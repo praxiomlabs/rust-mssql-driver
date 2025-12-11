@@ -42,12 +42,18 @@ pub enum Error {
     Server {
         /// Error number.
         number: i32,
-        /// Error severity.
-        severity: u8,
+        /// Error class/severity (0-25).
+        class: u8,
         /// Error state.
         state: u8,
         /// Error message.
         message: String,
+        /// Server name where error occurred.
+        server: Option<String>,
+        /// Stored procedure name (if applicable).
+        procedure: Option<String>,
+        /// Line number in the SQL batch or procedure.
+        line: u32,
     },
 
     /// Transaction error.
@@ -89,18 +95,26 @@ pub enum Error {
     /// Invalid identifier (potential SQL injection attempt).
     #[error("invalid identifier: {0}")]
     InvalidIdentifier(String),
+
+    /// Connection pool exhausted.
+    #[error("connection pool exhausted")]
+    PoolExhausted,
 }
 
 impl Error {
-    /// Check if this error is retryable.
+    /// Check if this error is transient and may succeed on retry.
+    ///
+    /// Transient errors include timeouts, connection issues, and
+    /// certain server errors that may resolve themselves.
     #[must_use]
-    pub fn is_retryable(&self) -> bool {
+    pub fn is_transient(&self) -> bool {
         matches!(
             self,
             Self::ConnectionTimeout
                 | Self::CommandTimeout
                 | Self::ConnectionClosed
                 | Self::Routing { .. }
+                | Self::PoolExhausted
                 | Self::Io(_)
         )
     }
@@ -120,13 +134,25 @@ impl Error {
         matches!(self, Self::Server { number: n, .. } if *n == number)
     }
 
-    /// Get the error severity if this is a server error.
+    /// Get the error class/severity if this is a server error.
+    ///
+    /// SQL Server error classes range from 0-25:
+    /// - 0-10: Informational
+    /// - 11-16: User errors
+    /// - 17-19: Resource/hardware errors
+    /// - 20-25: System errors (connection terminating)
     #[must_use]
-    pub fn severity(&self) -> Option<u8> {
+    pub fn class(&self) -> Option<u8> {
         match self {
-            Self::Server { severity, .. } => Some(*severity),
+            Self::Server { class, .. } => Some(*class),
             _ => None,
         }
+    }
+
+    /// Alias for `class()` - returns error severity.
+    #[must_use]
+    pub fn severity(&self) -> Option<u8> {
+        self.class()
     }
 }
 
