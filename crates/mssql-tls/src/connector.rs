@@ -2,14 +2,106 @@
 
 use std::sync::Arc;
 
-use rustls::pki_types::ServerName;
-use rustls::{ClientConfig, RootCertStore};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_rustls::TlsConnector as TokioTlsConnector;
 use tokio_rustls::client::TlsStream;
+use tokio_rustls::TlsConnector as TokioTlsConnector;
 
 use crate::config::{TlsConfig, TlsVersion};
 use crate::error::TlsError;
+
+// =============================================================================
+// Dangerous Certificate Verifier (for TrustServerCertificate=true)
+// =============================================================================
+
+/// A certificate verifier that accepts any server certificate.
+///
+/// **WARNING:** This is insecure and should only be used for development/testing.
+/// Using this verifier exposes the connection to man-in-the-middle attacks.
+#[derive(Debug)]
+struct DangerousServerCertVerifier;
+
+impl ServerCertVerifier for DangerousServerCertVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        // Accept any certificate without validation
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        // Support all common signature schemes
+        vec![
+            SignatureScheme::RSA_PKCS1_SHA256,
+            SignatureScheme::RSA_PKCS1_SHA384,
+            SignatureScheme::RSA_PKCS1_SHA512,
+            SignatureScheme::ECDSA_NISTP256_SHA256,
+            SignatureScheme::ECDSA_NISTP384_SHA384,
+            SignatureScheme::ECDSA_NISTP521_SHA512,
+            SignatureScheme::RSA_PSS_SHA256,
+            SignatureScheme::RSA_PSS_SHA384,
+            SignatureScheme::RSA_PSS_SHA512,
+            SignatureScheme::ED25519,
+        ]
+    }
+}
+
+// =============================================================================
+// Default TLS Configuration (per ARCHITECTURE.md §5.1)
+// =============================================================================
+
+/// Create a secure default TLS client configuration.
+///
+/// This uses the Mozilla root certificate store for server validation
+/// and requires no client authentication.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use mssql_tls::default_tls_config;
+///
+/// let config = default_tls_config()?;
+/// ```
+pub fn default_tls_config() -> Result<ClientConfig, TlsError> {
+    let root_store = RootCertStore {
+        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+    };
+
+    let config = ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+
+    Ok(config)
+}
+
+// =============================================================================
+// TLS Connector
+// =============================================================================
 
 /// TLS connector for SQL Server connections.
 ///
@@ -31,14 +123,30 @@ impl TlsConnector {
 
     /// Build the rustls client configuration.
     fn build_client_config(config: &TlsConfig) -> Result<ClientConfig, TlsError> {
-        // Build root certificate store
-        let root_store = Self::build_root_store(config)?;
-
         // Select protocol versions
         let versions: Vec<&'static rustls::SupportedProtocolVersion> =
             Self::select_versions(config);
 
-        // Build the client config
+        // Handle TrustServerCertificate mode (dangerous - development only)
+        if config.trust_server_certificate {
+            tracing::warn!(
+                "TrustServerCertificate is enabled - certificate validation is DISABLED. \
+                 This is insecure and should only be used for development/testing. \
+                 Connections are vulnerable to man-in-the-middle attacks."
+            );
+
+            let client_config = ClientConfig::builder_with_protocol_versions(&versions)
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(DangerousServerCertVerifier))
+                .with_no_client_auth();
+
+            return Ok(client_config);
+        }
+
+        // Build root certificate store for normal validation
+        let root_store = Self::build_root_store(config)?;
+
+        // Build the client config with proper certificate validation
         let builder = ClientConfig::builder_with_protocol_versions(&versions)
             .with_root_certificates(root_store);
 
