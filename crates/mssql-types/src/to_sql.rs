@@ -217,6 +217,19 @@ impl ToSql for chrono::DateTime<chrono::FixedOffset> {
     }
 }
 
+#[cfg(feature = "chrono")]
+impl ToSql for chrono::DateTime<chrono::Utc> {
+    fn to_sql(&self) -> Result<SqlValue, TypeError> {
+        // Convert UTC to FixedOffset with +00:00 offset
+        let fixed = self.with_timezone(&chrono::FixedOffset::east_opt(0).expect("valid offset"));
+        Ok(SqlValue::DateTimeOffset(fixed))
+    }
+
+    fn sql_type(&self) -> &'static str {
+        "DATETIMEOFFSET"
+    }
+}
+
 #[cfg(feature = "json")]
 impl ToSql for serde_json::Value {
     fn to_sql(&self) -> Result<SqlValue, TypeError> {

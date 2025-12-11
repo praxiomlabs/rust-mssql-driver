@@ -39,6 +39,19 @@ impl FromSql for bool {
     }
 }
 
+impl FromSql for u8 {
+    fn from_sql(value: &SqlValue) -> Result<Self, TypeError> {
+        match value {
+            SqlValue::TinyInt(v) => Ok(*v),
+            SqlValue::Null => Err(TypeError::UnexpectedNull),
+            _ => Err(TypeError::TypeMismatch {
+                expected: "u8",
+                actual: value.type_name().to_string(),
+            }),
+        }
+    }
+}
+
 impl FromSql for i16 {
     fn from_sql(value: &SqlValue) -> Result<Self, TypeError> {
         match value {
@@ -221,9 +234,39 @@ impl FromSql for chrono::NaiveDateTime {
     fn from_sql(value: &SqlValue) -> Result<Self, TypeError> {
         match value {
             SqlValue::DateTime(v) => Ok(*v),
+            SqlValue::DateTimeOffset(v) => Ok(v.naive_utc()),
             SqlValue::Null => Err(TypeError::UnexpectedNull),
             _ => Err(TypeError::TypeMismatch {
                 expected: "NaiveDateTime",
+                actual: value.type_name().to_string(),
+            }),
+        }
+    }
+}
+
+#[cfg(feature = "chrono")]
+impl FromSql for chrono::DateTime<chrono::FixedOffset> {
+    fn from_sql(value: &SqlValue) -> Result<Self, TypeError> {
+        match value {
+            SqlValue::DateTimeOffset(v) => Ok(*v),
+            SqlValue::Null => Err(TypeError::UnexpectedNull),
+            _ => Err(TypeError::TypeMismatch {
+                expected: "DateTime<FixedOffset>",
+                actual: value.type_name().to_string(),
+            }),
+        }
+    }
+}
+
+#[cfg(feature = "chrono")]
+impl FromSql for chrono::DateTime<chrono::Utc> {
+    fn from_sql(value: &SqlValue) -> Result<Self, TypeError> {
+        match value {
+            SqlValue::DateTimeOffset(v) => Ok(v.to_utc()),
+            SqlValue::DateTime(v) => Ok(chrono::DateTime::from_naive_utc_and_offset(*v, chrono::Utc)),
+            SqlValue::Null => Err(TypeError::UnexpectedNull),
+            _ => Err(TypeError::TypeMismatch {
+                expected: "DateTime<Utc>",
                 actual: value.type_name().to_string(),
             }),
         }

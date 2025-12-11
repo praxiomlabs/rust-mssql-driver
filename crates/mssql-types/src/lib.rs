@@ -34,11 +34,15 @@
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
 
+pub mod decode;
+pub mod encode;
 pub mod error;
 pub mod from_sql;
 pub mod to_sql;
 pub mod value;
 
+pub use decode::{decode_utf16_string, decode_value, Collation, TdsDecode, TypeInfo};
+pub use encode::{encode_utf16_string, TdsEncode};
 pub use error::TypeError;
 pub use from_sql::FromSql;
 pub use to_sql::ToSql;
