@@ -41,6 +41,7 @@ extern crate alloc;
 
 pub mod codec;
 pub mod error;
+pub mod login7;
 pub mod packet;
 pub mod prelogin;
 pub mod token;
@@ -48,5 +49,14 @@ pub mod types;
 pub mod version;
 
 pub use error::ProtocolError;
-pub use packet::{PacketHeader, PacketStatus, PacketType};
+pub use packet::{PacketHeader, PacketStatus, PacketType, DEFAULT_PACKET_SIZE, MAX_PACKET_SIZE, PACKET_HEADER_SIZE};
+pub use prelogin::{EncryptionLevel, PreLogin, PreLoginOption};
+pub use token::{
+    ColMetaData, ColumnData, Collation, Done, DoneInProc, DoneProc, DoneStatus, EnvChange,
+    EnvChangeType, EnvChangeValue, FeatureExtAck, FedAuthInfo, LoginAck, NbcRow, Order, RawRow,
+    ReturnValue, ServerError, ServerInfo, SessionState, SspiToken, Token, TokenParser, TokenType,
+    TypeInfo,
+};
+pub use types::{ColumnFlags, TypeId, Updateable};
 pub use version::TdsVersion;
+pub use login7::{FeatureExtension, FeatureId, Login7, OptionFlags1, OptionFlags2, OptionFlags3, TypeFlags};
