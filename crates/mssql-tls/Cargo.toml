@@ -1,0 +1,29 @@
+[package]
+name = "mssql-tls"
+description = "TLS negotiation for SQL Server connections (TDS 7.x and 8.0)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["sql-server", "tls", "rustls", "encryption"]
+categories = ["network-programming", "cryptography"]
+
+[features]
+default = []
+
+[dependencies]
+tds-protocol = { workspace = true }
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+webpki-roots = { workspace = true }
+tokio = { workspace = true }
+tokio-rustls = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+
+[lints]
+workspace = true
