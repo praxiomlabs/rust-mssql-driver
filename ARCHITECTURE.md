@@ -726,7 +726,7 @@ thiserror = "2.0"
 opentelemetry = { version = "0.31", optional = true }
 opentelemetry_sdk = { version = "0.31", optional = true }
 opentelemetry-otlp = { version = "0.31", optional = true }
-tracing-opentelemetry = { version = "0.31", optional = true }
+tracing-opentelemetry = { version = "0.32", optional = true }
 
 # Testing
 criterion = { version = "0.5", features = ["async_tokio"] }
