@@ -1,0 +1,23 @@
+[package]
+name = "mssql-testing"
+description = "Test infrastructure for SQL Server driver development"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["sql-server", "testing", "testcontainers"]
+categories = ["development-tools::testing"]
+
+[features]
+default = []
+
+[dependencies]
+mssql-client = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+testcontainers = { workspace = true }
+
+[lints]
+workspace = true
