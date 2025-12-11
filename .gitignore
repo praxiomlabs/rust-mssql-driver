@@ -1,0 +1,82 @@
+# Rust build artifacts
+/target/
+**/target/
+
+# Cargo lock for libraries (keep for binaries/applications)
+# Uncomment if this becomes a binary project:
+# Cargo.lock
+
+# Incremental compilation cache
+**/*.rs.bk
+
+# Backup files
+*.bak
+*~
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*.vim
+.project
+.classpath
+.settings/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+credentials.json
+secrets.json
+
+# Test artifacts
+*.log
+/coverage/
+**/*.profraw
+**/*.profdata
+
+# Documentation build output
+/doc/
+/docs/build/
+
+# Benchmark results
+/benches/target/
+criterion/
+
+# Fuzzing artifacts
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+
+# cargo-hakari workspace hack (if not committed)
+# Uncomment if workspace-hack should not be tracked:
+# /crates/workspace-hack/
+
+# Local development overrides
+.cargo/config.toml.local
+rustfmt.toml.local
+
+# Build cache directories
+.buildcache/
+.cache/
+
+# SQL Server test data (may contain sensitive info)
+*.bak
+*.mdf
+*.ldf
