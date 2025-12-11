@@ -22,7 +22,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 pin-project-lite = { workspace = true }
 futures-core = { workspace = true }
-futures-util = { workspace = true }
+futures-util = { version = "0.3", features = ["sink"] }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
