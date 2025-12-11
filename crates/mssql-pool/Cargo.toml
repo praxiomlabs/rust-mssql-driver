@@ -1,0 +1,28 @@
+[package]
+name = "mssql-driver-pool"
+description = "Connection pooling for SQL Server with sp_reset_connection support"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["sql-server", "pool", "connection", "async"]
+categories = ["database", "asynchronous"]
+
+[features]
+default = []
+
+[dependencies]
+mssql-client = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+hashbrown = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+
+[lints]
+workspace = true
