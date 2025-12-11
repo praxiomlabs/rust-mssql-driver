@@ -1,0 +1,33 @@
+[package]
+name = "mssql-types"
+description = "SQL Server to Rust type mappings and conversions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["sql-server", "types", "conversion"]
+categories = ["database"]
+
+[features]
+default = ["chrono", "uuid", "decimal"]
+chrono = ["dep:chrono"]
+uuid = ["dep:uuid"]
+decimal = ["dep:rust_decimal"]
+json = ["dep:serde_json"]
+
+[dependencies]
+bytes = { workspace = true }
+thiserror = { workspace = true }
+
+# Optional type support
+chrono = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
+rust_decimal = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lints]
+workspace = true
