@@ -14,6 +14,8 @@ default = []
 azure-identity = []
 integrated-auth = ["dep:libgssapi"]
 cert-auth = []
+# Enable secure credential zeroization on drop
+zeroize = ["dep:zeroize"]
 
 [dependencies]
 tds-protocol = { workspace = true }
@@ -23,6 +25,9 @@ bytes = { workspace = true }
 
 # Optional: Integrated authentication (Kerberos/SPNEGO)
 libgssapi = { version = "0.9", optional = true }
+
+# Optional: Secure credential zeroization
+zeroize = { version = "1.8", features = ["derive"], optional = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }

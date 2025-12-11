@@ -58,9 +58,13 @@ pub enum Error {
     #[error("configuration error: {0}")]
     Config(String),
 
-    /// Timeout occurred.
-    #[error("operation timed out")]
-    Timeout,
+    /// Connection timeout occurred.
+    #[error("connection timed out")]
+    ConnectionTimeout,
+
+    /// Command execution timeout occurred.
+    #[error("command timed out")]
+    CommandTimeout,
 
     /// Connection routing required (Azure SQL).
     #[error("routing required to {host}:{port}")]
@@ -93,8 +97,21 @@ impl Error {
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
-            Self::Timeout | Self::ConnectionClosed | Self::Routing { .. } | Self::Io(_)
+            Self::ConnectionTimeout
+                | Self::CommandTimeout
+                | Self::ConnectionClosed
+                | Self::Routing { .. }
+                | Self::Io(_)
         )
+    }
+
+    /// Check if this error indicates a protocol/driver bug.
+    ///
+    /// Protocol errors typically indicate a bug in the driver implementation
+    /// rather than a user error or server issue.
+    #[must_use]
+    pub fn is_protocol_error(&self) -> bool {
+        matches!(self, Self::Protocol(_))
     }
 
     /// Check if this is a server error with a specific number.

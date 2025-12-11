@@ -15,6 +15,17 @@
 //! | Service Principal | `azure-identity` | App credentials |
 //! | Integrated (Kerberos) | `integrated-auth` | GSSAPI/Kerberos |
 //! | Certificate | `cert-auth` | Client certificate |
+//!
+//! ## Secure Credential Handling
+//!
+//! Enable the `zeroize` feature for secure credential handling:
+//!
+//! ```toml
+//! mssql-auth = { version = "0.1", features = ["zeroize"] }
+//! ```
+//!
+//! This provides [`SecureCredentials`] and [`SecretString`] types that
+//! automatically zero sensitive data from memory when dropped.
 
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
@@ -26,3 +37,6 @@ pub mod sql_auth;
 pub use credentials::Credentials;
 pub use error::AuthError;
 pub use sql_auth::SqlAuthenticator;
+
+#[cfg(feature = "zeroize")]
+pub use credentials::{SecretString, SecureCredentials};
