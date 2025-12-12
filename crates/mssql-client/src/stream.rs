@@ -212,6 +212,9 @@ mod tests {
             index: 0,
             type_name: "INT".to_string(),
             nullable: false,
+            max_length: Some(4),
+            precision: Some(0),
+            scale: Some(0),
         }];
 
         let stream = QueryStream::new(columns);

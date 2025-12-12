@@ -6,7 +6,8 @@
 //! ## State Transitions
 //!
 //! ```text
-//! Disconnected -> Ready (via connect())
+//! Disconnected -> Connected (via TCP connect)
+//! Connected -> Ready (via authentication)
 //! Ready -> InTransaction (via begin_transaction())
 //! Ready -> Streaming (via query() that returns stream)
 //! InTransaction -> Ready (via commit() or rollback())
@@ -28,6 +29,17 @@ pub trait ConnectionState: private::Sealed {}
 /// In this state, only `connect()` can be called.
 pub struct Disconnected;
 
+/// TCP connection established, awaiting authentication.
+///
+/// In this intermediate state:
+/// - TCP connection is open
+/// - TLS negotiation may be in progress or complete
+/// - Login/authentication has not yet completed
+///
+/// This state is mostly internal; users typically go directly from
+/// `Disconnected` to `Ready` via `Client::connect()`.
+pub struct Connected;
+
 /// Connection is established and ready for queries.
 ///
 /// In this state, queries can be executed and transactions can be started.
@@ -47,6 +59,7 @@ pub struct InTransaction;
 pub struct Streaming;
 
 impl ConnectionState for Disconnected {}
+impl ConnectionState for Connected {}
 impl ConnectionState for Ready {}
 impl ConnectionState for InTransaction {}
 impl ConnectionState for Streaming {}
@@ -54,6 +67,7 @@ impl ConnectionState for Streaming {}
 mod private {
     pub trait Sealed {}
     impl Sealed for super::Disconnected {}
+    impl Sealed for super::Connected {}
     impl Sealed for super::Ready {}
     impl Sealed for super::InTransaction {}
     impl Sealed for super::Streaming {}

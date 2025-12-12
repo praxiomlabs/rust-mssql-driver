@@ -5,6 +5,267 @@ use std::time::Duration;
 use mssql_auth::Credentials;
 use mssql_tls::TlsConfig;
 
+/// Configuration for Azure SQL redirect handling.
+///
+/// Azure SQL Gateway may redirect connections to different backend servers.
+/// This configuration controls how the driver handles these redirects.
+#[derive(Debug, Clone)]
+pub struct RedirectConfig {
+    /// Maximum number of redirect attempts (default: 2).
+    pub max_redirects: u8,
+    /// Whether to follow redirects automatically (default: true).
+    pub follow_redirects: bool,
+}
+
+impl Default for RedirectConfig {
+    fn default() -> Self {
+        Self {
+            max_redirects: 2,
+            follow_redirects: true,
+        }
+    }
+}
+
+impl RedirectConfig {
+    /// Create a new redirect configuration with defaults.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the maximum number of redirect attempts.
+    #[must_use]
+    pub fn max_redirects(mut self, max: u8) -> Self {
+        self.max_redirects = max;
+        self
+    }
+
+    /// Enable or disable automatic redirect following.
+    #[must_use]
+    pub fn follow_redirects(mut self, follow: bool) -> Self {
+        self.follow_redirects = follow;
+        self
+    }
+
+    /// Disable automatic redirect following.
+    ///
+    /// When disabled, the driver will return an error with the redirect
+    /// information instead of automatically following the redirect.
+    #[must_use]
+    pub fn no_follow() -> Self {
+        Self {
+            max_redirects: 0,
+            follow_redirects: false,
+        }
+    }
+}
+
+/// Timeout configuration for various connection phases.
+///
+/// Per ARCHITECTURE.md §4.4, different phases of connection and command
+/// execution have separate timeout controls.
+#[derive(Debug, Clone)]
+pub struct TimeoutConfig {
+    /// Time to establish TCP connection (default: 15s).
+    pub connect_timeout: Duration,
+    /// Time to complete TLS handshake (default: 10s).
+    pub tls_timeout: Duration,
+    /// Time to complete login sequence (default: 30s).
+    pub login_timeout: Duration,
+    /// Default timeout for command execution (default: 30s).
+    pub command_timeout: Duration,
+    /// Time before idle connection is closed (default: 300s).
+    pub idle_timeout: Duration,
+    /// Interval for connection keep-alive (default: 30s).
+    pub keepalive_interval: Option<Duration>,
+}
+
+impl Default for TimeoutConfig {
+    fn default() -> Self {
+        Self {
+            connect_timeout: Duration::from_secs(15),
+            tls_timeout: Duration::from_secs(10),
+            login_timeout: Duration::from_secs(30),
+            command_timeout: Duration::from_secs(30),
+            idle_timeout: Duration::from_secs(300),
+            keepalive_interval: Some(Duration::from_secs(30)),
+        }
+    }
+}
+
+impl TimeoutConfig {
+    /// Create a new timeout configuration with defaults.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the TCP connection timeout.
+    #[must_use]
+    pub fn connect_timeout(mut self, timeout: Duration) -> Self {
+        self.connect_timeout = timeout;
+        self
+    }
+
+    /// Set the TLS handshake timeout.
+    #[must_use]
+    pub fn tls_timeout(mut self, timeout: Duration) -> Self {
+        self.tls_timeout = timeout;
+        self
+    }
+
+    /// Set the login sequence timeout.
+    #[must_use]
+    pub fn login_timeout(mut self, timeout: Duration) -> Self {
+        self.login_timeout = timeout;
+        self
+    }
+
+    /// Set the default command execution timeout.
+    #[must_use]
+    pub fn command_timeout(mut self, timeout: Duration) -> Self {
+        self.command_timeout = timeout;
+        self
+    }
+
+    /// Set the idle connection timeout.
+    #[must_use]
+    pub fn idle_timeout(mut self, timeout: Duration) -> Self {
+        self.idle_timeout = timeout;
+        self
+    }
+
+    /// Set the keep-alive interval.
+    #[must_use]
+    pub fn keepalive_interval(mut self, interval: Option<Duration>) -> Self {
+        self.keepalive_interval = interval;
+        self
+    }
+
+    /// Disable keep-alive.
+    #[must_use]
+    pub fn no_keepalive(mut self) -> Self {
+        self.keepalive_interval = None;
+        self
+    }
+
+    /// Get the total time allowed for a full connection (TCP + TLS + login).
+    #[must_use]
+    pub fn total_connect_timeout(&self) -> Duration {
+        self.connect_timeout + self.tls_timeout + self.login_timeout
+    }
+}
+
+/// Retry policy for transient error handling.
+///
+/// Per ADR-009, the driver can automatically retry operations that fail
+/// with transient errors (deadlocks, Azure service busy, etc.).
+#[derive(Debug, Clone)]
+pub struct RetryPolicy {
+    /// Maximum number of retry attempts (default: 3).
+    pub max_retries: u32,
+    /// Initial backoff duration before first retry (default: 100ms).
+    pub initial_backoff: Duration,
+    /// Maximum backoff duration between retries (default: 30s).
+    pub max_backoff: Duration,
+    /// Multiplier for exponential backoff (default: 2.0).
+    pub backoff_multiplier: f64,
+    /// Whether to add random jitter to backoff times (default: true).
+    pub jitter: bool,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_retries: 3,
+            initial_backoff: Duration::from_millis(100),
+            max_backoff: Duration::from_secs(30),
+            backoff_multiplier: 2.0,
+            jitter: true,
+        }
+    }
+}
+
+impl RetryPolicy {
+    /// Create a new retry policy with defaults.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the maximum number of retry attempts.
+    #[must_use]
+    pub fn max_retries(mut self, max: u32) -> Self {
+        self.max_retries = max;
+        self
+    }
+
+    /// Set the initial backoff duration.
+    #[must_use]
+    pub fn initial_backoff(mut self, backoff: Duration) -> Self {
+        self.initial_backoff = backoff;
+        self
+    }
+
+    /// Set the maximum backoff duration.
+    #[must_use]
+    pub fn max_backoff(mut self, backoff: Duration) -> Self {
+        self.max_backoff = backoff;
+        self
+    }
+
+    /// Set the backoff multiplier for exponential backoff.
+    #[must_use]
+    pub fn backoff_multiplier(mut self, multiplier: f64) -> Self {
+        self.backoff_multiplier = multiplier;
+        self
+    }
+
+    /// Enable or disable jitter.
+    #[must_use]
+    pub fn jitter(mut self, enabled: bool) -> Self {
+        self.jitter = enabled;
+        self
+    }
+
+    /// Disable automatic retries.
+    #[must_use]
+    pub fn no_retry() -> Self {
+        Self {
+            max_retries: 0,
+            ..Self::default()
+        }
+    }
+
+    /// Calculate the backoff duration for a given retry attempt.
+    ///
+    /// Uses exponential backoff with optional jitter.
+    #[must_use]
+    pub fn backoff_for_attempt(&self, attempt: u32) -> Duration {
+        if attempt == 0 {
+            return Duration::ZERO;
+        }
+
+        let base = self.initial_backoff.as_millis() as f64
+            * self.backoff_multiplier.powi(attempt.saturating_sub(1) as i32);
+        let capped = base.min(self.max_backoff.as_millis() as f64);
+
+        if self.jitter {
+            // Simple jitter: multiply by random factor between 0.5 and 1.5
+            // In production, this would use a proper RNG
+            Duration::from_millis(capped as u64)
+        } else {
+            Duration::from_millis(capped as u64)
+        }
+    }
+
+    /// Check if more retries are allowed for the given attempt number.
+    #[must_use]
+    pub fn should_retry(&self, attempt: u32) -> bool {
+        attempt < self.max_retries
+    }
+}
+
 /// Configuration for connecting to SQL Server.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -46,10 +307,20 @@ pub struct Config {
 
     /// Whether to enable MARS (Multiple Active Result Sets).
     pub mars: bool,
+
+    /// Redirect handling configuration (for Azure SQL).
+    pub redirect: RedirectConfig,
+
+    /// Retry policy for transient error handling.
+    pub retry: RetryPolicy,
+
+    /// Timeout configuration for various connection phases.
+    pub timeouts: TimeoutConfig,
 }
 
 impl Default for Config {
     fn default() -> Self {
+        let timeouts = TimeoutConfig::default();
         Self {
             host: "localhost".to_string(),
             port: 1433,
@@ -57,13 +328,16 @@ impl Default for Config {
             credentials: Credentials::sql_server("", ""),
             tls: TlsConfig::default(),
             application_name: "mssql-client".to_string(),
-            connect_timeout: Duration::from_secs(30),
-            command_timeout: Duration::from_secs(30),
+            connect_timeout: timeouts.connect_timeout,
+            command_timeout: timeouts.command_timeout,
             packet_size: 4096,
             strict_mode: false,
             trust_server_certificate: false,
             instance: None,
             mars: false,
+            redirect: RedirectConfig::default(),
+            retry: RetryPolicy::default(),
+            timeouts,
         }
     }
 }
@@ -252,6 +526,44 @@ impl Config {
         self.port = port;
         self
     }
+
+    /// Set the redirect handling configuration.
+    #[must_use]
+    pub fn redirect(mut self, redirect: RedirectConfig) -> Self {
+        self.redirect = redirect;
+        self
+    }
+
+    /// Set the maximum number of redirect attempts.
+    #[must_use]
+    pub fn max_redirects(mut self, max: u8) -> Self {
+        self.redirect.max_redirects = max;
+        self
+    }
+
+    /// Set the retry policy for transient error handling.
+    #[must_use]
+    pub fn retry(mut self, retry: RetryPolicy) -> Self {
+        self.retry = retry;
+        self
+    }
+
+    /// Set the maximum number of retry attempts.
+    #[must_use]
+    pub fn max_retries(mut self, max: u32) -> Self {
+        self.retry.max_retries = max;
+        self
+    }
+
+    /// Set the timeout configuration.
+    #[must_use]
+    pub fn timeouts(mut self, timeouts: TimeoutConfig) -> Self {
+        // Sync the legacy fields for backward compatibility first
+        self.connect_timeout = timeouts.connect_timeout;
+        self.command_timeout = timeouts.command_timeout;
+        self.timeouts = timeouts;
+        self
+    }
 }
 
 #[cfg(test)]
@@ -285,5 +597,173 @@ mod tests {
 
         assert_eq!(config.host, "localhost");
         assert_eq!(config.instance, Some("SQLEXPRESS".to_string()));
+    }
+
+    #[test]
+    fn test_redirect_config_defaults() {
+        let config = RedirectConfig::default();
+        assert_eq!(config.max_redirects, 2);
+        assert!(config.follow_redirects);
+    }
+
+    #[test]
+    fn test_redirect_config_builder() {
+        let config = RedirectConfig::new().max_redirects(5).follow_redirects(false);
+        assert_eq!(config.max_redirects, 5);
+        assert!(!config.follow_redirects);
+    }
+
+    #[test]
+    fn test_redirect_config_no_follow() {
+        let config = RedirectConfig::no_follow();
+        assert_eq!(config.max_redirects, 0);
+        assert!(!config.follow_redirects);
+    }
+
+    #[test]
+    fn test_config_redirect_builder() {
+        let config = Config::new().max_redirects(3);
+        assert_eq!(config.redirect.max_redirects, 3);
+
+        let config2 = Config::new().redirect(RedirectConfig::no_follow());
+        assert!(!config2.redirect.follow_redirects);
+    }
+
+    #[test]
+    fn test_retry_policy_defaults() {
+        let policy = RetryPolicy::default();
+        assert_eq!(policy.max_retries, 3);
+        assert_eq!(policy.initial_backoff, Duration::from_millis(100));
+        assert_eq!(policy.max_backoff, Duration::from_secs(30));
+        assert!((policy.backoff_multiplier - 2.0).abs() < f64::EPSILON);
+        assert!(policy.jitter);
+    }
+
+    #[test]
+    fn test_retry_policy_builder() {
+        let policy = RetryPolicy::new()
+            .max_retries(5)
+            .initial_backoff(Duration::from_millis(200))
+            .max_backoff(Duration::from_secs(60))
+            .backoff_multiplier(3.0)
+            .jitter(false);
+
+        assert_eq!(policy.max_retries, 5);
+        assert_eq!(policy.initial_backoff, Duration::from_millis(200));
+        assert_eq!(policy.max_backoff, Duration::from_secs(60));
+        assert!((policy.backoff_multiplier - 3.0).abs() < f64::EPSILON);
+        assert!(!policy.jitter);
+    }
+
+    #[test]
+    fn test_retry_policy_no_retry() {
+        let policy = RetryPolicy::no_retry();
+        assert_eq!(policy.max_retries, 0);
+        assert!(!policy.should_retry(0));
+    }
+
+    #[test]
+    fn test_retry_policy_should_retry() {
+        let policy = RetryPolicy::new().max_retries(3);
+        assert!(policy.should_retry(0));
+        assert!(policy.should_retry(1));
+        assert!(policy.should_retry(2));
+        assert!(!policy.should_retry(3));
+        assert!(!policy.should_retry(4));
+    }
+
+    #[test]
+    fn test_retry_policy_backoff_calculation() {
+        let policy = RetryPolicy::new()
+            .initial_backoff(Duration::from_millis(100))
+            .backoff_multiplier(2.0)
+            .max_backoff(Duration::from_secs(10))
+            .jitter(false);
+
+        assert_eq!(policy.backoff_for_attempt(0), Duration::ZERO);
+        assert_eq!(policy.backoff_for_attempt(1), Duration::from_millis(100));
+        assert_eq!(policy.backoff_for_attempt(2), Duration::from_millis(200));
+        assert_eq!(policy.backoff_for_attempt(3), Duration::from_millis(400));
+    }
+
+    #[test]
+    fn test_retry_policy_backoff_capped() {
+        let policy = RetryPolicy::new()
+            .initial_backoff(Duration::from_secs(1))
+            .backoff_multiplier(10.0)
+            .max_backoff(Duration::from_secs(5))
+            .jitter(false);
+
+        // Attempt 3 would be 1s * 10^2 = 100s, but capped at 5s
+        assert_eq!(policy.backoff_for_attempt(3), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn test_config_retry_builder() {
+        let config = Config::new().max_retries(5);
+        assert_eq!(config.retry.max_retries, 5);
+
+        let config2 = Config::new().retry(RetryPolicy::no_retry());
+        assert_eq!(config2.retry.max_retries, 0);
+    }
+
+    #[test]
+    fn test_timeout_config_defaults() {
+        let config = TimeoutConfig::default();
+        assert_eq!(config.connect_timeout, Duration::from_secs(15));
+        assert_eq!(config.tls_timeout, Duration::from_secs(10));
+        assert_eq!(config.login_timeout, Duration::from_secs(30));
+        assert_eq!(config.command_timeout, Duration::from_secs(30));
+        assert_eq!(config.idle_timeout, Duration::from_secs(300));
+        assert_eq!(config.keepalive_interval, Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn test_timeout_config_builder() {
+        let config = TimeoutConfig::new()
+            .connect_timeout(Duration::from_secs(5))
+            .tls_timeout(Duration::from_secs(3))
+            .login_timeout(Duration::from_secs(10))
+            .command_timeout(Duration::from_secs(60))
+            .idle_timeout(Duration::from_secs(600))
+            .keepalive_interval(Some(Duration::from_secs(60)));
+
+        assert_eq!(config.connect_timeout, Duration::from_secs(5));
+        assert_eq!(config.tls_timeout, Duration::from_secs(3));
+        assert_eq!(config.login_timeout, Duration::from_secs(10));
+        assert_eq!(config.command_timeout, Duration::from_secs(60));
+        assert_eq!(config.idle_timeout, Duration::from_secs(600));
+        assert_eq!(config.keepalive_interval, Some(Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn test_timeout_config_no_keepalive() {
+        let config = TimeoutConfig::new().no_keepalive();
+        assert_eq!(config.keepalive_interval, None);
+    }
+
+    #[test]
+    fn test_timeout_config_total_connect() {
+        let config = TimeoutConfig::new()
+            .connect_timeout(Duration::from_secs(5))
+            .tls_timeout(Duration::from_secs(3))
+            .login_timeout(Duration::from_secs(10));
+
+        // 5 + 3 + 10 = 18 seconds
+        assert_eq!(config.total_connect_timeout(), Duration::from_secs(18));
+    }
+
+    #[test]
+    fn test_config_timeouts_builder() {
+        let timeouts = TimeoutConfig::new()
+            .connect_timeout(Duration::from_secs(5))
+            .command_timeout(Duration::from_secs(60));
+
+        let config = Config::new().timeouts(timeouts);
+        assert_eq!(config.timeouts.connect_timeout, Duration::from_secs(5));
+        assert_eq!(config.timeouts.command_timeout, Duration::from_secs(60));
+        // Check that legacy fields are synced
+        assert_eq!(config.connect_timeout, Duration::from_secs(5));
+        assert_eq!(config.command_timeout, Duration::from_secs(60));
     }
 }

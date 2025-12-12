@@ -81,12 +81,12 @@ pub mod transaction;
 
 // Re-export commonly used types
 pub use client::Client;
-pub use config::Config;
+pub use config::{Config, RedirectConfig, RetryPolicy, TimeoutConfig};
 pub use error::Error;
 pub use mssql_auth::Credentials;
 pub use mssql_types::{FromSql, SqlValue, ToSql};
 pub use query::Query;
 pub use row::{Column, Row};
-pub use state::{ConnectionState, Disconnected, InTransaction, ProtocolState, Ready, Streaming};
+pub use state::{Connected, ConnectionState, Disconnected, InTransaction, ProtocolState, Ready, Streaming};
 pub use stream::{ExecuteResult, MultiResultStream, OutputParam, QueryStream};
 pub use transaction::{IsolationLevel, SavePoint, Transaction};
