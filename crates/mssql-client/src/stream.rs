@@ -2,7 +2,19 @@
 //!
 //! This module provides streaming result sets for memory-efficient
 //! processing of large query results.
+//!
+//! ## Buffered vs True Streaming
+//!
+//! The current implementation uses a buffered approach where all rows from
+//! the TDS response are parsed upfront. This works well because:
+//!
+//! 1. TDS responses arrive as complete messages (reassembled by mssql-codec)
+//! 2. Memory is shared via `Arc<Bytes>` pattern per ADR-004
+//! 3. No complex lifetime/borrow issues with the connection
+//!
+//! For truly large result sets, consider using OFFSET/FETCH pagination.
 
+use std::collections::VecDeque;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -21,7 +33,7 @@ use crate::row::{Column, Row};
 /// ```rust,ignore
 /// use futures::StreamExt;
 ///
-/// let mut stream = client.query_stream("SELECT * FROM large_table").await?;
+/// let mut stream = client.query("SELECT * FROM large_table", &[]).await?;
 ///
 /// while let Some(row) = stream.next().await {
 ///     let row = row?;
@@ -31,6 +43,8 @@ use crate::row::{Column, Row};
 pub struct QueryStream<'a> {
     /// Column metadata for the result set.
     columns: Vec<Column>,
+    /// Buffered rows from the response.
+    rows: VecDeque<Row>,
     /// Whether the stream has completed.
     finished: bool,
     /// Lifetime tied to the connection.
@@ -38,12 +52,22 @@ pub struct QueryStream<'a> {
 }
 
 impl<'a> QueryStream<'a> {
-    /// Create a new query stream.
-    #[allow(dead_code)] // Used when query execution is implemented
-    pub(crate) fn new(columns: Vec<Column>) -> Self {
+    /// Create a new query stream with columns and buffered rows.
+    pub(crate) fn new(columns: Vec<Column>, rows: Vec<Row>) -> Self {
         Self {
             columns,
+            rows: rows.into(),
             finished: false,
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    /// Create an empty query stream (no results).
+    pub(crate) fn empty() -> Self {
+        Self {
+            columns: Vec::new(),
+            rows: VecDeque::new(),
+            finished: true,
             _marker: std::marker::PhantomData,
         }
     }
@@ -60,13 +84,38 @@ impl<'a> QueryStream<'a> {
         self.finished
     }
 
+    /// Get the number of rows remaining in the buffer.
+    #[must_use]
+    pub fn rows_remaining(&self) -> usize {
+        self.rows.len()
+    }
+
     /// Collect all remaining rows into a vector.
     ///
     /// This consumes the stream and loads all rows into memory.
     /// For large result sets, consider iterating with the stream instead.
-    pub async fn collect_all(self) -> Result<Vec<Row>, Error> {
-        // Placeholder: actual implementation would collect from stream
-        Ok(Vec::new())
+    pub async fn collect_all(mut self) -> Result<Vec<Row>, Error> {
+        // Drain all remaining rows from the buffer
+        let rows: Vec<Row> = self.rows.drain(..).collect();
+        self.finished = true;
+        Ok(rows)
+    }
+
+    /// Try to get the next row synchronously (without async).
+    ///
+    /// Returns `None` when no more rows are available.
+    pub fn try_next(&mut self) -> Option<Row> {
+        if self.finished {
+            return None;
+        }
+
+        match self.rows.pop_front() {
+            Some(row) => Some(row),
+            None => {
+                self.finished = true;
+                None
+            }
+        }
     }
 }
 
@@ -80,10 +129,39 @@ impl Stream for QueryStream<'_> {
             return Poll::Ready(None);
         }
 
-        // Placeholder: actual implementation would poll the connection
-        // for the next row in the result set
-        this.finished = true;
-        Poll::Ready(None)
+        // Pop the next row from the buffer
+        match this.rows.pop_front() {
+            Some(row) => Poll::Ready(Some(Ok(row))),
+            None => {
+                this.finished = true;
+                Poll::Ready(None)
+            }
+        }
+    }
+}
+
+impl ExactSizeIterator for QueryStream<'_> {}
+
+impl Iterator for QueryStream<'_> {
+    type Item = Result<Row, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+
+        match self.rows.pop_front() {
+            Some(row) => Some(Ok(row)),
+            None => {
+                self.finished = true;
+                None
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.rows.len();
+        (remaining, Some(remaining))
     }
 }
 
@@ -217,9 +295,106 @@ mod tests {
             scale: Some(0),
         }];
 
-        let stream = QueryStream::new(columns);
+        let stream = QueryStream::new(columns, Vec::new());
         assert_eq!(stream.columns().len(), 1);
         assert_eq!(stream.columns()[0].name, "id");
         assert!(!stream.is_finished());
+    }
+
+    #[test]
+    fn test_query_stream_with_rows() {
+        use mssql_types::SqlValue;
+
+        let columns = vec![
+            Column {
+                name: "id".to_string(),
+                index: 0,
+                type_name: "INT".to_string(),
+                nullable: false,
+                max_length: Some(4),
+                precision: None,
+                scale: None,
+            },
+            Column {
+                name: "name".to_string(),
+                index: 1,
+                type_name: "NVARCHAR".to_string(),
+                nullable: true,
+                max_length: Some(100),
+                precision: None,
+                scale: None,
+            },
+        ];
+
+        let rows = vec![
+            Row::from_values(
+                columns.clone(),
+                vec![SqlValue::Int(1), SqlValue::String("Alice".to_string())],
+            ),
+            Row::from_values(
+                columns.clone(),
+                vec![SqlValue::Int(2), SqlValue::String("Bob".to_string())],
+            ),
+        ];
+
+        let mut stream = QueryStream::new(columns, rows);
+        assert_eq!(stream.columns().len(), 2);
+        assert_eq!(stream.rows_remaining(), 2);
+        assert!(!stream.is_finished());
+
+        // First row
+        let row1 = stream.try_next().unwrap();
+        assert_eq!(row1.get::<i32>(0).unwrap(), 1);
+        assert_eq!(row1.get_by_name::<String>("name").unwrap(), "Alice");
+
+        // Second row
+        let row2 = stream.try_next().unwrap();
+        assert_eq!(row2.get::<i32>(0).unwrap(), 2);
+        assert_eq!(row2.get_by_name::<String>("name").unwrap(), "Bob");
+
+        // No more rows
+        assert!(stream.try_next().is_none());
+        assert!(stream.is_finished());
+    }
+
+    #[test]
+    fn test_query_stream_iterator() {
+        use mssql_types::SqlValue;
+
+        let columns = vec![Column {
+            name: "val".to_string(),
+            index: 0,
+            type_name: "INT".to_string(),
+            nullable: false,
+            max_length: None,
+            precision: None,
+            scale: None,
+        }];
+
+        let rows = vec![
+            Row::from_values(columns.clone(), vec![SqlValue::Int(10)]),
+            Row::from_values(columns.clone(), vec![SqlValue::Int(20)]),
+            Row::from_values(columns.clone(), vec![SqlValue::Int(30)]),
+        ];
+
+        let mut stream = QueryStream::new(columns, rows);
+
+        // Use iterator
+        let values: Vec<i32> = stream
+            .by_ref()
+            .filter_map(|r| r.ok())
+            .map(|r| r.get::<i32>(0).unwrap())
+            .collect();
+
+        assert_eq!(values, vec![10, 20, 30]);
+        assert!(stream.is_finished());
+    }
+
+    #[test]
+    fn test_query_stream_empty() {
+        let stream = QueryStream::empty();
+        assert!(stream.columns().is_empty());
+        assert_eq!(stream.rows_remaining(), 0);
+        assert!(stream.is_finished());
     }
 }

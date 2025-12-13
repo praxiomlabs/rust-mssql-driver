@@ -73,20 +73,28 @@
 pub mod client;
 pub mod config;
 pub mod error;
+pub mod from_row;
 pub mod query;
 pub mod row;
 pub mod state;
+pub mod statement_cache;
 pub mod stream;
+pub mod to_params;
 pub mod transaction;
+pub mod tvp;
 
 // Re-export commonly used types
 pub use client::Client;
 pub use config::{Config, RedirectConfig, RetryPolicy, TimeoutConfig};
 pub use error::Error;
+pub use from_row::{FromRow, MapRows, RowIteratorExt};
 pub use mssql_auth::Credentials;
 pub use mssql_types::{FromSql, SqlValue, ToSql};
 pub use query::Query;
 pub use row::{Column, Row};
 pub use state::{Connected, ConnectionState, Disconnected, InTransaction, ProtocolState, Ready, Streaming};
+pub use statement_cache::{PreparedStatement, StatementCache, StatementCacheConfig};
 pub use stream::{ExecuteResult, MultiResultStream, OutputParam, QueryStream};
+pub use to_params::{NamedParam, ParamList, ToParams};
 pub use transaction::{IsolationLevel, SavePoint, Transaction};
+pub use tvp::{Tvp, TvpColumn, TvpRow, TvpValue};
