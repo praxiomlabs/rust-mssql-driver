@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 
+use mssql_types::decode::{decode_value, TypeInfo};
 use mssql_types::{FromSql, SqlValue, TypeError};
 
 /// Column slice information pointing into the row buffer.
@@ -105,6 +106,67 @@ impl Column {
         self.precision = Some(precision);
         self.scale = Some(scale);
         self
+    }
+
+    /// Convert column metadata to TDS TypeInfo for decoding.
+    ///
+    /// Maps type names to TDS type IDs and constructs appropriate TypeInfo.
+    pub fn to_type_info(&self) -> TypeInfo {
+        let type_id = type_name_to_id(&self.type_name);
+        TypeInfo {
+            type_id,
+            length: self.max_length,
+            scale: self.scale,
+            precision: self.precision,
+            collation: None,
+        }
+    }
+}
+
+/// Map SQL type name to TDS type ID.
+fn type_name_to_id(name: &str) -> u8 {
+    match name.to_uppercase().as_str() {
+        // Integer types
+        "INT" | "INTEGER" => 0x38,
+        "BIGINT" => 0x7F,
+        "SMALLINT" => 0x34,
+        "TINYINT" => 0x30,
+        "BIT" => 0x32,
+
+        // Floating point
+        "FLOAT" => 0x3E,
+        "REAL" => 0x3B,
+
+        // Decimal/Numeric
+        "DECIMAL" | "NUMERIC" => 0x6C,
+        "MONEY" | "SMALLMONEY" => 0x6E,
+
+        // String types
+        "NVARCHAR" | "NCHAR" | "NTEXT" => 0xE7,
+        "VARCHAR" | "CHAR" | "TEXT" => 0xA7,
+
+        // Binary types
+        "VARBINARY" | "BINARY" | "IMAGE" => 0xA5,
+
+        // Date/Time types
+        "DATE" => 0x28,
+        "TIME" => 0x29,
+        "DATETIME2" => 0x2A,
+        "DATETIMEOFFSET" => 0x2B,
+        "DATETIME" => 0x3D,
+        "SMALLDATETIME" => 0x3F,
+
+        // GUID
+        "UNIQUEIDENTIFIER" => 0x24,
+
+        // XML
+        "XML" => 0xF1,
+
+        // Nullable variants (INTNTYPE, etc.)
+        _ if name.ends_with("N") => 0x26,
+
+        // Default to binary for unknown types
+        _ => 0xA5,
     }
 }
 
@@ -431,6 +493,8 @@ impl Row {
     // ========================================================================
 
     /// Parse a value from the buffer at the given slice.
+    ///
+    /// Uses the mssql-types decode module for efficient binary parsing.
     fn parse_value(&self, index: usize, slice: &ColumnSlice) -> Result<SqlValue, TypeError> {
         if slice.is_null {
             return Ok(SqlValue::Null);
@@ -446,47 +510,14 @@ impl Row {
             actual: "buffer access failed".to_string(),
         })?;
 
-        // Parse based on type
-        // This is a simplified implementation - full implementation would
-        // use mssql_types::decode module
-        match column.type_name.to_uppercase().as_str() {
-            "INT" if bytes.len() >= 4 => {
-                let value = i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-                Ok(SqlValue::Int(value))
-            }
-            "BIGINT" if bytes.len() >= 8 => {
-                let value = i64::from_le_bytes([
-                    bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-                ]);
-                Ok(SqlValue::BigInt(value))
-            }
-            "SMALLINT" if bytes.len() >= 2 => {
-                let value = i16::from_le_bytes([bytes[0], bytes[1]]);
-                Ok(SqlValue::SmallInt(value))
-            }
-            "TINYINT" if !bytes.is_empty() => Ok(SqlValue::TinyInt(bytes[0])),
-            "BIT" if !bytes.is_empty() => Ok(SqlValue::Bool(bytes[0] != 0)),
-            "NVARCHAR" | "NCHAR" | "NTEXT" => {
-                // UTF-16LE to String
-                let utf16: Vec<u16> = bytes
-                    .chunks_exact(2)
-                    .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-                    .collect();
-                let s = String::from_utf16(&utf16).map_err(|_| TypeError::TypeMismatch {
-                    expected: "valid UTF-16",
-                    actual: "invalid UTF-16 data".to_string(),
-                })?;
-                Ok(SqlValue::String(s))
-            }
-            "VARCHAR" | "CHAR" | "TEXT" => {
-                let s = String::from_utf8_lossy(bytes).into_owned();
-                Ok(SqlValue::String(s))
-            }
-            _ => {
-                // Default: return as binary
-                Ok(SqlValue::Binary(Bytes::copy_from_slice(bytes)))
-            }
-        }
+        // Convert column metadata to TypeInfo for the decode module
+        let type_info = column.to_type_info();
+
+        // Create a Bytes buffer from the slice for decode_value
+        let mut buf = Bytes::copy_from_slice(bytes);
+
+        // Use the unified decode module for efficient parsing
+        decode_value(&mut buf, &type_info)
     }
 }
 

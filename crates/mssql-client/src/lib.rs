@@ -70,10 +70,12 @@
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
 
+pub mod bulk;
 pub mod client;
 pub mod config;
 pub mod error;
 pub mod from_row;
+pub mod instrumentation;
 pub mod query;
 pub mod row;
 pub mod state;
@@ -84,6 +86,7 @@ pub mod transaction;
 pub mod tvp;
 
 // Re-export commonly used types
+pub use bulk::{BulkColumn, BulkInsert, BulkInsertBuilder, BulkInsertResult, BulkOptions};
 pub use client::Client;
 pub use config::{Config, RedirectConfig, RetryPolicy, TimeoutConfig};
 pub use error::Error;
