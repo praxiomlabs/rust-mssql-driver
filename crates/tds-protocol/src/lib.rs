@@ -44,6 +44,7 @@ pub mod error;
 pub mod login7;
 pub mod packet;
 pub mod prelogin;
+pub mod rpc;
 pub mod sql_batch;
 pub mod token;
 pub mod types;
@@ -61,4 +62,5 @@ pub use token::{
 pub use types::{ColumnFlags, TypeId, Updateable};
 pub use version::TdsVersion;
 pub use login7::{FeatureExtension, FeatureId, Login7, OptionFlags1, OptionFlags2, OptionFlags3, TypeFlags};
+pub use rpc::{ParamFlags, ProcId, RpcOptionFlags, RpcParam, RpcRequest, TypeInfo as RpcTypeInfo};
 pub use sql_batch::{encode_sql_batch, SqlBatch};
