@@ -9,9 +9,17 @@ pub enum PoolError {
     #[error("connection acquisition timeout after {0:?}")]
     AcquisitionTimeout(std::time::Duration),
 
+    /// Timeout waiting for a connection.
+    #[error("timeout waiting for connection")]
+    Timeout,
+
     /// Pool is closed.
     #[error("pool is closed")]
     PoolClosed,
+
+    /// Connection error.
+    #[error("connection error: {0}")]
+    Connection(String),
 
     /// Connection creation failed.
     #[error("failed to create connection: {0}")]

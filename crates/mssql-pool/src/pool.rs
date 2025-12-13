@@ -3,11 +3,15 @@
 //! This module provides a purpose-built connection pool for SQL Server
 //! with SQL Server-specific lifecycle management including `sp_reset_connection`.
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+use mssql_client::{Client, Config as ClientConfig, Ready};
 use parking_lot::Mutex;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::time::timeout;
 
 use crate::config::PoolConfig;
 use crate::error::PoolError;
@@ -47,19 +51,27 @@ use crate::lifecycle::ConnectionMetadata;
 /// ```
 pub struct Pool {
     config: PoolConfig,
+    client_config: ClientConfig,
     inner: Arc<PoolInner>,
+}
+
+/// A pooled connection entry.
+struct PooledEntry {
+    /// The actual client connection.
+    client: Client<Ready>,
+    /// Connection metadata.
+    metadata: ConnectionMetadata,
 }
 
 struct PoolInner {
     /// Pool configuration.
-    #[allow(dead_code)] // Will be used once pool implementation is complete
+    #[allow(dead_code)] // Used for idle timeout, health checks, etc.
     config: PoolConfig,
 
     /// Whether the pool is closed.
     closed: AtomicBool,
 
     /// Counter for generating connection IDs.
-    #[allow(dead_code)] // Used when connection creation is implemented
     next_connection_id: AtomicU64,
 
     /// When the pool was created.
@@ -67,6 +79,18 @@ struct PoolInner {
 
     /// Pool metrics.
     metrics: Mutex<PoolMetricsInner>,
+
+    /// Idle connections ready for use.
+    idle_connections: Mutex<VecDeque<PooledEntry>>,
+
+    /// Semaphore to limit total connections (wrapped in Arc for owned permits).
+    semaphore: Arc<Semaphore>,
+
+    /// Number of connections currently in use.
+    in_use_count: AtomicU64,
+
+    /// Total connections created.
+    total_connections: AtomicU64,
 }
 
 /// Internal metrics tracking.
@@ -99,10 +123,10 @@ impl Pool {
         PoolBuilder::new()
     }
 
-    /// Create a new pool with the given configuration.
+    /// Create a new pool with the given configuration and client configuration.
     ///
     /// For more control over pool creation, use [`Pool::builder()`].
-    pub async fn new(config: PoolConfig) -> Result<Self, PoolError> {
+    pub async fn new(config: PoolConfig, client_config: ClientConfig) -> Result<Self, PoolError> {
         config.validate()?;
 
         let inner = Arc::new(PoolInner {
@@ -111,6 +135,10 @@ impl Pool {
             next_connection_id: AtomicU64::new(1),
             created_at: Instant::now(),
             metrics: Mutex::new(PoolMetricsInner::default()),
+            idle_connections: Mutex::new(VecDeque::with_capacity(config.max_connections as usize)),
+            semaphore: Arc::new(Semaphore::new(config.max_connections as usize)),
+            in_use_count: AtomicU64::new(0),
+            total_connections: AtomicU64::new(0),
         });
 
         tracing::info!(
@@ -119,7 +147,7 @@ impl Pool {
             "connection pool created"
         );
 
-        Ok(Self { config, inner })
+        Ok(Self { config, client_config, inner })
     }
 
     /// Get a connection from the pool.
@@ -135,13 +163,70 @@ impl Pool {
 
         tracing::trace!("acquiring connection from pool");
 
-        // Placeholder: actual connection acquisition logic
-        // Would involve:
-        // 1. Try to get idle connection
-        // 2. If none, try to create new (if under max)
-        // 3. If at max, wait with timeout
+        // Try to acquire semaphore permit with timeout
+        let permit = match timeout(
+            self.config.connection_timeout,
+            Arc::clone(&self.inner.semaphore).acquire_owned(),
+        )
+        .await
+        {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_)) => {
+                // Semaphore was closed (pool shut down)
+                self.inner.metrics.lock().checkouts_failed += 1;
+                return Err(PoolError::PoolClosed);
+            }
+            Err(_) => {
+                // Timeout waiting for semaphore
+                self.inner.metrics.lock().checkouts_failed += 1;
+                return Err(PoolError::Timeout);
+            }
+        };
 
-        todo!("Pool::get() - connection acquisition not yet implemented")
+        // Try to get an idle connection first
+        let entry = {
+            let mut idle = self.inner.idle_connections.lock();
+            idle.pop_front()
+        };
+
+        let (client, mut metadata) = match entry {
+            Some(entry) => {
+                tracing::trace!(connection_id = entry.metadata.id, "reusing idle connection");
+                (entry.client, entry.metadata)
+            }
+            None => {
+                // No idle connection, create a new one
+                let id = self.next_connection_id();
+                tracing::debug!(connection_id = id, "creating new connection");
+
+                match Client::connect(self.client_config.clone()).await {
+                    Ok(client) => {
+                        self.inner.total_connections.fetch_add(1, Ordering::Relaxed);
+                        self.inner.metrics.lock().connections_created += 1;
+                        (client, ConnectionMetadata::new(id))
+                    }
+                    Err(e) => {
+                        // Return the permit since we failed to create connection
+                        drop(permit);
+                        self.inner.metrics.lock().checkouts_failed += 1;
+                        return Err(PoolError::Connection(e.to_string()));
+                    }
+                }
+            }
+        };
+
+        // Mark as in use
+        metadata.mark_checkout();
+        self.inner.in_use_count.fetch_add(1, Ordering::Relaxed);
+        self.inner.metrics.lock().checkouts_successful += 1;
+
+        Ok(PooledConnection {
+            client: Some(client),
+            metadata,
+            pool: self.inner.clone(),
+            client_config: self.client_config.clone(),
+            _permit: permit,
+        })
     }
 
     /// Try to get a connection without waiting.
@@ -159,10 +244,12 @@ impl Pool {
     /// Get the current pool status.
     #[must_use]
     pub fn status(&self) -> PoolStatus {
+        let idle = self.inner.idle_connections.lock().len() as u32;
+        let in_use = self.inner.in_use_count.load(Ordering::Relaxed) as u32;
         PoolStatus {
-            available: 0,
-            in_use: 0,
-            total: 0,
+            available: idle,
+            in_use,
+            total: idle + in_use,
             max: self.config.max_connections,
         }
     }
@@ -215,12 +302,14 @@ impl Pool {
 ///
 /// ```rust,ignore
 /// let pool = Pool::builder()
+///     .client_config(client_config)
 ///     .pool_config(pool_config)
 ///     .build()
 ///     .await?;
 /// ```
 pub struct PoolBuilder {
     pool_config: PoolConfig,
+    client_config: Option<ClientConfig>,
 }
 
 impl PoolBuilder {
@@ -228,7 +317,15 @@ impl PoolBuilder {
     pub fn new() -> Self {
         Self {
             pool_config: PoolConfig::default(),
+            client_config: None,
         }
+    }
+
+    /// Set the client configuration (required).
+    #[must_use]
+    pub fn client_config(mut self, config: ClientConfig) -> Self {
+        self.client_config = Some(config);
+        self
     }
 
     /// Set the pool configuration.
@@ -274,8 +371,15 @@ impl PoolBuilder {
     }
 
     /// Build the pool.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `client_config` was not set.
     pub async fn build(self) -> Result<Pool, PoolError> {
-        Pool::new(self.pool_config).await
+        let client_config = self.client_config.ok_or_else(|| {
+            PoolError::Configuration("client_config is required".to_string())
+        })?;
+        Pool::new(self.pool_config, client_config).await
     }
 }
 
@@ -365,48 +469,98 @@ impl PoolMetrics {
 /// When dropped, the connection is automatically returned to the pool.
 /// Use [`detach()`](PooledConnection::detach) to prevent automatic return.
 pub struct PooledConnection {
+    /// The actual client connection (Option to allow taking on drop).
+    client: Option<Client<Ready>>,
     /// Connection metadata.
-    #[allow(dead_code)] // Will be used once pool implementation is complete
     metadata: ConnectionMetadata,
     /// Reference to the pool for returning the connection.
-    #[allow(dead_code)] // Will be used once pool implementation is complete
     pool: Arc<PoolInner>,
+    /// Client config for reconnection if needed.
+    #[allow(dead_code)] // Will be used for reconnection logic
+    client_config: ClientConfig,
+    /// Semaphore permit (released when connection returns to pool).
+    _permit: OwnedSemaphorePermit,
 }
 
 impl PooledConnection {
-    /// Create a new pooled connection.
-    #[allow(dead_code)] // Used when connection acquisition is implemented
-    fn new(metadata: ConnectionMetadata, pool: Arc<PoolInner>) -> Self {
-        Self { metadata, pool }
-    }
-
     /// Get the connection metadata.
     #[must_use]
     pub fn metadata(&self) -> &ConnectionMetadata {
         &self.metadata
     }
 
+    /// Get a reference to the underlying client.
+    #[must_use]
+    pub fn client(&self) -> Option<&Client<Ready>> {
+        self.client.as_ref()
+    }
+
+    /// Get a mutable reference to the underlying client.
+    #[must_use]
+    pub fn client_mut(&mut self) -> Option<&mut Client<Ready>> {
+        self.client.as_mut()
+    }
+
     /// Detach the connection from the pool.
     ///
-    /// The connection will not be returned to the pool when dropped.
-    /// This is useful when you want to keep the connection beyond the
-    /// normal pool lifecycle.
-    pub fn detach(self) {
-        // Prevent returning to pool by forgetting the wrapper
-        std::mem::forget(self);
+    /// Returns the underlying client. The connection will not be returned
+    /// to the pool when this `PooledConnection` is dropped.
+    pub fn detach(mut self) -> Option<Client<Ready>> {
+        self.client.take()
+    }
+
+    /// Execute a query on this pooled connection.
+    pub async fn query<'a>(
+        &'a mut self,
+        sql: &str,
+        params: &[&(dyn mssql_client::ToSql + Sync)],
+    ) -> Result<mssql_client::QueryStream<'a>, PoolError> {
+        let client = self.client.as_mut().ok_or(PoolError::Connection(
+            "connection detached or invalid".to_string(),
+        ))?;
+        client
+            .query(sql, params)
+            .await
+            .map_err(|e| PoolError::Connection(e.to_string()))
+    }
+
+    /// Execute a statement on this pooled connection.
+    pub async fn execute(
+        &mut self,
+        sql: &str,
+        params: &[&(dyn mssql_client::ToSql + Sync)],
+    ) -> Result<u64, PoolError> {
+        let client = self.client.as_mut().ok_or(PoolError::Connection(
+            "connection detached or invalid".to_string(),
+        ))?;
+        client
+            .execute(sql, params)
+            .await
+            .map_err(|e| PoolError::Connection(e.to_string()))
     }
 }
 
 impl Drop for PooledConnection {
     fn drop(&mut self) {
-        // Return connection to pool
-        // Would involve:
-        // 1. Run sp_reset_connection if configured
-        // 2. Return to idle queue
-        tracing::trace!(
-            connection_id = self.metadata.id,
-            "returning connection to pool"
-        );
+        if let Some(client) = self.client.take() {
+            tracing::trace!(
+                connection_id = self.metadata.id,
+                "returning connection to pool"
+            );
+
+            // Update metadata for checkin
+            self.metadata.mark_checkin();
+
+            // Return connection to idle queue
+            let entry = PooledEntry {
+                client,
+                metadata: self.metadata.clone(),
+            };
+
+            self.pool.idle_connections.lock().push_back(entry);
+            self.pool.in_use_count.fetch_sub(1, Ordering::Relaxed);
+        }
+        // Note: the semaphore permit is automatically released when _permit is dropped
     }
 }
 
