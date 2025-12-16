@@ -29,8 +29,26 @@ exact-versions = false
 # Crates to exclude from workspace-hack unification
 [traversal-excludes]
 # Procedural macro crates compile separately and don't benefit from unification
-workspace-members = ["mssql-derive"]
+# Build automation (xtask) and test infrastructure also excluded
+workspace-members = [
+    "mssql-derive",
+    "xtask",
+    "mssql-testing",
+]
+
+# Test-only third-party dependencies don't need unification
+third-party = [
+    { name = "criterion" },
+    { name = "proptest" },
+    { name = "testcontainers" },
+    { name = "tokio-test" },
+]
 
 [final-excludes]
 workspace-members = []
-third-party = []
+# Proc-macro helper crates can't be unified
+third-party = [
+    { name = "syn" },
+    { name = "quote" },
+    { name = "proc-macro2" },
+]
