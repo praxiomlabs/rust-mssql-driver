@@ -386,7 +386,8 @@ pub struct MockTdsServer {
     addr: SocketAddr,
     /// Shutdown signal sender.
     shutdown_tx: broadcast::Sender<()>,
-    /// Server configuration.
+    /// Server configuration (stored for potential introspection).
+    #[allow(dead_code)]
     config: Arc<MockServerConfig>,
     /// Connection count.
     connection_count: Arc<Mutex<usize>>,

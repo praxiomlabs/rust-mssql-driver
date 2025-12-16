@@ -63,6 +63,7 @@ impl<'a> QueryStream<'a> {
     }
 
     /// Create an empty query stream (no results).
+    #[allow(dead_code)]
     pub(crate) fn empty() -> Self {
         Self {
             columns: Vec::new(),
