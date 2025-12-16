@@ -1,0 +1,45 @@
+[package]
+name = "mssql-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+# Empty workspace table makes this package a standalone workspace
+# (required by cargo-fuzz since it uses a different build process)
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1.3", features = ["derive"] }
+bytes = "1.9"
+
+[dependencies.tds-protocol]
+path = "../crates/tds-protocol"
+
+[dependencies.mssql-client]
+path = "../crates/mssql-client"
+features = ["default"]
+
+[[bin]]
+name = "parse_packet"
+path = "fuzz_targets/parse_packet.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_token"
+path = "fuzz_targets/parse_token.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "connection_string"
+path = "fuzz_targets/connection_string.rs"
+test = false
+doc = false
+bench = false
