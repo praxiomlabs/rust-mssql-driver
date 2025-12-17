@@ -12,6 +12,8 @@ categories = ["authentication", "database"]
 [features]
 default = []
 azure-identity = []
+# Integrated authentication (Kerberos/SPNEGO) - Linux only
+# Requires libkrb5-dev on Debian/Ubuntu or krb5-devel on RHEL/Fedora
 integrated-auth = ["dep:libgssapi"]
 cert-auth = []
 # Enable secure credential zeroization on drop
