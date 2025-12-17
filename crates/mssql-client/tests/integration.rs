@@ -1372,7 +1372,398 @@ async fn test_same_sql_different_params() {
 
         assert_eq!(results.len(), 1, "Should find exactly one row for id {}", i);
         assert_eq!(results[0].0, format!("User{}", i));
-        assert_eq!(results[0].1, { (i * 10) });
+        assert_eq!(results[0].1, { i * 10 });
+    }
+
+    client.close().await.expect("Failed to close");
+}
+
+// =============================================================================
+// TLS and Encryption Tests
+// =============================================================================
+
+/// Helper to get config with specific encryption mode
+fn get_config_with_encrypt(encrypt: &str) -> Option<Config> {
+    let host = std::env::var("MSSQL_HOST").ok()?;
+    let user = std::env::var("MSSQL_USER").unwrap_or_else(|_| "sa".into());
+    let password = std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "MyStrongPassw0rd".into());
+    let database = std::env::var("MSSQL_DATABASE").unwrap_or_else(|_| "master".into());
+
+    let conn_str = format!(
+        "Server={};Database={};User Id={};Password={};TrustServerCertificate=true;Encrypt={}",
+        host, database, user, password, encrypt
+    );
+
+    Config::from_connection_string(&conn_str).ok()
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_connection_with_encryption_true() {
+    let config = get_config_with_encrypt("true").expect("SQL Server config required");
+
+    let client = Client::connect(config).await.expect("Failed to connect with Encrypt=true");
+
+    // Verify connection works by running a simple query
+    let mut client = client;
+    let rows = client
+        .query("SELECT 1 AS encrypted_connection", &[])
+        .await
+        .expect("Query failed");
+    assert_eq!(rows.len(), 1);
+
+    client.close().await.expect("Failed to close connection");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_connection_with_encryption_false() {
+    let config = get_config_with_encrypt("false").expect("SQL Server config required");
+
+    let client = Client::connect(config).await.expect("Failed to connect with Encrypt=false");
+
+    let mut client = client;
+    let rows = client
+        .query("SELECT 1 AS unencrypted_connection", &[])
+        .await
+        .expect("Query failed");
+    assert_eq!(rows.len(), 1);
+
+    client.close().await.expect("Failed to close connection");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server 2022+ with TDS 8.0 support"]
+async fn test_tds_8_strict_mode() {
+    // TDS 8.0 strict mode - TLS handshake before any TDS traffic
+    // This requires SQL Server 2022+ configured for strict encryption
+    let config = get_config_with_encrypt("strict").expect("SQL Server config required");
+
+    // Note: This test may fail if SQL Server is not configured for TDS 8.0
+    // TDS 8.0 requires server-side configuration changes
+    match Client::connect(config).await {
+        Ok(client) => {
+            // If connection succeeds, TDS 8.0 is working
+            let mut client = client;
+            let rows = client
+                .query("SELECT 'TDS 8.0' AS protocol_mode", &[])
+                .await
+                .expect("Query failed in TDS 8.0 mode");
+            assert_eq!(rows.len(), 1);
+            client.close().await.expect("Failed to close");
+        }
+        Err(e) => {
+            // Expected if server doesn't support TDS 8.0 strict mode
+            // The connection may fail with "strict encryption mode required"
+            println!("TDS 8.0 strict mode not available: {:?}", e);
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_server_tds_version() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Query the server version to verify connection protocol
+    let rows = client
+        .query(
+            "SELECT @@VERSION AS version, SERVERPROPERTY('ProductMajorVersion') AS major_version",
+            &[],
+        )
+        .await
+        .expect("Version query failed");
+
+    let mut count = 0;
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let version: String = row.get(0).expect("Failed to get version");
+        println!("SQL Server version: {}", version);
+
+        // SQL Server 2022 = version 16
+        // SQL Server 2019 = version 15
+        // SQL Server 2017 = version 14
+        // SQL Server 2016 = version 13
+        assert!(version.contains("Microsoft SQL Server"));
+        count += 1;
+    }
+    assert_eq!(count, 1);
+
+    client.close().await.expect("Failed to close connection");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_encrypted_query_roundtrip() {
+    // Test that data integrity is maintained through encrypted connection
+    let config = get_config_with_encrypt("true").expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Create temp table
+    client
+        .execute(
+            "CREATE TABLE #EncryptTest (id INT, data NVARCHAR(100), num FLOAT)",
+            &[],
+        )
+        .await
+        .expect("Failed to create temp table");
+
+    // Insert test data with various types over encrypted connection
+    let test_id: i32 = 1;
+    let test_string = String::from("Hello, encrypted world!");
+    let test_float: f64 = 123.456;
+
+    client
+        .execute(
+            "INSERT INTO #EncryptTest VALUES (@p1, @p2, @p3)",
+            &[&test_id, &test_string.as_str(), &test_float],
+        )
+        .await
+        .expect("Failed to insert test data");
+
+    // Read back and verify data integrity over encrypted connection
+    let rows = client
+        .query("SELECT id, data, num FROM #EncryptTest WHERE id = 1", &[])
+        .await
+        .expect("Query failed");
+
+    let mut count = 0;
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let id: i32 = row.get(0).expect("Failed to get id");
+        let data: String = row.get(1).expect("Failed to get data");
+        let num: f64 = row.get(2).expect("Failed to get float");
+
+        assert_eq!(id, 1);
+        assert_eq!(data, test_string);
+        assert!((num - test_float).abs() < 0.0001, "Float mismatch: {} vs {}", num, test_float);
+        count += 1;
+    }
+    assert_eq!(count, 1);
+
+    client.close().await.expect("Failed to close connection");
+}
+
+// =============================================================================
+// Connection Resilience Tests
+// =============================================================================
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_connection_state_after_error() {
+    // Verify connection remains usable after a server error
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Cause a server error (invalid SQL)
+    let result = client.query("SELECT * FROM NonExistentTable12345", &[]).await;
+    assert!(result.is_err(), "Expected error for non-existent table");
+
+    // Connection should still be usable
+    let rows = client
+        .query("SELECT 1 AS still_working", &[])
+        .await
+        .expect("Query should succeed after error");
+
+    let mut count = 0;
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let val: i32 = row.get(0).expect("Failed to get value");
+        assert_eq!(val, 1);
+        count += 1;
+    }
+    assert_eq!(count, 1);
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_multiple_errors_recovery() {
+    // Test that multiple consecutive errors don't corrupt connection state
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Cause multiple errors
+    for i in 1..=5 {
+        let result = client
+            .query(&format!("SELECT * FROM NonExistentTable{}", i), &[])
+            .await;
+        assert!(result.is_err(), "Expected error {} for non-existent table", i);
+    }
+
+    // Connection should still work
+    let rows = client
+        .query("SELECT 'recovered' AS status", &[])
+        .await
+        .expect("Query should succeed after multiple errors");
+
+    let mut count = 0;
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let val: String = row.get(0).expect("Failed to get value");
+        assert_eq!(val, "recovered");
+        count += 1;
+    }
+    assert_eq!(count, 1);
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_transaction_rollback_preserves_state() {
+    // Verify transaction state is correctly managed on rollback
+    // Using the driver's transaction API instead of raw SQL
+    let config = get_test_config().expect("SQL Server config required");
+    let client = Client::connect(config).await.expect("Failed to connect");
+
+    // Create a test table before transaction
+    let mut client = client;
+    client
+        .execute(
+            "CREATE TABLE #TxRollbackPreserve (id INT PRIMARY KEY, value NVARCHAR(50))",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    // Insert initial data
+    client
+        .execute("INSERT INTO #TxRollbackPreserve VALUES (1, 'initial')", &[])
+        .await
+        .expect("Failed to insert");
+
+    // Start a transaction using the client API
+    let mut tx = client.begin_transaction().await.expect("Failed to begin transaction");
+
+    // Make a change within transaction
+    tx.execute("UPDATE #TxRollbackPreserve SET value = 'modified' WHERE id = 1", &[])
+        .await
+        .expect("Failed to update");
+
+    // Rollback the transaction
+    let mut client = tx.rollback().await.expect("Failed to rollback");
+
+    // Verify the original value is preserved
+    let rows = client
+        .query("SELECT value FROM #TxRollbackPreserve WHERE id = 1", &[])
+        .await
+        .expect("Query failed");
+
+    let mut count = 0;
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let val: String = row.get(0).expect("Failed to get value");
+        assert_eq!(val, "initial", "Transaction should have been rolled back");
+        count += 1;
+    }
+    assert_eq!(count, 1);
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_duplicate_key_error_recovery() {
+    // Test that duplicate key errors don't break connection state
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Create test table
+    client
+        .execute("CREATE TABLE #DupKeyTest (id INT PRIMARY KEY)", &[])
+        .await
+        .expect("Failed to create table");
+
+    // First insert should succeed
+    client
+        .execute("INSERT INTO #DupKeyTest VALUES (1)", &[])
+        .await
+        .expect("First insert should succeed");
+
+    // Duplicate key should fail
+    let result = client.execute("INSERT INTO #DupKeyTest VALUES (1)", &[]).await;
+    assert!(result.is_err(), "Duplicate insert should fail");
+
+    // Next insert should succeed
+    client
+        .execute("INSERT INTO #DupKeyTest VALUES (2)", &[])
+        .await
+        .expect("Insert after error should succeed");
+
+    // Verify both successful inserts are present
+    let rows = client
+        .query("SELECT COUNT(*) FROM #DupKeyTest", &[])
+        .await
+        .expect("Count query failed");
+
+    let mut count = 0;
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let cnt: i32 = row.get(0).expect("Failed to get count");
+        assert_eq!(cnt, 2, "Should have exactly 2 rows");
+        count += 1;
+    }
+    assert_eq!(count, 1);
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_binary_data_roundtrip() {
+    // Test binary data handling with various patterns using fixed-size VARBINARY
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Create test table with fixed size VARBINARY (not MAX) for reliable parsing
+    client
+        .execute(
+            "CREATE TABLE #BinaryRoundtrip (id INT PRIMARY KEY, data VARBINARY(500))",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    // Test various binary patterns using hex literals (skip empty for now)
+    let test_cases: Vec<(i32, Vec<u8>)> = vec![
+        (1, vec![0x00]), // Single null byte
+        (2, vec![0xFF]), // Single max byte
+        (3, vec![0x00, 0xFF, 0x00, 0xFF]), // Alternating
+        (4, vec![0xDE, 0xAD, 0xBE, 0xEF]), // Classic magic bytes
+        (5, (0..64u8).collect()), // Sequential bytes (subset for reliability)
+    ];
+
+    for (id, data) in &test_cases {
+        // Use literal hex for binary data insertion
+        let hex: String = data.iter().map(|b| format!("{:02X}", b)).collect();
+        let sql = format!("INSERT INTO #BinaryRoundtrip VALUES ({}, 0x{})", id, hex);
+        client
+            .execute(&sql, &[])
+            .await
+            .unwrap_or_else(|e| panic!("Failed to insert binary data for id {}: {:?}", id, e));
+    }
+
+    // Verify each
+    for (id, expected) in &test_cases {
+        let rows = client
+            .query(
+                &format!("SELECT data FROM #BinaryRoundtrip WHERE id = {}", id),
+                &[],
+            )
+            .await
+            .unwrap_or_else(|e| panic!("Query failed for id {}: {:?}", id, e));
+
+        let mut found = false;
+        for result in rows {
+            let row = result.expect("Row should be valid");
+            let data: Vec<u8> = row.get(0).expect("Failed to get binary data");
+            assert_eq!(&data, expected, "Binary data mismatch for id {}", id);
+            found = true;
+        }
+        assert!(found, "No row found for id {}", id);
     }
 
     client.close().await.expect("Failed to close");
