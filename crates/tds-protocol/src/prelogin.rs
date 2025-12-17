@@ -284,10 +284,17 @@ impl PreLogin {
     }
 
     /// Decode a pre-login response from the server.
+    ///
+    /// Per MS-TDS spec 2.2.6.4, PreLogin message structure:
+    /// - Option headers: each 5 bytes (type:1 + offset:2 + length:2)
+    /// - Terminator: 1 byte (0xFF)
+    /// - Option data: variable length, positioned at offsets specified in headers
+    ///
+    /// Offsets in headers are absolute from the start of the PreLogin packet payload.
     pub fn decode(mut src: impl Buf) -> Result<Self, ProtocolError> {
         let mut prelogin = Self::default();
 
-        // Parse option headers
+        // Parse option headers first, collecting (option_type, offset, length)
         let mut options = Vec::new();
         loop {
             if src.remaining() < 1 {
@@ -311,35 +318,73 @@ impl PreLogin {
         // Get remaining data as bytes for random access
         let data = src.copy_to_bytes(src.remaining());
 
-        // Parse option data
-        // Calculate header size for offset adjustment (each option is 5 bytes + 1 terminator)
+        // Calculate header size: each option is 5 bytes + 1 byte terminator
         let header_size = options.len() * 5 + 1;
 
-        for (option, offset, length) in options {
-            let offset = offset as usize;
+        for (option, packet_offset, length) in options {
+            let packet_offset = packet_offset as usize;
             let length = length as usize;
 
-            // Adjust offset relative to data start (after headers)
-            // The offset in the packet is absolute from packet start
-            // We need to handle this carefully
-            if offset + length > data.len() + header_size {
-                // Skip malformed options rather than fail
+            // Convert absolute packet offset to offset within data buffer
+            // The data buffer starts after the headers, so we subtract header_size
+            if packet_offset < header_size {
+                // Invalid: offset points inside the headers
+                continue;
+            }
+            let data_offset = packet_offset - header_size;
+
+            // Bounds check
+            if data_offset + length > data.len() {
                 continue;
             }
 
-            // For simplicity, we'll just parse what we can
-            // In a production implementation, this would need more careful offset handling
             match option {
                 PreLoginOption::Version if length >= 6 => {
-                    // Version parsing would go here
-                }
-                PreLoginOption::Encryption if length >= 1 => {
-                    if let Some(&enc) = data.get(0) {
-                        prelogin.encryption = EncryptionLevel::from_u8(enc);
+                    // Per MS-TDS: UL_VERSION is 4 bytes big-endian, US_SUBBUILD is 2 bytes little-endian
+                    let version_bytes = &data[data_offset..data_offset + 4];
+                    let version_raw = u32::from_be_bytes([
+                        version_bytes[0],
+                        version_bytes[1],
+                        version_bytes[2],
+                        version_bytes[3],
+                    ]);
+                    prelogin.version = TdsVersion::new(version_raw);
+
+                    if length >= 6 {
+                        let sub_build_bytes = &data[data_offset + 4..data_offset + 6];
+                        prelogin.sub_build =
+                            u16::from_le_bytes([sub_build_bytes[0], sub_build_bytes[1]]);
                     }
                 }
+                PreLoginOption::Encryption if length >= 1 => {
+                    prelogin.encryption = EncryptionLevel::from_u8(data[data_offset]);
+                }
                 PreLoginOption::Mars if length >= 1 => {
-                    // MARS parsing
+                    prelogin.mars = data[data_offset] != 0;
+                }
+                PreLoginOption::Instance if length > 0 => {
+                    // Instance name is null-terminated string
+                    let instance_data = &data[data_offset..data_offset + length];
+                    if let Some(null_pos) = instance_data.iter().position(|&b| b == 0) {
+                        if let Ok(s) = std::str::from_utf8(&instance_data[..null_pos]) {
+                            if !s.is_empty() {
+                                prelogin.instance = Some(s.to_string());
+                            }
+                        }
+                    }
+                }
+                PreLoginOption::ThreadId if length >= 4 => {
+                    let bytes = &data[data_offset..data_offset + 4];
+                    prelogin.thread_id =
+                        Some(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]));
+                }
+                PreLoginOption::FedAuthRequired if length >= 1 => {
+                    prelogin.fed_auth_required = data[data_offset] != 0;
+                }
+                PreLoginOption::Nonce if length >= 32 => {
+                    let mut nonce = [0u8; 32];
+                    nonce.copy_from_slice(&data[data_offset..data_offset + 32]);
+                    prelogin.nonce = Some(nonce);
                 }
                 _ => {}
             }
@@ -376,5 +421,76 @@ mod tests {
         assert!(EncryptionLevel::On.is_required());
         assert!(!EncryptionLevel::Off.is_required());
         assert!(!EncryptionLevel::NotSupported.is_required());
+    }
+
+    #[test]
+    fn test_prelogin_decode_roundtrip() {
+        // Create a PreLogin with various options
+        let original = PreLogin::new()
+            .with_version(TdsVersion::V7_4)
+            .with_encryption(EncryptionLevel::On)
+            .with_mars(true);
+
+        // Encode it
+        let encoded = original.encode();
+
+        // Decode it back
+        let decoded = PreLogin::decode(encoded.as_ref()).unwrap();
+
+        // Verify the critical fields match
+        assert_eq!(decoded.version, original.version);
+        assert_eq!(decoded.encryption, original.encryption);
+        assert_eq!(decoded.mars, original.mars);
+    }
+
+    #[test]
+    fn test_prelogin_decode_encryption_offset() {
+        // Manually construct a PreLogin packet with options in non-standard order
+        // to verify offset handling works correctly
+        //
+        // Structure:
+        // - ENCRYPTION header at offset pointing to encryption data
+        // - VERSION header at offset pointing to version data
+        // - Terminator
+        // - Data section
+
+        use bytes::BufMut;
+
+        let mut buf = bytes::BytesMut::new();
+
+        // Header section: each option is 5 bytes (type:1 + offset:2 + length:2)
+        // We'll have 2 options + terminator = 11 bytes header
+        let header_size: u16 = 11;
+
+        // ENCRYPTION option header (put this first to test that we read from correct offset)
+        buf.put_u8(PreLoginOption::Encryption as u8);
+        buf.put_u16(header_size); // offset to encryption data
+        buf.put_u16(1); // length
+
+        // VERSION option header
+        buf.put_u8(PreLoginOption::Version as u8);
+        buf.put_u16(header_size + 1); // offset to version data (after encryption)
+        buf.put_u16(6); // length
+
+        // Terminator
+        buf.put_u8(PreLoginOption::Terminator as u8);
+
+        // Data section
+        // Encryption data (1 byte): ENCRYPT_ON = 0x01
+        buf.put_u8(0x01);
+
+        // Version data (6 bytes): TDS 7.4 = 0x74000004 big-endian + sub-build 0x0000 little-endian
+        buf.put_u8(0x74);
+        buf.put_u8(0x00);
+        buf.put_u8(0x00);
+        buf.put_u8(0x04);
+        buf.put_u16_le(0x0000); // sub-build
+
+        // Decode
+        let decoded = PreLogin::decode(buf.freeze().as_ref()).unwrap();
+
+        // Verify encryption was read from correct offset (not from index 0)
+        assert_eq!(decoded.encryption, EncryptionLevel::On);
+        assert_eq!(decoded.version, TdsVersion::V7_4);
     }
 }

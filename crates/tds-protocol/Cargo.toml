@@ -21,6 +21,11 @@ bitflags = "2.6"
 
 [dev-dependencies]
 proptest = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "protocol"
+harness = false
 
 [lints]
 workspace = true

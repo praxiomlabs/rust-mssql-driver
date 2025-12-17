@@ -715,9 +715,27 @@ impl RpcRequest {
         self
     }
 
-    /// Encode the RPC request to bytes.
+    /// Encode the RPC request to bytes (auto-commit mode).
+    ///
+    /// For requests within an explicit transaction, use [`encode_with_transaction`].
     #[must_use]
     pub fn encode(&self) -> Bytes {
+        self.encode_with_transaction(0)
+    }
+
+    /// Encode the RPC request with a transaction descriptor.
+    ///
+    /// Per MS-TDS spec, when executing within an explicit transaction:
+    /// - The `transaction_descriptor` MUST be the value returned by the server
+    ///   in the BeginTransaction EnvChange token.
+    /// - For auto-commit mode (no explicit transaction), use 0.
+    ///
+    /// # Arguments
+    ///
+    /// * `transaction_descriptor` - The transaction descriptor from BeginTransaction EnvChange,
+    ///   or 0 for auto-commit mode.
+    #[must_use]
+    pub fn encode_with_transaction(&self, transaction_descriptor: u64) -> Bytes {
         let mut buf = BytesMut::with_capacity(256);
 
         // ALL_HEADERS - TDS 7.2+ requires this section
@@ -726,10 +744,11 @@ impl RpcRequest {
         buf.put_u32_le(0); // Total length placeholder
 
         // Transaction descriptor header (required for RPC)
+        // Per MS-TDS 2.2.5.3: HeaderLength (4) + HeaderType (2) + TransactionDescriptor (8) + OutstandingRequestCount (4)
         buf.put_u32_le(18); // Header length
         buf.put_u16_le(0x0002); // Header type: transaction descriptor
-        buf.put_u64_le(0); // Transaction descriptor (0 for no explicit transaction)
-        buf.put_u32_le(1); // Outstanding request count
+        buf.put_u64_le(transaction_descriptor); // Transaction descriptor from BeginTransaction EnvChange
+        buf.put_u32_le(1); // Outstanding request count (1 for non-MARS connections)
 
         // Fill in ALL_HEADERS total length
         let all_headers_len = buf.len() - all_headers_start;

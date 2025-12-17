@@ -1586,8 +1586,11 @@ impl EnvChange {
             EnvChangeType::BeginTransaction
             | EnvChangeType::CommitTransaction
             | EnvChangeType::RollbackTransaction
-            | EnvChangeType::EnlistDtcTransaction => {
-                // Transaction tokens use binary format
+            | EnvChangeType::EnlistDtcTransaction
+            | EnvChangeType::SqlCollation => {
+                // These use binary format per MS-TDS spec:
+                // - Transaction tokens: transaction descriptor (8 bytes)
+                // - SqlCollation: collation info (5 bytes: LCID + sort flags)
                 let new_len = src.get_u8() as usize;
                 let new_value = if new_len > 0 && src.remaining() >= new_len {
                     EnvChangeValue::Binary(src.copy_to_bytes(new_len))

@@ -44,29 +44,37 @@ pub struct OptionFlags1 {
 
 impl OptionFlags1 {
     /// Convert to byte.
+    ///
+    /// Per MS-TDS 2.2.6.3 LOGIN7, OptionFlags1 layout:
+    /// - bit 0: fByteOrder (0=little-endian, 1=big-endian)
+    /// - bit 1: fChar (0=ASCII, 1=EBCDIC)
+    /// - bits 2-3: fFloat (0=IEEE 754, 1=VAX, 2=ND5000)
+    /// - bit 4: fDumpLoad
+    /// - bit 5: fUseDB
+    /// - bit 6: fDatabase
+    /// - bit 7: fSetLang
     #[must_use]
     pub fn to_byte(&self) -> u8 {
         let mut flags = 0u8;
         if self.byte_order_be {
-            flags |= 0x01;
+            flags |= 0x01; // bit 0
         }
         if self.char_ebcdic {
-            flags |= 0x02;
+            flags |= 0x02; // bit 1
         }
-        if self.float_ieee {
-            flags |= 0x04;
-        }
+        // Note: fFloat is bits 2-3, IEEE 754 = 0, so leave as 0 for IEEE
+        // float_ieee being true means we use IEEE (which is 0, the default)
         if self.dump_load_off {
-            flags |= 0x08;
+            flags |= 0x10; // bit 4
         }
         if self.use_db_notify {
-            flags |= 0x10;
+            flags |= 0x20; // bit 5
         }
         if self.database_fatal {
-            flags |= 0x20;
+            flags |= 0x40; // bit 6
         }
         if self.set_lang_warn {
-            flags |= 0x40;
+            flags |= 0x80; // bit 7
         }
         flags
     }
@@ -281,16 +289,22 @@ impl Default for Login7 {
             client_prog_version: 0,
             client_pid,
             connection_id: 0,
-            option_flags1: OptionFlags1::default(),
+            // Match Tiberius/standard SQL Server client flags
+            option_flags1: OptionFlags1 {
+                use_db_notify: true,
+                database_fatal: true,
+                ..Default::default()
+            },
             option_flags2: OptionFlags2 {
+                language_fatal: true,
                 odbc: true,
                 ..Default::default()
             },
-            type_flags: TypeFlags {
-                sql_type: 1, // TSQL
+            type_flags: TypeFlags::default(), // TSQL type is in sql_type field
+            option_flags3: OptionFlags3 {
+                unknown_collation_handling: true,
                 ..Default::default()
             },
-            option_flags3: OptionFlags3::default(),
             client_timezone: 0,
             client_lcid: 0x0409, // English (US)
             hostname: String::new(),
@@ -582,16 +596,17 @@ impl Login7 {
 
     /// Write password with TDS obfuscation.
     ///
-    /// TDS "encrypts" passwords using a simple substitution:
-    /// - XOR each byte with 0xA5
-    /// - Swap nibbles (rotate by 4 bits)
+    /// Per MS-TDS spec: For every byte in the password buffer, the client SHOULD first
+    /// swap the four high bits with the four low bits and then do a bit-XOR with 0xA5.
     fn write_obfuscated_password(dst: &mut impl BufMut, password: &str) {
         for c in password.encode_utf16() {
             let low = (c & 0xFF) as u8;
             let high = ((c >> 8) & 0xFF) as u8;
 
-            let low_enc = ((low ^ 0xA5) << 4) | ((low ^ 0xA5) >> 4);
-            let high_enc = ((high ^ 0xA5) << 4) | ((high ^ 0xA5) >> 4);
+            // Step 1: Swap nibbles (rotate by 4 bits)
+            // Step 2: XOR with 0xA5
+            let low_enc = ((low << 4) | (low >> 4)) ^ 0xA5;
+            let high_enc = ((high << 4) | (high >> 4)) ^ 0xA5;
 
             dst.put_u8(low_enc);
             dst.put_u8(high_enc);
@@ -641,11 +656,12 @@ mod tests {
         Login7::write_obfuscated_password(&mut buf, "a");
 
         // 'a' = 0x0061 in UTF-16LE
-        // Low byte: 0x61 ^ 0xA5 = 0xC4, swap nibbles = 0x4C
-        // High byte: 0x00 ^ 0xA5 = 0xA5, swap nibbles = 0x5A
+        // Per MS-TDS: swap nibbles FIRST, then XOR with 0xA5
+        // Low byte: 0x61 swap nibbles = 0x16, XOR 0xA5 = 0xB3
+        // High byte: 0x00 swap nibbles = 0x00, XOR 0xA5 = 0xA5
         assert_eq!(buf.len(), 2);
-        assert_eq!(buf[0], 0x4C);
-        assert_eq!(buf[1], 0x5A);
+        assert_eq!(buf[0], 0xB3);
+        assert_eq!(buf[1], 0xA5);
     }
 
     #[test]
