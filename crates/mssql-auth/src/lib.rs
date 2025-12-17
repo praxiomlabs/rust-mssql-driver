@@ -71,7 +71,7 @@ pub mod sql_auth;
 // Core types
 pub use credentials::Credentials;
 pub use error::AuthError;
-pub use provider::{AuthData, AuthMethod, AuthProvider, AsyncAuthProvider};
+pub use provider::{AsyncAuthProvider, AuthData, AuthMethod, AuthProvider};
 
 // Authentication providers
 pub use azure_ad::{AzureAdAuth, FedAuthLibrary};

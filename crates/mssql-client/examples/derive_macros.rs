@@ -14,6 +14,9 @@
 //! Note: This example requires the mssql-derive crate to be available.
 //! The derive macros generate code at compile time.
 
+// Allow common patterns in example code
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use mssql_client::{Client, Config, Error, ToParams, Tvp, TvpColumn};
 use mssql_types::{SqlValue, ToSql, TypeError};
 
@@ -133,10 +136,12 @@ async fn main() -> Result<(), Error> {
 fn demonstrate_from_row() {
     // Create a mock row with sample data
     // In practice, this comes from query results
-    let _values = [SqlValue::Int(42),
+    let _values = [
+        SqlValue::Int(42),
         SqlValue::String("Alice".into()),
         SqlValue::String("alice@example.com".into()),
-        SqlValue::String("+1-555-1234".into())];
+        SqlValue::String("+1-555-1234".into()),
+    ];
 
     println!("Mock row data:");
     println!("  id: 42");
@@ -183,7 +188,9 @@ fn demonstrate_to_params() {
 
     println!("\nUsage in query:");
     println!("  client.execute(");
-    println!("      \"INSERT INTO users (name, email_address, active) VALUES (@name, @email_address, @active)\",");
+    println!(
+        "      \"INSERT INTO users (name, email_address, active) VALUES (@name, @email_address, @active)\","
+    );
     println!("      &new_user.to_params()?");
     println!("  ).await?;");
 }
@@ -204,7 +211,10 @@ fn demonstrate_tvp() {
     println!("\nTVP type name: {}", UserIdParam::type_name());
     println!("TVP columns:");
     for col in UserIdParam::columns() {
-        println!("  {} ({}) at ordinal {}", col.name, col.sql_type, col.ordinal);
+        println!(
+            "  {} ({}) at ordinal {}",
+            col.name, col.sql_type, col.ordinal
+        );
     }
 
     println!("\nUsage with stored procedure:");
@@ -254,7 +264,9 @@ async fn database_example() -> Result<(), Error> {
     };
 
     // Get the parameters (returns Result, so handle it)
-    let params = new_user.to_params().map_err(|e| Error::Config(e.to_string()))?;
+    let params = new_user
+        .to_params()
+        .map_err(|e| Error::Config(e.to_string()))?;
     println!("Generated {} parameters", params.len());
 
     // Note: The execute method expects &[&dyn ToSql], not Vec<NamedParam>

@@ -38,6 +38,12 @@
 //!     -p 1435:1433 mcr.microsoft.com/mssql/server:2017-latest
 //! ```
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::manual_range_contains
+)]
+
 use mssql_client::{Client, Config};
 
 /// Helper to get test configuration from environment variables.
@@ -48,8 +54,7 @@ fn get_test_config() -> Option<Config> {
         .and_then(|p| p.parse().ok())
         .unwrap_or(1433);
     let user = std::env::var("MSSQL_USER").unwrap_or_else(|_| "sa".into());
-    let password =
-        std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "YourStrong@Passw0rd".into());
+    let password = std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "YourStrong@Passw0rd".into());
     let database = std::env::var("MSSQL_DATABASE").unwrap_or_else(|_| "master".into());
     let encrypt = std::env::var("MSSQL_ENCRYPT").unwrap_or_else(|_| "false".into());
 
@@ -243,7 +248,10 @@ async fn test_datetime_compatibility() {
 
     // DATETIME2 is available in all supported versions (2017+)
     let rows = client
-        .query("SELECT CAST('2024-06-15 14:30:00' AS DATETIME2) AS dt2", &[])
+        .query(
+            "SELECT CAST('2024-06-15 14:30:00' AS DATETIME2) AS dt2",
+            &[],
+        )
         .await
         .expect("Query should succeed");
 
@@ -267,7 +275,10 @@ async fn test_transaction_compatibility() {
 
     // Create temp table
     client
-        .execute("CREATE TABLE #VersionTest (id INT, value NVARCHAR(50))", &[])
+        .execute(
+            "CREATE TABLE #VersionTest (id INT, value NVARCHAR(50))",
+            &[],
+        )
         .await
         .expect("Create should succeed");
 
@@ -277,18 +288,18 @@ async fn test_transaction_compatibility() {
         .await
         .expect("Begin should succeed");
 
-    tx.execute(
-        "INSERT INTO #VersionTest VALUES (1, 'committed')",
-        &[],
-    )
-    .await
-    .expect("Insert should succeed");
+    tx.execute("INSERT INTO #VersionTest VALUES (1, 'committed')", &[])
+        .await
+        .expect("Insert should succeed");
 
     client = tx.commit().await.expect("Commit should succeed");
 
     // Verify committed
     let rows = client
-        .query("SELECT COUNT(*) FROM #VersionTest WHERE value = 'committed'", &[])
+        .query(
+            "SELECT COUNT(*) FROM #VersionTest WHERE value = 'committed'",
+            &[],
+        )
         .await
         .expect("Query should succeed");
 
@@ -304,18 +315,18 @@ async fn test_transaction_compatibility() {
         .await
         .expect("Begin should succeed");
 
-    tx.execute(
-        "INSERT INTO #VersionTest VALUES (2, 'rolled_back')",
-        &[],
-    )
-    .await
-    .expect("Insert should succeed");
+    tx.execute("INSERT INTO #VersionTest VALUES (2, 'rolled_back')", &[])
+        .await
+        .expect("Insert should succeed");
 
     client = tx.rollback().await.expect("Rollback should succeed");
 
     // Verify rolled back
     let rows = client
-        .query("SELECT COUNT(*) FROM #VersionTest WHERE value = 'rolled_back'", &[])
+        .query(
+            "SELECT COUNT(*) FROM #VersionTest WHERE value = 'rolled_back'",
+            &[],
+        )
         .await
         .expect("Query should succeed");
 
@@ -447,7 +458,10 @@ async fn test_large_data_compatibility() {
             values.push(format!("({})", batch * 100 + i));
         }
         let sql = format!("INSERT INTO #ManyRows VALUES {}", values.join(","));
-        client.execute(&sql, &[]).await.expect("Insert should succeed");
+        client
+            .execute(&sql, &[])
+            .await
+            .expect("Insert should succeed");
     }
 
     // Count rows
@@ -546,7 +560,10 @@ async fn test_sql_2019_features() {
     }
 
     if major_version < 15 {
-        println!("Skipping SQL Server 2019 features test (running on version {})", major_version);
+        println!(
+            "Skipping SQL Server 2019 features test (running on version {})",
+            major_version
+        );
         client.close().await.expect("Failed to close");
         return;
     }
@@ -563,7 +580,10 @@ async fn test_sql_2019_features() {
         values.push(format!("({})", i));
     }
     let sql = format!("INSERT INTO #ApproxTest VALUES {}", values.join(","));
-    client.execute(&sql, &[]).await.expect("Insert should succeed");
+    client
+        .execute(&sql, &[])
+        .await
+        .expect("Insert should succeed");
 
     let rows = client
         .query("SELECT APPROX_COUNT_DISTINCT(val) FROM #ApproxTest", &[])

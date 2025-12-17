@@ -13,16 +13,16 @@ keywords = ["sql-server", "mssql", "tds", "database", "async"]
 categories = ["database"]
 
 [workspace.dependencies]
-# Internal crates
-tds-protocol = { path = "crates/tds-protocol" }
-mssql-tls = { path = "crates/mssql-tls" }
-mssql-codec = { path = "crates/mssql-codec" }
-mssql-types = { path = "crates/mssql-types" }
-mssql-auth = { path = "crates/mssql-auth" }
-mssql-driver-pool = { path = "crates/mssql-pool" }
-mssql-client = { path = "crates/mssql-client" }
-mssql-derive = { path = "crates/mssql-derive" }
-mssql-testing = { path = "crates/mssql-testing" }
+# Internal crates (version required for crates.io publishing)
+tds-protocol = { version = "0.1.0", path = "crates/tds-protocol" }
+mssql-tls = { version = "0.1.0", path = "crates/mssql-tls" }
+mssql-codec = { version = "0.1.0", path = "crates/mssql-codec" }
+mssql-types = { version = "0.1.0", path = "crates/mssql-types" }
+mssql-auth = { version = "0.1.0", path = "crates/mssql-auth" }
+mssql-driver-pool = { version = "0.1.0", path = "crates/mssql-pool" }
+mssql-client = { version = "0.1.0", path = "crates/mssql-client" }
+mssql-derive = { version = "0.1.0", path = "crates/mssql-derive" }
+mssql-testing = { version = "0.1.0", path = "crates/mssql-testing" }
 
 # Async runtime
 tokio = { version = "1.48", features = ["full"] }

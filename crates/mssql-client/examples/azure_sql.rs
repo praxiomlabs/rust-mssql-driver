@@ -22,6 +22,9 @@
 //! - `TrustServerCertificate=false` (validate Azure certificates)
 //! - Server name must include `.database.windows.net`
 
+// Allow common patterns in example code
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use mssql_client::{Client, Config, Error, Ready};
 use std::time::Duration;
 
@@ -43,7 +46,10 @@ impl Default for AzureRetryConfig {
     }
 }
 
-async fn connect_with_retry(config: Config, retry_config: &AzureRetryConfig) -> Result<Client<Ready>, Error> {
+async fn connect_with_retry(
+    config: Config,
+    retry_config: &AzureRetryConfig,
+) -> Result<Client<Ready>, Error> {
     let mut attempts = 0;
     let mut last_error = None;
 
@@ -56,7 +62,10 @@ async fn connect_with_retry(config: Config, retry_config: &AzureRetryConfig) -> 
             // Add jitter (10-50% of backoff)
             let jitter = backoff / 5;
             let total_wait = backoff + jitter;
-            println!("  Retry {}/{} after {:?}", attempts, retry_config.max_retries, total_wait);
+            println!(
+                "  Retry {}/{} after {:?}",
+                attempts, retry_config.max_retries, total_wait
+            );
             tokio::time::sleep(total_wait).await;
         }
 
@@ -175,7 +184,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n3. Parameterized Query (RPC):");
     let name = "test_user";
     let rows = client
-        .query("SELECT @p1 AS input, SUSER_NAME() AS current_user", &[&name])
+        .query(
+            "SELECT @p1 AS input, SUSER_NAME() AS current_user",
+            &[&name],
+        )
         .await?;
 
     for result in rows {

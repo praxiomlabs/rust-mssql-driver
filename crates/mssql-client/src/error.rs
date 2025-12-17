@@ -179,7 +179,7 @@ impl Error {
             49919 |     // Cannot process create/update (Azure)
             49920 |     // Cannot process request (Azure)
             4060 |      // Cannot open database
-            18456       // Login failed (may be transient in Azure)
+            18456 // Login failed (may be transient in Azure)
         )
     }
 
@@ -216,7 +216,7 @@ impl Error {
             208 |       // Invalid object
             547 |       // Constraint violation
             2627 |      // Unique constraint violation
-            2601        // Duplicate key
+            2601 // Duplicate key
         )
     }
 
@@ -261,6 +261,7 @@ impl Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use std::sync::Arc;
@@ -283,11 +284,13 @@ mod tests {
         assert!(Error::CommandTimeout.is_transient());
         assert!(Error::ConnectionClosed.is_transient());
         assert!(Error::PoolExhausted.is_transient());
-        assert!(Error::Routing {
-            host: "test".into(),
-            port: 1433,
-        }
-        .is_transient());
+        assert!(
+            Error::Routing {
+                host: "test".into(),
+                port: 1433,
+            }
+            .is_transient()
+        );
     }
 
     #[test]

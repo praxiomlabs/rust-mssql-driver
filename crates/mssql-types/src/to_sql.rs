@@ -1,5 +1,8 @@
 //! Trait for converting Rust types to SQL values.
 
+// Allow expect() for chrono date construction with known-valid constant dates
+#![allow(clippy::expect_used)]
+
 use crate::error::TypeError;
 use crate::value::SqlValue;
 
@@ -242,6 +245,7 @@ impl ToSql for serde_json::Value {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

@@ -96,7 +96,9 @@ pub use mssql_auth::Credentials;
 pub use mssql_types::{FromSql, SqlValue, ToSql};
 pub use query::Query;
 pub use row::{Column, Row};
-pub use state::{Connected, ConnectionState, Disconnected, InTransaction, ProtocolState, Ready, Streaming};
+pub use state::{
+    Connected, ConnectionState, Disconnected, InTransaction, ProtocolState, Ready, Streaming,
+};
 pub use statement_cache::{PreparedStatement, StatementCache, StatementCacheConfig};
 pub use stream::{ExecuteResult, MultiResultStream, OutputParam, QueryStream, ResultSet};
 pub use to_params::{NamedParam, ParamList, ToParams};

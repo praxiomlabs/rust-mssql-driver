@@ -586,9 +586,8 @@ impl BulkInsert {
 
         // Write each column value
         for (i, (col, value)) in columns.iter().zip(values.iter()).enumerate() {
-            self.encode_column_value(col, value).map_err(|e| {
-                Error::Config(format!("failed to encode column {}: {}", i, e))
-            })?;
+            self.encode_column_value(col, value)
+                .map_err(|e| Error::Config(format!("failed to encode column {}: {}", i, e)))?;
         }
 
         Ok(())
@@ -600,8 +599,8 @@ impl BulkInsert {
 
         // Check if this column uses PLP (Partially Length-Prefixed) encoding
         // MAX types (max_length == 0xFFFF) use PLP format
-        let is_plp_type = col.max_length == Some(0xFFFF)
-            && matches!(col.type_id, 0xE7 | 0xA7 | 0xA5 | 0xAD);
+        let is_plp_type =
+            col.max_length == Some(0xFFFF) && matches!(col.type_id, 0xE7 | 0xA7 | 0xA5 | 0xAD);
 
         match value {
             SqlValue::Null => {
@@ -857,15 +856,10 @@ fn encode_plp_binary(data: &[u8], buf: &mut BytesMut) {
 
 /// Encode time with specific scale (for bulk copy).
 #[cfg(feature = "chrono")]
-fn encode_time_with_scale(
-    time: chrono::NaiveTime,
-    scale: u8,
-    buf: &mut BytesMut,
-) {
+fn encode_time_with_scale(time: chrono::NaiveTime, scale: u8, buf: &mut BytesMut) {
     use chrono::Timelike;
 
-    let nanos = time.num_seconds_from_midnight() as u64 * 1_000_000_000
-        + time.nanosecond() as u64;
+    let nanos = time.num_seconds_from_midnight() as u64 * 1_000_000_000 + time.nanosecond() as u64;
     let intervals = nanos / time_scale_divisor(scale);
     let len = time_byte_length(scale);
 
@@ -1014,6 +1008,7 @@ fn time_scale_divisor(scale: u8) -> u64 {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

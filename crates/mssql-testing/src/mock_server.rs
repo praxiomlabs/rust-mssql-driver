@@ -33,15 +33,15 @@ use std::collections::HashMap;
 use std::fmt;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tds_protocol::types::TypeId;
+use tds_protocol::{
+    DoneStatus, EnvChangeType, PACKET_HEADER_SIZE, PacketHeader, PacketStatus, PacketType,
+    TokenType,
+};
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{broadcast, Mutex};
-use tds_protocol::{
-    DoneStatus, EnvChangeType, PacketHeader, PacketStatus, PacketType, TokenType,
-    PACKET_HEADER_SIZE,
-};
-use tds_protocol::types::TypeId;
+use tokio::sync::{Mutex, broadcast};
 
 /// Error type for mock server operations.
 #[derive(Debug, Error)]
@@ -559,8 +559,8 @@ async fn read_packet(stream: &mut TcpStream) -> Result<Packet> {
     stream.read_exact(&mut header_buf).await?;
 
     let mut cursor = &header_buf[..];
-    let header = PacketHeader::decode(&mut cursor)
-        .map_err(|e| MockServerError::Protocol(e.to_string()))?;
+    let header =
+        PacketHeader::decode(&mut cursor).map_err(|e| MockServerError::Protocol(e.to_string()))?;
 
     let payload_len = header.payload_length();
     let mut payload = vec![0u8; payload_len];
@@ -646,20 +646,20 @@ async fn send_prelogin_response(stream: &mut TcpStream) -> Result<()> {
     // Option header area (offsets are big-endian per TDS spec)
     // VERSION token
     response.put_u8(0x00); // VERSION
-    response.put_u16(11);  // offset (header size)
-    response.put_u16(6);   // length
+    response.put_u16(11); // offset (header size)
+    response.put_u16(6); // length
 
     // ENCRYPTION token
     response.put_u8(0x01); // ENCRYPTION
-    response.put_u16(17);  // offset (11 + 6)
-    response.put_u16(1);   // length
+    response.put_u16(17); // offset (11 + 6)
+    response.put_u16(1); // length
 
     // Terminator
     response.put_u8(0xFF);
 
     // VERSION data (at offset 11)
-    response.put_u8(16);   // major version
-    response.put_u8(0);    // minor version
+    response.put_u8(16); // major version
+    response.put_u8(0); // minor version
     response.put_u16_le(0); // build number
     response.put_u16_le(0); // sub-build number
 
@@ -674,20 +674,10 @@ async fn send_login_response(stream: &mut TcpStream, config: &MockServerConfig) 
     let mut response = BytesMut::new();
 
     // EnvChange: Database
-    encode_env_change(
-        &mut response,
-        EnvChangeType::Database,
-        &config.database,
-        "",
-    );
+    encode_env_change(&mut response, EnvChangeType::Database, &config.database, "");
 
     // EnvChange: PacketSize
-    encode_env_change(
-        &mut response,
-        EnvChangeType::PacketSize,
-        "4096",
-        "4096",
-    );
+    encode_env_change(&mut response, EnvChangeType::PacketSize, "4096", "4096");
 
     // LoginAck
     encode_login_ack(&mut response, &config.server_name, config.tds_version);
@@ -748,9 +738,11 @@ fn encode_login_ack(dst: &mut BytesMut, server_name: &str, tds_version: u32) {
 fn encode_done(dst: &mut BytesMut, row_count: u64, more: bool) {
     dst.put_u8(TokenType::Done as u8);
 
-    let mut status = DoneStatus::default();
-    status.count = row_count > 0;
-    status.more = more;
+    let status = DoneStatus {
+        count: row_count > 0,
+        more,
+        ..Default::default()
+    };
 
     dst.put_u16_le(status.to_bits());
     dst.put_u16_le(0xC1); // cur_cmd: SELECT
@@ -788,7 +780,8 @@ fn decode_sql_batch(payload: &Bytes) -> Result<String> {
         chars.push(c);
     }
 
-    String::from_utf16(&chars).map_err(|_| MockServerError::Protocol("Invalid UTF-16 SQL text".to_string()))
+    String::from_utf16(&chars)
+        .map_err(|_| MockServerError::Protocol("Invalid UTF-16 SQL text".to_string()))
 }
 
 /// Find the response for a SQL query.
@@ -822,10 +815,7 @@ async fn send_query_response(stream: &mut TcpStream, response: MockResponse) -> 
     match response {
         MockResponse::Scalar(value) => {
             // Single column, single row result
-            encode_colmetadata(
-                &mut buf,
-                &[MockColumn::new("", value.type_id())],
-            );
+            encode_colmetadata(&mut buf, &[MockColumn::new("", value.type_id())]);
             encode_row(&mut buf, &[value.clone()]);
             encode_done(&mut buf, 1, false);
         }
@@ -884,7 +874,7 @@ fn encode_colmetadata(dst: &mut BytesMut, columns: &[MockColumn]) {
                 dst.put_u16_le(col.max_length.unwrap_or(8000) as u16);
                 // Collation (5 bytes)
                 dst.put_u32_le(0x0904D000); // LCID
-                dst.put_u8(0x34);            // Sort ID
+                dst.put_u8(0x34); // Sort ID
             }
             TypeId::BigVarBinary | TypeId::BigBinary => {
                 dst.put_u16_le(col.max_length.unwrap_or(8000) as u16);
@@ -923,7 +913,7 @@ fn encode_error(dst: &mut BytesMut, number: i32, message: &str, severity: u8) {
     dst.put_u8(TokenType::Error as u8);
     dst.put_u16_le(data_len as u16);
     dst.put_i32_le(number);
-    dst.put_u8(1);        // state
+    dst.put_u8(1); // state
     dst.put_u8(severity); // class
 
     // Message (US_VARCHAR)
@@ -1002,7 +992,8 @@ impl PacketRecorder {
 
         for packet in &self.packets {
             // Direction (1 byte) + length (4 bytes) + data
-            file.write_u8(if packet.from_server { 1 } else { 0 }).await?;
+            file.write_u8(if packet.from_server { 1 } else { 0 })
+                .await?;
             file.write_u32_le(packet.data.len() as u32).await?;
             file.write_all(&packet.data).await?;
         }
@@ -1037,6 +1028,7 @@ impl PacketRecorder {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -1085,7 +1077,7 @@ mod tests {
         value.encode(&mut buf);
 
         assert_eq!(buf.len(), 5); // 1 byte length + 4 bytes value
-        assert_eq!(buf[0], 4);    // length
+        assert_eq!(buf[0], 4); // length
         assert_eq!(i32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]), 42);
     }
 

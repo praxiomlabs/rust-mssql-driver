@@ -3,6 +3,9 @@
 //! TDS messages can span multiple packets. This module handles reassembling
 //! packets into complete messages based on the `END_OF_MESSAGE` status flag.
 
+// Allow expect() on Option that is guaranteed to be Some based on prior logic
+#![allow(clippy::expect_used)]
+
 use bytes::{Bytes, BytesMut};
 use tds_protocol::packet::{PacketStatus, PacketType};
 
@@ -143,6 +146,7 @@ impl Default for MessageAssembler {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use tds_protocol::packet::PacketHeader;

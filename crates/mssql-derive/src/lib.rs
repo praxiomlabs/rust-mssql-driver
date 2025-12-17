@@ -1,3 +1,6 @@
+// Proc macros operate on named structs where field.ident is always Some
+#![allow(clippy::unwrap_used)]
+
 //! # mssql-derive
 //!
 //! Procedural macros for SQL Server row mapping and parameter handling.
@@ -38,7 +41,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{parse_macro_input, Attribute, Data, DeriveInput, Expr, ExprLit, Fields, Lit, Type};
+use syn::{Attribute, Data, DeriveInput, Expr, ExprLit, Fields, Lit, Type, parse_macro_input};
 
 /// Field configuration extracted from attributes.
 #[derive(Default)]
@@ -248,14 +251,14 @@ fn impl_from_row(input: &DeriveInput) -> syn::Result<TokenStream2> {
                 return Err(syn::Error::new_spanned(
                     input,
                     "FromRow can only be derived for structs with named fields",
-                ))
+                ));
             }
         },
         _ => {
             return Err(syn::Error::new_spanned(
                 input,
                 "FromRow can only be derived for structs",
-            ))
+            ));
         }
     };
 
@@ -389,14 +392,14 @@ fn impl_to_params(input: &DeriveInput) -> syn::Result<TokenStream2> {
                 return Err(syn::Error::new_spanned(
                     input,
                     "ToParams can only be derived for structs with named fields",
-                ))
+                ));
             }
         },
         _ => {
             return Err(syn::Error::new_spanned(
                 input,
                 "ToParams can only be derived for structs",
-            ))
+            ));
         }
     };
 
@@ -509,14 +512,14 @@ fn impl_tvp(input: &DeriveInput) -> syn::Result<TokenStream2> {
                 return Err(syn::Error::new_spanned(
                     input,
                     "Tvp can only be derived for structs with named fields",
-                ))
+                ));
             }
         },
         _ => {
             return Err(syn::Error::new_spanned(
                 input,
                 "Tvp can only be derived for structs",
-            ))
+            ));
         }
     };
 

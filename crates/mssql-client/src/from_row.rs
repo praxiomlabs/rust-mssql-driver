@@ -112,9 +112,9 @@ where
     type Item = Result<T, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|result| {
-            result.and_then(|row| T::from_row(&row))
-        })
+        self.inner
+            .next()
+            .map(|result| result.and_then(|row| T::from_row(&row)))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -123,6 +123,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::row::Column;
@@ -148,10 +149,10 @@ mod tests {
             Column::new("id", 0, "INT".to_string()),
             Column::new("name", 1, "NVARCHAR".to_string()),
         ];
-        let row = Row::from_values(columns, vec![
-            SqlValue::Int(42),
-            SqlValue::String("Alice".to_string()),
-        ]);
+        let row = Row::from_values(
+            columns,
+            vec![SqlValue::Int(42), SqlValue::String("Alice".to_string())],
+        );
 
         let user = TestUser::from_row(&row).unwrap();
         assert_eq!(user.id, 42);
@@ -166,14 +167,14 @@ mod tests {
         ];
 
         let rows = vec![
-            Ok(Row::from_values(columns.clone(), vec![
-                SqlValue::Int(1),
-                SqlValue::String("Alice".to_string()),
-            ])),
-            Ok(Row::from_values(columns.clone(), vec![
-                SqlValue::Int(2),
-                SqlValue::String("Bob".to_string()),
-            ])),
+            Ok(Row::from_values(
+                columns.clone(),
+                vec![SqlValue::Int(1), SqlValue::String("Alice".to_string())],
+            )),
+            Ok(Row::from_values(
+                columns.clone(),
+                vec![SqlValue::Int(2), SqlValue::String("Bob".to_string())],
+            )),
         ];
 
         let users: Vec<TestUser> = rows

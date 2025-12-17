@@ -192,6 +192,7 @@ impl FromIterator<NamedParam> for ParamList {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

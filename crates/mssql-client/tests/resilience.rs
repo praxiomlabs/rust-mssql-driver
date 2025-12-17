@@ -9,6 +9,13 @@
 //!     cargo test -p mssql-client --test resilience -- --ignored
 //! ```
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::expect_fun_call,
+    clippy::panic
+)]
+
 use mssql_client::{Client, Config};
 use std::time::Duration;
 use tokio::time::timeout;
@@ -17,8 +24,7 @@ use tokio::time::timeout;
 fn get_test_config() -> Option<Config> {
     let host = std::env::var("MSSQL_HOST").ok()?;
     let user = std::env::var("MSSQL_USER").unwrap_or_else(|_| "sa".into());
-    let password =
-        std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "YourStrong@Passw0rd".into());
+    let password = std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "YourStrong@Passw0rd".into());
     let database = std::env::var("MSSQL_DATABASE").unwrap_or_else(|_| "master".into());
     let encrypt = std::env::var("MSSQL_ENCRYPT").unwrap_or_else(|_| "false".into());
 
@@ -39,7 +45,9 @@ fn get_test_config() -> Option<Config> {
 #[ignore = "Requires SQL Server"]
 async fn test_detect_killed_connection() {
     let config = get_test_config().expect("SQL Server config required");
-    let mut client = Client::connect(config.clone()).await.expect("Failed to connect");
+    let mut client = Client::connect(config.clone())
+        .await
+        .expect("Failed to connect");
 
     // Get current session ID
     let rows = client
@@ -56,7 +64,9 @@ async fn test_detect_killed_connection() {
     assert!(spid > 0, "Should have valid SPID");
 
     // Create another connection to kill the first one
-    let mut admin_client = Client::connect(config).await.expect("Failed to connect admin");
+    let mut admin_client = Client::connect(config)
+        .await
+        .expect("Failed to connect admin");
 
     // Kill the first session
     admin_client

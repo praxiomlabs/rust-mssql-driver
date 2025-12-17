@@ -131,13 +131,20 @@ fn main() -> Result<()> {
         }
         Command::Fmt { fix } => fmt(&sh, fix)?,
         Command::Clippy { fix } => clippy(&sh, fix)?,
-        Command::Test { package, integration } => test(&sh, package.as_deref(), integration)?,
+        Command::Test {
+            package,
+            integration,
+        } => test(&sh, package.as_deref(), integration)?,
         Command::Deny => deny(&sh)?,
         Command::Doc { open } => doc(&sh, open)?,
         Command::Bench { filter } => bench(&sh, filter.as_deref())?,
         Command::Clean => clean(&sh)?,
         Command::Hakari => hakari(&sh)?,
-        Command::Fuzz { target, max_time, list } => fuzz(&sh, &target, max_time, list)?,
+        Command::Fuzz {
+            target,
+            max_time,
+            list,
+        } => fuzz(&sh, &target, max_time, list)?,
         Command::Codegen { check } => codegen(&sh, check)?,
         Command::Dist { target, no_test } => dist(&sh, target.as_deref(), no_test)?,
         Command::FuzzInit => fuzz_init(&sh)?,
@@ -410,7 +417,10 @@ fuzz_target!(|data: &[u8]| {
     }
 });
 "#;
-    fs::write(fuzz_dir.join("fuzz_targets/connection_string.rs"), connection_string)?;
+    fs::write(
+        fuzz_dir.join("fuzz_targets/connection_string.rs"),
+        connection_string,
+    )?;
 
     println!("✅ Fuzz infrastructure initialized.");
     println!("\nAvailable fuzz targets:");
@@ -554,7 +564,8 @@ pub mod type_id {
     pub const TVP: u8 = 0xF3;
     pub const VARIANT: u8 = 0x62;
 }
-"#.to_string()
+"#
+    .to_string()
 }
 
 fn generate_token_types() -> String {
@@ -589,7 +600,8 @@ pub mod token_type {
     pub const SSPI: u8 = 0xED;
     pub const TABNAME: u8 = 0xA4;
 }
-"#.to_string()
+"#
+    .to_string()
 }
 
 fn generate_packet_types() -> String {
@@ -624,7 +636,8 @@ pub mod packet_status {
     pub const RESET_CONNECTION: u8 = 0x08;
     pub const RESET_CONNECTION_KEEP_TRANSACTION: u8 = 0x10;
 }
-"#.to_string()
+"#
+    .to_string()
 }
 
 fn dist(sh: &Shell, target: Option<&str>, no_test: bool) -> Result<()> {
@@ -680,15 +693,26 @@ fn coverage(sh: &Shell, format: &str) -> Result<()> {
             println!("✅ Coverage report: target/llvm-cov/html/index.html");
         }
         "lcov" => {
-            cmd!(sh, "cargo llvm-cov --all-features --lcov --output-path target/lcov.info").run()?;
+            cmd!(
+                sh,
+                "cargo llvm-cov --all-features --lcov --output-path target/lcov.info"
+            )
+            .run()?;
             println!("✅ Coverage report: target/lcov.info");
         }
         "json" => {
-            cmd!(sh, "cargo llvm-cov --all-features --json --output-path target/coverage.json").run()?;
+            cmd!(
+                sh,
+                "cargo llvm-cov --all-features --json --output-path target/coverage.json"
+            )
+            .run()?;
             println!("✅ Coverage report: target/coverage.json");
         }
         _ => {
-            bail!("Unknown coverage format: {}. Use html, lcov, or json.", format);
+            bail!(
+                "Unknown coverage format: {}. Use html, lcov, or json.",
+                format
+            );
         }
     }
 

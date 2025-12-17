@@ -9,6 +9,9 @@
 //! cargo run --example streaming
 //! ```
 
+// Allow common patterns in example code
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use mssql_client::{Client, Config, Error, Ready};
 use std::time::Instant;
 
@@ -170,7 +173,10 @@ async fn aggregation_example(client: &mut Client<Ready>) -> Result<(), Error> {
     }
 
     println!("\nGroup Statistics:");
-    println!("{:>8} {:>10} {:>8} {:>10}", "Group", "Sum", "Count", "Average");
+    println!(
+        "{:>8} {:>10} {:>8} {:>10}",
+        "Group", "Sum", "Count", "Average"
+    );
     println!("{}", "-".repeat(40));
 
     let mut group_ids: Vec<_> = groups.keys().collect();

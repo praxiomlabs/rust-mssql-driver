@@ -9,17 +9,23 @@
 //!     cargo test -p mssql-client --test stress -- --ignored --nocapture
 //! ```
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::expect_fun_call,
+    clippy::unnecessary_cast
+)]
+
 use mssql_client::{Client, Config};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 /// Helper to get test configuration from environment variables.
 fn get_test_config() -> Option<Config> {
     let host = std::env::var("MSSQL_HOST").ok()?;
     let user = std::env::var("MSSQL_USER").unwrap_or_else(|_| "sa".into());
-    let password =
-        std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "YourStrong@Passw0rd".into());
+    let password = std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "YourStrong@Passw0rd".into());
     let database = std::env::var("MSSQL_DATABASE").unwrap_or_else(|_| "master".into());
     let encrypt = std::env::var("MSSQL_ENCRYPT").unwrap_or_else(|_| "false".into());
 
@@ -217,7 +223,10 @@ async fn test_stress_many_rows() {
 
     // Create temp table
     client
-        .execute("CREATE TABLE #StressRows (id INT, value NVARCHAR(100))", &[])
+        .execute(
+            "CREATE TABLE #StressRows (id INT, value NVARCHAR(100))",
+            &[],
+        )
         .await
         .expect("Failed to create table");
 
@@ -232,7 +241,10 @@ async fn test_stress_many_rows() {
             values.push(format!("({}, 'Value {}')", id, id));
         }
         let sql = format!("INSERT INTO #StressRows VALUES {}", values.join(","));
-        client.execute(&sql, &[]).await.expect("Insert should succeed");
+        client
+            .execute(&sql, &[])
+            .await
+            .expect("Insert should succeed");
     }
 
     let insert_elapsed = insert_start.elapsed();
@@ -281,7 +293,10 @@ async fn test_stress_large_values() {
 
     // Create table with large columns
     client
-        .execute("CREATE TABLE #LargeValues (id INT, big_text NVARCHAR(MAX))", &[])
+        .execute(
+            "CREATE TABLE #LargeValues (id INT, big_text NVARCHAR(MAX))",
+            &[],
+        )
         .await
         .expect("Failed to create table");
 
@@ -305,7 +320,10 @@ async fn test_stress_large_values() {
 
     // Retrieve and verify
     let rows = client
-        .query("SELECT id, LEN(big_text) AS len FROM #LargeValues ORDER BY id", &[])
+        .query(
+            "SELECT id, LEN(big_text) AS len FROM #LargeValues ORDER BY id",
+            &[],
+        )
         .await
         .expect("Query should succeed");
 
@@ -335,7 +353,10 @@ async fn test_stress_sequential_transactions() {
 
     // Create test table
     client
-        .execute("CREATE TABLE #TxStress (id INT PRIMARY KEY, value INT)", &[])
+        .execute(
+            "CREATE TABLE #TxStress (id INT PRIMARY KEY, value INT)",
+            &[],
+        )
         .await
         .expect("Failed to create table");
 
@@ -348,12 +369,9 @@ async fn test_stress_sequential_transactions() {
             .await
             .expect("Begin should succeed");
 
-        tx.execute(
-            "INSERT INTO #TxStress VALUES (@p1, @p2)",
-            &[&i, &(i * 10)],
-        )
-        .await
-        .expect("Insert should succeed");
+        tx.execute("INSERT INTO #TxStress VALUES (@p1, @p2)", &[&i, &(i * 10)])
+            .await
+            .expect("Insert should succeed");
 
         client = tx.commit().await.expect("Commit should succeed");
     }
@@ -513,7 +531,11 @@ async fn test_stress_error_recovery() {
         }
     }
 
-    assert_eq!(successes, iterations / 2, "All valid queries should succeed");
+    assert_eq!(
+        successes,
+        iterations / 2,
+        "All valid queries should succeed"
+    );
     assert_eq!(errors, iterations / 2, "All invalid queries should fail");
 
     // Connection should still be usable

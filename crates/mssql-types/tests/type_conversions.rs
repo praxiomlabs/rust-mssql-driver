@@ -6,6 +6,8 @@
 //! - Large dataset handling
 //! - Type conversion boundaries
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::approx_constant)]
+
 use bytes::Bytes;
 use mssql_types::{FromSql, SqlValue, ToSql, TypeError};
 

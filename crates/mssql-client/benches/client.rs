@@ -2,10 +2,10 @@
 //!
 //! Tests the performance of the `Arc<Bytes>` pattern from ADR-004.
 
-#![allow(missing_docs)]
+#![allow(missing_docs, clippy::unwrap_used, clippy::approx_constant)]
 
 use bytes::Bytes;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use mssql_client::Config;
 use std::sync::Arc;
 
@@ -184,9 +184,7 @@ fn bench_config_builder(c: &mut Criterion) {
     // Minimal config
     group.bench_function("minimal", |b| {
         b.iter(|| {
-            let config = Config::new()
-                .host("localhost")
-                .database("test");
+            let config = Config::new().host("localhost").database("test");
             black_box(config)
         })
     });
@@ -217,9 +215,7 @@ fn bench_sql_value_operations(c: &mut Criterion) {
     let mut group = c.benchmark_group("sql_value");
 
     // Creating various SqlValue types
-    group.bench_function("create_int", |b| {
-        b.iter(|| black_box(SqlValue::Int(42)))
-    });
+    group.bench_function("create_int", |b| b.iter(|| black_box(SqlValue::Int(42))));
 
     group.bench_function("create_bigint", |b| {
         b.iter(|| black_box(SqlValue::BigInt(9_876_543_210)))
@@ -229,16 +225,16 @@ fn bench_sql_value_operations(c: &mut Criterion) {
         b.iter(|| black_box(SqlValue::String("test value".to_string())))
     });
 
-    group.bench_function("create_null", |b| {
-        b.iter(|| black_box(SqlValue::Null))
-    });
+    group.bench_function("create_null", |b| b.iter(|| black_box(SqlValue::Null)));
 
     // Pattern matching for null checks
-    let values = [SqlValue::Int(1),
+    let values = [
+        SqlValue::Int(1),
         SqlValue::Null,
         SqlValue::String("test".to_string()),
         SqlValue::Null,
-        SqlValue::BigInt(100)];
+        SqlValue::BigInt(100),
+    ];
 
     group.bench_function("null_check_iter", |b| {
         b.iter(|| {

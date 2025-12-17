@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 
-use mssql_types::decode::{decode_value, TypeInfo};
+use mssql_types::decode::{TypeInfo, decode_value};
 use mssql_types::{FromSql, SqlValue, TypeError};
 
 /// Column slice information pointing into the row buffer.
@@ -256,11 +256,7 @@ impl Row {
     /// Create a new row with the `Arc<Bytes>` pattern.
     ///
     /// This is the primary constructor for the reduced-copy pattern.
-    pub fn new(
-        buffer: Arc<Bytes>,
-        slices: Arc<[ColumnSlice]>,
-        metadata: Arc<ColMetaData>,
-    ) -> Self {
+    pub fn new(buffer: Arc<Bytes>, slices: Arc<[ColumnSlice]>, metadata: Arc<ColMetaData>) -> Self {
         Self {
             buffer,
             slices,
@@ -367,10 +363,13 @@ impl Row {
         }
 
         // Otherwise, parse on demand from the buffer
-        let slice = self.slices.get(index).ok_or_else(|| TypeError::TypeMismatch {
-            expected: "valid column index",
-            actual: format!("index {index} out of bounds"),
-        })?;
+        let slice = self
+            .slices
+            .get(index)
+            .ok_or_else(|| TypeError::TypeMismatch {
+                expected: "valid column index",
+                actual: format!("index {index} out of bounds"),
+            })?;
 
         if slice.is_null {
             return Err(TypeError::UnexpectedNull);
@@ -384,12 +383,13 @@ impl Row {
 
     /// Get a value by column name with type conversion.
     pub fn get_by_name<T: FromSql>(&self, name: &str) -> Result<T, TypeError> {
-        let index = self.metadata.find_by_name(name).ok_or_else(|| {
-            TypeError::TypeMismatch {
+        let index = self
+            .metadata
+            .find_by_name(name)
+            .ok_or_else(|| TypeError::TypeMismatch {
                 expected: "valid column name",
                 actual: format!("column '{name}' not found"),
-            }
-        })?;
+            })?;
 
         self.get(index)
     }
@@ -473,10 +473,7 @@ impl Row {
     /// Check if a column value is NULL.
     #[must_use]
     pub fn is_null(&self, index: usize) -> bool {
-        self.slices
-            .get(index)
-            .map(|s| s.is_null)
-            .unwrap_or(true)
+        self.slices.get(index).map(|s| s.is_null).unwrap_or(true)
     }
 
     /// Check if a column value is NULL by name.
@@ -501,10 +498,13 @@ impl Row {
             return Ok(SqlValue::Null);
         }
 
-        let column = self.metadata.get(index).ok_or_else(|| TypeError::TypeMismatch {
-            expected: "valid column metadata",
-            actual: format!("no metadata for column {index}"),
-        })?;
+        let column = self
+            .metadata
+            .get(index)
+            .ok_or_else(|| TypeError::TypeMismatch {
+                expected: "valid column metadata",
+                actual: format!("no metadata for column {index}"),
+            })?;
 
         // Calculate byte range for this column
         let start = slice.offset as usize;
@@ -514,7 +514,12 @@ impl Row {
         if end > self.buffer.len() {
             return Err(TypeError::TypeMismatch {
                 expected: "valid byte range",
-                actual: format!("range {}..{} exceeds buffer length {}", start, end, self.buffer.len()),
+                actual: format!(
+                    "range {}..{} exceeds buffer length {}",
+                    start,
+                    end,
+                    self.buffer.len()
+                ),
             });
         }
 
@@ -577,6 +582,7 @@ impl<'a> IntoIterator for &'a Row {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -647,8 +653,8 @@ mod tests {
     fn test_row_get_bytes_with_buffer() {
         let buffer = Arc::new(Bytes::from_static(b"Hello World"));
         let slices: Arc<[ColumnSlice]> = vec![
-            ColumnSlice::new(0, 5, false),  // "Hello"
-            ColumnSlice::new(6, 5, false),  // "World"
+            ColumnSlice::new(0, 5, false), // "Hello"
+            ColumnSlice::new(6, 5, false), // "World"
         ]
         .into();
         let meta = Arc::new(ColMetaData::new(vec![

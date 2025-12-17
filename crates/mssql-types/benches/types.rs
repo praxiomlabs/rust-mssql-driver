@@ -1,8 +1,10 @@
 //! Benchmarks for SQL Server type encoding and decoding.
 
+#![allow(clippy::unwrap_used, clippy::approx_constant, missing_docs)]
+
 use bytes::BytesMut;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use mssql_types::{decode_utf16_string, encode_utf16_string, FromSql, SqlValue, ToSql};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
+use mssql_types::{FromSql, SqlValue, ToSql, decode_utf16_string, encode_utf16_string};
 
 /// Helper to encode a UTF-16 string and return the bytes.
 fn encode_utf16_to_bytes(s: &str) -> Vec<u8> {
@@ -258,24 +260,22 @@ fn bench_sql_value(c: &mut Criterion) {
     let mut group = c.benchmark_group("sql_value");
 
     // Creating various SqlValue types
-    group.bench_function("create_int", |b| {
-        b.iter(|| black_box(SqlValue::Int(12345)))
-    });
+    group.bench_function("create_int", |b| b.iter(|| black_box(SqlValue::Int(12345))));
 
     group.bench_function("create_string", |b| {
         b.iter(|| black_box(SqlValue::String("test".to_string())))
     });
 
-    group.bench_function("create_null", |b| {
-        b.iter(|| black_box(SqlValue::Null))
-    });
+    group.bench_function("create_null", |b| b.iter(|| black_box(SqlValue::Null)));
 
     // Pattern matching
-    let values = [SqlValue::Int(1),
+    let values = [
+        SqlValue::Int(1),
         SqlValue::String("test".to_string()),
         SqlValue::Bool(true),
         SqlValue::Null,
-        SqlValue::BigInt(12345)];
+        SqlValue::BigInt(12345),
+    ];
 
     group.bench_function("is_null_check", |b| {
         b.iter(|| {

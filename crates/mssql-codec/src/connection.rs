@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
 use futures_util::{SinkExt, StreamExt};
+use tds_protocol::packet::{PACKET_HEADER_SIZE, PacketHeader, PacketStatus, PacketType};
 use tokio::io::{AsyncRead, AsyncWrite, ReadHalf, WriteHalf};
 use tokio::sync::{Mutex, Notify};
-use tds_protocol::packet::{PacketHeader, PacketStatus, PacketType, PACKET_HEADER_SIZE};
 
 use crate::error::CodecError;
 use crate::framed::{PacketReader, PacketWriter};
@@ -84,7 +84,10 @@ where
 
         Self {
             reader: PacketReader::with_codec(read_half, read_codec),
-            writer: Arc::new(Mutex::new(PacketWriter::with_codec(write_half, write_codec))),
+            writer: Arc::new(Mutex::new(PacketWriter::with_codec(
+                write_half,
+                write_codec,
+            ))),
             assembler: MessageAssembler::new(),
             cancel_notify: Arc::new(Notify::new()),
             cancelling: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -363,6 +366,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -390,11 +394,19 @@ mod tests {
         let header = PacketHeader::new(PacketType::TabularResult, PacketStatus::END_OF_MESSAGE, 0);
 
         // DONE token with ATTN flag set (status = 0x0020)
-        let payload_with_attn = BytesMut::from(&[0xFD, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]);
+        let payload_with_attn = BytesMut::from(
+            &[
+                0xFD, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ][..],
+        );
         let packet_with_attn = Packet::new(header, payload_with_attn);
 
         // DONE token without ATTN flag (status = 0x0000)
-        let payload_no_attn = BytesMut::from(&[0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]);
+        let payload_no_attn = BytesMut::from(
+            &[
+                0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ][..],
+        );
         let packet_no_attn = Packet::new(header, payload_no_attn);
 
         // We can't easily test check_attention_done without a Connection,

@@ -266,6 +266,7 @@ impl ToSql for TvpValue {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

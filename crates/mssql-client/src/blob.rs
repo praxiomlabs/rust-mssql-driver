@@ -191,7 +191,8 @@ impl BlobReader {
     /// Returns `Some(remaining)` if the total length is known.
     #[must_use]
     pub fn remaining(&self) -> Option<u64> {
-        self.len().map(|total| total.saturating_sub(self.position as u64))
+        self.len()
+            .map(|total| total.saturating_sub(self.position as u64))
     }
 
     /// Reset the reader position to the beginning.
@@ -335,6 +336,7 @@ impl From<String> for BlobReader {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use tokio::io::AsyncReadExt;

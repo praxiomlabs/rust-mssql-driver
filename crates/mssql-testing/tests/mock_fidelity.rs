@@ -18,6 +18,13 @@
 //!     cargo test -p mssql-testing --test mock_fidelity -- --ignored
 //! ```
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::approx_constant,
+    clippy::panic
+)]
+
 use mssql_testing::mock_server::{MockColumn, MockResponse, MockTdsServer, ScalarValue};
 use tds_protocol::types::TypeId;
 
@@ -36,7 +43,11 @@ async fn test_mock_server_starts_and_listens() {
 
     assert!(server.port() > 0, "Should have valid port");
     assert_eq!(server.host(), "127.0.0.1", "Should listen on localhost");
-    assert_eq!(server.connection_count().await, 0, "Should start with no connections");
+    assert_eq!(
+        server.connection_count().await,
+        0,
+        "Should start with no connections"
+    );
 
     server.stop();
 }
@@ -83,7 +94,11 @@ async fn test_mock_response_types() {
     // Test error
     let response = MockResponse::error(50000, "Test error");
     match response {
-        MockResponse::Error { number, message, severity } => {
+        MockResponse::Error {
+            number,
+            message,
+            severity,
+        } => {
             assert_eq!(number, 50000);
             assert_eq!(message, "Test error");
             assert_eq!(severity, 16);
@@ -127,10 +142,7 @@ async fn test_mock_column_constructors() {
 
 #[tokio::test]
 async fn test_mock_rows_response() {
-    let columns = vec![
-        MockColumn::int("id"),
-        MockColumn::nvarchar("name", 50),
-    ];
+    let columns = vec![MockColumn::int("id"), MockColumn::nvarchar("name", 50)];
 
     let rows = vec![
         vec![ScalarValue::Int(1), ScalarValue::String("Alice".into())],
@@ -139,7 +151,10 @@ async fn test_mock_rows_response() {
 
     let response = MockResponse::rows(columns.clone(), rows.clone());
     match response {
-        MockResponse::Rows { columns: cols, rows: data } => {
+        MockResponse::Rows {
+            columns: cols,
+            rows: data,
+        } => {
             assert_eq!(cols.len(), 2);
             assert_eq!(data.len(), 2);
             assert_eq!(cols[0].name, "id");

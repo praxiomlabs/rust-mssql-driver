@@ -112,6 +112,7 @@ impl From<TdsVersion> for u32 {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

@@ -20,6 +20,15 @@
 //!     -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest
 //! ```
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::manual_flatten,
+    clippy::format_collect,
+    clippy::approx_constant
+)]
+
 use mssql_client::{Client, Config};
 
 /// Helper to get test configuration from environment variables.
@@ -104,7 +113,10 @@ async fn test_simple_select() {
     let config = get_test_config().expect("SQL Server config required");
     let mut client = Client::connect(config).await.expect("Failed to connect");
 
-    let rows = client.query("SELECT 1 AS value", &[]).await.expect("Query failed");
+    let rows = client
+        .query("SELECT 1 AS value", &[])
+        .await
+        .expect("Query failed");
 
     let mut count = 0;
     for result in rows {
@@ -129,7 +141,10 @@ async fn test_select_multiple_columns() {
 
     // Test with DECIMAL type (now properly parsed)
     let rows = client
-        .query("SELECT 1 AS a, 'hello' AS b, CAST(3.14 AS DECIMAL(10,2)) AS c", &[])
+        .query(
+            "SELECT 1 AS a, 'hello' AS b, CAST(3.14 AS DECIMAL(10,2)) AS c",
+            &[],
+        )
         .await
         .expect("Query failed");
 
@@ -454,12 +469,18 @@ async fn test_data_type_datetime() {
         let row = result.expect("Row should be valid");
         let now: NaiveDateTime = row.get(0).expect("Should get datetime");
         // Just verify it's a reasonable year (not a parse error)
-        assert!(now.year() >= 2024 && now.year() <= 2100, "Year should be reasonable");
+        assert!(
+            now.year() >= 2024 && now.year() <= 2100,
+            "Year should be reasonable"
+        );
     }
 
     // Also test a specific datetime value
     let rows = client
-        .query("SELECT CAST('2024-06-15 14:30:45.123' AS DATETIME) AS dt", &[])
+        .query(
+            "SELECT CAST('2024-06-15 14:30:45.123' AS DATETIME) AS dt",
+            &[],
+        )
         .await
         .expect("Query failed");
 
@@ -485,7 +506,7 @@ async fn test_unicode_strings() {
     let mut client = Client::connect(config).await.expect("Failed to connect");
 
     let rows = client
-        .query("SELECT N'Hello, \u{4e16}\u{754c}!' AS greeting", &[])  // Hello, World! in Chinese
+        .query("SELECT N'Hello, \u{4e16}\u{754c}!' AS greeting", &[]) // Hello, World! in Chinese
         .await
         .expect("Query failed");
 
@@ -639,10 +660,7 @@ async fn test_large_string() {
     // Create a string of 8000 characters (max for VARCHAR)
     let large_string = "X".repeat(8000);
     let rows = client
-        .query(
-            &format!("SELECT '{}' AS large_value", large_string),
-            &[],
-        )
+        .query(&format!("SELECT '{}' AS large_value", large_string), &[])
         .await
         .expect("Query failed");
 
@@ -720,7 +738,10 @@ async fn test_transaction_rollback() {
 
     // Create temp table with initial data
     client
-        .execute("CREATE TABLE #tx_rollback (id INT, value NVARCHAR(50))", &[])
+        .execute(
+            "CREATE TABLE #tx_rollback (id INT, value NVARCHAR(50))",
+            &[],
+        )
         .await
         .expect("Create table failed");
 
@@ -732,9 +753,12 @@ async fn test_transaction_rollback() {
     // Begin transaction and modify data
     let mut tx = client.begin_transaction().await.expect("Begin failed");
 
-    tx.execute("UPDATE #tx_rollback SET value = 'modified' WHERE id = 1", &[])
-        .await
-        .expect("Update failed");
+    tx.execute(
+        "UPDATE #tx_rollback SET value = 'modified' WHERE id = 1",
+        &[],
+    )
+    .await
+    .expect("Update failed");
 
     // Rollback the transaction
     let mut client = tx.rollback().await.expect("Rollback failed");
@@ -764,7 +788,10 @@ async fn test_transaction_savepoint() {
 
     // Create temp table
     client
-        .execute("CREATE TABLE #tx_savepoint (id INT, value NVARCHAR(50))", &[])
+        .execute(
+            "CREATE TABLE #tx_savepoint (id INT, value NVARCHAR(50))",
+            &[],
+        )
         .await
         .expect("Create table failed");
 
@@ -785,7 +812,9 @@ async fn test_transaction_savepoint() {
         .expect("Insert failed");
 
     // Rollback to savepoint (undoes second insert)
-    tx.rollback_to(&savepoint).await.expect("Rollback to savepoint failed");
+    tx.rollback_to(&savepoint)
+        .await
+        .expect("Rollback to savepoint failed");
 
     // Commit the transaction (only first row should exist)
     let mut client = tx.commit().await.expect("Commit failed");
@@ -801,7 +830,11 @@ async fn test_transaction_savepoint() {
         .map(|row| row.get(0).unwrap())
         .collect();
 
-    assert_eq!(ids, vec![1], "Only first row should exist after savepoint rollback");
+    assert_eq!(
+        ids,
+        vec![1],
+        "Only first row should exist after savepoint rollback"
+    );
 
     client.close().await.expect("Failed to close");
 }
@@ -914,20 +947,31 @@ async fn test_multi_result_set() {
 
     // Execute a batch with multiple SELECT statements
     let mut results = client
-        .query_multiple("SELECT 1 AS a; SELECT 2 AS b, 3 AS c; SELECT 4 AS d, 5 AS e, 6 AS f;", &[])
+        .query_multiple(
+            "SELECT 1 AS a; SELECT 2 AS b, 3 AS c; SELECT 4 AS d, 5 AS e, 6 AS f;",
+            &[],
+        )
         .await
         .expect("Query failed");
 
     // Verify we have 3 result sets
     assert_eq!(results.result_count(), 3, "Should have 3 result sets");
-    assert_eq!(results.current_result_index(), 0, "Should start at first result");
+    assert_eq!(
+        results.current_result_index(),
+        0,
+        "Should start at first result"
+    );
 
     // Process first result set (1 column, 1 row)
     let columns = results.columns().expect("Should have columns");
     assert_eq!(columns.len(), 1, "First result should have 1 column");
     assert_eq!(columns[0].name, "a");
 
-    let row = results.next_row().await.expect("Should get row").expect("Row should exist");
+    let row = results
+        .next_row()
+        .await
+        .expect("Should get row")
+        .expect("Row should exist");
     let a: i32 = row.get(0).expect("Should get value");
     assert_eq!(a, 1);
 
@@ -936,7 +980,13 @@ async fn test_multi_result_set() {
 
     // Move to second result set
     assert!(results.has_more_results(), "Should have more results");
-    assert!(results.next_result().await.expect("next_result should succeed"), "Should advance to second result");
+    assert!(
+        results
+            .next_result()
+            .await
+            .expect("next_result should succeed"),
+        "Should advance to second result"
+    );
     assert_eq!(results.current_result_index(), 1);
 
     // Process second result set (2 columns, 1 row)
@@ -945,7 +995,11 @@ async fn test_multi_result_set() {
     assert_eq!(columns[0].name, "b");
     assert_eq!(columns[1].name, "c");
 
-    let row = results.next_row().await.expect("Should get row").expect("Row should exist");
+    let row = results
+        .next_row()
+        .await
+        .expect("Should get row")
+        .expect("Row should exist");
     let b: i32 = row.get(0).expect("Should get value");
     let c: i32 = row.get(1).expect("Should get value");
     assert_eq!(b, 2);
@@ -953,7 +1007,13 @@ async fn test_multi_result_set() {
 
     // Move to third result set
     assert!(results.has_more_results(), "Should have more results");
-    assert!(results.next_result().await.expect("next_result should succeed"), "Should advance to third result");
+    assert!(
+        results
+            .next_result()
+            .await
+            .expect("next_result should succeed"),
+        "Should advance to third result"
+    );
     assert_eq!(results.current_result_index(), 2);
 
     // Process third result set (3 columns, 1 row)
@@ -963,7 +1023,11 @@ async fn test_multi_result_set() {
     assert_eq!(columns[1].name, "e");
     assert_eq!(columns[2].name, "f");
 
-    let row = results.next_row().await.expect("Should get row").expect("Row should exist");
+    let row = results
+        .next_row()
+        .await
+        .expect("Should get row")
+        .expect("Row should exist");
     let d: i32 = row.get(0).expect("Should get value");
     let e: i32 = row.get(1).expect("Should get value");
     let f: i32 = row.get(2).expect("Should get value");
@@ -973,7 +1037,13 @@ async fn test_multi_result_set() {
 
     // No more result sets
     assert!(!results.has_more_results(), "Should not have more results");
-    assert!(!results.next_result().await.expect("next_result should succeed"), "Should not advance");
+    assert!(
+        !results
+            .next_result()
+            .await
+            .expect("next_result should succeed"),
+        "Should not advance"
+    );
 
     client.close().await.expect("Failed to close");
 }
@@ -1001,7 +1071,10 @@ async fn test_multi_result_with_rows() {
         .expect("Create table 2 failed");
 
     client
-        .execute("INSERT INTO #multi_r2 VALUES ('A', 100), ('B', 200), ('C', 300)", &[])
+        .execute(
+            "INSERT INTO #multi_r2 VALUES ('A', 100), ('B', 200), ('C', 300)",
+            &[],
+        )
         .await
         .expect("Insert failed");
 
@@ -1120,7 +1193,10 @@ async fn test_transaction_isolation_serializable() {
 
     // Create temp table
     client
-        .execute("CREATE TABLE #iso_serial (id INT PRIMARY KEY, value INT)", &[])
+        .execute(
+            "CREATE TABLE #iso_serial (id INT PRIMARY KEY, value INT)",
+            &[],
+        )
         .await
         .expect("Create table failed");
 
@@ -1244,7 +1320,12 @@ async fn test_repeated_parameterized_queries() {
             .map(|row| row.get(0).unwrap())
             .collect();
 
-        assert_eq!(result, vec![param * 2], "Iteration {} should return doubled value", i);
+        assert_eq!(
+            result,
+            vec![param * 2],
+            "Iteration {} should return doubled value",
+            i
+        );
     }
 
     client.close().await.expect("Failed to close");
@@ -1266,7 +1347,10 @@ async fn test_statement_cache_with_different_queries() {
 
     // Insert test data
     client
-        .execute("INSERT INTO #cache_test VALUES (1, 'one'), (2, 'two'), (3, 'three')", &[])
+        .execute(
+            "INSERT INTO #cache_test VALUES (1, 'one'), (2, 'two'), (3, 'three')",
+            &[],
+        )
         .await
         .expect("Insert failed");
 
@@ -1277,22 +1361,46 @@ async fn test_statement_cache_with_different_queries() {
     let query2 = "SELECT id, value FROM #cache_test WHERE id > @p1 ORDER BY id";
 
     // Interleave different queries to test cache discrimination
-    let result1 = client.query(query1, &[&1i32]).await.expect("Query 1 failed");
-    let values1: Vec<String> = result1.filter_map(|r| r.ok()).map(|row| row.get(0).unwrap()).collect();
+    let result1 = client
+        .query(query1, &[&1i32])
+        .await
+        .expect("Query 1 failed");
+    let values1: Vec<String> = result1
+        .filter_map(|r| r.ok())
+        .map(|row| row.get(0).unwrap())
+        .collect();
     assert_eq!(values1, vec!["one"]);
 
-    let result2 = client.query(query2, &[&1i32]).await.expect("Query 2 failed");
-    let ids2: Vec<i32> = result2.filter_map(|r| r.ok()).map(|row| row.get(0).unwrap()).collect();
+    let result2 = client
+        .query(query2, &[&1i32])
+        .await
+        .expect("Query 2 failed");
+    let ids2: Vec<i32> = result2
+        .filter_map(|r| r.ok())
+        .map(|row| row.get(0).unwrap())
+        .collect();
     assert_eq!(ids2, vec![2, 3]);
 
     // Repeat query 1 with different parameter
-    let result1b = client.query(query1, &[&2i32]).await.expect("Query 1b failed");
-    let values1b: Vec<String> = result1b.filter_map(|r| r.ok()).map(|row| row.get(0).unwrap()).collect();
+    let result1b = client
+        .query(query1, &[&2i32])
+        .await
+        .expect("Query 1b failed");
+    let values1b: Vec<String> = result1b
+        .filter_map(|r| r.ok())
+        .map(|row| row.get(0).unwrap())
+        .collect();
     assert_eq!(values1b, vec!["two"]);
 
     // Repeat query 2 with different parameter
-    let result2b = client.query(query2, &[&2i32]).await.expect("Query 2b failed");
-    let ids2b: Vec<i32> = result2b.filter_map(|r| r.ok()).map(|row| row.get(0).unwrap()).collect();
+    let result2b = client
+        .query(query2, &[&2i32])
+        .await
+        .expect("Query 2b failed");
+    let ids2b: Vec<i32> = result2b
+        .filter_map(|r| r.ok())
+        .map(|row| row.get(0).unwrap())
+        .collect();
     assert_eq!(ids2b, vec![3]);
 
     client.close().await.expect("Failed to close");
@@ -1339,7 +1447,10 @@ async fn test_same_sql_different_params() {
 
     // Create temp table
     client
-        .execute("CREATE TABLE #params_test (id INT PRIMARY KEY, name NVARCHAR(50), score INT)", &[])
+        .execute(
+            "CREATE TABLE #params_test (id INT PRIMARY KEY, name NVARCHAR(50), score INT)",
+            &[],
+        )
         .await
         .expect("Create table failed");
 
@@ -1402,7 +1513,9 @@ fn get_config_with_encrypt(encrypt: &str) -> Option<Config> {
 async fn test_connection_with_encryption_true() {
     let config = get_config_with_encrypt("true").expect("SQL Server config required");
 
-    let client = Client::connect(config).await.expect("Failed to connect with Encrypt=true");
+    let client = Client::connect(config)
+        .await
+        .expect("Failed to connect with Encrypt=true");
 
     // Verify connection works by running a simple query
     let mut client = client;
@@ -1420,7 +1533,9 @@ async fn test_connection_with_encryption_true() {
 async fn test_connection_with_encryption_false() {
     let config = get_config_with_encrypt("false").expect("SQL Server config required");
 
-    let client = Client::connect(config).await.expect("Failed to connect with Encrypt=false");
+    let client = Client::connect(config)
+        .await
+        .expect("Failed to connect with Encrypt=false");
 
     let mut client = client;
     let rows = client
@@ -1537,7 +1652,12 @@ async fn test_encrypted_query_roundtrip() {
 
         assert_eq!(id, 1);
         assert_eq!(data, test_string);
-        assert!((num - test_float).abs() < 0.0001, "Float mismatch: {} vs {}", num, test_float);
+        assert!(
+            (num - test_float).abs() < 0.0001,
+            "Float mismatch: {} vs {}",
+            num,
+            test_float
+        );
         count += 1;
     }
     assert_eq!(count, 1);
@@ -1557,7 +1677,9 @@ async fn test_connection_state_after_error() {
     let mut client = Client::connect(config).await.expect("Failed to connect");
 
     // Cause a server error (invalid SQL)
-    let result = client.query("SELECT * FROM NonExistentTable12345", &[]).await;
+    let result = client
+        .query("SELECT * FROM NonExistentTable12345", &[])
+        .await;
     assert!(result.is_err(), "Expected error for non-existent table");
 
     // Connection should still be usable
@@ -1590,7 +1712,11 @@ async fn test_multiple_errors_recovery() {
         let result = client
             .query(&format!("SELECT * FROM NonExistentTable{}", i), &[])
             .await;
-        assert!(result.is_err(), "Expected error {} for non-existent table", i);
+        assert!(
+            result.is_err(),
+            "Expected error {} for non-existent table",
+            i
+        );
     }
 
     // Connection should still work
@@ -1636,12 +1762,18 @@ async fn test_transaction_rollback_preserves_state() {
         .expect("Failed to insert");
 
     // Start a transaction using the client API
-    let mut tx = client.begin_transaction().await.expect("Failed to begin transaction");
+    let mut tx = client
+        .begin_transaction()
+        .await
+        .expect("Failed to begin transaction");
 
     // Make a change within transaction
-    tx.execute("UPDATE #TxRollbackPreserve SET value = 'modified' WHERE id = 1", &[])
-        .await
-        .expect("Failed to update");
+    tx.execute(
+        "UPDATE #TxRollbackPreserve SET value = 'modified' WHERE id = 1",
+        &[],
+    )
+    .await
+    .expect("Failed to update");
 
     // Rollback the transaction
     let mut client = tx.rollback().await.expect("Failed to rollback");
@@ -1684,7 +1816,9 @@ async fn test_duplicate_key_error_recovery() {
         .expect("First insert should succeed");
 
     // Duplicate key should fail
-    let result = client.execute("INSERT INTO #DupKeyTest VALUES (1)", &[]).await;
+    let result = client
+        .execute("INSERT INTO #DupKeyTest VALUES (1)", &[])
+        .await;
     assert!(result.is_err(), "Duplicate insert should fail");
 
     // Next insert should succeed
@@ -1729,11 +1863,11 @@ async fn test_binary_data_roundtrip() {
 
     // Test various binary patterns using hex literals (skip empty for now)
     let test_cases: Vec<(i32, Vec<u8>)> = vec![
-        (1, vec![0x00]), // Single null byte
-        (2, vec![0xFF]), // Single max byte
+        (1, vec![0x00]),                   // Single null byte
+        (2, vec![0xFF]),                   // Single max byte
         (3, vec![0x00, 0xFF, 0x00, 0xFF]), // Alternating
         (4, vec![0xDE, 0xAD, 0xBE, 0xEF]), // Classic magic bytes
-        (5, (0..64u8).collect()), // Sequential bytes (subset for reliability)
+        (5, (0..64u8).collect()),          // Sequential bytes (subset for reliability)
     ];
 
     for (id, data) in &test_cases {

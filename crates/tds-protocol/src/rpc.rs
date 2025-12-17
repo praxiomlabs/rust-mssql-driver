@@ -242,7 +242,7 @@ impl TypeInfo {
     /// Create type info for NVARCHAR with max length.
     pub fn nvarchar(max_len: u16) -> Self {
         Self {
-            type_id: 0xE7, // NVARCHARTYPE
+            type_id: 0xE7,                 // NVARCHARTYPE
             max_length: Some(max_len * 2), // UTF-16, so double the char count
             precision: None,
             scale: None,
@@ -254,7 +254,7 @@ impl TypeInfo {
     /// Create type info for NVARCHAR(MAX).
     pub fn nvarchar_max() -> Self {
         Self {
-            type_id: 0xE7, // NVARCHARTYPE
+            type_id: 0xE7,            // NVARCHARTYPE
             max_length: Some(0xFFFF), // MAX indicator
             precision: None,
             scale: None,
@@ -309,7 +309,7 @@ impl TypeInfo {
     /// Create type info for DECIMAL.
     pub fn decimal(precision: u8, scale: u8) -> Self {
         Self {
-            type_id: 0x6C, // DECIMALNTYPE
+            type_id: 0x6C,        // DECIMALNTYPE
             max_length: Some(17), // Max decimal size
             precision: Some(precision),
             scale: Some(scale),
@@ -607,7 +607,10 @@ impl RpcRequest {
                     p.name.clone()
                 } else if p.name.is_empty() {
                     // Generate positional name
-                    format!("@p{}", params.iter().position(|x| x.name == p.name).unwrap_or(0) + 1)
+                    format!(
+                        "@p{}",
+                        params.iter().position(|x| x.name == p.name).unwrap_or(0) + 1
+                    )
                 } else {
                     format!("@{}", p.name)
                 };
@@ -666,11 +669,15 @@ impl RpcRequest {
         let mut request = Self::by_id(ProcId::Prepare);
 
         // OUT: handle (INT)
-        request.params.push(RpcParam::null("@handle", TypeInfo::int()).as_output());
+        request
+            .params
+            .push(RpcParam::null("@handle", TypeInfo::int()).as_output());
 
         // Param declarations
         let declarations = Self::build_param_declarations(params);
-        request.params.push(RpcParam::nvarchar("@params", &declarations));
+        request
+            .params
+            .push(RpcParam::nvarchar("@params", &declarations));
 
         // SQL statement
         request.params.push(RpcParam::nvarchar("@stmt", sql));
@@ -717,7 +724,7 @@ impl RpcRequest {
 
     /// Encode the RPC request to bytes (auto-commit mode).
     ///
-    /// For requests within an explicit transaction, use [`encode_with_transaction`].
+    /// For requests within an explicit transaction, use [`Self::encode_with_transaction`].
     #[must_use]
     pub fn encode(&self) -> Bytes {
         self.encode_with_transaction(0)
@@ -780,6 +787,7 @@ impl RpcRequest {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

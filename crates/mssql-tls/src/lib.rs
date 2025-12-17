@@ -52,7 +52,7 @@ pub mod error;
 pub mod prelogin_wrapper;
 
 pub use config::{ClientAuth, TlsConfig, TlsVersion};
-pub use connector::{default_tls_config, TlsConnector};
+pub use connector::{TlsConnector, default_tls_config};
 pub use error::TlsError;
 pub use prelogin_wrapper::TlsPreloginWrapper;
 

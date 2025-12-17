@@ -140,6 +140,7 @@ impl PoolConfig {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -177,25 +178,23 @@ mod tests {
 
     #[test]
     fn test_config_validation_success() {
-        let config = PoolConfig::new()
-            .min_connections(1)
-            .max_connections(10);
+        let config = PoolConfig::new().min_connections(1).max_connections(10);
 
         assert!(config.validate().is_ok());
     }
 
     #[test]
     fn test_config_validation_min_greater_than_max() {
-        let config = PoolConfig::new()
-            .min_connections(20)
-            .max_connections(10);
+        let config = PoolConfig::new().min_connections(20).max_connections(10);
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("min_connections cannot be greater than max_connections"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("min_connections cannot be greater than max_connections")
+        );
     }
 
     #[test]
@@ -205,17 +204,17 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("max_connections must be greater than 0"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("max_connections must be greater than 0")
+        );
     }
 
     #[test]
     fn test_config_equal_min_max() {
-        let config = PoolConfig::new()
-            .min_connections(5)
-            .max_connections(5);
+        let config = PoolConfig::new().min_connections(5).max_connections(5);
 
         assert!(config.validate().is_ok());
     }

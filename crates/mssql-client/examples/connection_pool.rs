@@ -13,6 +13,9 @@
 //! cargo run --example connection_pool
 //! ```
 
+// Allow common patterns in example code
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use mssql_client::Config;
 use mssql_driver_pool::{Pool, PoolConfig, PoolError};
 use std::sync::Arc;
@@ -93,11 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!(
-        "  Completed {} queries in {:?}",
-        completed,
-        start.elapsed()
-    );
+    println!("  Completed {} queries in {:?}", completed, start.elapsed());
 
     // Print metrics after concurrent usage
     print_pool_metrics(&pool);
@@ -181,12 +180,12 @@ fn print_pool_metrics(pool: &Pool) {
         "    Checkout success rate: {:.2}%",
         metrics.checkout_success_rate() * 100.0
     );
-    println!("    Health checks: {} performed, {} failed",
-        metrics.health_checks_performed,
-        metrics.health_checks_failed
+    println!(
+        "    Health checks: {} performed, {} failed",
+        metrics.health_checks_performed, metrics.health_checks_failed
     );
-    println!("    Resets: {} performed, {} failed",
-        metrics.resets_performed,
-        metrics.resets_failed
+    println!(
+        "    Resets: {} performed, {} failed",
+        metrics.resets_performed, metrics.resets_failed
     );
 }

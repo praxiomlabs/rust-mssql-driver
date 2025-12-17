@@ -6,8 +6,8 @@ use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, Server
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_rustls::client::TlsStream;
 use tokio_rustls::TlsConnector as TokioTlsConnector;
+use tokio_rustls::client::TlsStream;
 
 use crate::config::{TlsConfig, TlsVersion};
 use crate::error::TlsError;
@@ -354,6 +354,7 @@ impl std::fmt::Debug for TlsConnector {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

@@ -12,6 +12,9 @@
 //! 4. Pool reset (`sp_reset_connection`) invalidates all handles, clearing the cache
 //! 5. Connection close implicitly releases all server-side handles
 
+// Allow expect() for NonZeroUsize construction with validated input
+#![allow(clippy::expect_used)]
+
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
@@ -299,6 +302,7 @@ impl StatementCacheConfig {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

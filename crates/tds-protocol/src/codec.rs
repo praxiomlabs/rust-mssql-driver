@@ -94,6 +94,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use bytes::BytesMut;

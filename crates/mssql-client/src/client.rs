@@ -1,5 +1,9 @@
 //! SQL Server client implementation.
 
+// Allow unwrap/expect for chrono date construction with known-valid constant dates
+// and for regex patterns that are compile-time constants
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::needless_range_loop)]
+
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -7,7 +11,7 @@ use bytes::BytesMut;
 use mssql_codec::connection::Connection;
 use mssql_tls::{TlsConfig, TlsConnector, TlsNegotiationMode, TlsStream};
 use tds_protocol::login7::Login7;
-use tds_protocol::packet::{PacketType, MAX_PACKET_SIZE};
+use tds_protocol::packet::{MAX_PACKET_SIZE, PacketType};
 use tds_protocol::prelogin::{EncryptionLevel, PreLogin};
 use tds_protocol::rpc::{RpcParam, RpcRequest, TypeInfo as RpcTypeInfo};
 use tds_protocol::token::{
@@ -56,7 +60,7 @@ pub struct Client<S: ConnectionState> {
 /// - TLS (TDS 8.0 strict mode)
 /// - TLS with PreLogin wrapping (TDS 7.x style)
 /// - Plain TCP (rare, for testing or internal networks)
-#[allow(dead_code)]  // Connection will be used once query execution is implemented
+#[allow(dead_code)] // Connection will be used once query execution is implemented
 enum ConnectionHandle {
     /// TLS connection (TDS 8.0 strict mode - TLS before any TDS traffic)
     Tls(Connection<TlsStream<TcpStream>>),
@@ -128,7 +132,9 @@ impl Client<Disconnected> {
             .map_err(|e| Error::Io(Arc::new(e)))?;
 
         // Enable TCP nodelay for better latency
-        tcp_stream.set_nodelay(true).map_err(|e| Error::Io(Arc::new(e)))?;
+        tcp_stream
+            .set_nodelay(true)
+            .map_err(|e| Error::Io(Arc::new(e)))?;
 
         // Determine TLS negotiation mode
         let tls_mode = TlsNegotiationMode::from_encrypt_mode(config.strict_mode);
@@ -153,8 +159,7 @@ impl Client<Disconnected> {
             .strict_mode(true)
             .trust_server_certificate(config.trust_server_certificate);
 
-        let tls_connector = TlsConnector::new(tls_config)
-            .map_err(|e| Error::Tls(e.to_string()))?;
+        let tls_connector = TlsConnector::new(tls_config).map_err(|e| Error::Tls(e.to_string()))?;
 
         // Perform TLS handshake before any TDS traffic
         let tls_stream = timeout(
@@ -211,8 +216,8 @@ impl Client<Disconnected> {
     /// since the Connection struct splits the stream immediately.
     async fn connect_tds_7x(config: &Config, mut tcp_stream: TcpStream) -> Result<Client<Ready>> {
         use bytes::BufMut;
+        use tds_protocol::packet::{PACKET_HEADER_SIZE, PacketHeader, PacketStatus};
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tds_protocol::packet::{PacketHeader, PacketStatus, PACKET_HEADER_SIZE};
 
         tracing::debug!("using TDS 7.x flow (PreLogin first)");
 
@@ -292,11 +297,11 @@ impl Client<Disconnected> {
         if use_tls {
             // Upgrade to TLS with PreLogin wrapping (TDS 7.x style)
             // In TDS 7.x, the TLS handshake is wrapped inside TDS PreLogin packets
-            let tls_config = TlsConfig::new()
-                .trust_server_certificate(config.trust_server_certificate);
+            let tls_config =
+                TlsConfig::new().trust_server_certificate(config.trust_server_certificate);
 
-            let tls_connector = TlsConnector::new(tls_config)
-                .map_err(|e| Error::Tls(e.to_string()))?;
+            let tls_connector =
+                TlsConnector::new(tls_config).map_err(|e| Error::Tls(e.to_string()))?;
 
             // Use PreLogin-wrapped TLS connection for TDS 7.x
             let mut tls_stream = timeout(
@@ -346,8 +351,7 @@ impl Client<Disconnected> {
                         (PACKET_HEADER_SIZE + chunk.len()) as u16,
                     );
 
-                    let mut packet_buf =
-                        BytesMut::with_capacity(PACKET_HEADER_SIZE + chunk.len());
+                    let mut packet_buf = BytesMut::with_capacity(PACKET_HEADER_SIZE + chunk.len());
                     header.encode(&mut packet_buf);
                     packet_buf.put_slice(chunk);
 
@@ -437,10 +441,7 @@ impl Client<Disconnected> {
             // Build Login7 packet
             let login = Self::build_login7(config);
             let login_bytes = login.encode();
-            tracing::debug!(
-                "Login7 packet built: {} bytes",
-                login_bytes.len(),
-            );
+            tracing::debug!("Login7 packet built: {} bytes", login_bytes.len(),);
             // Dump the fixed header (94 bytes)
             tracing::debug!(
                 "Login7 fixed header (94 bytes): {:02X?}",
@@ -521,8 +522,9 @@ impl Client<Disconnected> {
             let mut current_database = None;
             let routing = None;
 
-            while let Some(token) =
-                parser.next_token().map_err(|e| Error::Protocol(e.to_string()))?
+            while let Some(token) = parser
+                .next_token()
+                .map_err(|e| Error::Protocol(e.to_string()))?
             {
                 match token {
                     Token::LoginAck(ack) => {
@@ -696,7 +698,10 @@ impl Client<Disconnected> {
         let mut database = None;
         let mut routing = None;
 
-        while let Some(token) = parser.next_token().map_err(|e| Error::Protocol(e.to_string()))? {
+        while let Some(token) = parser
+            .next_token()
+            .map_err(|e| Error::Protocol(e.to_string()))?
+        {
             match token {
                 Token::LoginAck(ack) => {
                     tracing::info!(
@@ -795,10 +800,7 @@ impl<S: ConnectionState> Client<S> {
             tds_protocol::encode_sql_batch_with_transaction(sql, self.transaction_descriptor);
         let max_packet = self.config.packet_size as usize;
 
-        let connection = self
-            .connection
-            .as_mut()
-            .ok_or(Error::ConnectionClosed)?;
+        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         match connection {
             ConnectionHandle::Tls(conn) => {
@@ -828,10 +830,7 @@ impl<S: ConnectionState> Client<S> {
         let payload = rpc.encode_with_transaction(self.transaction_descriptor);
         let max_packet = self.config.packet_size as usize;
 
-        let connection = self
-            .connection
-            .as_mut()
-            .ok_or(Error::ConnectionClosed)?;
+        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         match connection {
             ConnectionHandle::Tls(conn) => {
@@ -906,7 +905,9 @@ impl<S: ConnectionState> Client<S> {
                         let bytes = u.as_bytes();
                         let mut buf = BytesMut::with_capacity(16);
                         // SQL Server stores GUIDs in mixed-endian format
-                        buf.put_u32_le(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]));
+                        buf.put_u32_le(u32::from_be_bytes([
+                            bytes[0], bytes[1], bytes[2], bytes[3],
+                        ]));
                         buf.put_u16_le(u16::from_be_bytes([bytes[4], bytes[5]]));
                         buf.put_u16_le(u16::from_be_bytes([bytes[6], bytes[7]]));
                         buf.put_slice(&bytes[8..16]);
@@ -918,7 +919,10 @@ impl<S: ConnectionState> Client<S> {
                         RpcParam::nvarchar(&name, &d.to_string())
                     }
                     #[cfg(feature = "chrono")]
-                    SqlValue::Date(_) | SqlValue::Time(_) | SqlValue::DateTime(_) | SqlValue::DateTimeOffset(_) => {
+                    SqlValue::Date(_)
+                    | SqlValue::Time(_)
+                    | SqlValue::DateTime(_)
+                    | SqlValue::DateTimeOffset(_) => {
                         // For date/time types, use string representation for simplicity
                         // A full implementation would encode these properly
                         let s = match &sql_value {
@@ -941,10 +945,7 @@ impl<S: ConnectionState> Client<S> {
     async fn read_query_response(
         &mut self,
     ) -> Result<(Vec<crate::row::Column>, Vec<crate::row::Row>)> {
-        let connection = self
-            .connection
-            .as_mut()
-            .ok_or(Error::ConnectionClosed)?;
+        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         let message = match connection {
             ConnectionHandle::Tls(conn) => conn
@@ -1214,7 +1215,9 @@ impl<S: ConnectionState> Client<S> {
             }
             TypeId::FloatN => {
                 if buf.remaining() < 1 {
-                    return Err(Error::Protocol("unexpected EOF reading FloatN length".into()));
+                    return Err(Error::Protocol(
+                        "unexpected EOF reading FloatN length".into(),
+                    ));
                 }
                 let len = buf.get_u8();
                 match len {
@@ -1241,7 +1244,9 @@ impl<S: ConnectionState> Client<S> {
             }
             TypeId::MoneyN => {
                 if buf.remaining() < 1 {
-                    return Err(Error::Protocol("unexpected EOF reading MoneyN length".into()));
+                    return Err(Error::Protocol(
+                        "unexpected EOF reading MoneyN length".into(),
+                    ));
                 }
                 let len = buf.get_u8();
                 match len {
@@ -1338,7 +1343,11 @@ impl<S: ConnectionState> Client<S> {
                             {
                                 let base = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
                                 let date = base + chrono::Duration::days(days);
-                                let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(minutes * 60, 0).unwrap();
+                                let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(
+                                    minutes * 60,
+                                    0,
+                                )
+                                .unwrap();
                                 SqlValue::DateTime(date.and_time(time))
                             }
                             #[cfg(not(feature = "chrono"))]
@@ -1358,7 +1367,10 @@ impl<S: ConnectionState> Client<S> {
                                 let total_ms = (time_300ths * 1000) / 300;
                                 let secs = (total_ms / 1000) as u32;
                                 let nanos = ((total_ms % 1000) * 1_000_000) as u32;
-                                let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nanos).unwrap();
+                                let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(
+                                    secs, nanos,
+                                )
+                                .unwrap();
                                 SqlValue::DateTime(date.and_time(time))
                             }
                             #[cfg(not(feature = "chrono"))]
@@ -1389,7 +1401,8 @@ impl<S: ConnectionState> Client<S> {
                     let total_ms = (time_300ths * 1000) / 300;
                     let secs = (total_ms / 1000) as u32;
                     let nanos = ((total_ms % 1000) * 1_000_000) as u32;
-                    let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nanos).unwrap();
+                    let time =
+                        chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nanos).unwrap();
                     SqlValue::DateTime(date.and_time(time))
                 }
                 #[cfg(not(feature = "chrono"))]
@@ -1401,7 +1414,9 @@ impl<S: ConnectionState> Client<S> {
             // Fixed SMALLDATETIME (4 bytes)
             TypeId::DateTime4 => {
                 if buf.remaining() < 4 {
-                    return Err(Error::Protocol("unexpected EOF reading SMALLDATETIME".into()));
+                    return Err(Error::Protocol(
+                        "unexpected EOF reading SMALLDATETIME".into(),
+                    ));
                 }
                 let days = buf.get_u16_le() as i64;
                 let minutes = buf.get_u16_le() as u32;
@@ -1409,7 +1424,9 @@ impl<S: ConnectionState> Client<S> {
                 {
                     let base = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
                     let date = base + chrono::Duration::days(days);
-                    let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(minutes * 60, 0).unwrap();
+                    let time =
+                        chrono::NaiveTime::from_num_seconds_from_midnight_opt(minutes * 60, 0)
+                            .unwrap();
                     SqlValue::DateTime(date.and_time(time))
                 }
                 #[cfg(not(feature = "chrono"))]
@@ -1480,7 +1497,9 @@ impl<S: ConnectionState> Client<S> {
             // DATETIME2 (variable length: TIME bytes + 3 bytes date, 1-byte length prefix)
             TypeId::DateTime2 => {
                 if buf.remaining() < 1 {
-                    return Err(Error::Protocol("unexpected EOF reading DATETIME2 length".into()));
+                    return Err(Error::Protocol(
+                        "unexpected EOF reading DATETIME2 length".into(),
+                    ));
                 }
                 let len = buf.get_u8() as usize;
                 if len == 0 {
@@ -1520,13 +1539,17 @@ impl<S: ConnectionState> Client<S> {
             // DATETIMEOFFSET (variable length: TIME bytes + 3 bytes date + 2 bytes offset)
             TypeId::DateTimeOffset => {
                 if buf.remaining() < 1 {
-                    return Err(Error::Protocol("unexpected EOF reading DATETIMEOFFSET length".into()));
+                    return Err(Error::Protocol(
+                        "unexpected EOF reading DATETIMEOFFSET length".into(),
+                    ));
                 }
                 let len = buf.get_u8() as usize;
                 if len == 0 {
                     SqlValue::Null
                 } else if buf.remaining() < len {
-                    return Err(Error::Protocol("unexpected EOF reading DATETIMEOFFSET".into()));
+                    return Err(Error::Protocol(
+                        "unexpected EOF reading DATETIMEOFFSET".into(),
+                    ));
                 } else {
                     let scale = col.type_info.scale.unwrap_or(7);
                     let time_len = Self::time_bytes_for_scale(scale);
@@ -1554,14 +1577,17 @@ impl<S: ConnectionState> Client<S> {
                         let time = Self::intervals_to_time(intervals, scale);
                         let offset = chrono::FixedOffset::east_opt((offset_minutes as i32) * 60)
                             .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).unwrap());
-                        let datetime = offset.from_local_datetime(&date.and_time(time))
+                        let datetime = offset
+                            .from_local_datetime(&date.and_time(time))
                             .single()
                             .unwrap_or_else(|| offset.from_utc_datetime(&date.and_time(time)));
                         SqlValue::DateTimeOffset(datetime)
                     }
                     #[cfg(not(feature = "chrono"))]
                     {
-                        SqlValue::String(format!("DATETIMEOFFSET({days},{intervals},{offset_minutes})"))
+                        SqlValue::String(format!(
+                            "DATETIMEOFFSET({days},{intervals},{offset_minutes})"
+                        ))
                     }
                 }
             }
@@ -1578,7 +1604,9 @@ impl<S: ConnectionState> Client<S> {
                 if len == 0xFFFF {
                     SqlValue::Null
                 } else if buf.remaining() < len as usize {
-                    return Err(Error::Protocol("unexpected EOF reading varchar data".into()));
+                    return Err(Error::Protocol(
+                        "unexpected EOF reading varchar data".into(),
+                    ));
                 } else {
                     let data = &buf[..len as usize];
                     let s = String::from_utf8_lossy(data).into_owned();
@@ -1597,7 +1625,9 @@ impl<S: ConnectionState> Client<S> {
                 if len == 0xFFFF {
                     SqlValue::Null
                 } else if buf.remaining() < len as usize {
-                    return Err(Error::Protocol("unexpected EOF reading nvarchar data".into()));
+                    return Err(Error::Protocol(
+                        "unexpected EOF reading nvarchar data".into(),
+                    ));
                 } else {
                     let data = &buf[..len as usize];
                     // UTF-16LE to String
@@ -1724,10 +1754,7 @@ impl<S: ConnectionState> Client<S> {
 
     /// Read execute result (row count) from the response.
     async fn read_execute_result(&mut self) -> Result<u64> {
-        let connection = self
-            .connection
-            .as_mut()
-            .ok_or(Error::ConnectionClosed)?;
+        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         let message = match connection {
             ConnectionHandle::Tls(conn) => conn
@@ -1826,10 +1853,7 @@ impl<S: ConnectionState> Client<S> {
     /// the transaction descriptor (8-byte value) that must be included in subsequent
     /// ALL_HEADERS sections for requests within this transaction.
     async fn read_transaction_begin_result(&mut self) -> Result<u64> {
-        let connection = self
-            .connection
-            .as_mut()
-            .ok_or(Error::ConnectionClosed)?;
+        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         let message = match connection {
             ConnectionHandle::Tls(conn) => conn
@@ -1872,7 +1896,8 @@ impl<S: ConnectionState> Client<S> {
                                     data[7],
                                 ]);
                                 tracing::debug!(
-                                    transaction_descriptor = format!("0x{:016X}", transaction_descriptor),
+                                    transaction_descriptor =
+                                        format!("0x{:016X}", transaction_descriptor),
                                     "transaction begun"
                                 );
                             }
@@ -2040,10 +2065,7 @@ impl Client<Ready> {
 
     /// Read multiple result sets from a batch response.
     async fn read_multi_result_response(&mut self) -> Result<Vec<crate::stream::ResultSet>> {
-        let connection = self
-            .connection
-            .as_mut()
-            .ok_or(Error::ConnectionClosed)?;
+        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         let message = match connection {
             ConnectionHandle::Tls(conn) => conn
@@ -2162,10 +2184,7 @@ impl Client<Ready> {
 
                     // Check if there are more result sets
                     if !done.status.more {
-                        tracing::debug!(
-                            result_sets = result_sets.len(),
-                            "all result sets parsed"
-                        );
+                        tracing::debug!(result_sets = result_sets.len(), "all result sets parsed");
                         break;
                     }
                 }
@@ -2207,10 +2226,7 @@ impl Client<Ready> {
 
         // Don't forget any remaining result set that wasn't followed by Done
         if !current_columns.is_empty() {
-            result_sets.push(crate::stream::ResultSet::new(
-                current_columns,
-                current_rows,
-            ));
+            result_sets.push(crate::stream::ResultSet::new(current_columns, current_rows));
         }
 
         Ok(result_sets)
@@ -2423,7 +2439,11 @@ impl Client<InTransaction> {
         sql: &str,
         params: &[&(dyn crate::ToSql + Sync)],
     ) -> Result<QueryStream<'a>> {
-        tracing::debug!(sql = sql, params_count = params.len(), "executing query in transaction");
+        tracing::debug!(
+            sql = sql,
+            params_count = params.len(),
+            "executing query in transaction"
+        );
 
         #[cfg(feature = "otel")]
         let instrumentation = self.instrumentation.clone();
@@ -2701,6 +2721,7 @@ impl<S: ConnectionState> std::fmt::Debug for Client<S> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

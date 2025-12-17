@@ -7,6 +7,7 @@
 name = "workspace-hack"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 publish = false
 # This crate is intentionally empty. It exists to unify features across the workspace.
 

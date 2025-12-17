@@ -4,8 +4,8 @@
 //! with SQL Server-specific lifecycle management including `sp_reset_connection`.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
 use mssql_client::{Client, Config as ClientConfig, Ready};
@@ -147,7 +147,11 @@ impl Pool {
             "connection pool created"
         );
 
-        Ok(Self { config, client_config, inner })
+        Ok(Self {
+            config,
+            client_config,
+            inner,
+        })
     }
 
     /// Get a connection from the pool.
@@ -260,7 +264,10 @@ impl Pool {
                 self.inner.in_use_count.fetch_add(1, Ordering::Relaxed);
                 self.inner.metrics.lock().checkouts_successful += 1;
 
-                tracing::trace!(connection_id = metadata.id, "try_get: reusing idle connection");
+                tracing::trace!(
+                    connection_id = metadata.id,
+                    "try_get: reusing idle connection"
+                );
 
                 Ok(Some(PooledConnection {
                     client: Some(entry.client),
@@ -330,7 +337,9 @@ impl Pool {
     /// Generate a new unique connection ID.
     #[allow(dead_code)] // Used when connection creation is implemented
     fn next_connection_id(&self) -> u64 {
-        self.inner.next_connection_id.fetch_add(1, Ordering::Relaxed)
+        self.inner
+            .next_connection_id
+            .fetch_add(1, Ordering::Relaxed)
     }
 }
 
@@ -414,9 +423,9 @@ impl PoolBuilder {
     ///
     /// Returns an error if `client_config` was not set.
     pub async fn build(self) -> Result<Pool, PoolError> {
-        let client_config = self.client_config.ok_or_else(|| {
-            PoolError::Configuration("client_config is required".to_string())
-        })?;
+        let client_config = self
+            .client_config
+            .ok_or_else(|| PoolError::Configuration("client_config is required".to_string()))?;
         Pool::new(self.pool_config, client_config).await
     }
 }
@@ -611,6 +620,7 @@ impl Drop for PooledConnection {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

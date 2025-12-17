@@ -2,6 +2,8 @@
 //!
 //! Tests edge cases that users commonly encounter with connection strings.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use mssql_client::Config;
 
 // ============================================================================
@@ -58,9 +60,8 @@ fn test_missing_equals_sign() {
 #[test]
 fn test_multiple_equals_in_value() {
     // Password with equals sign
-    let _config = Config::from_connection_string(
-        "Server=localhost;Password=pass=word=with=equals;"
-    ).unwrap();
+    let _config =
+        Config::from_connection_string("Server=localhost;Password=pass=word=with=equals;").unwrap();
 
     // The current implementation splits on first '=', so everything after is the value
     // Note: This may need fixing depending on desired behavior
@@ -136,9 +137,7 @@ fn test_server_ipv4_with_port() {
 
 #[test]
 fn test_azure_server_name() {
-    let config = Config::from_connection_string(
-        "Server=myserver.database.windows.net;"
-    ).unwrap();
+    let config = Config::from_connection_string("Server=myserver.database.windows.net;").unwrap();
     assert_eq!(config.host, "myserver.database.windows.net");
 }
 
@@ -280,7 +279,7 @@ fn test_whitespace_around_equals() {
 fn test_unknown_keys_ignored() {
     // Unknown keys should be ignored for forward compatibility
     let config = Config::from_connection_string(
-        "Server=localhost;UnknownOption=value;FutureFeature=enabled;"
+        "Server=localhost;UnknownOption=value;FutureFeature=enabled;",
     );
     assert!(config.is_ok());
 }
@@ -312,9 +311,7 @@ fn test_full_azure_connection_string() {
 
 #[test]
 fn test_connection_string_without_trailing_semicolon() {
-    let config = Config::from_connection_string(
-        "Server=localhost;Database=test"
-    ).unwrap();
+    let config = Config::from_connection_string("Server=localhost;Database=test").unwrap();
 
     assert_eq!(config.host, "localhost");
     assert_eq!(config.database, Some("test".to_string()));
@@ -323,9 +320,8 @@ fn test_connection_string_without_trailing_semicolon() {
 #[test]
 fn test_repeated_keys_last_wins() {
     // When a key appears multiple times, the last value should win
-    let config = Config::from_connection_string(
-        "Server=first;Server=second;Server=third;"
-    ).unwrap();
+    let config =
+        Config::from_connection_string("Server=first;Server=second;Server=third;").unwrap();
 
     assert_eq!(config.host, "third");
 }

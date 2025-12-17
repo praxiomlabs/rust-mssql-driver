@@ -247,7 +247,9 @@ impl RetryPolicy {
         }
 
         let base = self.initial_backoff.as_millis() as f64
-            * self.backoff_multiplier.powi(attempt.saturating_sub(1) as i32);
+            * self
+                .backoff_multiplier
+                .powi(attempt.saturating_sub(1) as i32);
         let capped = base.min(self.max_backoff.as_millis() as f64);
 
         if self.jitter {
@@ -600,6 +602,7 @@ impl Config {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -641,7 +644,9 @@ mod tests {
 
     #[test]
     fn test_redirect_config_builder() {
-        let config = RedirectConfig::new().max_redirects(5).follow_redirects(false);
+        let config = RedirectConfig::new()
+            .max_redirects(5)
+            .follow_redirects(false);
         assert_eq!(config.max_redirects, 5);
         assert!(!config.follow_redirects);
     }

@@ -3,6 +3,9 @@
 //! This module provides encoding of Rust values into TDS wire format
 //! for transmission to SQL Server.
 
+// Allow expect() for chrono date construction with known-valid constant dates
+#![allow(clippy::expect_used)]
+
 use bytes::{BufMut, BytesMut};
 
 use crate::error::TypeError;
@@ -117,31 +120,31 @@ impl TdsEncode for SqlValue {
 
     fn type_id(&self) -> u8 {
         match self {
-            SqlValue::Null => 0x1F,          // NULLTYPE
-            SqlValue::Bool(_) => 0x32,       // BITTYPE
-            SqlValue::TinyInt(_) => 0x30,    // INT1TYPE
-            SqlValue::SmallInt(_) => 0x34,   // INT2TYPE
-            SqlValue::Int(_) => 0x38,        // INT4TYPE
-            SqlValue::BigInt(_) => 0x7F,     // INT8TYPE
-            SqlValue::Float(_) => 0x3B,      // FLT4TYPE
-            SqlValue::Double(_) => 0x3E,     // FLT8TYPE
-            SqlValue::String(_) => 0xE7,     // NVARCHARTYPE
-            SqlValue::Binary(_) => 0xA5,     // BIGVARBINTYPE
+            SqlValue::Null => 0x1F,        // NULLTYPE
+            SqlValue::Bool(_) => 0x32,     // BITTYPE
+            SqlValue::TinyInt(_) => 0x30,  // INT1TYPE
+            SqlValue::SmallInt(_) => 0x34, // INT2TYPE
+            SqlValue::Int(_) => 0x38,      // INT4TYPE
+            SqlValue::BigInt(_) => 0x7F,   // INT8TYPE
+            SqlValue::Float(_) => 0x3B,    // FLT4TYPE
+            SqlValue::Double(_) => 0x3E,   // FLT8TYPE
+            SqlValue::String(_) => 0xE7,   // NVARCHARTYPE
+            SqlValue::Binary(_) => 0xA5,   // BIGVARBINTYPE
             #[cfg(feature = "decimal")]
-            SqlValue::Decimal(_) => 0x6C,    // DECIMALTYPE
+            SqlValue::Decimal(_) => 0x6C, // DECIMALTYPE
             #[cfg(feature = "uuid")]
-            SqlValue::Uuid(_) => 0x24,       // GUIDTYPE
+            SqlValue::Uuid(_) => 0x24, // GUIDTYPE
             #[cfg(feature = "chrono")]
-            SqlValue::Date(_) => 0x28,       // DATETYPE
+            SqlValue::Date(_) => 0x28, // DATETYPE
             #[cfg(feature = "chrono")]
-            SqlValue::Time(_) => 0x29,       // TIMETYPE
+            SqlValue::Time(_) => 0x29, // TIMETYPE
             #[cfg(feature = "chrono")]
-            SqlValue::DateTime(_) => 0x2A,   // DATETIME2TYPE
+            SqlValue::DateTime(_) => 0x2A, // DATETIME2TYPE
             #[cfg(feature = "chrono")]
             SqlValue::DateTimeOffset(_) => 0x2B, // DATETIMEOFFSETTYPE
             #[cfg(feature = "json")]
-            SqlValue::Json(_) => 0xE7,       // NVARCHARTYPE (JSON as string)
-            SqlValue::Xml(_) => 0xF1,        // XMLTYPE
+            SqlValue::Json(_) => 0xE7, // NVARCHARTYPE (JSON as string)
+            SqlValue::Xml(_) => 0xF1,      // XMLTYPE
         }
     }
 }
@@ -235,8 +238,7 @@ pub fn encode_time(time: chrono::NaiveTime, buf: &mut BytesMut) {
 
     // Calculate 100-ns intervals since midnight
     // Scale = 7 (100-nanosecond precision)
-    let nanos = time.num_seconds_from_midnight() as u64 * 1_000_000_000
-        + time.nanosecond() as u64;
+    let nanos = time.num_seconds_from_midnight() as u64 * 1_000_000_000 + time.nanosecond() as u64;
     let intervals = nanos / 100;
 
     // TIME with scale 7 uses 5 bytes
@@ -260,10 +262,7 @@ pub fn encode_datetime2(datetime: chrono::NaiveDateTime, buf: &mut BytesMut) {
 ///
 /// DATETIMEOFFSET is encoded as TIME + DATE + offset (in minutes).
 #[cfg(feature = "chrono")]
-pub fn encode_datetimeoffset(
-    datetime: chrono::DateTime<chrono::FixedOffset>,
-    buf: &mut BytesMut,
-) {
+pub fn encode_datetimeoffset(datetime: chrono::DateTime<chrono::FixedOffset>, buf: &mut BytesMut) {
     use chrono::Offset;
 
     // Encode time and date components
@@ -277,6 +276,7 @@ pub fn encode_datetimeoffset(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -290,7 +290,9 @@ mod tests {
     #[test]
     fn test_encode_bigint() {
         let mut buf = BytesMut::new();
-        SqlValue::BigInt(0x0102030405060708).encode(&mut buf).unwrap();
+        SqlValue::BigInt(0x0102030405060708)
+            .encode(&mut buf)
+            .unwrap();
         assert_eq!(&buf[..], &[0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]);
     }
 
@@ -313,8 +315,8 @@ mod tests {
             &buf[..],
             &[
                 0x78, 0x56, 0x34, 0x12, // First group reversed
-                0x34, 0x12,             // Second group reversed
-                0x78, 0x56,             // Third group reversed
+                0x34, 0x12, // Second group reversed
+                0x78, 0x56, // Third group reversed
                 0x12, 0x34, 0x56, 0x78, 0x12, 0x34, 0x56, 0x78 // Last 8 bytes as-is
             ]
         );

@@ -63,6 +63,6 @@ pub mod mock_server;
 
 pub use container::SqlServerContainer;
 pub use mock_server::{
-    MockColumn, MockResponse, MockServerBuilder, MockServerConfig, MockServerError,
-    MockTdsServer, PacketRecorder, RecordedPacket, ScalarValue,
+    MockColumn, MockResponse, MockServerBuilder, MockServerConfig, MockServerError, MockTdsServer,
+    PacketRecorder, RecordedPacket, ScalarValue,
 };

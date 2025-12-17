@@ -12,6 +12,9 @@
 //! cargo run --example transactions
 //! ```
 
+// Allow common patterns in example code
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use mssql_client::{Client, Config, Error, IsolationLevel, Ready};
 
 #[tokio::main]
@@ -46,11 +49,8 @@ async fn basic_transaction_example(client: Client<Ready>) -> Result<(), Error> {
     println!("Transaction started");
 
     // Execute statements within the transaction (returns rows affected as u64)
-    tx.execute(
-        "CREATE TABLE #TempUsers (id INT, name NVARCHAR(100))",
-        &[],
-    )
-    .await?;
+    tx.execute("CREATE TABLE #TempUsers (id INT, name NVARCHAR(100))", &[])
+        .await?;
     println!("Temporary table created");
 
     tx.execute(
@@ -121,9 +121,7 @@ async fn isolation_level_example(mut client: Client<Ready>) -> Result<(), Error>
     // Begin transaction with specific isolation level
     // Use as_sql() which returns the full SET TRANSACTION ISOLATION LEVEL statement
     // Or use name() which returns just the level name
-    client
-        .simple_query(isolation.as_sql())
-        .await?;
+    client.simple_query(isolation.as_sql()).await?;
 
     let tx = client.begin_transaction().await?;
     println!("Transaction started with {:?}", isolation);

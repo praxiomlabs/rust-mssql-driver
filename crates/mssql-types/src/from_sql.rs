@@ -1,5 +1,8 @@
 //! Trait for converting from SQL values to Rust types.
 
+// Allow expect() for chrono date construction with known-valid constant dates
+#![allow(clippy::expect_used)]
+
 use crate::error::TypeError;
 use crate::value::SqlValue;
 
@@ -263,7 +266,9 @@ impl FromSql for chrono::DateTime<chrono::Utc> {
     fn from_sql(value: &SqlValue) -> Result<Self, TypeError> {
         match value {
             SqlValue::DateTimeOffset(v) => Ok(v.to_utc()),
-            SqlValue::DateTime(v) => Ok(chrono::DateTime::from_naive_utc_and_offset(*v, chrono::Utc)),
+            SqlValue::DateTime(v) => {
+                Ok(chrono::DateTime::from_naive_utc_and_offset(*v, chrono::Utc))
+            }
             SqlValue::Null => Err(TypeError::UnexpectedNull),
             _ => Err(TypeError::TypeMismatch {
                 expected: "DateTime<Utc>",
@@ -292,6 +297,7 @@ impl FromSql for serde_json::Value {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

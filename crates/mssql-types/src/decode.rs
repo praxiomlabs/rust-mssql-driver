@@ -2,6 +2,10 @@
 //!
 //! This module provides decoding of TDS wire format data into Rust values.
 
+// Allow expect() for chrono date construction with known-valid constant dates
+// (e.g., from_ymd_opt(1, 1, 1) for SQL Server epoch)
+#![allow(clippy::expect_used)]
+
 use bytes::{Buf, Bytes};
 
 use crate::error::TypeError;
@@ -91,14 +95,14 @@ impl TypeInfo {
 pub fn decode_value(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, TypeError> {
     match type_info.type_id {
         // Fixed-length types
-        0x1F => Ok(SqlValue::Null), // NULLTYPE
-        0x32 => decode_bit(buf),    // BITTYPE
-        0x30 => decode_tinyint(buf), // INT1TYPE
+        0x1F => Ok(SqlValue::Null),   // NULLTYPE
+        0x32 => decode_bit(buf),      // BITTYPE
+        0x30 => decode_tinyint(buf),  // INT1TYPE
         0x34 => decode_smallint(buf), // INT2TYPE
-        0x38 => decode_int(buf),    // INT4TYPE
-        0x7F => decode_bigint(buf), // INT8TYPE
-        0x3B => decode_float(buf),  // FLT4TYPE
-        0x3E => decode_double(buf), // FLT8TYPE
+        0x38 => decode_int(buf),      // INT4TYPE
+        0x7F => decode_bigint(buf),   // INT8TYPE
+        0x3B => decode_float(buf),    // FLT4TYPE
+        0x3E => decode_double(buf),   // FLT8TYPE
 
         // Nullable integer types (INTNTYPE)
         0x26 => decode_intn(buf, type_info),
@@ -119,12 +123,12 @@ pub fn decode_value(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, T
         0x6C | 0x6A => decode_decimal(buf, type_info),
 
         // Date/Time types
-        0x28 => decode_date(buf),                     // DATETYPE
-        0x29 => decode_time(buf, type_info),          // TIMETYPE
-        0x2A => decode_datetime2(buf, type_info),     // DATETIME2TYPE
+        0x28 => decode_date(buf),                      // DATETYPE
+        0x29 => decode_time(buf, type_info),           // TIMETYPE
+        0x2A => decode_datetime2(buf, type_info),      // DATETIME2TYPE
         0x2B => decode_datetimeoffset(buf, type_info), // DATETIMEOFFSETTYPE
-        0x3D => decode_datetime(buf),                 // DATETIMETYPE
-        0x3F => decode_smalldatetime(buf),            // SMALLDATETIMETYPE
+        0x3D => decode_datetime(buf),                  // DATETIMETYPE
+        0x3F => decode_smalldatetime(buf),             // SMALLDATETIMETYPE
 
         // XML
         0xF1 => decode_xml(buf),
@@ -287,8 +291,8 @@ fn decode_varchar(buf: &mut Bytes, _type_info: &TypeInfo) -> Result<SqlValue, Ty
     }
 
     let data = buf.copy_to_bytes(byte_len);
-    let s = String::from_utf8(data.to_vec())
-        .map_err(|e| TypeError::InvalidEncoding(e.to_string()))?;
+    let s =
+        String::from_utf8(data.to_vec()).map_err(|e| TypeError::InvalidEncoding(e.to_string()))?;
     Ok(SqlValue::String(s))
 }
 
@@ -425,8 +429,8 @@ fn decode_decimal(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, Typ
 
     // Read mantissa (little-endian)
     let mut mantissa_bytes = [0u8; 16];
-    for i in 0..remaining.min(16) {
-        mantissa_bytes[i] = buf.get_u8();
+    for byte in mantissa_bytes.iter_mut().take(remaining.min(16)) {
+        *byte = buf.get_u8();
     }
 
     let mantissa = u128::from_le_bytes(mantissa_bytes);
@@ -494,9 +498,7 @@ fn decode_date(buf: &mut Bytes) -> Result<SqlValue, TypeError> {
     }
 
     // 3 bytes little-endian representing days since 0001-01-01
-    let days = buf.get_u8() as u32
-        | ((buf.get_u8() as u32) << 8)
-        | ((buf.get_u8() as u32) << 16);
+    let days = buf.get_u8() as u32 | ((buf.get_u8() as u32) << 8) | ((buf.get_u8() as u32) << 16);
 
     let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("valid date");
     let date = base + chrono::Duration::days(days as i64);
@@ -623,9 +625,7 @@ fn decode_datetime2(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, T
     let time = intervals_to_time(intervals, scale);
 
     // Decode date
-    let days = buf.get_u8() as u32
-        | ((buf.get_u8() as u32) << 8)
-        | ((buf.get_u8() as u32) << 16);
+    let days = buf.get_u8() as u32 | ((buf.get_u8() as u32) << 8) | ((buf.get_u8() as u32) << 16);
     let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("valid date");
     let date = base + chrono::Duration::days(days as i64);
 
@@ -692,9 +692,7 @@ fn decode_datetimeoffset(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlVal
     let time = intervals_to_time(intervals, scale);
 
     // Decode date
-    let days = buf.get_u8() as u32
-        | ((buf.get_u8() as u32) << 8)
-        | ((buf.get_u8() as u32) << 16);
+    let days = buf.get_u8() as u32 | ((buf.get_u8() as u32) << 8) | ((buf.get_u8() as u32) << 16);
     let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("valid date");
     let date = base + chrono::Duration::days(days as i64);
 
@@ -733,7 +731,9 @@ fn decode_datetimeoffset(buf: &mut Bytes, _type_info: &TypeInfo) -> Result<SqlVa
     }
 
     buf.advance(len);
-    Ok(SqlValue::String("DATETIMEOFFSET (feature disabled)".to_string()))
+    Ok(SqlValue::String(
+        "DATETIMEOFFSET (feature disabled)".to_string(),
+    ))
 }
 
 #[cfg(feature = "chrono")]
@@ -808,7 +808,9 @@ fn decode_smalldatetime(buf: &mut Bytes) -> Result<SqlValue, TypeError> {
     }
 
     buf.advance(4);
-    Ok(SqlValue::String("SMALLDATETIME (feature disabled)".to_string()))
+    Ok(SqlValue::String(
+        "SMALLDATETIME (feature disabled)".to_string(),
+    ))
 }
 
 fn decode_xml(buf: &mut Bytes) -> Result<SqlValue, TypeError> {
@@ -898,6 +900,7 @@ fn intervals_to_time(intervals: u64, scale: u8) -> chrono::NaiveTime {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

@@ -14,8 +14,10 @@
 //! cargo test -p mssql-driver-pool --test integration -- --ignored
 //! ```
 
-use std::sync::atomic::{AtomicU32, Ordering};
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::redundant_locals)]
+
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use mssql_client::Config;
@@ -189,7 +191,10 @@ async fn test_pool_try_get_no_idle_connections() {
 
     // try_get should return None - no idle connections available
     let result = pool.try_get().expect("try_get should not error");
-    assert!(result.is_none(), "Should return None when no idle connections");
+    assert!(
+        result.is_none(),
+        "Should return None when no idle connections"
+    );
 
     drop(conn);
     pool.close().await;
@@ -314,7 +319,10 @@ async fn test_pool_concurrent_stress_test() {
     let successes = success_count.load(Ordering::Relaxed);
     let errors = error_count.load(Ordering::Relaxed);
 
-    println!("Stress test results: {} successes, {} errors", successes, errors);
+    println!(
+        "Stress test results: {} successes, {} errors",
+        successes, errors
+    );
 
     // We expect all 150 queries (50 tasks * 3 queries each) to succeed
     assert_eq!(successes, 150, "All queries should succeed");
@@ -348,11 +356,20 @@ async fn test_pool_metrics() {
     let metrics = pool.metrics();
 
     // Should have at least 1 connection created (may reuse for subsequent gets)
-    assert!(metrics.connections_created >= 1, "Should have created at least 1 connection");
+    assert!(
+        metrics.connections_created >= 1,
+        "Should have created at least 1 connection"
+    );
 
     // All checkouts should be successful
-    assert!(metrics.checkouts_successful >= 5, "Should have at least 5 successful checkouts");
-    assert_eq!(metrics.checkouts_failed, 0, "No checkouts should have failed");
+    assert!(
+        metrics.checkouts_successful >= 5,
+        "Should have at least 5 successful checkouts"
+    );
+    assert_eq!(
+        metrics.checkouts_failed, 0,
+        "No checkouts should have failed"
+    );
 
     // Checkout success rate should be 100%
     assert!((metrics.checkout_success_rate() - 1.0).abs() < f64::EPSILON);
@@ -428,7 +445,10 @@ async fn test_pool_connection_timeout() {
 
     // Try to get another connection - should timeout
     let result = pool.get().await;
-    assert!(matches!(result, Err(PoolError::Timeout)), "Should timeout waiting for connection");
+    assert!(
+        matches!(result, Err(PoolError::Timeout)),
+        "Should timeout waiting for connection"
+    );
 
     pool.close().await;
 }
@@ -450,11 +470,17 @@ async fn test_pool_closed_error() {
 
     // Try to get a connection - should fail
     let result = pool.get().await;
-    assert!(matches!(result, Err(PoolError::PoolClosed)), "Should error when pool is closed");
+    assert!(
+        matches!(result, Err(PoolError::PoolClosed)),
+        "Should error when pool is closed"
+    );
 
     // try_get should also fail
     let result = pool.try_get();
-    assert!(matches!(result, Err(PoolError::PoolClosed)), "try_get should error when pool is closed");
+    assert!(
+        matches!(result, Err(PoolError::PoolClosed)),
+        "try_get should error when pool is closed"
+    );
 }
 
 // =============================================================================
@@ -514,7 +540,11 @@ async fn test_pool_high_throughput() {
     );
 
     // Should be able to handle at least 100 queries per second (conservative)
-    assert!(qps >= 100.0, "Should achieve at least 100 queries/second, got {}", qps);
+    assert!(
+        qps >= 100.0,
+        "Should achieve at least 100 queries/second, got {}",
+        qps
+    );
 
     pool.close().await;
 }
@@ -603,10 +633,7 @@ async fn test_pool_sustained_load() {
             for query_id in 0..50 {
                 match pool.get().await {
                     Ok(mut conn) => {
-                        let sql = format!(
-                            "SELECT {} * 100 + {} AS id",
-                            worker_id, query_id
-                        );
+                        let sql = format!("SELECT {} * 100 + {} AS id", worker_id, query_id);
                         match conn.query(&sql, &[]).await {
                             Ok(rows) => {
                                 let values: Vec<i32> = rows
@@ -680,16 +707,28 @@ async fn test_pool_detach_connection() {
 
     // Connection should not be in pool anymore
     let status = pool.status();
-    assert_eq!(status.in_use, 0, "Detached connection should not count as in_use");
+    assert_eq!(
+        status.in_use, 0,
+        "Detached connection should not count as in_use"
+    );
 
     // But the client should still work
     let mut client = client;
-    let rows = client.query("SELECT 999 AS detached", &[]).await.expect("Query should work");
-    let values: Vec<i32> = rows.filter_map(|r| r.ok()).map(|row| row.get(0).unwrap()).collect();
+    let rows = client
+        .query("SELECT 999 AS detached", &[])
+        .await
+        .expect("Query should work");
+    let values: Vec<i32> = rows
+        .filter_map(|r| r.ok())
+        .map(|row| row.get(0).unwrap())
+        .collect();
     assert_eq!(values, vec![999]);
 
     // Clean up the detached client manually
-    client.close().await.expect("Failed to close detached client");
+    client
+        .close()
+        .await
+        .expect("Failed to close detached client");
 
     pool.close().await;
 }
@@ -726,7 +765,10 @@ async fn test_pool_no_deadlock_under_contention() {
         handles.push(tokio::spawn(async move {
             // Each task does multiple operations
             for j in 0..5 {
-                let mut conn = pool.get().await.expect("Should get connection without deadlock");
+                let mut conn = pool
+                    .get()
+                    .await
+                    .expect("Should get connection without deadlock");
 
                 // Simulate some work
                 let sql = format!("SELECT {} + {} AS result", i, j);
@@ -747,8 +789,15 @@ async fn test_pool_no_deadlock_under_contention() {
     })
     .await;
 
-    assert!(timeout_result.is_ok(), "Pool deadlocked - tasks did not complete within timeout");
-    assert_eq!(success_count.load(Ordering::Relaxed), 20, "All tasks should complete");
+    assert!(
+        timeout_result.is_ok(),
+        "Pool deadlocked - tasks did not complete within timeout"
+    );
+    assert_eq!(
+        success_count.load(Ordering::Relaxed),
+        20,
+        "All tasks should complete"
+    );
 
     pool.close().await;
 }
@@ -894,7 +943,10 @@ async fn test_pool_rapid_acquire_release_no_deadlock() {
     })
     .await;
 
-    assert!(timeout_result.is_ok(), "Rapid acquire/release caused deadlock");
+    assert!(
+        timeout_result.is_ok(),
+        "Rapid acquire/release caused deadlock"
+    );
     assert_eq!(
         iterations.load(Ordering::Relaxed),
         800,
@@ -954,7 +1006,11 @@ async fn test_pool_mixed_operations_no_deadlock() {
     .await;
 
     assert!(timeout_result.is_ok(), "Mixed operations caused deadlock");
-    assert_eq!(success_count.load(Ordering::Relaxed), 10, "All workers should complete");
+    assert_eq!(
+        success_count.load(Ordering::Relaxed),
+        10,
+        "All workers should complete"
+    );
 
     pool.close().await;
 }

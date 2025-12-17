@@ -176,6 +176,7 @@ impl Encoder<Packet> for TdsCodec {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use tds_protocol::packet::{PacketStatus, PacketType};

@@ -38,9 +38,8 @@
 
 #[cfg(feature = "otel")]
 use opentelemetry::{
-    global,
+    KeyValue, global,
     trace::{Span, SpanKind, Status, Tracer},
-    KeyValue,
 };
 
 /// Database system identifier for MSSQL.
@@ -273,10 +272,7 @@ impl InstrumentationContext {
         let mut attrs = vec![
             KeyValue::new(attributes::DB_SYSTEM, DB_SYSTEM),
             KeyValue::new(attributes::SERVER_ADDRESS, self.server_address.clone()),
-            KeyValue::new(
-                attributes::SERVER_PORT,
-                i64::from(self.server_port),
-            ),
+            KeyValue::new(attributes::SERVER_PORT, i64::from(self.server_port)),
         ];
 
         if let Some(ref db) = self.database {
@@ -290,7 +286,10 @@ impl InstrumentationContext {
     pub fn connection_span(&self) -> impl Span {
         let tracer = global::tracer("mssql-client");
         let mut attrs = self.base_attributes();
-        attrs.push(KeyValue::new("db.connection_string.host", self.server_address.clone()));
+        attrs.push(KeyValue::new(
+            "db.connection_string.host",
+            self.server_address.clone(),
+        ));
 
         tracer
             .span_builder(span_names::CONNECT)
@@ -322,7 +321,10 @@ impl InstrumentationContext {
     pub fn transaction_span(&self, operation: &str) -> impl Span {
         let tracer = global::tracer("mssql-client");
         let mut attrs = self.base_attributes();
-        attrs.push(KeyValue::new(attributes::DB_OPERATION, operation.to_string()));
+        attrs.push(KeyValue::new(
+            attributes::DB_OPERATION,
+            operation.to_string(),
+        ));
 
         let span_name = match operation {
             "BEGIN" => span_names::BEGIN_TRANSACTION,
@@ -380,6 +382,7 @@ impl InstrumentationContext {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

@@ -493,8 +493,7 @@ impl ColMetaData {
         let flags = src.get_u16_le();
         let col_type = src.get_u8();
 
-        let type_id = TypeId::from_u8(col_type)
-            .unwrap_or(TypeId::Null); // Default to Null for unknown types
+        let type_id = TypeId::from_u8(col_type).unwrap_or(TypeId::Null); // Default to Null for unknown types
 
         // Parse type-specific metadata
         let type_info = Self::decode_type_info(src, type_id, col_type)?;
@@ -906,10 +905,7 @@ impl RawRow {
                 Self::decode_bytelen_type(src, dst)?;
             }
 
-            TypeId::Decimal
-            | TypeId::Numeric
-            | TypeId::DecimalN
-            | TypeId::NumericN => {
+            TypeId::Decimal | TypeId::Numeric | TypeId::DecimalN | TypeId::NumericN => {
                 Self::decode_bytelen_type(src, dst)?;
             }
 
@@ -958,7 +954,10 @@ impl RawRow {
     }
 
     /// Decode a 1-byte length-prefixed value.
-    fn decode_bytelen_type(src: &mut impl Buf, dst: &mut bytes::BytesMut) -> Result<(), ProtocolError> {
+    fn decode_bytelen_type(
+        src: &mut impl Buf,
+        dst: &mut bytes::BytesMut,
+    ) -> Result<(), ProtocolError> {
         if src.remaining() < 1 {
             return Err(ProtocolError::UnexpectedEof);
         }
@@ -982,7 +981,10 @@ impl RawRow {
     }
 
     /// Decode a 2-byte length-prefixed value.
-    fn decode_ushortlen_type(src: &mut impl Buf, dst: &mut bytes::BytesMut) -> Result<(), ProtocolError> {
+    fn decode_ushortlen_type(
+        src: &mut impl Buf,
+        dst: &mut bytes::BytesMut,
+    ) -> Result<(), ProtocolError> {
         if src.remaining() < 2 {
             return Err(ProtocolError::UnexpectedEof);
         }
@@ -1006,7 +1008,10 @@ impl RawRow {
     }
 
     /// Decode a 4-byte length-prefixed value.
-    fn decode_intlen_type(src: &mut impl Buf, dst: &mut bytes::BytesMut) -> Result<(), ProtocolError> {
+    fn decode_intlen_type(
+        src: &mut impl Buf,
+        dst: &mut bytes::BytesMut,
+    ) -> Result<(), ProtocolError> {
         if src.remaining() < 4 {
             return Err(ProtocolError::UnexpectedEof);
         }
@@ -2091,7 +2096,10 @@ impl TokenParser {
                 if self.remaining() < 3 {
                     return Err(ProtocolError::UnexpectedEof);
                 }
-                let length = u16::from_le_bytes([self.data[self.position + 1], self.data[self.position + 2]]) as usize;
+                let length = u16::from_le_bytes([
+                    self.data[self.position + 1],
+                    self.data[self.position + 2],
+                ]) as usize;
                 1 + 2 + length // token type + length prefix + data
             }
             // Tokens with 4-byte length prefix
@@ -2157,6 +2165,7 @@ use alloc::vec::Vec;
 // =============================================================================
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
     use bytes::BytesMut;
@@ -2237,14 +2246,8 @@ mod tests {
 
     #[test]
     fn test_env_change_type_from_u8() {
-        assert_eq!(
-            EnvChangeType::from_u8(1),
-            Some(EnvChangeType::Database)
-        );
-        assert_eq!(
-            EnvChangeType::from_u8(20),
-            Some(EnvChangeType::Routing)
-        );
+        assert_eq!(EnvChangeType::from_u8(1), Some(EnvChangeType::Database));
+        assert_eq!(EnvChangeType::from_u8(20), Some(EnvChangeType::Routing));
         assert_eq!(EnvChangeType::from_u8(100), None);
     }
 
@@ -2440,7 +2443,10 @@ mod tests {
         data.extend_from_slice(&[0x2A, 0x00, 0x00, 0x00]); // value = 42
 
         let mut parser = TokenParser::new(data.freeze());
-        let token = parser.next_token_with_metadata(Some(&metadata)).unwrap().unwrap();
+        let token = parser
+            .next_token_with_metadata(Some(&metadata))
+            .unwrap()
+            .unwrap();
 
         match token {
             Token::Row(row) => {

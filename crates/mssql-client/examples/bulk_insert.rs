@@ -9,6 +9,9 @@
 //! cargo run --example bulk_insert
 //! ```
 
+// Allow common patterns in example code
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::vec_init_then_push)]
+
 use mssql_client::{BulkColumn, BulkInsert, BulkInsertBuilder, BulkOptions, Client, Config, Error};
 use mssql_types::SqlValue;
 
@@ -32,9 +35,7 @@ async fn main() -> Result<(), Error> {
 
     // Create a test table using simple_query (no row count needed)
     client
-        .simple_query(
-            "IF OBJECT_ID('tempdb..#BulkTest', 'U') IS NOT NULL DROP TABLE #BulkTest",
-        )
+        .simple_query("IF OBJECT_ID('tempdb..#BulkTest', 'U') IS NOT NULL DROP TABLE #BulkTest")
         .await?;
 
     client

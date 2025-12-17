@@ -41,8 +41,8 @@ pub mod from_sql;
 pub mod to_sql;
 pub mod value;
 
-pub use decode::{decode_utf16_string, decode_value, Collation, TdsDecode, TypeInfo};
-pub use encode::{encode_utf16_string, TdsEncode};
+pub use decode::{Collation, TdsDecode, TypeInfo, decode_utf16_string, decode_value};
+pub use encode::{TdsEncode, encode_utf16_string};
 pub use error::TypeError;
 pub use from_sql::FromSql;
 pub use to_sql::ToSql;

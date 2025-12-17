@@ -52,7 +52,7 @@ impl<S> TlsPreloginWrapper<S> {
             header_pos: 0,
             read_remaining: 0,
             write_buf: vec![0u8; HEADER_SIZE], // Pre-allocate header space
-            write_pos: HEADER_SIZE, // Start after header
+            write_pos: HEADER_SIZE,            // Start after header
             header_written: false,
         }
     }
@@ -125,7 +125,10 @@ impl<S: AsyncRead + Unpin> AsyncRead for TlsPreloginWrapper<S> {
             let length = u16::from_be_bytes([this.header_buf[2], this.header_buf[3]]) as usize;
             this.read_remaining = length.saturating_sub(HEADER_SIZE);
 
-            tracing::trace!("TLS wrapper: reading {} bytes of payload", this.read_remaining);
+            tracing::trace!(
+                "TLS wrapper: reading {} bytes of payload",
+                this.read_remaining
+            );
         }
 
         // Read the payload (TLS data)
@@ -201,7 +204,9 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for TlsPreloginWrapper<S> {
 
             // Write all buffered data
             while this.write_pos < this.write_buf.len() {
-                match Pin::new(&mut this.stream).poll_write(cx, &this.write_buf[this.write_pos..])? {
+                match Pin::new(&mut this.stream)
+                    .poll_write(cx, &this.write_buf[this.write_pos..])?
+                {
                     Poll::Ready(n) => {
                         this.write_pos += n;
                     }

@@ -1,10 +1,12 @@
 //! Benchmarks for TDS protocol encoding and decoding.
 
+#![allow(clippy::unwrap_used, missing_docs)]
+
 use bytes::{Bytes, BytesMut};
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use tds_protocol::{
     encode_sql_batch,
-    packet::{PacketHeader, PacketStatus, PacketType, PACKET_HEADER_SIZE},
+    packet::{PACKET_HEADER_SIZE, PacketHeader, PacketStatus, PacketType},
     prelogin::{EncryptionLevel, PreLogin},
 };
 

@@ -97,7 +97,7 @@ impl<S: ConnectionState> Default for StateMarker<S> {
 
 impl<S: ConnectionState> Clone for StateMarker<S> {
     fn clone(&self) -> Self {
-        Self::new()
+        *self
     }
 }
 

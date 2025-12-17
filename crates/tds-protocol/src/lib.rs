@@ -51,16 +51,21 @@ pub mod types;
 pub mod version;
 
 pub use error::ProtocolError;
-pub use packet::{PacketHeader, PacketStatus, PacketType, DEFAULT_PACKET_SIZE, MAX_PACKET_SIZE, PACKET_HEADER_SIZE};
+pub use login7::{
+    FeatureExtension, FeatureId, Login7, OptionFlags1, OptionFlags2, OptionFlags3, TypeFlags,
+};
+pub use packet::{
+    DEFAULT_PACKET_SIZE, MAX_PACKET_SIZE, PACKET_HEADER_SIZE, PacketHeader, PacketStatus,
+    PacketType,
+};
 pub use prelogin::{EncryptionLevel, PreLogin, PreLoginOption};
+pub use rpc::{ParamFlags, ProcId, RpcOptionFlags, RpcParam, RpcRequest, TypeInfo as RpcTypeInfo};
+pub use sql_batch::{SqlBatch, encode_sql_batch, encode_sql_batch_with_transaction};
 pub use token::{
-    ColMetaData, ColumnData, Collation, Done, DoneInProc, DoneProc, DoneStatus, EnvChange,
+    ColMetaData, Collation, ColumnData, Done, DoneInProc, DoneProc, DoneStatus, EnvChange,
     EnvChangeType, EnvChangeValue, FeatureExtAck, FedAuthInfo, LoginAck, NbcRow, Order, RawRow,
     ReturnValue, ServerError, ServerInfo, SessionState, SspiToken, Token, TokenParser, TokenType,
     TypeInfo,
 };
 pub use types::{ColumnFlags, TypeId, Updateable};
 pub use version::TdsVersion;
-pub use login7::{FeatureExtension, FeatureId, Login7, OptionFlags1, OptionFlags2, OptionFlags3, TypeFlags};
-pub use rpc::{ParamFlags, ProcId, RpcOptionFlags, RpcParam, RpcRequest, TypeInfo as RpcTypeInfo};
-pub use sql_batch::{encode_sql_batch, encode_sql_batch_with_transaction, SqlBatch};

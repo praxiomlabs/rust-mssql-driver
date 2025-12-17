@@ -341,7 +341,11 @@ impl Login7 {
 
     /// Set SQL authentication credentials.
     #[must_use]
-    pub fn with_sql_auth(mut self, username: impl Into<String>, password: impl Into<String>) -> Self {
+    pub fn with_sql_auth(
+        mut self,
+        username: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Self {
         self.username = username.into();
         self.password = password.into();
         self.option_flags2.integrated_security = false;
@@ -620,6 +624,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

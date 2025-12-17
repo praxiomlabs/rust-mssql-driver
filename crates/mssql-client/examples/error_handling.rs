@@ -13,6 +13,9 @@
 //! cargo run --example error_handling
 //! ```
 
+// Allow common patterns in example code
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::never_loop)]
+
 use mssql_client::{Client, Config, Error, Ready};
 use std::time::Duration;
 
@@ -115,7 +118,10 @@ async fn main() -> Result<(), Error> {
             class,
             ..
         }) => {
-            println!("  SQL Server Error #{}: {} (severity: {})", number, message, class);
+            println!(
+                "  SQL Server Error #{}: {} (severity: {})",
+                number, message, class
+            );
         }
         Err(e) => println!("  Other error: {:?}", e),
     }
@@ -156,22 +162,22 @@ async fn main() -> Result<(), Error> {
         )
         .await?;
     client
-        .execute(
-            "INSERT INTO #test_constraints VALUES (1, 'first')",
-            &[],
-        )
+        .execute("INSERT INTO #test_constraints VALUES (1, 'first')", &[])
         .await?;
 
     // Try to violate the primary key constraint
     match client
-        .execute(
-            "INSERT INTO #test_constraints VALUES (1, 'duplicate')",
-            &[],
-        )
+        .execute("INSERT INTO #test_constraints VALUES (1, 'duplicate')", &[])
         .await
     {
         Ok(_) => println!("  Unexpectedly succeeded!"),
-        Err(ref e @ Error::Server { number, ref message, .. }) if number == 2627 => {
+        Err(
+            ref e @ Error::Server {
+                number,
+                ref message,
+                ..
+            },
+        ) if number == 2627 => {
             println!("  Primary key violation (error {}): {}", number, message);
             println!("  is_transient: {}", e.is_transient());
             println!("  is_terminal: {}", e.is_terminal());

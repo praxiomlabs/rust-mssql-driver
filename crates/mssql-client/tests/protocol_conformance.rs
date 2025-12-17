@@ -10,6 +10,13 @@
 //!     cargo test -p mssql-client --test protocol_conformance -- --ignored
 //! ```
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::expect_fun_call,
+    clippy::approx_constant
+)]
+
 use chrono::Datelike;
 use chrono::Timelike;
 use mssql_client::{Client, Config};
@@ -440,7 +447,10 @@ async fn test_protocol_multiple_result_sets() {
     let total: usize = rows.filter_map(|r| r.ok()).count();
 
     // Should have at least one row (may be 1 or 3 depending on driver behavior)
-    assert!(total >= 1, "Expected at least one row from multi-result batch");
+    assert!(
+        total >= 1,
+        "Expected at least one row from multi-result batch"
+    );
 
     client.close().await.expect("Failed to close");
 }
@@ -466,7 +476,10 @@ async fn test_protocol_sql_error_severity_levels() {
     let result = client
         .query("RAISERROR('Test error message', 16, 1)", &[])
         .await;
-    assert!(result.is_err(), "RAISERROR with severity 16 should cause an error");
+    assert!(
+        result.is_err(),
+        "RAISERROR with severity 16 should cause an error"
+    );
 
     client.close().await.expect("Failed to close");
 }
@@ -501,7 +514,10 @@ async fn test_protocol_constraint_violation_error() {
     let result = client
         .execute("INSERT INTO #ConstraintTest VALUES (2, -5)", &[])
         .await;
-    assert!(result.is_err(), "Check constraint violation should cause an error");
+    assert!(
+        result.is_err(),
+        "Check constraint violation should cause an error"
+    );
 
     client.close().await.expect("Failed to close");
 }
@@ -518,7 +534,10 @@ async fn test_protocol_transaction_commit() {
 
     // Create test table
     client
-        .execute("CREATE TABLE #TxCommitTest (id INT, value NVARCHAR(50))", &[])
+        .execute(
+            "CREATE TABLE #TxCommitTest (id INT, value NVARCHAR(50))",
+            &[],
+        )
         .await
         .expect("Failed to create table");
 
@@ -562,7 +581,10 @@ async fn test_protocol_transaction_rollback() {
 
     // Create test table and insert initial data
     client
-        .execute("CREATE TABLE #TxRollbackTest (id INT, value NVARCHAR(50))", &[])
+        .execute(
+            "CREATE TABLE #TxRollbackTest (id INT, value NVARCHAR(50))",
+            &[],
+        )
         .await
         .expect("Failed to create table");
 
@@ -705,7 +727,10 @@ async fn test_protocol_affected_rows() {
 
     // Update some rows
     let affected = client
-        .execute("UPDATE #AffectedRowsTest SET id = id + 10 WHERE id > 3", &[])
+        .execute(
+            "UPDATE #AffectedRowsTest SET id = id + 10 WHERE id > 3",
+            &[],
+        )
         .await
         .expect("Failed to update");
 

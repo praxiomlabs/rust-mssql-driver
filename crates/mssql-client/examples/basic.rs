@@ -15,6 +15,9 @@
 //! cargo run --example basic
 //! ```
 
+// Allow common patterns in example code
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use mssql_client::{Client, Config, Error};
 
 #[tokio::main]
