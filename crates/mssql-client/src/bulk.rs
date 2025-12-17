@@ -217,16 +217,15 @@ fn parse_sql_type(sql_type: &str) -> (u8, Option<u32>, Option<u8>, Option<u8>) {
             (0xA7, Some(len), None, None)
         }
         "NVARCHAR" | "NCHAR" => {
-            let len = params
-                .and_then(|p| {
-                    if p == "MAX" {
-                        Some(0xFFFF_u32)
-                    } else {
-                        p.parse().ok()
-                    }
-                })
-                .unwrap_or(4000);
-            (0xE7, Some(len * 2), None, None) // UTF-16 doubles byte length
+            let is_max = params.map(|p| p == "MAX").unwrap_or(false);
+            if is_max {
+                // MAX types use 0xFFFF marker (not doubled)
+                (0xE7, Some(0xFFFF), None, None)
+            } else {
+                // Normal lengths are in characters, double for UTF-16 byte length
+                let len = params.and_then(|p| p.parse().ok()).unwrap_or(4000);
+                (0xE7, Some(len * 2), None, None)
+            }
         }
         "VARBINARY" | "BINARY" => {
             let len = params
@@ -499,7 +498,7 @@ impl BulkInsert {
                 }
 
                 // Time-based with scale
-                0x29 | 0x2A | 0x2B => {
+                0x29..=0x2B => {
                     buf.put_u8(col.scale.unwrap_or(7));
                 }
 
@@ -599,13 +598,24 @@ impl BulkInsert {
     fn encode_column_value(&mut self, col: &BulkColumn, value: &SqlValue) -> Result<(), TypeError> {
         let buf = &mut self.buffer;
 
+        // Check if this column uses PLP (Partially Length-Prefixed) encoding
+        // MAX types (max_length == 0xFFFF) use PLP format
+        let is_plp_type = col.max_length == Some(0xFFFF)
+            && matches!(col.type_id, 0xE7 | 0xA7 | 0xA5 | 0xAD);
+
         match value {
             SqlValue::Null => {
                 // NULL encoding depends on type
                 match col.type_id {
-                    // Variable-length types use 0xFFFF length
+                    // Variable-length types
                     0xE7 | 0xA7 | 0xA5 | 0xAD => {
-                        buf.put_u16_le(0xFFFF);
+                        if is_plp_type {
+                            // PLP NULL: 0xFFFFFFFFFFFFFFFF
+                            buf.put_u64_le(0xFFFF_FFFF_FFFF_FFFF);
+                        } else {
+                            // Standard NULL: 0xFFFF length marker
+                            buf.put_u16_le(0xFFFF);
+                        }
                     }
                     // Nullable fixed types use 0 length
                     0x26 | 0x6C | 0x6A | 0x24 | 0x29 | 0x2A | 0x2B => {
@@ -662,29 +672,40 @@ impl BulkInsert {
                 let utf16: Vec<u16> = s.encode_utf16().collect();
                 let byte_len = utf16.len() * 2;
 
-                if byte_len > 0xFFFF {
-                    // PLP format for very large strings (not implemented yet)
+                if is_plp_type {
+                    // PLP format for MAX types - supports unlimited size
+                    // Send as a single chunk for simplicity
+                    encode_plp_string(&utf16, buf);
+                } else if byte_len > 0xFFFF {
+                    // Non-MAX column can't hold this much data
                     return Err(TypeError::BufferTooSmall {
                         needed: byte_len,
                         available: 0xFFFF,
                     });
-                }
-
-                buf.put_u16_le(byte_len as u16);
-                for code_unit in utf16 {
-                    buf.put_u16_le(code_unit);
+                } else {
+                    // Standard encoding with 2-byte length prefix
+                    buf.put_u16_le(byte_len as u16);
+                    for code_unit in utf16 {
+                        buf.put_u16_le(code_unit);
+                    }
                 }
             }
 
             SqlValue::Binary(b) => {
-                if b.len() > 0xFFFF {
+                if is_plp_type {
+                    // PLP format for MAX types - supports unlimited size
+                    encode_plp_binary(b, buf);
+                } else if b.len() > 0xFFFF {
+                    // Non-MAX column can't hold this much data
                     return Err(TypeError::BufferTooSmall {
                         needed: b.len(),
                         available: 0xFFFF,
                     });
+                } else {
+                    // Standard encoding with 2-byte length prefix
+                    buf.put_u16_le(b.len() as u16);
+                    buf.put_slice(b);
                 }
-                buf.put_u16_le(b.len() as u16);
-                buf.put_slice(b);
             }
 
             // Feature-gated types - use mssql_types::encode module
@@ -783,6 +804,55 @@ fn encode_nvarchar_value(s: &str, buf: &mut BytesMut) -> Result<(), TypeError> {
         buf.put_u16_le(code_unit);
     }
     Ok(())
+}
+
+/// Encode a UTF-16 string using PLP (Partially Length-Prefixed) format.
+///
+/// PLP format (per MS-TDS specification):
+/// - 8 bytes: total length in bytes (little-endian)
+/// - Chunks: 4-byte chunk length + data, repeated
+/// - Terminator: 4 bytes of zero
+///
+/// For simplicity, we send the entire value as a single chunk.
+/// This is efficient for bulk operations where we already have the complete data.
+fn encode_plp_string(utf16: &[u16], buf: &mut BytesMut) {
+    let byte_len = utf16.len() * 2;
+
+    // Total length (8 bytes)
+    buf.put_u64_le(byte_len as u64);
+
+    if byte_len > 0 {
+        // Single chunk: length (4 bytes) + data
+        buf.put_u32_le(byte_len as u32);
+        for code_unit in utf16 {
+            buf.put_u16_le(*code_unit);
+        }
+    }
+
+    // Terminator chunk (length = 0)
+    buf.put_u32_le(0);
+}
+
+/// Encode binary data using PLP (Partially Length-Prefixed) format.
+///
+/// PLP format (per MS-TDS specification):
+/// - 8 bytes: total length in bytes (little-endian)
+/// - Chunks: 4-byte chunk length + data, repeated
+/// - Terminator: 4 bytes of zero
+///
+/// For simplicity, we send the entire value as a single chunk.
+fn encode_plp_binary(data: &[u8], buf: &mut BytesMut) {
+    // Total length (8 bytes)
+    buf.put_u64_le(data.len() as u64);
+
+    if !data.is_empty() {
+        // Single chunk: length (4 bytes) + data
+        buf.put_u32_le(data.len() as u32);
+        buf.put_slice(data);
+    }
+
+    // Terminator chunk (length = 0)
+    buf.put_u32_le(0);
 }
 
 /// Encode time with specific scale (for bulk copy).
@@ -1021,5 +1091,113 @@ mod tests {
         assert_eq!(time_byte_length(0), 3);
         assert_eq!(time_byte_length(3), 4);
         assert_eq!(time_byte_length(7), 5);
+    }
+
+    #[test]
+    fn test_plp_string_encoding() {
+        let mut buf = BytesMut::new();
+        let text = "Hello";
+        let utf16: Vec<u16> = text.encode_utf16().collect();
+
+        encode_plp_string(&utf16, &mut buf);
+
+        // Verify structure:
+        // - 8 bytes total length
+        // - 4 bytes chunk length
+        // - data (5 chars * 2 bytes = 10 bytes)
+        // - 4 bytes terminator (0)
+        assert_eq!(buf.len(), 8 + 4 + 10 + 4);
+
+        // Check total length
+        assert_eq!(&buf[0..8], &10u64.to_le_bytes());
+
+        // Check chunk length
+        assert_eq!(&buf[8..12], &10u32.to_le_bytes());
+
+        // Check terminator
+        assert_eq!(&buf[22..26], &0u32.to_le_bytes());
+    }
+
+    #[test]
+    fn test_plp_binary_encoding() {
+        let mut buf = BytesMut::new();
+        let data = b"test binary data";
+
+        encode_plp_binary(data, &mut buf);
+
+        // Verify structure:
+        // - 8 bytes total length
+        // - 4 bytes chunk length
+        // - data (16 bytes)
+        // - 4 bytes terminator (0)
+        assert_eq!(buf.len(), 8 + 4 + 16 + 4);
+
+        // Check total length
+        assert_eq!(&buf[0..8], &16u64.to_le_bytes());
+
+        // Check chunk length
+        assert_eq!(&buf[8..12], &16u32.to_le_bytes());
+
+        // Check data
+        assert_eq!(&buf[12..28], data);
+
+        // Check terminator
+        assert_eq!(&buf[28..32], &0u32.to_le_bytes());
+    }
+
+    #[test]
+    fn test_plp_empty_string() {
+        let mut buf = BytesMut::new();
+        let utf16: Vec<u16> = "".encode_utf16().collect();
+
+        encode_plp_string(&utf16, &mut buf);
+
+        // Empty string: total length (8) + terminator (4)
+        assert_eq!(buf.len(), 8 + 4);
+
+        // Check total length is 0
+        assert_eq!(&buf[0..8], &0u64.to_le_bytes());
+
+        // Check terminator
+        assert_eq!(&buf[8..12], &0u32.to_le_bytes());
+    }
+
+    #[test]
+    fn test_plp_empty_binary() {
+        let mut buf = BytesMut::new();
+
+        encode_plp_binary(&[], &mut buf);
+
+        // Empty binary: total length (8) + terminator (4)
+        assert_eq!(buf.len(), 8 + 4);
+
+        // Check total length is 0
+        assert_eq!(&buf[0..8], &0u64.to_le_bytes());
+
+        // Check terminator
+        assert_eq!(&buf[8..12], &0u32.to_le_bytes());
+    }
+
+    #[test]
+    fn test_parse_sql_type_max() {
+        // Test NVARCHAR(MAX) parsing - uses 0xFFFF marker (not doubled for MAX)
+        let (type_id, len, _, _) = parse_sql_type("NVARCHAR(MAX)");
+        assert_eq!(type_id, 0xE7);
+        assert_eq!(len, Some(0xFFFF)); // MAX marker is 0xFFFF
+
+        // Test VARBINARY(MAX) parsing
+        let (type_id, len, _, _) = parse_sql_type("VARBINARY(MAX)");
+        assert_eq!(type_id, 0xA5);
+        assert_eq!(len, Some(0xFFFF));
+
+        // Test VARCHAR(MAX) parsing
+        let (type_id, len, _, _) = parse_sql_type("VARCHAR(MAX)");
+        assert_eq!(type_id, 0xA7);
+        assert_eq!(len, Some(0xFFFF));
+
+        // Verify normal NVARCHAR does double the length
+        let (type_id, len, _, _) = parse_sql_type("NVARCHAR(100)");
+        assert_eq!(type_id, 0xE7);
+        assert_eq!(len, Some(200)); // 100 * 2 for UTF-16
     }
 }
