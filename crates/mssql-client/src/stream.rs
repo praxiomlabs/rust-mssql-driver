@@ -212,27 +212,101 @@ impl ExecuteResult {
     }
 }
 
+/// A single result set within a multi-result batch.
+#[derive(Debug)]
+pub struct ResultSet {
+    /// Column metadata for this result set.
+    columns: Vec<Column>,
+    /// Rows in this result set.
+    rows: VecDeque<Row>,
+}
+
+impl ResultSet {
+    /// Create a new result set.
+    pub fn new(columns: Vec<Column>, rows: Vec<Row>) -> Self {
+        Self {
+            columns,
+            rows: rows.into(),
+        }
+    }
+
+    /// Get the column metadata.
+    #[must_use]
+    pub fn columns(&self) -> &[Column] {
+        &self.columns
+    }
+
+    /// Get the number of rows remaining.
+    #[must_use]
+    pub fn rows_remaining(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// Get the next row from this result set.
+    pub fn next_row(&mut self) -> Option<Row> {
+        self.rows.pop_front()
+    }
+
+    /// Check if this result set is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    /// Collect all remaining rows into a vector.
+    pub fn collect_all(&mut self) -> Vec<Row> {
+        self.rows.drain(..).collect()
+    }
+}
+
 /// Multiple result sets from a batch or stored procedure.
 ///
 /// Some queries return multiple result sets (e.g., stored procedures
-/// with multiple SELECT statements).
+/// with multiple SELECT statements, or batches with multiple queries).
+///
+/// # Example
+///
+/// ```rust,ignore
+/// // Execute a batch with multiple SELECTs
+/// let mut results = client.query_multiple("SELECT 1 AS a; SELECT 2 AS b, 3 AS c;", &[]).await?;
+///
+/// // Process first result set
+/// while let Some(row) = results.next_row().await? {
+///     println!("Result 1: {:?}", row);
+/// }
+///
+/// // Move to second result set
+/// if results.next_result().await? {
+///     while let Some(row) = results.next_row().await? {
+///         println!("Result 2: {:?}", row);
+///     }
+/// }
+/// ```
 pub struct MultiResultStream<'a> {
-    /// Current result set index.
+    /// All result sets from the batch.
+    result_sets: Vec<ResultSet>,
+    /// Current result set index (0-based).
     current_result: usize,
-    /// Total number of result sets (if known).
-    #[allow(dead_code)] // Will be used when multi-result handling is implemented
-    total_results: Option<usize>,
     /// Lifetime tied to the connection.
     _marker: std::marker::PhantomData<&'a ()>,
 }
 
 impl<'a> MultiResultStream<'a> {
-    /// Create a new multi-result stream.
-    #[allow(dead_code)] // Used when multi-result queries are implemented
-    pub(crate) fn new() -> Self {
+    /// Create a new multi-result stream from parsed result sets.
+    pub(crate) fn new(result_sets: Vec<ResultSet>) -> Self {
         Self {
+            result_sets,
             current_result: 0,
-            total_results: None,
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    /// Create an empty multi-result stream.
+    #[allow(dead_code)]
+    pub(crate) fn empty() -> Self {
+        Self {
+            result_sets: Vec::new(),
+            current_result: 0,
             _marker: std::marker::PhantomData,
         }
     }
@@ -243,19 +317,72 @@ impl<'a> MultiResultStream<'a> {
         self.current_result
     }
 
+    /// Get the total number of result sets.
+    #[must_use]
+    pub fn result_count(&self) -> usize {
+        self.result_sets.len()
+    }
+
+    /// Check if there are more result sets after the current one.
+    #[must_use]
+    pub fn has_more_results(&self) -> bool {
+        self.current_result + 1 < self.result_sets.len()
+    }
+
+    /// Get the column metadata for the current result set.
+    ///
+    /// Returns `None` if there are no result sets or we've moved past all of them.
+    #[must_use]
+    pub fn columns(&self) -> Option<&[Column]> {
+        self.result_sets
+            .get(self.current_result)
+            .map(|rs| rs.columns())
+    }
+
     /// Move to the next result set.
     ///
     /// Returns `true` if there is another result set, `false` if no more.
     pub async fn next_result(&mut self) -> Result<bool, Error> {
-        // Placeholder: actual implementation would advance to next result set
-        self.current_result += 1;
-        Ok(false)
+        if self.current_result + 1 < self.result_sets.len() {
+            self.current_result += 1;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     /// Get the next row from the current result set.
+    ///
+    /// Returns `None` when no more rows in the current result set.
+    /// Call `next_result()` to move to the next result set.
     pub async fn next_row(&mut self) -> Result<Option<Row>, Error> {
-        // Placeholder: actual implementation would get the next row
-        Ok(None)
+        if let Some(result_set) = self.result_sets.get_mut(self.current_result) {
+            Ok(result_set.next_row())
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get a mutable reference to the current result set.
+    #[must_use]
+    pub fn current_result_set(&mut self) -> Option<&mut ResultSet> {
+        self.result_sets.get_mut(self.current_result)
+    }
+
+    /// Collect all rows from the current result set.
+    pub fn collect_current(&mut self) -> Vec<Row> {
+        self.result_sets
+            .get_mut(self.current_result)
+            .map(|rs| rs.collect_all())
+            .unwrap_or_default()
+    }
+
+    /// Consume the stream and return all result sets as `QueryStream`s.
+    pub fn into_query_streams(self) -> Vec<QueryStream<'a>> {
+        self.result_sets
+            .into_iter()
+            .map(|rs| QueryStream::new(rs.columns, rs.rows.into()))
+            .collect()
     }
 }
 

@@ -98,7 +98,7 @@ pub use query::Query;
 pub use row::{Column, Row};
 pub use state::{Connected, ConnectionState, Disconnected, InTransaction, ProtocolState, Ready, Streaming};
 pub use statement_cache::{PreparedStatement, StatementCache, StatementCacheConfig};
-pub use stream::{ExecuteResult, MultiResultStream, OutputParam, QueryStream};
+pub use stream::{ExecuteResult, MultiResultStream, OutputParam, QueryStream, ResultSet};
 pub use to_params::{NamedParam, ParamList, ToParams};
 pub use transaction::{IsolationLevel, SavePoint, Transaction};
 pub use tvp::{Tvp, TvpColumn, TvpRow, TvpValue};

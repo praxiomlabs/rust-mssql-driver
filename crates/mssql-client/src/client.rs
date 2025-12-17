@@ -22,7 +22,7 @@ use crate::error::{Error, Result};
 use crate::instrumentation::InstrumentationContext;
 use crate::state::{ConnectionState, Disconnected, InTransaction, Ready};
 use crate::statement_cache::StatementCache;
-use crate::stream::QueryStream;
+use crate::stream::{MultiResultStream, QueryStream};
 use crate::transaction::SavePoint;
 
 /// SQL Server client with type-state connection management.
@@ -41,6 +41,10 @@ pub struct Client<S: ConnectionState> {
     current_database: Option<String>,
     /// Prepared statement cache for query optimization
     statement_cache: StatementCache,
+    /// Transaction descriptor from BeginTransaction EnvChange.
+    /// Per MS-TDS spec, this value must be included in ALL_HEADERS for subsequent
+    /// requests within an explicit transaction. 0 indicates auto-commit mode.
+    transaction_descriptor: u64,
     /// OpenTelemetry instrumentation context (when otel feature is enabled)
     #[cfg(feature = "otel")]
     instrumentation: InstrumentationContext,
@@ -48,12 +52,16 @@ pub struct Client<S: ConnectionState> {
 
 /// Internal connection handle wrapping the actual connection.
 ///
-/// This is an enum to support both TLS and non-TLS connections,
-/// though in practice TLS is almost always required for SQL Server.
+/// This is an enum to support different connection types:
+/// - TLS (TDS 8.0 strict mode)
+/// - TLS with PreLogin wrapping (TDS 7.x style)
+/// - Plain TCP (rare, for testing or internal networks)
 #[allow(dead_code)]  // Connection will be used once query execution is implemented
 enum ConnectionHandle {
-    /// TLS connection
+    /// TLS connection (TDS 8.0 strict mode - TLS before any TDS traffic)
     Tls(Connection<TlsStream<TcpStream>>),
+    /// TLS connection with PreLogin wrapping (TDS 7.x style)
+    TlsPrelogin(Connection<TlsStream<mssql_tls::TlsPreloginWrapper<TcpStream>>>),
     /// Plain TCP connection (rare, for testing or internal networks)
     Plain(Connection<TcpStream>),
 }
@@ -187,6 +195,7 @@ impl Client<Disconnected> {
             server_version,
             current_database: current_database.clone(),
             statement_cache: StatementCache::with_default_size(),
+            transaction_descriptor: 0, // Auto-commit mode initially
             #[cfg(feature = "otel")]
             instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
                 .with_database(current_database.unwrap_or_default()),
@@ -208,7 +217,14 @@ impl Client<Disconnected> {
         tracing::debug!("using TDS 7.x flow (PreLogin first)");
 
         // Build PreLogin packet
-        let prelogin = Self::build_prelogin(config, EncryptionLevel::On);
+        // Use EncryptionLevel::On if client wants encryption, Off otherwise
+        let client_encryption = if config.encrypt {
+            EncryptionLevel::On
+        } else {
+            EncryptionLevel::Off
+        };
+        let prelogin = Self::build_prelogin(config, client_encryption);
+        tracing::debug!(encryption = ?client_encryption, "sending PreLogin");
         let prelogin_bytes = prelogin.encode();
 
         // Manually create and send the PreLogin packet over raw TCP
@@ -250,50 +266,331 @@ impl Client<Disconnected> {
         let server_encryption = prelogin_response.encryption;
         tracing::debug!(encryption = ?server_encryption, "server encryption level");
 
-        // Now upgrade to TLS
-        let tls_config = TlsConfig::new()
-            .trust_server_certificate(config.trust_server_certificate);
+        // Determine negotiated encryption level (follows TDS 7.x rules)
+        // - NotSupported + NotSupported = NotSupported (no TLS at all)
+        // - Off + Off = Off (TLS for login only, then plain)
+        // - On + anything supported = On (full TLS)
+        // - Required = On with failure if not possible
+        let negotiated_encryption = match (client_encryption, server_encryption) {
+            (EncryptionLevel::NotSupported, EncryptionLevel::NotSupported) => {
+                EncryptionLevel::NotSupported
+            }
+            (EncryptionLevel::Off, EncryptionLevel::Off) => EncryptionLevel::Off,
+            (EncryptionLevel::On, EncryptionLevel::Off)
+            | (EncryptionLevel::On, EncryptionLevel::NotSupported) => {
+                return Err(Error::Protocol(
+                    "Server does not support requested encryption level".to_string(),
+                ));
+            }
+            _ => EncryptionLevel::On,
+        };
 
-        let tls_connector = TlsConnector::new(tls_config)
+        // TLS is required unless negotiated encryption is NotSupported
+        // Even with "Off", TLS is used to protect login credentials (per TDS 7.x spec)
+        let use_tls = negotiated_encryption != EncryptionLevel::NotSupported;
+
+        if use_tls {
+            // Upgrade to TLS with PreLogin wrapping (TDS 7.x style)
+            // In TDS 7.x, the TLS handshake is wrapped inside TDS PreLogin packets
+            let tls_config = TlsConfig::new()
+                .trust_server_certificate(config.trust_server_certificate);
+
+            let tls_connector = TlsConnector::new(tls_config)
+                .map_err(|e| Error::Tls(e.to_string()))?;
+
+            // Use PreLogin-wrapped TLS connection for TDS 7.x
+            let mut tls_stream = timeout(
+                config.timeouts.tls_timeout,
+                tls_connector.connect_with_prelogin(tcp_stream, &config.host),
+            )
+            .await
+            .map_err(|_| Error::TlsTimeout)?
             .map_err(|e| Error::Tls(e.to_string()))?;
 
-        let tls_stream = timeout(
-            config.timeouts.tls_timeout,
-            tls_connector.connect(tcp_stream, &config.host),
-        )
-        .await
-        .map_err(|_| Error::TlsTimeout)?
-        .map_err(|e| Error::Tls(e.to_string()))?;
+            tracing::debug!("TLS handshake completed (PreLogin wrapped)");
 
-        tracing::debug!("TLS handshake completed");
+            // Check if we need full encryption or login-only encryption
+            let login_only_encryption = negotiated_encryption == EncryptionLevel::Off;
 
-        // Create connection with TLS stream
-        let mut connection = Connection::new(tls_stream);
+            if login_only_encryption {
+                // Login-Only Encryption (ENCRYPT_OFF + ENCRYPT_OFF per MS-TDS spec):
+                // - Login7 is sent through TLS to protect credentials
+                // - Server responds in PLAINTEXT after receiving Login7
+                // - All subsequent communication is plaintext
+                //
+                // We must NOT use Connection with TLS stream because Connection splits
+                // the stream and we need to extract the underlying TCP afterward.
+                use tokio::io::AsyncWriteExt;
 
-        // Send Login7
-        let login = Self::build_login7(config);
-        Self::send_login7(&mut connection, &login).await?;
+                // Build and send Login7 directly through TLS
+                let login = Self::build_login7(config);
+                let login_payload = login.encode();
 
-        // Process login response
-        let (server_version, current_database, routing) =
-            Self::process_login_response(&mut connection).await?;
+                // Create TDS packet manually for Login7
+                let max_packet = MAX_PACKET_SIZE;
+                let max_payload = max_packet - PACKET_HEADER_SIZE;
+                let chunks: Vec<_> = login_payload.chunks(max_payload).collect();
+                let total_chunks = chunks.len();
 
-        // Handle routing redirect
-        if let Some((host, port)) = routing {
-            return Err(Error::Routing { host, port });
+                for (i, chunk) in chunks.into_iter().enumerate() {
+                    let is_last = i == total_chunks - 1;
+                    let status = if is_last {
+                        PacketStatus::END_OF_MESSAGE
+                    } else {
+                        PacketStatus::NORMAL
+                    };
+
+                    let header = PacketHeader::new(
+                        PacketType::Tds7Login,
+                        status,
+                        (PACKET_HEADER_SIZE + chunk.len()) as u16,
+                    );
+
+                    let mut packet_buf =
+                        BytesMut::with_capacity(PACKET_HEADER_SIZE + chunk.len());
+                    header.encode(&mut packet_buf);
+                    packet_buf.put_slice(chunk);
+
+                    tls_stream
+                        .write_all(&packet_buf)
+                        .await
+                        .map_err(|e| Error::Io(Arc::new(e)))?;
+                }
+
+                // Flush TLS to ensure all data is sent
+                tls_stream
+                    .flush()
+                    .await
+                    .map_err(|e| Error::Io(Arc::new(e)))?;
+
+                tracing::debug!("Login7 sent through TLS, switching to plaintext for response");
+
+                // Extract the underlying TCP stream from the TLS layer
+                // TlsStream::into_inner() returns (IO, ClientConnection)
+                // where IO is our TlsPreloginWrapper<TcpStream>
+                let (wrapper, _client_conn) = tls_stream.into_inner();
+                let tcp_stream = wrapper.into_inner();
+
+                // Create Connection from plain TCP for reading response
+                let mut connection = Connection::new(tcp_stream);
+
+                // Process login response (comes in plaintext)
+                let (server_version, current_database, routing) =
+                    Self::process_login_response(&mut connection).await?;
+
+                // Handle routing redirect
+                if let Some((host, port)) = routing {
+                    return Err(Error::Routing { host, port });
+                }
+
+                // Store plain TCP connection for subsequent operations
+                Ok(Client {
+                    config: config.clone(),
+                    _state: PhantomData,
+                    connection: Some(ConnectionHandle::Plain(connection)),
+                    server_version,
+                    current_database: current_database.clone(),
+                    statement_cache: StatementCache::with_default_size(),
+                    transaction_descriptor: 0, // Auto-commit mode initially
+                    #[cfg(feature = "otel")]
+                    instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
+                        .with_database(current_database.unwrap_or_default()),
+                })
+            } else {
+                // Full Encryption (ENCRYPT_ON per MS-TDS spec):
+                // - All communication after TLS handshake goes through TLS
+                let mut connection = Connection::new(tls_stream);
+
+                // Send Login7
+                let login = Self::build_login7(config);
+                Self::send_login7(&mut connection, &login).await?;
+
+                // Process login response
+                let (server_version, current_database, routing) =
+                    Self::process_login_response(&mut connection).await?;
+
+                // Handle routing redirect
+                if let Some((host, port)) = routing {
+                    return Err(Error::Routing { host, port });
+                }
+
+                Ok(Client {
+                    config: config.clone(),
+                    _state: PhantomData,
+                    connection: Some(ConnectionHandle::TlsPrelogin(connection)),
+                    server_version,
+                    current_database: current_database.clone(),
+                    statement_cache: StatementCache::with_default_size(),
+                    transaction_descriptor: 0, // Auto-commit mode initially
+                    #[cfg(feature = "otel")]
+                    instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
+                        .with_database(current_database.unwrap_or_default()),
+                })
+            }
+        } else {
+            // Server does not require encryption and client doesn't either
+            tracing::warn!(
+                "Connecting without TLS encryption. This is insecure and should only be \
+                 used for development/testing on trusted networks."
+            );
+
+            // Build Login7 packet
+            let login = Self::build_login7(config);
+            let login_bytes = login.encode();
+            tracing::debug!(
+                "Login7 packet built: {} bytes",
+                login_bytes.len(),
+            );
+            // Dump the fixed header (94 bytes)
+            tracing::debug!(
+                "Login7 fixed header (94 bytes): {:02X?}",
+                &login_bytes[..login_bytes.len().min(94)]
+            );
+            // Dump variable data
+            if login_bytes.len() > 94 {
+                tracing::debug!(
+                    "Login7 variable data ({} bytes): {:02X?}",
+                    login_bytes.len() - 94,
+                    &login_bytes[94..]
+                );
+            }
+
+            // Send Login7 over raw TCP (like PreLogin)
+            let login_header = PacketHeader::new(
+                PacketType::Tds7Login,
+                PacketStatus::END_OF_MESSAGE,
+                (PACKET_HEADER_SIZE + login_bytes.len()) as u16,
+            )
+            .with_packet_id(1);
+            let mut login_packet_buf =
+                BytesMut::with_capacity(PACKET_HEADER_SIZE + login_bytes.len());
+            login_header.encode(&mut login_packet_buf);
+            login_packet_buf.put_slice(&login_bytes);
+
+            tracing::debug!(
+                "Sending Login7 packet: {} bytes total, header: {:02X?}",
+                login_packet_buf.len(),
+                &login_packet_buf[..PACKET_HEADER_SIZE]
+            );
+            tcp_stream
+                .write_all(&login_packet_buf)
+                .await
+                .map_err(|e| Error::Io(Arc::new(e)))?;
+            tcp_stream
+                .flush()
+                .await
+                .map_err(|e| Error::Io(Arc::new(e)))?;
+            tracing::debug!("Login7 sent and flushed over raw TCP");
+
+            // Read login response header
+            let mut response_header_buf = [0u8; PACKET_HEADER_SIZE];
+            tcp_stream
+                .read_exact(&mut response_header_buf)
+                .await
+                .map_err(|e| Error::Io(Arc::new(e)))?;
+
+            let response_type = response_header_buf[0];
+            let response_length =
+                u16::from_be_bytes([response_header_buf[2], response_header_buf[3]]) as usize;
+            tracing::debug!(
+                "Response header: type={:#04X}, length={}",
+                response_type,
+                response_length
+            );
+
+            // Read response payload
+            let payload_length = response_length.saturating_sub(PACKET_HEADER_SIZE);
+            let mut response_payload = vec![0u8; payload_length];
+            tcp_stream
+                .read_exact(&mut response_payload)
+                .await
+                .map_err(|e| Error::Io(Arc::new(e)))?;
+            tracing::debug!(
+                "Response payload: {} bytes, first 32: {:02X?}",
+                response_payload.len(),
+                &response_payload[..response_payload.len().min(32)]
+            );
+
+            // Now create Connection for further communication
+            let connection = Connection::new(tcp_stream);
+
+            // Parse login response
+            let response_bytes = bytes::Bytes::from(response_payload);
+            let mut parser = TokenParser::new(response_bytes);
+            let mut server_version = None;
+            let mut current_database = None;
+            let routing = None;
+
+            while let Some(token) =
+                parser.next_token().map_err(|e| Error::Protocol(e.to_string()))?
+            {
+                match token {
+                    Token::LoginAck(ack) => {
+                        tracing::info!(
+                            version = ack.tds_version,
+                            interface = ack.interface,
+                            prog_name = %ack.prog_name,
+                            "login acknowledged"
+                        );
+                        server_version = Some(ack.tds_version);
+                    }
+                    Token::EnvChange(env) => {
+                        Self::process_env_change(&env, &mut current_database, &mut None);
+                    }
+                    Token::Error(err) => {
+                        return Err(Error::Server {
+                            number: err.number,
+                            state: err.state,
+                            class: err.class,
+                            message: err.message.clone(),
+                            server: if err.server.is_empty() {
+                                None
+                            } else {
+                                Some(err.server.clone())
+                            },
+                            procedure: if err.procedure.is_empty() {
+                                None
+                            } else {
+                                Some(err.procedure.clone())
+                            },
+                            line: err.line as u32,
+                        });
+                    }
+                    Token::Info(info) => {
+                        tracing::info!(
+                            number = info.number,
+                            message = %info.message,
+                            "server info message"
+                        );
+                    }
+                    Token::Done(done) => {
+                        if done.status.error {
+                            return Err(Error::Protocol("login failed".to_string()));
+                        }
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
+            // Handle routing redirect
+            if let Some((host, port)) = routing {
+                return Err(Error::Routing { host, port });
+            }
+
+            Ok(Client {
+                config: config.clone(),
+                _state: PhantomData,
+                connection: Some(ConnectionHandle::Plain(connection)),
+                server_version,
+                current_database: current_database.clone(),
+                statement_cache: StatementCache::with_default_size(),
+                transaction_descriptor: 0, // Auto-commit mode initially
+                #[cfg(feature = "otel")]
+                instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
+                    .with_database(current_database.unwrap_or_default()),
+            })
         }
-
-        Ok(Client {
-            config: config.clone(),
-            _state: PhantomData,
-            connection: Some(ConnectionHandle::Tls(connection)),
-            server_version,
-            current_database: current_database.clone(),
-            statement_cache: StatementCache::with_default_size(),
-            #[cfg(feature = "otel")]
-            instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
-                .with_database(current_database.unwrap_or_default()),
-        })
     }
 
     /// Build a PreLogin packet.
@@ -489,8 +786,13 @@ impl Client<Disconnected> {
 // Private helper methods available to all connection states
 impl<S: ConnectionState> Client<S> {
     /// Send a SQL batch to the server.
+    ///
+    /// Uses the client's current transaction descriptor in ALL_HEADERS.
+    /// Per MS-TDS spec, when in an explicit transaction, the descriptor
+    /// returned by BeginTransaction must be included.
     async fn send_sql_batch(&mut self, sql: &str) -> Result<()> {
-        let payload = tds_protocol::encode_sql_batch(sql);
+        let payload =
+            tds_protocol::encode_sql_batch_with_transaction(sql, self.transaction_descriptor);
         let max_packet = self.config.packet_size as usize;
 
         let connection = self
@@ -500,6 +802,11 @@ impl<S: ConnectionState> Client<S> {
 
         match connection {
             ConnectionHandle::Tls(conn) => {
+                conn.send_message(PacketType::SqlBatch, payload, max_packet)
+                    .await
+                    .map_err(|e| Error::Protocol(e.to_string()))?;
+            }
+            ConnectionHandle::TlsPrelogin(conn) => {
                 conn.send_message(PacketType::SqlBatch, payload, max_packet)
                     .await
                     .map_err(|e| Error::Protocol(e.to_string()))?;
@@ -515,8 +822,10 @@ impl<S: ConnectionState> Client<S> {
     }
 
     /// Send an RPC request to the server.
+    ///
+    /// Uses the client's current transaction descriptor in ALL_HEADERS.
     async fn send_rpc(&mut self, rpc: &RpcRequest) -> Result<()> {
-        let payload = rpc.encode();
+        let payload = rpc.encode_with_transaction(self.transaction_descriptor);
         let max_packet = self.config.packet_size as usize;
 
         let connection = self
@@ -526,6 +835,11 @@ impl<S: ConnectionState> Client<S> {
 
         match connection {
             ConnectionHandle::Tls(conn) => {
+                conn.send_message(PacketType::Rpc, payload, max_packet)
+                    .await
+                    .map_err(|e| Error::Protocol(e.to_string()))?;
+            }
+            ConnectionHandle::TlsPrelogin(conn) => {
                 conn.send_message(PacketType::Rpc, payload, max_packet)
                     .await
                     .map_err(|e| Error::Protocol(e.to_string()))?;
@@ -634,6 +948,10 @@ impl<S: ConnectionState> Client<S> {
 
         let message = match connection {
             ConnectionHandle::Tls(conn) => conn
+                .read_message()
+                .await
+                .map_err(|e| Error::Protocol(e.to_string()))?,
+            ConnectionHandle::TlsPrelogin(conn) => conn
                 .read_message()
                 .await
                 .map_err(|e| Error::Protocol(e.to_string()))?,
@@ -943,23 +1261,308 @@ impl<S: ConnectionState> Client<S> {
                     }
                 }
             }
+            // DECIMAL/NUMERIC types (1-byte length prefix)
+            TypeId::Decimal | TypeId::Numeric | TypeId::DecimalN | TypeId::NumericN => {
+                if buf.remaining() < 1 {
+                    return Err(Error::Protocol(
+                        "unexpected EOF reading DECIMAL/NUMERIC length".into(),
+                    ));
+                }
+                let len = buf.get_u8() as usize;
+                if len == 0 {
+                    SqlValue::Null
+                } else {
+                    if buf.remaining() < len {
+                        return Err(Error::Protocol(
+                            "unexpected EOF reading DECIMAL/NUMERIC data".into(),
+                        ));
+                    }
+
+                    // First byte is sign: 0 = negative, 1 = positive
+                    let sign = buf.get_u8();
+                    let mantissa_len = len - 1;
+
+                    // Read mantissa as little-endian integer (up to 16 bytes for max precision 38)
+                    let mut mantissa_bytes = [0u8; 16];
+                    for i in 0..mantissa_len.min(16) {
+                        mantissa_bytes[i] = buf.get_u8();
+                    }
+                    // Skip any excess bytes (shouldn't happen with valid data)
+                    for _ in 16..mantissa_len {
+                        buf.get_u8();
+                    }
+
+                    let mantissa = u128::from_le_bytes(mantissa_bytes);
+                    let scale = col.type_info.scale.unwrap_or(0) as u32;
+
+                    #[cfg(feature = "decimal")]
+                    {
+                        use rust_decimal::Decimal;
+                        let mut decimal = Decimal::from_i128_with_scale(mantissa as i128, scale);
+                        if sign == 0 {
+                            decimal.set_sign_negative(true);
+                        }
+                        SqlValue::Decimal(decimal)
+                    }
+
+                    #[cfg(not(feature = "decimal"))]
+                    {
+                        // Without the decimal feature, convert to f64
+                        let divisor = 10f64.powi(scale as i32);
+                        let value = (mantissa as f64) / divisor;
+                        let value = if sign == 0 { -value } else { value };
+                        SqlValue::Double(value)
+                    }
+                }
+            }
+
+            // DATETIME/SMALLDATETIME nullable (1-byte length prefix)
             TypeId::DateTimeN => {
                 if buf.remaining() < 1 {
                     return Err(Error::Protocol(
                         "unexpected EOF reading DateTimeN length".into(),
                     ));
                 }
-                let len = buf.get_u8();
+                let len = buf.get_u8() as usize;
                 if len == 0 {
                     SqlValue::Null
+                } else if buf.remaining() < len {
+                    return Err(Error::Protocol("unexpected EOF reading DateTimeN".into()));
                 } else {
-                    // Skip date/time bytes for now - return as binary
-                    if buf.remaining() < len as usize {
-                        return Err(Error::Protocol("unexpected EOF reading DateTimeN".into()));
+                    match len {
+                        4 => {
+                            // SMALLDATETIME: 2 bytes days + 2 bytes minutes
+                            let days = buf.get_u16_le() as i64;
+                            let minutes = buf.get_u16_le() as u32;
+                            #[cfg(feature = "chrono")]
+                            {
+                                let base = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
+                                let date = base + chrono::Duration::days(days);
+                                let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(minutes * 60, 0).unwrap();
+                                SqlValue::DateTime(date.and_time(time))
+                            }
+                            #[cfg(not(feature = "chrono"))]
+                            {
+                                SqlValue::String(format!("SMALLDATETIME({days},{minutes})"))
+                            }
+                        }
+                        8 => {
+                            // DATETIME: 4 bytes days + 4 bytes 1/300ths of second
+                            let days = buf.get_i32_le() as i64;
+                            let time_300ths = buf.get_u32_le() as u64;
+                            #[cfg(feature = "chrono")]
+                            {
+                                let base = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
+                                let date = base + chrono::Duration::days(days);
+                                // Convert 300ths of second to nanoseconds
+                                let total_ms = (time_300ths * 1000) / 300;
+                                let secs = (total_ms / 1000) as u32;
+                                let nanos = ((total_ms % 1000) * 1_000_000) as u32;
+                                let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nanos).unwrap();
+                                SqlValue::DateTime(date.and_time(time))
+                            }
+                            #[cfg(not(feature = "chrono"))]
+                            {
+                                SqlValue::String(format!("DATETIME({days},{time_300ths})"))
+                            }
+                        }
+                        _ => {
+                            return Err(Error::Protocol(format!(
+                                "invalid DateTimeN length: {len}"
+                            )));
+                        }
                     }
-                    let bytes = bytes::Bytes::copy_from_slice(&buf[..len as usize]);
-                    buf.advance(len as usize);
-                    SqlValue::Binary(bytes)
+                }
+            }
+
+            // Fixed DATETIME (8 bytes)
+            TypeId::DateTime => {
+                if buf.remaining() < 8 {
+                    return Err(Error::Protocol("unexpected EOF reading DATETIME".into()));
+                }
+                let days = buf.get_i32_le() as i64;
+                let time_300ths = buf.get_u32_le() as u64;
+                #[cfg(feature = "chrono")]
+                {
+                    let base = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
+                    let date = base + chrono::Duration::days(days);
+                    let total_ms = (time_300ths * 1000) / 300;
+                    let secs = (total_ms / 1000) as u32;
+                    let nanos = ((total_ms % 1000) * 1_000_000) as u32;
+                    let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nanos).unwrap();
+                    SqlValue::DateTime(date.and_time(time))
+                }
+                #[cfg(not(feature = "chrono"))]
+                {
+                    SqlValue::String(format!("DATETIME({days},{time_300ths})"))
+                }
+            }
+
+            // Fixed SMALLDATETIME (4 bytes)
+            TypeId::DateTime4 => {
+                if buf.remaining() < 4 {
+                    return Err(Error::Protocol("unexpected EOF reading SMALLDATETIME".into()));
+                }
+                let days = buf.get_u16_le() as i64;
+                let minutes = buf.get_u16_le() as u32;
+                #[cfg(feature = "chrono")]
+                {
+                    let base = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
+                    let date = base + chrono::Duration::days(days);
+                    let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(minutes * 60, 0).unwrap();
+                    SqlValue::DateTime(date.and_time(time))
+                }
+                #[cfg(not(feature = "chrono"))]
+                {
+                    SqlValue::String(format!("SMALLDATETIME({days},{minutes})"))
+                }
+            }
+
+            // DATE (3 bytes, nullable with 1-byte length prefix)
+            TypeId::Date => {
+                if buf.remaining() < 1 {
+                    return Err(Error::Protocol("unexpected EOF reading DATE length".into()));
+                }
+                let len = buf.get_u8() as usize;
+                if len == 0 {
+                    SqlValue::Null
+                } else if len != 3 {
+                    return Err(Error::Protocol(format!("invalid DATE length: {len}")));
+                } else if buf.remaining() < 3 {
+                    return Err(Error::Protocol("unexpected EOF reading DATE".into()));
+                } else {
+                    // 3 bytes little-endian days since 0001-01-01
+                    let days = buf.get_u8() as u32
+                        | ((buf.get_u8() as u32) << 8)
+                        | ((buf.get_u8() as u32) << 16);
+                    #[cfg(feature = "chrono")]
+                    {
+                        let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
+                        let date = base + chrono::Duration::days(days as i64);
+                        SqlValue::Date(date)
+                    }
+                    #[cfg(not(feature = "chrono"))]
+                    {
+                        SqlValue::String(format!("DATE({days})"))
+                    }
+                }
+            }
+
+            // TIME (variable length with scale, 1-byte length prefix)
+            TypeId::Time => {
+                if buf.remaining() < 1 {
+                    return Err(Error::Protocol("unexpected EOF reading TIME length".into()));
+                }
+                let len = buf.get_u8() as usize;
+                if len == 0 {
+                    SqlValue::Null
+                } else if buf.remaining() < len {
+                    return Err(Error::Protocol("unexpected EOF reading TIME".into()));
+                } else {
+                    let scale = col.type_info.scale.unwrap_or(7);
+                    let mut time_bytes = [0u8; 8];
+                    for byte in time_bytes.iter_mut().take(len) {
+                        *byte = buf.get_u8();
+                    }
+                    let intervals = u64::from_le_bytes(time_bytes);
+                    #[cfg(feature = "chrono")]
+                    {
+                        let time = Self::intervals_to_time(intervals, scale);
+                        SqlValue::Time(time)
+                    }
+                    #[cfg(not(feature = "chrono"))]
+                    {
+                        SqlValue::String(format!("TIME({intervals})"))
+                    }
+                }
+            }
+
+            // DATETIME2 (variable length: TIME bytes + 3 bytes date, 1-byte length prefix)
+            TypeId::DateTime2 => {
+                if buf.remaining() < 1 {
+                    return Err(Error::Protocol("unexpected EOF reading DATETIME2 length".into()));
+                }
+                let len = buf.get_u8() as usize;
+                if len == 0 {
+                    SqlValue::Null
+                } else if buf.remaining() < len {
+                    return Err(Error::Protocol("unexpected EOF reading DATETIME2".into()));
+                } else {
+                    let scale = col.type_info.scale.unwrap_or(7);
+                    let time_len = Self::time_bytes_for_scale(scale);
+
+                    // Read time
+                    let mut time_bytes = [0u8; 8];
+                    for byte in time_bytes.iter_mut().take(time_len) {
+                        *byte = buf.get_u8();
+                    }
+                    let intervals = u64::from_le_bytes(time_bytes);
+
+                    // Read date (3 bytes)
+                    let days = buf.get_u8() as u32
+                        | ((buf.get_u8() as u32) << 8)
+                        | ((buf.get_u8() as u32) << 16);
+
+                    #[cfg(feature = "chrono")]
+                    {
+                        let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
+                        let date = base + chrono::Duration::days(days as i64);
+                        let time = Self::intervals_to_time(intervals, scale);
+                        SqlValue::DateTime(date.and_time(time))
+                    }
+                    #[cfg(not(feature = "chrono"))]
+                    {
+                        SqlValue::String(format!("DATETIME2({days},{intervals})"))
+                    }
+                }
+            }
+
+            // DATETIMEOFFSET (variable length: TIME bytes + 3 bytes date + 2 bytes offset)
+            TypeId::DateTimeOffset => {
+                if buf.remaining() < 1 {
+                    return Err(Error::Protocol("unexpected EOF reading DATETIMEOFFSET length".into()));
+                }
+                let len = buf.get_u8() as usize;
+                if len == 0 {
+                    SqlValue::Null
+                } else if buf.remaining() < len {
+                    return Err(Error::Protocol("unexpected EOF reading DATETIMEOFFSET".into()));
+                } else {
+                    let scale = col.type_info.scale.unwrap_or(7);
+                    let time_len = Self::time_bytes_for_scale(scale);
+
+                    // Read time
+                    let mut time_bytes = [0u8; 8];
+                    for byte in time_bytes.iter_mut().take(time_len) {
+                        *byte = buf.get_u8();
+                    }
+                    let intervals = u64::from_le_bytes(time_bytes);
+
+                    // Read date (3 bytes)
+                    let days = buf.get_u8() as u32
+                        | ((buf.get_u8() as u32) << 8)
+                        | ((buf.get_u8() as u32) << 16);
+
+                    // Read offset in minutes (2 bytes, signed)
+                    let offset_minutes = buf.get_i16_le();
+
+                    #[cfg(feature = "chrono")]
+                    {
+                        use chrono::TimeZone;
+                        let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
+                        let date = base + chrono::Duration::days(days as i64);
+                        let time = Self::intervals_to_time(intervals, scale);
+                        let offset = chrono::FixedOffset::east_opt((offset_minutes as i32) * 60)
+                            .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).unwrap());
+                        let datetime = offset.from_local_datetime(&date.and_time(time))
+                            .single()
+                            .unwrap_or_else(|| offset.from_utc_datetime(&date.and_time(time)));
+                        SqlValue::DateTimeOffset(datetime)
+                    }
+                    #[cfg(not(feature = "chrono"))]
+                    {
+                        SqlValue::String(format!("DATETIMEOFFSET({days},{intervals},{offset_minutes})"))
+                    }
                 }
             }
 
@@ -1078,6 +1681,47 @@ impl<S: ConnectionState> Client<S> {
         Ok(value)
     }
 
+    /// Calculate number of bytes needed for TIME based on scale.
+    fn time_bytes_for_scale(scale: u8) -> usize {
+        match scale {
+            0..=2 => 3,
+            3..=4 => 4,
+            5..=7 => 5,
+            _ => 5, // Default to max precision
+        }
+    }
+
+    /// Convert 100-nanosecond intervals to NaiveTime.
+    #[cfg(feature = "chrono")]
+    fn intervals_to_time(intervals: u64, scale: u8) -> chrono::NaiveTime {
+        // Scale determines the unit:
+        // scale 0: seconds
+        // scale 1: 100ms
+        // scale 2: 10ms
+        // scale 3: 1ms
+        // scale 4: 100us
+        // scale 5: 10us
+        // scale 6: 1us
+        // scale 7: 100ns
+        let nanos = match scale {
+            0 => intervals * 1_000_000_000,
+            1 => intervals * 100_000_000,
+            2 => intervals * 10_000_000,
+            3 => intervals * 1_000_000,
+            4 => intervals * 100_000,
+            5 => intervals * 10_000,
+            6 => intervals * 1_000,
+            7 => intervals * 100,
+            _ => intervals * 100,
+        };
+
+        let secs = (nanos / 1_000_000_000) as u32;
+        let nano_part = (nanos % 1_000_000_000) as u32;
+
+        chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nano_part)
+            .unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap())
+    }
+
     /// Read execute result (row count) from the response.
     async fn read_execute_result(&mut self) -> Result<u64> {
         let connection = self
@@ -1090,6 +1734,10 @@ impl<S: ConnectionState> Client<S> {
                 .read_message()
                 .await
                 .map_err(|e| Error::Protocol(e.to_string()))?,
+            ConnectionHandle::TlsPrelogin(conn) => conn
+                .read_message()
+                .await
+                .map_err(|e| Error::Protocol(e.to_string()))?,
             ConnectionHandle::Plain(conn) => conn
                 .read_message()
                 .await
@@ -1099,9 +1747,27 @@ impl<S: ConnectionState> Client<S> {
 
         let mut parser = TokenParser::new(message.payload);
         let mut rows_affected = 0u64;
+        let mut current_metadata: Option<ColMetaData> = None;
 
-        while let Some(token) = parser.next_token().map_err(|e| Error::Protocol(e.to_string()))? {
+        loop {
+            // Use metadata-aware parsing to handle Row tokens from SELECT statements
+            let token = parser
+                .next_token_with_metadata(current_metadata.as_ref())
+                .map_err(|e| Error::Protocol(e.to_string()))?;
+
+            let Some(token) = token else {
+                break;
+            };
+
             match token {
+                Token::ColMetaData(meta) => {
+                    // Store metadata for subsequent Row token parsing
+                    current_metadata = Some(meta);
+                }
+                Token::Row(_) | Token::NbcRow(_) => {
+                    // Skip row data for execute() - we only care about row count
+                    // The rows are parsed but we don't process them
+                }
                 Token::Done(done) => {
                     if done.status.error {
                         return Err(Error::Query("execution failed".to_string()));
@@ -1152,6 +1818,104 @@ impl<S: ConnectionState> Client<S> {
         }
 
         Ok(rows_affected)
+    }
+
+    /// Read the response from BEGIN TRANSACTION and extract the transaction descriptor.
+    ///
+    /// Per MS-TDS spec, the server sends a BeginTransaction EnvChange token containing
+    /// the transaction descriptor (8-byte value) that must be included in subsequent
+    /// ALL_HEADERS sections for requests within this transaction.
+    async fn read_transaction_begin_result(&mut self) -> Result<u64> {
+        let connection = self
+            .connection
+            .as_mut()
+            .ok_or_else(|| Error::ConnectionClosed)?;
+
+        let message = match connection {
+            ConnectionHandle::Tls(conn) => conn
+                .read_message()
+                .await
+                .map_err(|e| Error::Protocol(e.to_string()))?,
+            ConnectionHandle::TlsPrelogin(conn) => conn
+                .read_message()
+                .await
+                .map_err(|e| Error::Protocol(e.to_string()))?,
+            ConnectionHandle::Plain(conn) => conn
+                .read_message()
+                .await
+                .map_err(|e| Error::Protocol(e.to_string()))?,
+        }
+        .ok_or_else(|| Error::ConnectionClosed)?;
+
+        let mut parser = TokenParser::new(message.payload);
+        let mut transaction_descriptor: u64 = 0;
+
+        loop {
+            let token = parser
+                .next_token()
+                .map_err(|e| Error::Protocol(e.to_string()))?;
+
+            let Some(token) = token else {
+                break;
+            };
+
+            match token {
+                Token::EnvChange(env) => {
+                    if env.env_type == EnvChangeType::BeginTransaction {
+                        // Extract the transaction descriptor from the binary value
+                        // Per MS-TDS spec, it's an 8-byte (ULONGLONG) value
+                        if let tds_protocol::token::EnvChangeValue::Binary(ref data) = env.new_value
+                        {
+                            if data.len() >= 8 {
+                                transaction_descriptor = u64::from_le_bytes([
+                                    data[0], data[1], data[2], data[3], data[4], data[5], data[6],
+                                    data[7],
+                                ]);
+                                tracing::debug!(
+                                    transaction_descriptor = format!("0x{:016X}", transaction_descriptor),
+                                    "transaction begun"
+                                );
+                            }
+                        }
+                    }
+                }
+                Token::Done(done) => {
+                    if done.status.error {
+                        return Err(Error::Query("BEGIN TRANSACTION failed".to_string()));
+                    }
+                    break;
+                }
+                Token::Error(err) => {
+                    return Err(Error::Server {
+                        number: err.number,
+                        state: err.state,
+                        class: err.class,
+                        message: err.message.clone(),
+                        server: if err.server.is_empty() {
+                            None
+                        } else {
+                            Some(err.server.clone())
+                        },
+                        procedure: if err.procedure.is_empty() {
+                            None
+                        } else {
+                            Some(err.procedure.clone())
+                        },
+                        line: err.line as u32,
+                    });
+                }
+                Token::Info(info) => {
+                    tracing::info!(
+                        number = info.number,
+                        message = %info.message,
+                        "server info message"
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        Ok(transaction_descriptor)
     }
 }
 
@@ -1222,6 +1986,236 @@ impl Client<Ready> {
         Ok(QueryStream::new(columns, rows))
     }
 
+    /// Execute a batch that may return multiple result sets.
+    ///
+    /// This is useful for stored procedures or SQL batches that contain
+    /// multiple SELECT statements.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Execute a batch with multiple SELECTs
+    /// let mut results = client.query_multiple(
+    ///     "SELECT 1 AS a; SELECT 2 AS b, 3 AS c;",
+    ///     &[]
+    /// ).await?;
+    ///
+    /// // Process first result set
+    /// while let Some(row) = results.next_row().await? {
+    ///     println!("Result 1: {:?}", row);
+    /// }
+    ///
+    /// // Move to second result set
+    /// if results.next_result().await? {
+    ///     while let Some(row) = results.next_row().await? {
+    ///         println!("Result 2: {:?}", row);
+    ///     }
+    /// }
+    /// ```
+    pub async fn query_multiple<'a>(
+        &'a mut self,
+        sql: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<MultiResultStream<'a>> {
+        tracing::debug!(
+            sql = sql,
+            params_count = params.len(),
+            "executing multi-result query"
+        );
+
+        if params.is_empty() {
+            // Simple batch without parameters - use SQL batch
+            self.send_sql_batch(sql).await?;
+        } else {
+            // Parameterized query - use sp_executesql via RPC
+            let rpc_params = Self::convert_params(params)?;
+            let rpc = RpcRequest::execute_sql(sql, rpc_params);
+            self.send_rpc(&rpc).await?;
+        }
+
+        // Read all result sets
+        let result_sets = self.read_multi_result_response().await?;
+        Ok(MultiResultStream::new(result_sets))
+    }
+
+    /// Read multiple result sets from a batch response.
+    async fn read_multi_result_response(&mut self) -> Result<Vec<crate::stream::ResultSet>> {
+        let connection = self
+            .connection
+            .as_mut()
+            .ok_or_else(|| Error::ConnectionClosed)?;
+
+        let message = match connection {
+            ConnectionHandle::Tls(conn) => conn
+                .read_message()
+                .await
+                .map_err(|e| Error::Protocol(e.to_string()))?,
+            ConnectionHandle::TlsPrelogin(conn) => conn
+                .read_message()
+                .await
+                .map_err(|e| Error::Protocol(e.to_string()))?,
+            ConnectionHandle::Plain(conn) => conn
+                .read_message()
+                .await
+                .map_err(|e| Error::Protocol(e.to_string()))?,
+        }
+        .ok_or_else(|| Error::ConnectionClosed)?;
+
+        let mut parser = TokenParser::new(message.payload);
+        let mut result_sets: Vec<crate::stream::ResultSet> = Vec::new();
+        let mut current_columns: Vec<crate::row::Column> = Vec::new();
+        let mut current_rows: Vec<crate::row::Row> = Vec::new();
+        let mut protocol_metadata: Option<ColMetaData> = None;
+
+        loop {
+            let token = parser
+                .next_token_with_metadata(protocol_metadata.as_ref())
+                .map_err(|e| Error::Protocol(e.to_string()))?;
+
+            let Some(token) = token else {
+                break;
+            };
+
+            match token {
+                Token::ColMetaData(meta) => {
+                    // New result set starting - save the previous one if it has columns
+                    if !current_columns.is_empty() {
+                        result_sets.push(crate::stream::ResultSet::new(
+                            std::mem::take(&mut current_columns),
+                            std::mem::take(&mut current_rows),
+                        ));
+                    }
+
+                    // Parse the new column metadata
+                    current_columns = meta
+                        .columns
+                        .iter()
+                        .enumerate()
+                        .map(|(i, col)| {
+                            let type_name = format!("{:?}", col.type_id);
+                            let mut column = crate::row::Column::new(&col.name, i, type_name)
+                                .with_nullable(col.flags & 0x01 != 0);
+
+                            if let Some(max_len) = col.type_info.max_length {
+                                column = column.with_max_length(max_len);
+                            }
+                            if let (Some(prec), Some(scale)) =
+                                (col.type_info.precision, col.type_info.scale)
+                            {
+                                column = column.with_precision_scale(prec, scale);
+                            }
+                            column
+                        })
+                        .collect();
+
+                    tracing::debug!(
+                        columns = current_columns.len(),
+                        result_set = result_sets.len(),
+                        "received column metadata for result set"
+                    );
+                    protocol_metadata = Some(meta);
+                }
+                Token::Row(raw_row) => {
+                    if let Some(ref meta) = protocol_metadata {
+                        let row = Self::convert_raw_row(&raw_row, meta, &current_columns)?;
+                        current_rows.push(row);
+                    }
+                }
+                Token::NbcRow(nbc_row) => {
+                    if let Some(ref meta) = protocol_metadata {
+                        let row = Self::convert_nbc_row(&nbc_row, meta, &current_columns)?;
+                        current_rows.push(row);
+                    }
+                }
+                Token::Error(err) => {
+                    return Err(Error::Server {
+                        number: err.number,
+                        state: err.state,
+                        class: err.class,
+                        message: err.message.clone(),
+                        server: if err.server.is_empty() {
+                            None
+                        } else {
+                            Some(err.server.clone())
+                        },
+                        procedure: if err.procedure.is_empty() {
+                            None
+                        } else {
+                            Some(err.procedure.clone())
+                        },
+                        line: err.line as u32,
+                    });
+                }
+                Token::Done(done) => {
+                    if done.status.error {
+                        return Err(Error::Query("query failed".to_string()));
+                    }
+
+                    // Save the current result set if we have columns
+                    if !current_columns.is_empty() {
+                        result_sets.push(crate::stream::ResultSet::new(
+                            std::mem::take(&mut current_columns),
+                            std::mem::take(&mut current_rows),
+                        ));
+                        protocol_metadata = None;
+                    }
+
+                    // Check if there are more result sets
+                    if !done.status.more {
+                        tracing::debug!(
+                            result_sets = result_sets.len(),
+                            "all result sets parsed"
+                        );
+                        break;
+                    }
+                }
+                Token::DoneInProc(done) => {
+                    if done.status.error {
+                        return Err(Error::Query("query failed".to_string()));
+                    }
+
+                    // Save the current result set if we have columns (within stored proc)
+                    if !current_columns.is_empty() {
+                        result_sets.push(crate::stream::ResultSet::new(
+                            std::mem::take(&mut current_columns),
+                            std::mem::take(&mut current_rows),
+                        ));
+                        protocol_metadata = None;
+                    }
+
+                    // DoneInProc may indicate more results within the batch
+                    if !done.status.more {
+                        // No more results from this statement, but batch may continue
+                    }
+                }
+                Token::DoneProc(done) => {
+                    if done.status.error {
+                        return Err(Error::Query("query failed".to_string()));
+                    }
+                    // DoneProc marks end of stored procedure, not necessarily end of results
+                }
+                Token::Info(info) => {
+                    tracing::debug!(
+                        number = info.number,
+                        message = %info.message,
+                        "server info message"
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        // Don't forget any remaining result set that wasn't followed by Done
+        if !current_columns.is_empty() {
+            result_sets.push(crate::stream::ResultSet::new(
+                current_columns,
+                current_rows,
+            ));
+        }
+
+        Ok(result_sets)
+    }
+
     /// Execute a query that doesn't return rows.
     ///
     /// Returns the number of affected rows.
@@ -1273,6 +2267,9 @@ impl Client<Ready> {
     /// Begin a transaction.
     ///
     /// This transitions the client from `Ready` to `InTransaction` state.
+    /// Per MS-TDS spec, the server returns a transaction descriptor in the
+    /// BeginTransaction EnvChange token that must be included in subsequent
+    /// ALL_HEADERS sections.
     pub async fn begin_transaction(mut self) -> Result<Client<InTransaction>> {
         tracing::debug!("beginning transaction");
 
@@ -1281,10 +2278,10 @@ impl Client<Ready> {
         #[cfg(feature = "otel")]
         let mut span = instrumentation.transaction_span("BEGIN");
 
-        // Execute BEGIN TRANSACTION
+        // Execute BEGIN TRANSACTION and extract the transaction descriptor
         let result = async {
             self.send_sql_batch("BEGIN TRANSACTION").await?;
-            self.read_execute_result().await
+            self.read_transaction_begin_result().await
         }
         .await;
 
@@ -1298,7 +2295,7 @@ impl Client<Ready> {
         #[cfg(feature = "otel")]
         drop(span);
 
-        result?;
+        let transaction_descriptor = result?;
 
         Ok(Client {
             config: self.config,
@@ -1307,6 +2304,70 @@ impl Client<Ready> {
             server_version: self.server_version,
             current_database: self.current_database,
             statement_cache: self.statement_cache,
+            transaction_descriptor, // Store the descriptor from server
+            #[cfg(feature = "otel")]
+            instrumentation: self.instrumentation,
+        })
+    }
+
+    /// Begin a transaction with a specific isolation level.
+    ///
+    /// This transitions the client from `Ready` to `InTransaction` state
+    /// with the specified isolation level.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use mssql_client::IsolationLevel;
+    ///
+    /// let tx = client.begin_transaction_with_isolation(IsolationLevel::Serializable).await?;
+    /// // All operations in this transaction use SERIALIZABLE isolation
+    /// tx.commit().await?;
+    /// ```
+    pub async fn begin_transaction_with_isolation(
+        mut self,
+        isolation_level: crate::transaction::IsolationLevel,
+    ) -> Result<Client<InTransaction>> {
+        tracing::debug!(
+            isolation_level = %isolation_level.name(),
+            "beginning transaction with isolation level"
+        );
+
+        #[cfg(feature = "otel")]
+        let instrumentation = self.instrumentation.clone();
+        #[cfg(feature = "otel")]
+        let mut span = instrumentation.transaction_span("BEGIN");
+
+        // First set the isolation level
+        let result = async {
+            self.send_sql_batch(isolation_level.as_sql()).await?;
+            self.read_execute_result().await?;
+
+            // Then begin the transaction
+            self.send_sql_batch("BEGIN TRANSACTION").await?;
+            self.read_transaction_begin_result().await
+        }
+        .await;
+
+        #[cfg(feature = "otel")]
+        match &result {
+            Ok(_) => InstrumentationContext::record_success(&mut span, None),
+            Err(e) => InstrumentationContext::record_error(&mut span, e),
+        }
+
+        #[cfg(feature = "otel")]
+        drop(span);
+
+        let transaction_descriptor = result?;
+
+        Ok(Client {
+            config: self.config,
+            _state: PhantomData,
+            connection: self.connection,
+            server_version: self.server_version,
+            current_database: self.current_database,
+            statement_cache: self.statement_cache,
+            transaction_descriptor,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
         })
@@ -1484,6 +2545,7 @@ impl Client<InTransaction> {
             server_version: self.server_version,
             current_database: self.current_database,
             statement_cache: self.statement_cache,
+            transaction_descriptor: 0, // Reset to auto-commit mode
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
         })
@@ -1526,6 +2588,7 @@ impl Client<InTransaction> {
             server_version: self.server_version,
             current_database: self.current_database,
             statement_cache: self.statement_cache,
+            transaction_descriptor: 0, // Reset to auto-commit mode
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
         })
