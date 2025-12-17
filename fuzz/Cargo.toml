@@ -23,6 +23,10 @@ path = "../crates/tds-protocol"
 path = "../crates/mssql-client"
 features = ["default"]
 
+[dependencies.mssql-types]
+path = "../crates/mssql-types"
+features = ["default"]
+
 [[bin]]
 name = "parse_packet"
 path = "fuzz_targets/parse_packet.rs"
@@ -40,6 +44,20 @@ bench = false
 [[bin]]
 name = "connection_string"
 path = "fuzz_targets/connection_string.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_prelogin"
+path = "fuzz_targets/parse_prelogin.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decode_value"
+path = "fuzz_targets/decode_value.rs"
 test = false
 doc = false
 bench = false

@@ -488,6 +488,7 @@ dependencies = [
  "bytes",
  "libfuzzer-sys",
  "mssql-client",
+ "mssql-types",
  "tds-protocol",
 ]
 
