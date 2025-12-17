@@ -65,6 +65,43 @@ let (result1, result2) = tokio::join!(
 
 ---
 
+### Table-Valued Parameters (TVP)
+
+**Status:** Not supported
+
+**Description:** Table-Valued Parameters allow passing collections of structured data to stored procedures. The TVP encoding requires TDS-specific binary encoding (type_id 0xF3) that is not yet implemented.
+
+**Workaround:** Use one of these alternatives:
+
+1. **Temporary Tables:**
+   ```rust
+   client.execute("CREATE TABLE #UserIds (UserId INT)", &[]).await?;
+   client.execute("INSERT INTO #UserIds VALUES (1), (2), (3)", &[]).await?;
+   client.execute("EXEC ProcessUsers", &[]).await?;
+   ```
+
+2. **XML Parameters:**
+   ```rust
+   let xml = "<ids><id>1</id><id>2</id><id>3</id></ids>";
+   client.execute(
+       "SELECT * FROM Users WHERE UserId IN (SELECT x.value('.', 'INT') FROM @xml.nodes('/ids/id') AS T(x))",
+       &[&xml]
+   ).await?;
+   ```
+
+3. **JSON Parameters (SQL Server 2016+):**
+   ```rust
+   let json = "[1, 2, 3]";
+   client.execute(
+       "SELECT * FROM Users WHERE UserId IN (SELECT value FROM OPENJSON(@json))",
+       &[&json]
+   ).await?;
+   ```
+
+**Timeline:** TVP support is planned for v1.1.
+
+---
+
 ### Always Encrypted
 
 **Status:** Not supported
