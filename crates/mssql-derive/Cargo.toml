@@ -19,7 +19,8 @@ syn = { version = "2.0", features = ["full", "parsing", "extra-traits"] }
 
 [dev-dependencies]
 mssql-types = { workspace = true }
-mssql-client = { workspace = true }
+# mssql-client: Removed to break circular dev-dependency for crates.io publishing
+# Re-add after both crates are published: mssql-client = { workspace = true }
 trybuild = "1.0"
 
 [lints]

@@ -84,7 +84,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       # Publish in dependency order with waits for crates.io index propagation
-      # Independent crates (no internal dependencies)
+      # Tier 0: Independent crates (no internal dependencies)
       - name: Publish tds-protocol
         run: cargo publish -p tds-protocol --no-verify
         continue-on-error: true  # May already be published
@@ -93,15 +93,11 @@ jobs:
         run: cargo publish -p mssql-types --no-verify
         continue-on-error: true
 
-      - name: Publish mssql-derive
-        run: cargo publish -p mssql-derive --no-verify
-        continue-on-error: true
-
       # Wait for crates.io index to update
       - name: Wait for index propagation (30s)
         run: sleep 30
 
-      # Crates with single dependency
+      # Tier 1: Crates depending only on tds-protocol
       - name: Publish mssql-tls
         run: cargo publish -p mssql-tls --no-verify
         continue-on-error: true
@@ -114,24 +110,27 @@ jobs:
         run: cargo publish -p mssql-auth --no-verify
         continue-on-error: true
 
+      # Tier 2: Proc-macro crate (no internal runtime deps)
+      - name: Publish mssql-derive
+        run: cargo publish -p mssql-derive --no-verify
+        continue-on-error: true
+
       # Wait for index propagation
       - name: Wait for index propagation (30s)
         run: sleep 30
 
-      # Higher-level crates
-      - name: Publish mssql-driver-pool
-        run: cargo publish -p mssql-driver-pool --no-verify
-        continue-on-error: true
-
-      - name: Wait for index propagation (30s)
-        run: sleep 30
-
+      # Tier 3: Main client (depends on tds-protocol, mssql-tls, mssql-codec, mssql-types, mssql-auth)
       - name: Publish mssql-client
         run: cargo publish -p mssql-client --no-verify
         continue-on-error: true
 
       - name: Wait for index propagation (30s)
         run: sleep 30
+
+      # Tier 4: Crates depending on mssql-client
+      - name: Publish mssql-driver-pool
+        run: cargo publish -p mssql-driver-pool --no-verify
+        continue-on-error: true
 
       - name: Publish mssql-testing
         run: cargo publish -p mssql-testing --no-verify
