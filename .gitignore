@@ -80,3 +80,7 @@ rustfmt.toml.local
 *.bak
 *.mdf
 *.ldf
+
+# Misc
+.tmp/
+
