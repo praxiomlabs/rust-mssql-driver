@@ -49,10 +49,12 @@
 pub mod config;
 pub mod connector;
 pub mod error;
+pub mod prelogin_wrapper;
 
 pub use config::{ClientAuth, TlsConfig, TlsVersion};
 pub use connector::{default_tls_config, TlsConnector};
 pub use error::TlsError;
+pub use prelogin_wrapper::TlsPreloginWrapper;
 
 // Re-export tokio-rustls stream type for convenience
 pub use tokio_rustls::client::TlsStream;

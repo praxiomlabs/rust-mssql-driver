@@ -1,6 +1,6 @@
 //! TLS connector for establishing encrypted connections.
 
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
@@ -11,6 +11,22 @@ use tokio_rustls::TlsConnector as TokioTlsConnector;
 
 use crate::config::{TlsConfig, TlsVersion};
 use crate::error::TlsError;
+
+// =============================================================================
+// Crypto Provider Initialization
+// =============================================================================
+
+/// Ensure the ring crypto provider is installed for rustls.
+/// This is called automatically when creating a TLS connector.
+static CRYPTO_PROVIDER_INIT: Once = Once::new();
+
+fn ensure_crypto_provider() {
+    CRYPTO_PROVIDER_INIT.call_once(|| {
+        // Install the ring crypto provider as the process-wide default.
+        // This is required for rustls 0.23+ which doesn't auto-select a provider.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
 
 // =============================================================================
 // Dangerous Certificate Verifier (for TrustServerCertificate=true)
@@ -88,6 +104,9 @@ impl ServerCertVerifier for DangerousServerCertVerifier {
 /// let config = default_tls_config()?;
 /// ```
 pub fn default_tls_config() -> Result<ClientConfig, TlsError> {
+    // Ensure the crypto provider is installed before using rustls
+    ensure_crypto_provider();
+
     let root_store = RootCertStore {
         roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
     };
@@ -123,6 +142,9 @@ impl TlsConnector {
 
     /// Build the rustls client configuration.
     fn build_client_config(config: &TlsConfig) -> Result<ClientConfig, TlsError> {
+        // Ensure the crypto provider is installed before using rustls
+        ensure_crypto_provider();
+
         // Select protocol versions
         let versions: Vec<&'static rustls::SupportedProtocolVersion> =
             Self::select_versions(config);
@@ -255,6 +277,57 @@ impl TlsConnector {
             .map_err(|e| TlsError::HandshakeFailed(e.to_string()))?;
 
         tracing::debug!("TLS handshake completed successfully");
+
+        Ok(tls_stream)
+    }
+
+    /// Connect and perform TLS handshake with TDS PreLogin wrapping (TDS 7.x style).
+    ///
+    /// In TDS 7.x, the TLS handshake is wrapped inside TDS PreLogin packets.
+    /// This method handles that wrapping automatically.
+    ///
+    /// # Arguments
+    ///
+    /// * `stream` - The underlying TCP stream
+    /// * `server_name` - The server hostname for SNI and certificate validation
+    ///
+    /// # Returns
+    ///
+    /// A TLS stream wrapped around a PreLogin wrapper. After the handshake completes,
+    /// the wrapper becomes a transparent pass-through.
+    pub async fn connect_with_prelogin<S>(
+        &self,
+        stream: S,
+        server_name: &str,
+    ) -> Result<TlsStream<crate::TlsPreloginWrapper<S>>, TlsError>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        let server_name = self.config.server_name.as_deref().unwrap_or(server_name);
+
+        let dns_name = ServerName::try_from(server_name.to_string()).map_err(|_| {
+            TlsError::HostnameVerification {
+                expected: server_name.to_string(),
+                actual: "invalid DNS name".to_string(),
+            }
+        })?;
+
+        tracing::debug!(server_name = %server_name, "performing TLS handshake (PreLogin wrapped)");
+
+        // Wrap the stream in a PreLogin wrapper
+        let wrapper = crate::TlsPreloginWrapper::new(stream);
+
+        let mut tls_stream = self
+            .inner
+            .connect(dns_name, wrapper)
+            .await
+            .map_err(|e| TlsError::HandshakeFailed(e.to_string()))?;
+
+        // Mark the handshake as complete so the wrapper becomes pass-through
+        // get_mut() returns (&mut IO, &mut ClientConnection), so access .0 for the wrapper
+        tls_stream.get_mut().0.handshake_complete();
+
+        tracing::debug!("TLS handshake completed successfully (PreLogin wrapped)");
 
         Ok(tls_stream)
     }
