@@ -115,14 +115,17 @@ jobs:
         with:
           components: miri
       - name: Setup Miri
-        run: cargo miri setup
+        run: cargo +nightly miri setup
       - name: Run Miri on tds-protocol
-        run: cargo miri test -p tds-protocol
+        # Override rust-toolchain.toml to use nightly for Miri
+        run: cargo +nightly miri test -p tds-protocol
 
   semver:
     name: Semver Check
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    # Skip semver check until crates are published to crates.io
+    # Re-enable after v0.1.0 release
+    if: false && github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -172,6 +175,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
+      - name: Install Kerberos headers
+        run: sudo apt-get update && sudo apt-get install -y libkrb5-dev
       - name: Wait for SQL Server
         run: |
           for i in {1..30}; do
@@ -183,7 +188,8 @@ jobs:
             sleep 2
           done
       - name: Run integration tests
-        run: cargo nextest run --features integration-tests
+        # Run with all features to test full functionality
+        run: cargo nextest run --all-features
         env:
           MSSQL_TEST_HOST: localhost
           MSSQL_TEST_PORT: 1433
