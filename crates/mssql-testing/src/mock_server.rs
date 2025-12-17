@@ -628,35 +628,45 @@ async fn write_packet(
 /// Send PRELOGIN response.
 async fn send_prelogin_response(stream: &mut TcpStream) -> Result<()> {
     // PRELOGIN response format:
-    // Option tokens followed by data
-    // VERSION (0x00), ENCRYPTION (0x01), INSTOPT (0x02), THREADID (0x03), MARS (0x04)
+    // Option tokens (5 bytes each: type + offset + length) followed by data
+    // VERSION (0x00), ENCRYPTION (0x01)
+    //
+    // Options section layout:
+    //   VERSION token:    1 + 2 + 2 = 5 bytes
+    //   ENCRYPTION token: 1 + 2 + 2 = 5 bytes
+    //   Terminator:       1 byte
+    //   Total header:     11 bytes
+    //
+    // Data section layout:
+    //   VERSION data at offset 11: 6 bytes
+    //   ENCRYPTION data at offset 17: 1 byte
 
     let mut response = BytesMut::new();
 
-    // Option header area
+    // Option header area (offsets are big-endian per TDS spec)
     // VERSION token
     response.put_u8(0x00); // VERSION
-    response.put_u16(6);   // offset
+    response.put_u16(11);  // offset (header size)
     response.put_u16(6);   // length
 
     // ENCRYPTION token
     response.put_u8(0x01); // ENCRYPTION
-    response.put_u16(12);  // offset
+    response.put_u16(17);  // offset (11 + 6)
     response.put_u16(1);   // length
 
     // Terminator
     response.put_u8(0xFF);
 
-    // VERSION data (at offset 6)
+    // VERSION data (at offset 11)
     response.put_u8(16);   // major version
     response.put_u8(0);    // minor version
     response.put_u16_le(0); // build number
     response.put_u16_le(0); // sub-build number
 
-    // ENCRYPTION data (at offset 12)
-    response.put_u8(0x00); // ENCRYPT_OFF
+    // ENCRYPTION data (at offset 17)
+    response.put_u8(0x00); // ENCRYPT_OFF (no encryption)
 
-    write_packet(stream, PacketType::TabularResult, &response).await
+    write_packet(stream, PacketType::PreLogin, &response).await
 }
 
 /// Send LOGIN7 response (LoginAck + EnvChange + Done).

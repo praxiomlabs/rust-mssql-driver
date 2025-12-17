@@ -56,6 +56,8 @@ mssql-driver-pool = { workspace = true }
 tracing-subscriber = "0.3"
 rust_decimal = { workspace = true }
 criterion = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
 
 [[example]]
 name = "basic"
