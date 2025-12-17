@@ -28,6 +28,11 @@ serde_json = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "types"
+harness = false
 
 [lints]
 workspace = true

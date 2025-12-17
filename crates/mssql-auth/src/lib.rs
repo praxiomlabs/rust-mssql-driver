@@ -43,8 +43,8 @@
 //! mssql-auth = { version = "0.1", features = ["zeroize"] }
 //! ```
 //!
-//! This provides [`SecureCredentials`] and [`SecretString`] types that
-//! automatically zero sensitive data from memory when dropped.
+//! This enables secure credential handling that automatically zeroes
+//! sensitive data from memory when dropped.
 //!
 //! ## Example
 //!
