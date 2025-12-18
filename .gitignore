@@ -48,6 +48,7 @@ secrets.json
 # Test artifacts
 *.log
 /coverage/
+lcov.info
 **/*.profraw
 **/*.profdata
 
