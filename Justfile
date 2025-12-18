@@ -182,13 +182,87 @@ setup-linux:
     printf '{{green}}[OK]{{reset}}   libkrb5-dev installed\n'
 
 [group('setup')]
-[doc("Install recommended cargo extensions")]
+[doc("Install recommended cargo extensions (version-pinned for Rust 1.85)")]
 setup-tools:
     #!/usr/bin/env bash
     set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Installing recommended cargo extensions...\n'
-    cargo install cargo-nextest cargo-llvm-cov cargo-audit cargo-deny cargo-machete cargo-semver-checks
+    printf '{{cyan}}[INFO]{{reset}} Note: Using version pins compatible with Rust 1.85\n'
+
+    # Core testing and coverage
+    cargo install cargo-nextest@0.9.100 --locked
+    cargo install cargo-llvm-cov --locked
+
+    # Security and dependency auditing
+    cargo install cargo-audit --locked
+    cargo install cargo-deny --locked
+
+    # Code quality
+    cargo install cargo-machete@0.7.0 --locked
+    cargo install cargo-semver-checks@0.42.0 --locked
+
+    # Development workflow
+    cargo install cargo-watch --locked
+
     printf '{{green}}[OK]{{reset}}   Tools installed\n'
+
+[group('setup')]
+[doc("Install git pre-commit hooks for code quality")]
+setup-hooks:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '{{cyan}}[INFO]{{reset}} Installing git pre-commit hooks...\n'
+
+    # Create hooks directory if it doesn't exist
+    mkdir -p .git/hooks
+
+    # Create pre-commit hook using printf to avoid heredoc parsing issues
+    printf '%s\n' '#!/usr/bin/env bash' > .git/hooks/pre-commit
+    printf '%s\n' 'set -euo pipefail' >> .git/hooks/pre-commit
+    printf '%s\n' '' >> .git/hooks/pre-commit
+    printf '%s\n' 'echo "Running pre-commit checks..."' >> .git/hooks/pre-commit
+    printf '%s\n' '' >> .git/hooks/pre-commit
+    printf '%s\n' '# Check formatting' >> .git/hooks/pre-commit
+    printf '%s\n' 'if ! cargo fmt --all -- --check 2>/dev/null; then' >> .git/hooks/pre-commit
+    printf '%s\n' '    echo "❌ Formatting check failed. Run '\''cargo fmt --all'\'' to fix."' >> .git/hooks/pre-commit
+    printf '%s\n' '    exit 1' >> .git/hooks/pre-commit
+    printf '%s\n' 'fi' >> .git/hooks/pre-commit
+    printf '%s\n' 'echo "✓ Format check passed"' >> .git/hooks/pre-commit
+    printf '%s\n' '' >> .git/hooks/pre-commit
+    printf '%s\n' '# Run clippy (default features for speed)' >> .git/hooks/pre-commit
+    printf '%s\n' 'if ! cargo clippy --workspace --all-targets -- -D warnings 2>/dev/null; then' >> .git/hooks/pre-commit
+    printf '%s\n' '    echo "❌ Clippy check failed. Fix the warnings above."' >> .git/hooks/pre-commit
+    printf '%s\n' '    exit 1' >> .git/hooks/pre-commit
+    printf '%s\n' 'fi' >> .git/hooks/pre-commit
+    printf '%s\n' 'echo "✓ Clippy check passed"' >> .git/hooks/pre-commit
+    printf '%s\n' '' >> .git/hooks/pre-commit
+    printf '%s\n' '# Quick type check' >> .git/hooks/pre-commit
+    printf '%s\n' 'if ! cargo check --workspace 2>/dev/null; then' >> .git/hooks/pre-commit
+    printf '%s\n' '    echo "❌ Type check failed."' >> .git/hooks/pre-commit
+    printf '%s\n' '    exit 1' >> .git/hooks/pre-commit
+    printf '%s\n' 'fi' >> .git/hooks/pre-commit
+    printf '%s\n' 'echo "✓ Type check passed"' >> .git/hooks/pre-commit
+    printf '%s\n' '' >> .git/hooks/pre-commit
+    printf '%s\n' 'echo "✅ All pre-commit checks passed!"' >> .git/hooks/pre-commit
+
+    chmod +x .git/hooks/pre-commit
+    printf '{{green}}[OK]{{reset}}   Pre-commit hook installed\n'
+    printf '{{cyan}}[INFO]{{reset}} Hook will run: fmt-check, clippy, check\n'
+
+[group('setup')]
+[doc("Complete development environment setup")]
+setup-all: setup setup-tools setup-hooks
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '\n{{bold}}{{green}}══════ Development Environment Complete ══════{{reset}}\n\n'
+    printf 'All tools installed and hooks configured.\n'
+    printf 'Run {{cyan}}just ci{{reset}} to verify everything works.\n\n'
+    if [[ "{{platform}}" == "linux" ]]; then
+        if ! pkg-config --exists krb5-gssapi 2>/dev/null; then
+            printf '{{yellow}}[NOTE]{{reset}} For --all-features support, run:\n'
+            printf '       sudo apt-get install libkrb5-dev\n\n'
+        fi
+    fi
 
 # ============================================================================
 # CORE BUILD RECIPES
@@ -463,6 +537,36 @@ nextest-all:
     printf '\n{{bold}}{{blue}}══════ Running Tests (nextest, all features) ══════{{reset}}\n\n'
     {{cargo}} nextest run --workspace --all-features -j {{jobs}}
     printf '{{green}}[OK]{{reset}}   All tests passed\n'
+
+[group('test')]
+[doc("Run tests with cargo-nextest and locked dependencies (matches CI)")]
+nextest-locked:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '\n{{bold}}{{blue}}══════ Running Tests (nextest, locked) ══════{{reset}}\n\n'
+    {{cargo}} nextest run --workspace --locked -j {{jobs}}
+    printf '{{green}}[OK]{{reset}}   All tests passed\n'
+
+[group('test')]
+[doc("Run tests with cargo-nextest, ALL features, and locked dependencies (matches CI)")]
+nextest-locked-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '\n{{bold}}{{blue}}══════ Running Tests (nextest, locked, all features) ══════{{reset}}\n\n'
+    {{cargo}} nextest run --workspace --all-features --locked -j {{jobs}}
+    printf '{{green}}[OK]{{reset}}   All tests passed\n'
+
+[group('test')]
+[doc("Run Miri tests for unsafe code detection (requires nightly)")]
+miri:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '\n{{bold}}{{blue}}══════ Running Miri Tests ══════{{reset}}\n\n'
+    printf '{{cyan}}[INFO]{{reset}} Setting up Miri...\n'
+    cargo +nightly miri setup
+    printf '{{cyan}}[INFO]{{reset}} Running Miri on tds-protocol...\n'
+    cargo +nightly miri test -p tds-protocol
+    printf '{{green}}[OK]{{reset}}   Miri tests passed\n'
 
 # ============================================================================
 # CODE QUALITY RECIPES
@@ -783,12 +887,21 @@ fuzz-all time="30":
 # ============================================================================
 
 [group('examples')]
-[doc("Build all examples")]
+[doc("Build all examples (default features)")]
 examples:
     #!/usr/bin/env bash
     set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Building all examples...\n'
-    {{cargo}} build -p mssql-client --examples
+    {{cargo}} build --examples
+    printf '{{green}}[OK]{{reset}}   Examples built\n'
+
+[group('examples')]
+[doc("Build all examples with ALL features (matches CI)")]
+examples-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '{{cyan}}[INFO]{{reset}} Building all examples (all features)...\n'
+    {{cargo}} build --examples --all-features
     printf '{{green}}[OK]{{reset}}   Examples built\n'
 
 [group('examples')]
@@ -995,7 +1108,7 @@ version-sync:
 
 [group('ci')]
 [doc("Standard CI pipeline (default features, fast local checks)")]
-ci: fmt-check clippy test-locked doc-check
+ci: fmt-check clippy nextest-locked doc-check examples
     #!/usr/bin/env bash
     set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ CI Pipeline Complete ══════{{reset}}\n\n'
@@ -1003,7 +1116,7 @@ ci: fmt-check clippy test-locked doc-check
 
 [group('ci')]
 [doc("CI pipeline with ALL features (matches GitHub Actions on Linux)")]
-ci-all: fmt-check clippy-all test-locked-all doc-check-all
+ci-all: fmt-check clippy-all nextest-locked-all doc-check-all examples-all
     #!/usr/bin/env bash
     set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ CI Pipeline Complete (all features) ══════{{reset}}\n\n'
@@ -1015,12 +1128,12 @@ ci-fast: fmt-check clippy check
     @printf '{{green}}[OK]{{reset}}   Fast CI checks passed\n'
 
 [group('ci')]
-[doc("Full CI with coverage and security audit")]
+[doc("Full CI with coverage and security audit (matches GitHub Actions)")]
 ci-full: ci coverage-lcov audit deny
     @printf '{{green}}[OK]{{reset}}   Full CI pipeline passed\n'
 
 [group('ci')]
-[doc("Full CI with ALL features")]
+[doc("Full CI with ALL features and security audit (matches GitHub Actions)")]
 ci-full-all: ci-all coverage-lcov-all audit deny
     @printf '{{green}}[OK]{{reset}}   Full CI pipeline passed\n'
 

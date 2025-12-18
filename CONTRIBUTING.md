@@ -27,66 +27,197 @@ This project follows the [Rust Code of Conduct](https://www.rust-lang.org/polici
 
 ## Development Setup
 
+### Quick Start (Recommended)
+
+The fastest way to get started:
+
+```bash
+# Clone and enter the repository
+git clone https://github.com/praxiomlabs/rust-mssql-driver.git
+cd rust-mssql-driver
+
+# Complete setup: check environment, install tools, configure hooks
+just setup-all
+
+# Verify everything works
+just ci
+```
+
 ### Prerequisites
 
-- Rust 1.85+ (2024 Edition)
-- Docker (for integration tests)
-- SQL Server instance (or use Docker)
+| Tool | Version | Required | Notes |
+|------|---------|----------|-------|
+| Rust | 1.85+ | Yes | 2024 Edition |
+| Just | 1.23+ | Yes | Command runner |
+| jq | any | Yes | JSON parsing |
+| Docker | any | No | For integration tests |
 
-#### Platform-Specific Requirements
+### Step-by-Step Setup
 
-**Linux (with integrated authentication):**
+#### 1. Check Your Environment
+
+```bash
+just setup
+```
+
+This shows what's installed and what's missing.
+
+#### 2. Install Cargo Extensions
+
+```bash
+just setup-tools
+```
+
+Installs version-pinned tools compatible with Rust 1.85:
+- `cargo-nextest` - Fast test runner
+- `cargo-llvm-cov` - Code coverage
+- `cargo-audit` - Security auditing
+- `cargo-deny` - License/dependency checking
+- `cargo-machete` - Unused dependency detection
+- `cargo-semver-checks` - API compatibility
+- `cargo-watch` - File watching
+
+#### 3. Install Git Hooks
+
+```bash
+just setup-hooks
+```
+
+Installs a pre-commit hook that runs:
+- Format check (`cargo fmt --check`)
+- Clippy lints
+- Type check (`cargo check`)
+
+#### 4. Platform-Specific: Linux Kerberos Support
+
+For `--all-features` (integrated authentication):
+
 ```bash
 # Debian/Ubuntu
 sudo apt-get install libkrb5-dev
 
 # RHEL/Fedora
 sudo dnf install krb5-devel
+
+# Or use the just recipe
+just setup-linux
 ```
 
-The `integrated-auth` feature (Kerberos/SPNEGO) requires `libkrb5-dev` headers and is **Linux-only**.
-On macOS and Windows, use default features (omit `--all-features`).
+The `integrated-auth` feature requires `libkrb5-dev` headers and is **Linux-only**.
 
-The Justfile recipes use `--all-features` by default and require Linux with Kerberos headers installed. For cross-platform development without integrated auth, run cargo commands directly without `--all-features`.
+### Justfile Recipe Naming Convention
+
+This project uses a dual-recipe pattern to handle platform differences:
+
+| Recipe | Features | Platform | Notes |
+|--------|----------|----------|-------|
+| `just build` | Default | Works everywhere | Day-to-day development |
+| `just build-all` | All features | Needs libkrb5-dev on Linux | Full build |
+| `just test` | Default | Works everywhere | Uses cargo test |
+| `just test-all` | All features | Needs libkrb5-dev on Linux | Uses cargo test |
+| `just nextest` | Default | Works everywhere | Uses cargo-nextest (faster) |
+| `just nextest-all` | All features | Needs libkrb5-dev on Linux | Uses cargo-nextest |
+| `just ci` | Default | Works everywhere | fmt + clippy + nextest + docs + examples |
+| `just ci-all` | All features | Matches GitHub Actions | Full CI pipeline |
+
+**Use base recipes for day-to-day development.** Use `-all` variants when you need to test Kerberos integration or match CI exactly.
+
+**CI Alignment:** The `just ci-all` recipe mirrors GitHub Actions exactly:
+- Uses `cargo-nextest` for tests (same as CI)
+- Includes `--locked` flag (ensures Cargo.lock is respected)
+- Builds examples with `--all-features`
+- Runs documentation checks with `-D warnings`
 
 ### Building
 
 ```bash
-# Build all crates
-cargo build --workspace
+# Build (default features - works everywhere)
+just build
 
-# Build with all features
-cargo build --workspace --all-features
+# Build with all features (requires libkrb5-dev on Linux)
+just build-all
 
-# Run the build automation
-cargo xtask build
+# Build in release mode
+just release
 ```
 
 ### Running Tests
 
 ```bash
-# Unit tests only
-cargo test --workspace
+# Unit tests with cargo test (default features)
+just test
 
-# Integration tests (requires SQL Server)
-cargo xtask test
+# Unit tests with cargo test (all features)
+just test-all
 
-# With coverage
-cargo xtask coverage
+# Fast parallel tests with cargo-nextest (recommended)
+just nextest
+
+# Fast parallel tests with all features
+just nextest-all
+
+# Tests with locked dependencies (matches CI)
+just nextest-locked
+just nextest-locked-all
+
+# Run specific crate tests
+just test-crate mssql-client
+
+# Run Miri tests for unsafe code detection (requires nightly)
+just miri
+```
+
+### Code Quality
+
+```bash
+# Format code
+just fmt
+
+# Check formatting
+just fmt-check
+
+# Run clippy
+just clippy
+
+# Full CI pipeline (matches what runs on PRs)
+just ci
 ```
 
 ### Setting Up SQL Server for Testing
 
 ```bash
-# Start SQL Server in Docker
-docker run -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=YourStrong@Passw0rd" \
-    -p 1433:1433 --name mssql-test \
-    -d mcr.microsoft.com/mssql/server:2022-latest
+# Start SQL Server in Docker (recommended)
+just sql-server-start
 
-# Set environment variables
+# Or start all versions (2017, 2019, 2022) for compatibility testing
+just sql-server-all
+
+# Check container status
+just sql-server-status
+
+# Stop containers when done
+just sql-server-stop
+```
+
+Environment variables (set automatically by just recipes):
+```bash
 export MSSQL_HOST=localhost
+export MSSQL_PORT=1433
 export MSSQL_USER=sa
 export MSSQL_PASSWORD=YourStrong@Passw0rd
+```
+
+### Watch Mode (Auto-Rebuild on Save)
+
+```bash
+# Re-run tests on file changes
+just watch
+
+# Re-run type check on file changes
+just watch-check
+
+# Re-run clippy on file changes
+just watch-clippy
 ```
 
 ## Making Changes
