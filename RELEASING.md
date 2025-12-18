@@ -10,48 +10,132 @@ We follow [Semantic Versioning 2.0.0](https://semver.org/):
 - Pre-1.0: Minor bumps may contain breaking changes
 - Post-1.0: Strictly follow semver
 
-## Crate Publication Order
+## Crate Dependency Graph
 
-Due to dependencies between crates, they must be published in a specific order:
+Understanding the dependency structure is critical for correct publish order.
 
 ```
-1. tds-protocol        (no internal deps)
-2. mssql-tls           (no internal deps)
-3. mssql-codec         (depends on tds-protocol)
-4. mssql-types         (depends on tds-protocol)
-5. mssql-auth          (no internal deps)
-6. mssql-derive        (no internal deps)
-7. mssql-client        (depends on all above)
-8. mssql-driver-pool   (depends on mssql-client)
-9. mssql-testing       (depends on mssql-client)
+Tier 0 (Independent - no internal deps):
+├── tds-protocol
+└── mssql-types
+
+Tier 1 (Depend on Tier 0):
+├── mssql-tls      → tds-protocol
+├── mssql-codec    → tds-protocol
+└── mssql-auth     → tds-protocol
+
+Tier 2 (Proc-macro, no internal runtime deps):
+└── mssql-derive   (dev-dep on mssql-client, but NOT runtime)
+
+Tier 3 (Main client):
+└── mssql-client   → tds-protocol, mssql-tls, mssql-codec, mssql-types, mssql-auth
+                     (dev-dep on mssql-derive, mssql-driver-pool)
+
+Tier 4 (Depend on mssql-client):
+├── mssql-driver-pool → mssql-client
+└── mssql-testing     → mssql-client
 ```
+
+### Circular Dev-Dependencies
+
+**CRITICAL**: The following circular dev-dependencies exist and must be handled:
+
+- `mssql-derive` ↔ `mssql-client` (both have each other as dev-deps)
+- `mssql-client` → `mssql-driver-pool` (dev-dep, but pool depends on client at runtime)
+
+For **initial releases** or when these crates haven't been published:
+1. Temporarily comment out circular dev-dependencies
+2. Publish in order
+3. Restore dev-dependencies after all crates are published
+
+---
 
 ## Pre-Release Checklist
 
-Before starting the release process:
+### Phase 1: Code Quality Validation
 
-### Code Quality
-- [ ] All tests pass: `cargo test --workspace --all-features`
-- [ ] No clippy warnings: `cargo clippy --workspace --all-features`
-- [ ] Code is formatted: `cargo fmt --all --check`
-- [ ] No dependency issues: `cargo deny check`
+```bash
+# Run all checks (requires libkrb5-dev on Linux for --all-features)
+cargo fmt --all --check
+cargo clippy --workspace --all-features -- -D warnings
+cargo test --workspace --all-features
+cargo doc --workspace --all-features --no-deps
+```
 
-### Documentation
-- [ ] CHANGELOG.md is updated with all changes
-- [ ] README.md examples are tested and working
-- [ ] API documentation is complete: `cargo doc --workspace --no-deps`
-- [ ] Breaking changes have migration guides
+- [ ] All formatting passes
+- [ ] No clippy warnings
+- [ ] All tests pass
+- [ ] Documentation builds without warnings
 
-### Version Consistency
-- [ ] `workspace.package.version` in root `Cargo.toml` is correct
-- [ ] All crate versions match (they inherit from workspace)
-- [ ] CHANGELOG.md date is set to release date
-- [ ] Git tag matches the version number
+### Phase 2: Security & Dependency Audit
 
-### Final Verification
-- [ ] CI pipeline passes on main branch
-- [ ] Integration tests pass against SQL Server 2019 and 2022
-- [ ] Examples run successfully
+```bash
+cargo deny check
+cargo audit
+```
+
+- [ ] No license violations
+- [ ] No banned dependencies
+- [ ] No unaddressed security advisories (or documented exceptions in `.cargo/audit.toml`)
+
+### Phase 3: Dependency Graph Validation
+
+```bash
+# Verify publish order by checking what each crate depends on
+cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | "\(.name): \(.dependencies | map(.name) | join(", "))"'
+
+# Check for circular dependencies in dev-dependencies
+# Manual inspection required - see "Circular Dev-Dependencies" section above
+```
+
+- [ ] Dependency graph matches documented tiers
+- [ ] No unexpected circular dependencies
+- [ ] All internal dependencies use `workspace = true`
+
+### Phase 4: Version & Metadata Verification
+
+```bash
+# Check version consistency
+cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name | startswith("mssql") or . == "tds-protocol") | "\(.name): \(.version)"'
+
+# Verify crates.io required metadata
+cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "mssql-client") | {name, version, description, license, repository, keywords, categories}'
+```
+
+- [ ] All crate versions match workspace version
+- [ ] Repository URL is correct (`praxiomlabs/rust-mssql-driver`)
+- [ ] All crates have description, license, keywords, categories
+- [ ] README version references match release version
+
+### Phase 5: Documentation Review
+
+- [ ] CHANGELOG.md has entry for this version with correct date
+- [ ] CHANGELOG.md links at bottom are correct
+- [ ] README.md examples are accurate
+- [ ] API documentation is complete
+- [ ] Breaking changes have migration notes
+
+### Phase 6: CI Verification
+
+- [ ] All CI jobs pass on main branch
+- [ ] Release workflow is correctly configured
+- [ ] `CARGO_REGISTRY_TOKEN` secret is set in GitHub
+
+### Phase 7: Dry-Run Publish Test
+
+```bash
+# Test independent crates can be packaged
+cargo publish -p tds-protocol --dry-run
+cargo publish -p mssql-types --dry-run
+cargo publish -p mssql-derive --dry-run
+
+# Note: Dependent crates cannot be dry-run tested until dependencies are published
+```
+
+- [ ] Independent crates package successfully
+- [ ] No packaging errors
+
+---
 
 ## Release Steps
 
@@ -81,7 +165,7 @@ All crates inherit this version automatically.
 - ...
 
 [Unreleased]: https://github.com/praxiomlabs/rust-mssql-driver/compare/vX.Y.Z...HEAD
-[X.Y.Z]: https://github.com/praxiomlabs/rust-mssql-driver/compare/vX.Y-1.Z...vX.Y.Z
+[X.Y.Z]: https://github.com/praxiomlabs/rust-mssql-driver/compare/vPREV...vX.Y.Z
 ```
 
 ### 3. Create Release Commit
@@ -89,194 +173,234 @@ All crates inherit this version automatically.
 ```bash
 git add Cargo.toml CHANGELOG.md
 git commit -m "chore: release version X.Y.Z"
-```
-
-### 4. Create Git Tag
-
-```bash
-git tag -a vX.Y.Z -m "Release version X.Y.Z"
-```
-
-### 5. Push to Remote
-
-```bash
 git push origin main
+```
+
+### 4. Create and Push Tag
+
+```bash
+git tag v.X.Y.Z
 git push origin vX.Y.Z
 ```
 
-### 6. Publish to crates.io
+This triggers the automated release workflow.
 
-Publish crates in dependency order:
+### 5. Monitor Release Workflow
+
+Watch the GitHub Actions release workflow:
+- https://github.com/praxiomlabs/rust-mssql-driver/actions
+
+If the workflow fails, you may need to publish manually (see Manual Publishing below).
+
+---
+
+## Manual Publishing
+
+If automated publishing fails, publish manually in this exact order:
 
 ```bash
-# Verify dry-run first
-cargo publish -p tds-protocol --dry-run
-
-# Publish each crate (wait for previous to propagate)
+# Tier 0: Independent crates
 cargo publish -p tds-protocol
-sleep 30
-cargo publish -p mssql-tls
-sleep 30
-cargo publish -p mssql-codec
-sleep 30
 cargo publish -p mssql-types
-sleep 30
+sleep 30  # Wait for crates.io index propagation
+
+# Tier 1: Crates depending on tds-protocol
+cargo publish -p mssql-tls
+cargo publish -p mssql-codec
 cargo publish -p mssql-auth
 sleep 30
+
+# Tier 2: Proc-macro crate
 cargo publish -p mssql-derive
 sleep 30
+
+# Tier 3: Main client
 cargo publish -p mssql-client
 sleep 30
+
+# Tier 4: Crates depending on mssql-client
 cargo publish -p mssql-driver-pool
-# Note: mssql-testing is typically not published (test infrastructure only)
+cargo publish -p mssql-testing
 ```
 
-### 7. Create GitHub Release
+### Handling Circular Dev-Dependencies (First-Time Publish)
 
-1. Go to GitHub Releases
-2. Create new release from tag `vX.Y.Z`
-3. Use CHANGELOG content for release notes
-4. Attach any relevant assets
+If `mssql-derive` or `mssql-client` fail due to circular dev-dependencies:
 
-### 8. Announce Release
+1. **Temporarily remove circular dev-deps:**
 
-- Update documentation site (if applicable)
-- Post to relevant forums/channels
-- Update project status if needed
+   In `crates/mssql-derive/Cargo.toml`:
+   ```toml
+   [dev-dependencies]
+   # mssql-client = { workspace = true }  # Comment out
+   ```
 
-## Automated Release (Future)
+   In `crates/mssql-client/Cargo.toml`:
+   ```toml
+   [dev-dependencies]
+   # mssql-derive = { workspace = true }  # Comment out
+   # mssql-driver-pool = { workspace = true }  # Comment out
+   ```
 
-We plan to automate releases using:
+2. **Publish in order** (Tier 2 → Tier 3 → Tier 4)
 
-```yaml
-# .github/workflows/release.yml
-name: Release
+3. **Restore dev-dependencies:**
+   ```bash
+   git checkout crates/mssql-derive/Cargo.toml crates/mssql-client/Cargo.toml
+   # Or manually uncomment the lines
+   git add -A && git commit -m "chore: restore dev-dependencies after publish"
+   git push origin main
+   ```
 
-on:
-  push:
-    tags:
-      - 'v*'
+---
 
-jobs:
-  publish:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Publish crates
-        run: cargo xtask publish
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-```
+## Post-Release Verification
 
-## Hotfix Process
-
-For critical bug fixes that need immediate release:
-
-### 1. Create Hotfix Branch
+### Immediate Checks (within 5 minutes)
 
 ```bash
-git checkout -b hotfix/X.Y.Z+1 vX.Y.Z
+# Verify crates are on crates.io
+cargo search mssql-client
+
+# Verify crate is usable
+cd /tmp && mkdir test-release && cd test-release
+cargo init
+echo 'mssql-client = "X.Y.Z"' >> Cargo.toml
+cargo check
+
+# Verify GitHub release was created
+gh release view vX.Y.Z --repo praxiomlabs/rust-mssql-driver
 ```
 
-### 2. Apply Fix
+- [ ] `cargo search mssql-client` shows correct version
+- [ ] `cargo add mssql-client` works in fresh project
+- [ ] GitHub release exists with changelog content
 
-- Make minimal changes to fix the issue
-- Add regression test
-- Update CHANGELOG
-
-### 3. Bump Patch Version
-
-```toml
-version = "X.Y.Z+1"
-```
-
-### 4. Release
-
-Follow normal release steps from step 3 onwards.
-
-### 5. Merge Back
+### Delayed Checks (15-30 minutes)
 
 ```bash
-git checkout main
-git merge hotfix/X.Y.Z+1
-git push origin main
+# Check docs.rs (takes time to build)
+curl -I https://docs.rs/mssql-client/X.Y.Z
+
+# Check badges
+curl -I https://img.shields.io/crates/v/mssql-client.svg
 ```
 
-## Yanking a Release
+- [ ] docs.rs documentation is built and accessible
+- [ ] README badges show correct version
 
-If a release contains a critical bug:
+### Downstream Verification
 
-```bash
-# Yank the problematic version
-cargo yank --version X.Y.Z mssql-client
+- [ ] Example projects compile with new version
+- [ ] No unexpected breaking changes reported
 
-# Publish fix as new patch version
-# Follow hotfix process
-```
+---
 
-**Note:** Yanking prevents new dependencies but doesn't remove existing ones.
+## Release Checklist Template
 
-## Release Cadence
-
-- **Patch releases**: As needed for bug fixes
-- **Minor releases**: Every 4-8 weeks during active development
-- **Major releases**: When significant breaking changes accumulate
-
-## Checklist Template
-
-Copy this template for each release:
+Copy this for each release:
 
 ```markdown
 ## Release X.Y.Z Checklist
 
-### Pre-Release
-- [ ] All CI checks pass
-- [ ] `cargo test --workspace --all-features`
-- [ ] `cargo clippy --workspace --all-features`
-- [ ] `cargo deny check`
-- [ ] CHANGELOG.md updated
-- [ ] Documentation reviewed
+### Pre-Release Validation
+- [ ] `cargo fmt --all --check` passes
+- [ ] `cargo clippy --workspace --all-features` passes
+- [ ] `cargo test --workspace --all-features` passes
+- [ ] `cargo doc --workspace --all-features --no-deps` passes
+- [ ] `cargo deny check` passes
+- [ ] `cargo audit` passes (or exceptions documented)
+- [ ] Dependency graph validated
+- [ ] All versions consistent
+- [ ] Repository URLs correct (praxiomlabs/rust-mssql-driver)
+- [ ] CHANGELOG.md updated with date
+- [ ] CI passing on main branch
 
-### Release
+### Release Execution
 - [ ] Version bumped in Cargo.toml
-- [ ] Release commit created
+- [ ] Release commit pushed
 - [ ] Tag created and pushed
-- [ ] Crates published in order
-- [ ] GitHub release created
+- [ ] Release workflow completed (or manual publish done)
+- [ ] Circular dev-deps restored (if removed)
 
-### Post-Release
-- [ ] Verify crates.io pages
-- [ ] Test `cargo add mssql-client`
-- [ ] Announce release
-- [ ] Update downstream projects
+### Post-Release Verification
+- [ ] `cargo search mssql-client` shows X.Y.Z
+- [ ] `cargo add mssql-client` works in fresh project
+- [ ] GitHub release exists
+- [ ] docs.rs building/built
+- [ ] Badges updated
 ```
+
+---
 
 ## Troubleshooting
 
-### Publish Failed Mid-Way
+### "no matching package named X found"
 
-If publishing fails partway through:
+**Cause**: Publishing a crate before its dependencies are on crates.io.
 
-1. Note which crates were published
-2. Fix the issue
-3. Bump patch version
-4. Continue publishing remaining crates
+**Fix**: Follow the tier-based publish order. Wait 30 seconds between tiers for index propagation.
 
-### Version Mismatch
+### "circular dependency" or dev-dependency resolution failure
 
-If crates.io shows inconsistent versions:
+**Cause**: Circular dev-dependencies between crates.
 
-1. Check `Cargo.lock` for version conflicts
-2. Ensure all crates use `version.workspace = true`
-3. Yank incorrect versions if necessary
+**Fix**: Temporarily remove the circular dev-deps, publish, then restore. See "Handling Circular Dev-Dependencies" above.
 
-### Authentication Issues
+### Rate Limited (429 Too Many Requests)
+
+**Cause**: crates.io limits new crate publications.
+
+**Fix**: Wait for the time specified in the error message, then retry.
+
+### docs.rs Build Failed
+
+**Cause**: Documentation requires features or dependencies not available in docs.rs environment.
+
+**Fix**:
+1. Check docs.rs build logs
+2. Add `[package.metadata.docs.rs]` configuration if needed
+3. Ensure all doc examples compile
+
+### GitHub Release Not Created
+
+**Cause**: Release workflow failed or tag format incorrect.
+
+**Fix**:
+1. Verify tag format is `vX.Y.Z`
+2. Check workflow logs
+3. Manually create release if needed via `gh release create`
+
+---
+
+## Platform-Specific Notes
+
+### Linux (with integrated-auth feature)
+
+The `--all-features` flag requires `libkrb5-dev`:
 
 ```bash
-# Login to crates.io
-cargo login
+# Debian/Ubuntu
+sudo apt-get install libkrb5-dev
 
-# Verify token
-cargo owner --list mssql-client
+# RHEL/Fedora
+sudo dnf install krb5-devel
 ```
+
+### macOS/Windows
+
+Use default features (omit `--all-features`) as Kerberos/GSSAPI is Linux-only.
+
+---
+
+## Automated vs Manual Release
+
+| Aspect | Automated (tag push) | Manual |
+|--------|---------------------|--------|
+| Trigger | Push `vX.Y.Z` tag | Run commands locally |
+| CI checks | Run automatically | Must run manually first |
+| Publish order | Handled by workflow | Must follow tier order |
+| Rate limits | May hit limits | Can wait between publishes |
+| Circular deps | Must be pre-resolved | Can resolve during process |
+
+**Recommendation**: Use automated release for routine releases. Use manual process for first-time publishes or when troubleshooting.

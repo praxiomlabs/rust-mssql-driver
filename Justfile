@@ -887,17 +887,56 @@ release-check: ci-release wip-check panic-audit metadata-check
 publish-dry:
     #!/usr/bin/env bash
     printf '{{cyan}}[INFO]{{reset}} Publishing (dry run) in dependency order...\n'
-    # Publish in dependency order
+    # Tier 0: Independent crates
     {{cargo}} publish --dry-run -p tds-protocol
     {{cargo}} publish --dry-run -p mssql-types
+    # Tier 1: Depend on tds-protocol
     {{cargo}} publish --dry-run -p mssql-tls
     {{cargo}} publish --dry-run -p mssql-codec
     {{cargo}} publish --dry-run -p mssql-auth
+    # Tier 2: Proc-macro (no internal runtime deps)
     {{cargo}} publish --dry-run -p mssql-derive
-    {{cargo}} publish --dry-run -p mssql-driver-pool
+    # Tier 3: Main client
     {{cargo}} publish --dry-run -p mssql-client
+    # Tier 4: Depend on mssql-client
+    {{cargo}} publish --dry-run -p mssql-driver-pool
     {{cargo}} publish --dry-run -p mssql-testing
     printf '{{green}}[OK]{{reset}}   Dry run complete\n'
+
+[group('release')]
+[doc("Validate dependency graph for publishing")]
+dep-graph:
+    #!/usr/bin/env bash
+    printf '{{cyan}}[INFO]{{reset}} Dependency graph for publishing:\n\n'
+    printf '{{bold}}Tier 0 (Independent):{{reset}}\n'
+    printf '  tds-protocol\n'
+    printf '  mssql-types\n\n'
+    printf '{{bold}}Tier 1 (Depend on Tier 0):{{reset}}\n'
+    printf '  mssql-tls      → tds-protocol\n'
+    printf '  mssql-codec    → tds-protocol\n'
+    printf '  mssql-auth     → tds-protocol\n\n'
+    printf '{{bold}}Tier 2 (Proc-macro):{{reset}}\n'
+    printf '  mssql-derive   (dev-dep on mssql-client)\n\n'
+    printf '{{bold}}Tier 3 (Main client):{{reset}}\n'
+    printf '  mssql-client   → tds-protocol, mssql-tls, mssql-codec, mssql-types, mssql-auth\n\n'
+    printf '{{bold}}Tier 4 (Depend on client):{{reset}}\n'
+    printf '  mssql-driver-pool → mssql-client\n'
+    printf '  mssql-testing     → mssql-client\n\n'
+    printf '{{yellow}}[NOTE]{{reset}} Circular dev-deps: mssql-derive ↔ mssql-client\n'
+    printf '{{yellow}}[NOTE]{{reset}} See RELEASING.md for handling first-time publishes\n'
+
+[group('release')]
+[doc("Check repository URLs are correct")]
+url-check:
+    #!/usr/bin/env bash
+    printf '{{cyan}}[INFO]{{reset}} Checking repository URLs...\n'
+    REPO=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "mssql-client") | .repository')
+    if [[ "$REPO" != *"praxiomlabs/rust-mssql-driver"* ]]; then
+        printf '{{red}}[ERR]{{reset}}  Repository URL incorrect: %s\n' "$REPO"
+        printf '{{red}}[ERR]{{reset}}  Expected: https://github.com/praxiomlabs/rust-mssql-driver\n'
+        exit 1
+    fi
+    printf '{{green}}[OK]{{reset}}   Repository URL correct: %s\n' "$REPO"
 
 [group('release')]
 [doc("Create git tag for release")]
