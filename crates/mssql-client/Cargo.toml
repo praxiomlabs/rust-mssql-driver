@@ -51,10 +51,8 @@ tracing-opentelemetry = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
-# Circular dev-dependencies removed for crates.io publishing
-# Re-add after all crates are published:
-# mssql-derive = { workspace = true }
-# mssql-driver-pool = { workspace = true }
+mssql-derive = { workspace = true }
+mssql-driver-pool = { workspace = true }
 tracing-subscriber = "0.3"
 rust_decimal = { workspace = true }
 criterion = { workspace = true }

@@ -1420,6 +1420,8 @@ dependencies = [
  "lru",
  "mssql-auth",
  "mssql-codec",
+ "mssql-derive",
+ "mssql-driver-pool",
  "mssql-tls",
  "mssql-types",
  "once_cell",
@@ -1458,6 +1460,7 @@ dependencies = [
 name = "mssql-derive"
 version = "0.1.0"
 dependencies = [
+ "mssql-client",
  "mssql-types",
  "proc-macro2",
  "quote",
