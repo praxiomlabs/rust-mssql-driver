@@ -72,6 +72,10 @@ proptest = "1.5"
 testcontainers = "0.23"
 tokio-test = "0.4"
 
+# MSRV-constrained transitive dependencies
+# home 0.5.12+ requires Rust 1.88, we support 1.85
+home = ">=0.5.9, <0.5.12"
+
 [workspace.lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"

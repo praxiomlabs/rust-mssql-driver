@@ -761,7 +761,10 @@ semver:
     #!/usr/bin/env bash
     set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Checking semver compliance...\n'
-    {{cargo}} semver-checks check-release
+    # Exclude mssql-testing: testcontainers -> home@0.5.12 requires Rust 1.88,
+    # but we support MSRV 1.85. Testing utilities have relaxed API stability requirements.
+    # Re-enable when upstream testcontainers updates their dependencies.
+    {{cargo}} semver-checks check-release --exclude mssql-testing
     printf '{{green}}[OK]{{reset}}   Semver check passed\n'
 
 [group('lint')]

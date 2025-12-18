@@ -130,6 +130,11 @@ jobs:
         with:
           fetch-depth: 0
       - uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          # Exclude mssql-testing: testcontainers -> home@0.5.12 requires Rust 1.88,
+          # but we support MSRV 1.85. Testing utilities have relaxed API stability requirements.
+          # Re-enable when upstream testcontainers updates their dependencies.
+          exclude: mssql-testing
 
   coverage:
     name: Code Coverage
