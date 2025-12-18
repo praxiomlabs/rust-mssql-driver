@@ -3,21 +3,24 @@
 # ============================================================================
 #
 # Modern command runner for the rust-mssql-driver SQL Server client.
-# Replaces traditional Makefile with improved UX, safety, and features.
 #
-# Usage:
+# RECIPE NAMING CONVENTION:
+#   - Base recipes (e.g., `build`, `test`, `clippy`) use DEFAULT features
+#     and work on all platforms without additional dependencies.
+#   - `-all` variants (e.g., `build-all`, `test-all`, `clippy-all`) use
+#     --all-features and require libkrb5-dev on Linux for Kerberos support.
+#
+# QUICK START:
 #   just              - Show all available commands
-#   just build        - Build debug
-#   just ci           - Run full CI pipeline
-#   just <recipe>     - Run any recipe
+#   just setup        - Check/install required dependencies
+#   just dev          - Build, test, and lint (default features)
+#   just ci           - Run full CI pipeline (default features)
+#   just ci-all       - Run full CI pipeline (all features, matches GitHub Actions)
 #
-# Requirements:
+# REQUIREMENTS:
 #   - Just >= 1.23.0 (for [group], [confirm], [doc] attributes)
 #   - Rust toolchain (rustup recommended)
-#
-# Install Just:
-#   cargo install just
-#   # or: brew install just / apt install just / pacman -S just
+#   - For --all-features on Linux: libkrb5-dev (see `just setup-linux`)
 #
 # ============================================================================
 
@@ -90,37 +93,158 @@ default:
 # Load .env file if present
 set dotenv-load
 
-# Use bash for shell commands
-set shell := ["bash", "-cu"]
+# Use bash with strict error handling
+# -e: Exit on error
+# -u: Error on undefined variables
+# -o pipefail: Pipe failures propagate
+set shell := ["bash", "-euo", "pipefail", "-c"]
 
 # Export all variables to child processes
 set export
+
+# ============================================================================
+# SETUP & PREREQUISITES
+# ============================================================================
+
+[group('setup')]
+[doc("Check development environment and show missing dependencies")]
+setup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '\n{{bold}}{{blue}}══════ Development Environment Check ══════{{reset}}\n\n'
+
+    MISSING=0
+
+    # Check required tools
+    printf '{{cyan}}Required Tools:{{reset}}\n'
+    for tool in rustc cargo just jq; do
+        if command -v "$tool" &> /dev/null; then
+            printf '  {{green}}✓{{reset}} %s (%s)\n' "$tool" "$($tool --version 2>/dev/null | head -1)"
+        else
+            printf '  {{red}}✗{{reset}} %s (not found)\n' "$tool"
+            MISSING=1
+        fi
+    done
+
+    # Check Rust components
+    printf '\n{{cyan}}Rust Components:{{reset}}\n'
+    for component in rustfmt clippy; do
+        if rustup component list --installed 2>/dev/null | grep -q "$component"; then
+            printf '  {{green}}✓{{reset}} %s\n' "$component"
+        else
+            printf '  {{red}}✗{{reset}} %s (run: rustup component add %s)\n' "$component" "$component"
+            MISSING=1
+        fi
+    done
+
+    # Check optional cargo extensions
+    printf '\n{{cyan}}Optional Cargo Extensions:{{reset}}\n'
+    for tool in nextest llvm-cov audit deny machete semver-checks; do
+        if cargo $tool --version &> /dev/null 2>&1; then
+            printf '  {{green}}✓{{reset}} cargo-%s\n' "$tool"
+        else
+            printf '  {{yellow}}○{{reset}} cargo-%s (optional)\n' "$tool"
+        fi
+    done
+
+    # Check platform-specific dependencies
+    printf '\n{{cyan}}Platform Dependencies ({{platform}}):{{reset}}\n'
+    if [[ "{{platform}}" == "linux" ]]; then
+        if pkg-config --exists krb5-gssapi 2>/dev/null; then
+            printf '  {{green}}✓{{reset}} libkrb5-dev (Kerberos support)\n'
+        else
+            printf '  {{yellow}}○{{reset}} libkrb5-dev (needed for --all-features)\n'
+            printf '       Install: sudo apt-get install libkrb5-dev\n'
+        fi
+    else
+        printf '  {{green}}✓{{reset}} No additional dependencies needed\n'
+    fi
+
+    printf '\n'
+    if [[ $MISSING -eq 1 ]]; then
+        printf '{{yellow}}[WARN]{{reset}} Some required dependencies are missing\n'
+        exit 1
+    else
+        printf '{{green}}[OK]{{reset}}   Development environment ready\n'
+    fi
+
+[group('setup')]
+[doc("Install Linux dependencies for --all-features (Kerberos)")]
+setup-linux:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ "{{platform}}" != "linux" ]]; then
+        printf '{{yellow}}[WARN]{{reset}} This command is for Linux only\n'
+        exit 0
+    fi
+    printf '{{cyan}}[INFO]{{reset}} Installing libkrb5-dev for Kerberos support...\n'
+    sudo apt-get update && sudo apt-get install -y libkrb5-dev
+    printf '{{green}}[OK]{{reset}}   libkrb5-dev installed\n'
+
+[group('setup')]
+[doc("Install recommended cargo extensions")]
+setup-tools:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '{{cyan}}[INFO]{{reset}} Installing recommended cargo extensions...\n'
+    cargo install cargo-nextest cargo-llvm-cov cargo-audit cargo-deny cargo-machete cargo-semver-checks
+    printf '{{green}}[OK]{{reset}}   Tools installed\n'
 
 # ============================================================================
 # CORE BUILD RECIPES
 # ============================================================================
 
 [group('build')]
-[doc("Build workspace in debug mode")]
+[doc("Build workspace (default features, works everywhere)")]
 build:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Building (debug) ══════{{reset}}\n\n'
+    {{cargo}} build --workspace -j {{jobs}}
+    printf '{{green}}[OK]{{reset}}   Build complete\n'
+
+[group('build')]
+[doc("Build workspace with ALL features (requires libkrb5-dev on Linux)")]
+build-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '\n{{bold}}{{blue}}══════ Building (debug, all features) ══════{{reset}}\n\n'
     {{cargo}} build --workspace --all-features -j {{jobs}}
     printf '{{green}}[OK]{{reset}}   Build complete\n'
 
 [group('build')]
-[doc("Build workspace in release mode with optimizations")]
+[doc("Build workspace in release mode")]
 release:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Building (release) ══════{{reset}}\n\n'
+    {{cargo}} build --workspace --release -j {{jobs}}
+    printf '{{green}}[OK]{{reset}}   Release build complete\n'
+
+[group('build')]
+[doc("Build workspace in release mode with ALL features")]
+release-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '\n{{bold}}{{blue}}══════ Building (release, all features) ══════{{reset}}\n\n'
     {{cargo}} build --workspace --all-features --release -j {{jobs}}
     printf '{{green}}[OK]{{reset}}   Release build complete\n'
 
 [group('build')]
-[doc("Fast type check without code generation")]
+[doc("Fast type check (default features)")]
 check:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Type checking...\n'
+    {{cargo}} check --workspace -j {{jobs}}
+    printf '{{green}}[OK]{{reset}}   Type check passed\n'
+
+[group('build')]
+[doc("Fast type check with ALL features")]
+check-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '{{cyan}}[INFO]{{reset}} Type checking (all features)...\n'
     {{cargo}} check --workspace --all-features -j {{jobs}}
     printf '{{green}}[OK]{{reset}}   Type check passed\n'
 
@@ -128,8 +252,9 @@ check:
 [doc("Analyze build times")]
 build-timing:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Building with timing analysis...\n'
-    {{cargo}} build --workspace --all-features --timings
+    {{cargo}} build --workspace --timings
     printf '{{green}}[OK]{{reset}}   Build timing report generated (see target/cargo-timings/)\n'
 
 [group('build')]
@@ -137,6 +262,7 @@ build-timing:
 [doc("Clean all build artifacts")]
 clean:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Cleaning build artifacts...\n'
     {{cargo}} clean
     rm -rf coverage/ lcov.info *.profraw *.profdata
@@ -151,18 +277,38 @@ rebuild: clean build
 # ============================================================================
 
 [group('test')]
-[doc("Run all unit tests")]
+[doc("Run all unit tests (default features)")]
 test:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Running Tests ══════{{reset}}\n\n'
+    {{cargo}} test --workspace -j {{jobs}}
+    printf '{{green}}[OK]{{reset}}   All tests passed\n'
+
+[group('test')]
+[doc("Run all unit tests with ALL features")]
+test-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '\n{{bold}}{{blue}}══════ Running Tests (all features) ══════{{reset}}\n\n'
     {{cargo}} test --workspace --all-features -j {{jobs}}
     printf '{{green}}[OK]{{reset}}   All tests passed\n'
 
 [group('test')]
-[doc("Run tests with locked dependencies (reproducible)")]
+[doc("Run tests with locked dependencies (default features)")]
 test-locked:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Running Tests (locked) ══════{{reset}}\n\n'
+    {{cargo}} test --workspace --locked -j {{jobs}}
+    printf '{{green}}[OK]{{reset}}   All tests passed (locked)\n'
+
+[group('test')]
+[doc("Run tests with locked dependencies and ALL features")]
+test-locked-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '\n{{bold}}{{blue}}══════ Running Tests (locked, all features) ══════{{reset}}\n\n'
     {{cargo}} test --workspace --all-features --locked -j {{jobs}}
     printf '{{green}}[OK]{{reset}}   All tests passed (locked)\n'
 
@@ -170,30 +316,34 @@ test-locked:
 [doc("Run tests with output visible")]
 test-verbose:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Running Tests (verbose) ══════{{reset}}\n\n'
-    {{cargo}} test --workspace --all-features -j {{jobs}} -- --nocapture
+    {{cargo}} test --workspace -j {{jobs}} -- --nocapture
     printf '{{green}}[OK]{{reset}}   All tests passed\n'
 
 [group('test')]
 [doc("Test specific crate")]
 test-crate crate:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Testing crate: {{crate}}\n'
-    {{cargo}} test -p {{crate}} --all-features -- --nocapture
+    {{cargo}} test -p {{crate}} -- --nocapture
     printf '{{green}}[OK]{{reset}}   Crate tests passed\n'
 
 [group('test')]
 [doc("Run documentation tests only")]
 test-doc:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Running doc tests...\n'
-    {{cargo}} test --workspace --all-features --doc
+    {{cargo}} test --workspace --doc
     printf '{{green}}[OK]{{reset}}   Doc tests passed\n'
 
 [group('test')]
 [doc("Run SQL Server integration tests")]
 test-integration:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Running Integration Tests ══════{{reset}}\n\n'
     printf '{{cyan}}[INFO]{{reset}} Using SQL Server at {{mssql_host}}:{{mssql_port}}\n'
     MSSQL_HOST={{mssql_host}} MSSQL_PORT={{mssql_port}} MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
@@ -204,6 +354,7 @@ test-integration:
 [doc("Run protocol conformance tests")]
 test-conformance:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Running Protocol Conformance Tests ══════{{reset}}\n\n'
     MSSQL_HOST={{mssql_host}} MSSQL_PORT={{mssql_port}} MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
         {{cargo}} test -p mssql-client --test protocol_conformance -- --ignored
@@ -213,6 +364,7 @@ test-conformance:
 [doc("Run resilience tests")]
 test-resilience:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Running Resilience Tests ══════{{reset}}\n\n'
     MSSQL_HOST={{mssql_host}} MSSQL_PORT={{mssql_port}} MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
         {{cargo}} test -p mssql-client --test resilience -- --ignored
@@ -222,6 +374,7 @@ test-resilience:
 [doc("Run stress tests (long-running)")]
 test-stress:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Running Stress Tests ══════{{reset}}\n\n'
     printf '{{yellow}}[WARN]{{reset}} Stress tests may take several minutes\n'
     MSSQL_HOST={{mssql_host}} MSSQL_PORT={{mssql_port}} MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
@@ -232,28 +385,35 @@ test-stress:
 [doc("Run version compatibility tests against SQL Server 2017/2019/2022")]
 test-all-versions:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Testing SQL Server Version Compatibility ══════{{reset}}\n\n'
 
     # SQL Server 2022 (default port 1433)
     printf '{{cyan}}[INFO]{{reset}} Testing SQL Server 2022 (port 1433)...\n'
-    MSSQL_HOST={{mssql_host}} MSSQL_PORT=1433 MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
-        {{cargo}} test -p mssql-client --test version_compatibility -- --ignored 2>/dev/null && \
-        printf '{{green}}[OK]{{reset}}   SQL Server 2022 passed\n' || \
+    if MSSQL_HOST={{mssql_host}} MSSQL_PORT=1433 MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
+        {{cargo}} test -p mssql-client --test version_compatibility -- --ignored 2>/dev/null; then
+        printf '{{green}}[OK]{{reset}}   SQL Server 2022 passed\n'
+    else
         printf '{{yellow}}[SKIP]{{reset}} SQL Server 2022 not available\n'
+    fi
 
     # SQL Server 2019 (port 1434)
     printf '{{cyan}}[INFO]{{reset}} Testing SQL Server 2019 (port 1434)...\n'
-    MSSQL_HOST={{mssql_host}} MSSQL_PORT=1434 MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
-        {{cargo}} test -p mssql-client --test version_compatibility -- --ignored 2>/dev/null && \
-        printf '{{green}}[OK]{{reset}}   SQL Server 2019 passed\n' || \
+    if MSSQL_HOST={{mssql_host}} MSSQL_PORT=1434 MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
+        {{cargo}} test -p mssql-client --test version_compatibility -- --ignored 2>/dev/null; then
+        printf '{{green}}[OK]{{reset}}   SQL Server 2019 passed\n'
+    else
         printf '{{yellow}}[SKIP]{{reset}} SQL Server 2019 not available\n'
+    fi
 
     # SQL Server 2017 (port 1435)
     printf '{{cyan}}[INFO]{{reset}} Testing SQL Server 2017 (port 1435)...\n'
-    MSSQL_HOST={{mssql_host}} MSSQL_PORT=1435 MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
-        {{cargo}} test -p mssql-client --test version_compatibility -- --ignored 2>/dev/null && \
-        printf '{{green}}[OK]{{reset}}   SQL Server 2017 passed\n' || \
+    if MSSQL_HOST={{mssql_host}} MSSQL_PORT=1435 MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
+        {{cargo}} test -p mssql-client --test version_compatibility -- --ignored 2>/dev/null; then
+        printf '{{green}}[OK]{{reset}}   SQL Server 2017 passed\n'
+    else
         printf '{{yellow}}[SKIP]{{reset}} SQL Server 2017 not available\n'
+    fi
 
     printf '{{green}}[OK]{{reset}}   Version compatibility testing complete\n'
 
@@ -261,6 +421,7 @@ test-all-versions:
 [doc("Run pool integration tests")]
 test-pool:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Running Pool Integration Tests ══════{{reset}}\n\n'
     MSSQL_HOST={{mssql_host}} MSSQL_PORT={{mssql_port}} MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
         {{cargo}} test -p mssql-pool --test integration -- --ignored --test-threads=1
@@ -275,6 +436,7 @@ test-sql-server: test-integration test-conformance test-resilience test-pool
 [doc("Run tests with various feature combinations")]
 test-features:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Testing Feature Matrix ══════{{reset}}\n\n'
     printf '{{cyan}}[INFO]{{reset}} Testing with no features...\n'
     {{cargo}} test --workspace --no-default-features -j {{jobs}}
@@ -285,10 +447,20 @@ test-features:
     printf '{{green}}[OK]{{reset}}   Feature matrix tests passed\n'
 
 [group('test')]
-[doc("Run tests with cargo-nextest (faster, parallel)")]
+[doc("Run tests with cargo-nextest (default features)")]
 nextest:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Running Tests (nextest) ══════{{reset}}\n\n'
+    {{cargo}} nextest run --workspace -j {{jobs}}
+    printf '{{green}}[OK]{{reset}}   All tests passed\n'
+
+[group('test')]
+[doc("Run tests with cargo-nextest and ALL features")]
+nextest-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '\n{{bold}}{{blue}}══════ Running Tests (nextest, all features) ══════{{reset}}\n\n'
     {{cargo}} nextest run --workspace --all-features -j {{jobs}}
     printf '{{green}}[OK]{{reset}}   All tests passed\n'
 
@@ -300,6 +472,7 @@ nextest:
 [doc("Format all code")]
 fmt:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Formatting code...\n'
     {{cargo}} fmt --all
     printf '{{green}}[OK]{{reset}}   Formatting complete\n'
@@ -308,24 +481,51 @@ fmt:
 [doc("Check code formatting")]
 fmt-check:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Checking format...\n'
     {{cargo}} fmt --all -- --check
     printf '{{green}}[OK]{{reset}}   Format check passed\n'
 
 [group('lint')]
-[doc("Run clippy lints (matches CI configuration)")]
+[doc("Run clippy lints (default features)")]
 clippy:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Running clippy...\n'
+    {{cargo}} clippy --workspace --all-targets -- -D warnings
+    printf '{{green}}[OK]{{reset}}   Clippy passed\n'
+
+[group('lint')]
+[doc("Run clippy lints with ALL features (matches CI)")]
+clippy-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '{{cyan}}[INFO]{{reset}} Running clippy (all features)...\n'
     {{cargo}} clippy --workspace --all-features --all-targets -- -D warnings
     printf '{{green}}[OK]{{reset}}   Clippy passed\n'
 
 [group('lint')]
-[doc("Run clippy with strict deny on warnings")]
+[doc("Run clippy with strict pedantic lints")]
 clippy-strict:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Running clippy (strict)...\n'
-    {{cargo}} clippy --workspace --all-targets --all-features -- \
+    {{cargo}} clippy --workspace --all-targets -- \
+        -D warnings \
+        -D clippy::all \
+        -D clippy::pedantic \
+        -D clippy::nursery \
+        -A clippy::module_name_repetitions \
+        -A clippy::too_many_lines
+    printf '{{green}}[OK]{{reset}}   Clippy (strict) passed\n'
+
+[group('lint')]
+[doc("Run clippy with strict pedantic lints and ALL features")]
+clippy-strict-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '{{cyan}}[INFO]{{reset}} Running clippy (strict, all features)...\n'
+    {{cargo}} clippy --workspace --all-features --all-targets -- \
         -D warnings \
         -D clippy::all \
         -D clippy::pedantic \
@@ -338,14 +538,16 @@ clippy-strict:
 [doc("Auto-fix clippy warnings")]
 clippy-fix:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Auto-fixing clippy warnings...\n'
-    {{cargo}} clippy --workspace --all-targets --all-features --fix --allow-dirty --allow-staged
+    {{cargo}} clippy --workspace --all-targets --fix --allow-dirty --allow-staged
     printf '{{green}}[OK]{{reset}}   Clippy fixes applied\n'
 
 [group('security')]
 [doc("Security vulnerability audit via cargo-audit")]
 audit:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Running security audit...\n'
     {{cargo}} audit
     printf '{{green}}[OK]{{reset}}   Security audit passed\n'
@@ -354,37 +556,55 @@ audit:
 [doc("Run cargo-deny checks (licenses, bans, advisories)")]
 deny:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Running cargo-deny...\n'
     {{cargo}} deny check
     printf '{{green}}[OK]{{reset}}   Deny checks passed\n'
 
 [group('lint')]
-[doc("Find unused dependencies via cargo-machete (fast, heuristic)")]
+[doc("Find unused dependencies via cargo-machete")]
 machete:
     #!/usr/bin/env bash
-    printf '{{cyan}}[INFO]{{reset}} Finding unused dependencies (fast)...\n'
+    set -euo pipefail
+    printf '{{cyan}}[INFO]{{reset}} Finding unused dependencies...\n'
     {{cargo}} machete
     printf '{{green}}[OK]{{reset}}   Machete check complete\n'
 
 [group('lint')]
-[doc("Verify MSRV compliance")]
+[doc("Verify MSRV compliance (default features)")]
 msrv-check:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Checking MSRV {{msrv}}...\n'
+    {{cargo}} +{{msrv}} check --workspace
+    printf '{{green}}[OK]{{reset}}   MSRV {{msrv}} check passed\n'
+
+[group('lint')]
+[doc("Verify MSRV compliance with ALL features")]
+msrv-check-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '{{cyan}}[INFO]{{reset}} Checking MSRV {{msrv}} (all features)...\n'
     {{cargo}} +{{msrv}} check --workspace --all-features
     printf '{{green}}[OK]{{reset}}   MSRV {{msrv}} check passed\n'
 
 [group('lint')]
-[doc("Check for semver violations (for library crates)")]
+[doc("Check for semver violations")]
 semver:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Checking semver compliance...\n'
     {{cargo}} semver-checks check-release
     printf '{{green}}[OK]{{reset}}   Semver check passed\n'
 
 [group('lint')]
-[doc("Run all lints (fmt + clippy)")]
+[doc("Run all lints (fmt + clippy, default features)")]
 lint: fmt-check clippy
+    @printf '{{green}}[OK]{{reset}}   All lints passed\n'
+
+[group('lint')]
+[doc("Run all lints with ALL features")]
+lint-all: fmt-check clippy-all
     @printf '{{green}}[OK]{{reset}}   All lints passed\n'
 
 [group('lint')]
@@ -397,10 +617,20 @@ lint-full: fmt-check clippy-strict audit deny machete
 # ============================================================================
 
 [group('docs')]
-[doc("Generate documentation")]
+[doc("Generate documentation (default features)")]
 doc:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Generating documentation...\n'
+    {{cargo}} doc --workspace --no-deps
+    printf '{{green}}[OK]{{reset}}   Documentation generated\n'
+
+[group('docs')]
+[doc("Generate documentation with ALL features")]
+doc-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '{{cyan}}[INFO]{{reset}} Generating documentation (all features)...\n'
     {{cargo}} doc --workspace --all-features --no-deps
     printf '{{green}}[OK]{{reset}}   Documentation generated\n'
 
@@ -408,23 +638,35 @@ doc:
 [doc("Generate and open documentation")]
 doc-open:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Generating documentation...\n'
-    {{cargo}} doc --workspace --all-features --no-deps --open
+    {{cargo}} doc --workspace --no-deps --open
     printf '{{green}}[OK]{{reset}}   Documentation opened\n'
 
 [group('docs')]
 [doc("Generate docs including private items")]
 doc-private:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Generating documentation (with private items)...\n'
-    {{cargo}} doc --workspace --all-features --no-deps --document-private-items --open
+    {{cargo}} doc --workspace --no-deps --document-private-items --open
     printf '{{green}}[OK]{{reset}}   Documentation opened\n'
 
 [group('docs')]
-[doc("Check documentation for warnings")]
+[doc("Check documentation for warnings (default features)")]
 doc-check:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Checking documentation...\n'
+    RUSTDOCFLAGS="-D warnings" {{cargo}} doc --workspace --no-deps
+    printf '{{green}}[OK]{{reset}}   Documentation check passed\n'
+
+[group('docs')]
+[doc("Check documentation for warnings with ALL features")]
+doc-check-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '{{cyan}}[INFO]{{reset}} Checking documentation (all features)...\n'
     RUSTDOCFLAGS="-D warnings" {{cargo}} doc --workspace --all-features --no-deps
     printf '{{green}}[OK]{{reset}}   Documentation check passed\n'
 
@@ -432,6 +674,7 @@ doc-check:
 [doc("Check markdown links (requires lychee)")]
 link-check:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Checking markdown links...\n'
     if ! command -v lychee &> /dev/null; then
         printf '{{yellow}}[WARN]{{reset}} lychee not installed (cargo install lychee)\n'
@@ -450,18 +693,38 @@ link-check:
 # ============================================================================
 
 [group('coverage')]
-[doc("Generate HTML coverage report and open in browser")]
+[doc("Generate HTML coverage report (default features)")]
 coverage:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Generating Coverage Report ══════{{reset}}\n\n'
+    {{cargo}} llvm-cov --workspace --html --open
+    printf '{{green}}[OK]{{reset}}   Coverage report opened\n'
+
+[group('coverage')]
+[doc("Generate HTML coverage report with ALL features")]
+coverage-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '\n{{bold}}{{blue}}══════ Generating Coverage Report (all features) ══════{{reset}}\n\n'
     {{cargo}} llvm-cov --workspace --all-features --html --open
     printf '{{green}}[OK]{{reset}}   Coverage report opened\n'
 
 [group('coverage')]
-[doc("Generate LCOV coverage for CI integration")]
+[doc("Generate LCOV coverage for CI (default features)")]
 coverage-lcov output="lcov.info":
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Generating LCOV coverage...\n'
+    {{cargo}} llvm-cov --workspace --lcov --output-path {{output}}
+    printf '{{green}}[OK]{{reset}}   Coverage saved to {{output}}\n'
+
+[group('coverage')]
+[doc("Generate LCOV coverage for CI with ALL features")]
+coverage-lcov-all output="lcov.info":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '{{cyan}}[INFO]{{reset}} Generating LCOV coverage (all features)...\n'
     {{cargo}} llvm-cov --workspace --all-features --lcov --output-path {{output}}
     printf '{{green}}[OK]{{reset}}   Coverage saved to {{output}}\n'
 
@@ -469,13 +732,15 @@ coverage-lcov output="lcov.info":
 [doc("Show coverage summary in terminal")]
 coverage-summary:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Coverage summary:\n'
-    {{cargo}} llvm-cov --workspace --all-features --text
+    {{cargo}} llvm-cov --workspace --text
 
 [group('coverage')]
 [doc("Generate Codecov-compatible coverage")]
 coverage-codecov output="codecov.json":
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Generating Codecov coverage...\n'
     {{cargo}} llvm-cov --workspace --all-features --codecov --output-path {{output}}
     printf '{{green}}[OK]{{reset}}   Coverage saved to {{output}}\n'
@@ -488,6 +753,7 @@ coverage-codecov output="codecov.json":
 [doc("Run default fuzz target")]
 fuzz target=fuzz_target time=fuzz_time:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Fuzzing: {{target}} ══════{{reset}}\n\n'
     cd {{fuzz_dir}} && {{cargo}} +nightly fuzz run {{target}} -- -max_total_time={{time}}
     printf '{{green}}[OK]{{reset}}   Fuzzing complete\n'
@@ -496,6 +762,7 @@ fuzz target=fuzz_target time=fuzz_time:
 [doc("List available fuzz targets")]
 fuzz-list:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Available fuzz targets:\n'
     cd {{fuzz_dir}} && {{cargo}} +nightly fuzz list
 
@@ -503,6 +770,7 @@ fuzz-list:
 [doc("Run all fuzz targets briefly (smoke test)")]
 fuzz-all time="30":
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Fuzzing All Targets ══════{{reset}}\n\n'
     for target in parse_packet parse_token connection_string parse_prelogin decode_value; do
         printf '{{cyan}}[INFO]{{reset}} Fuzzing %s...\n' "$target"
@@ -518,14 +786,16 @@ fuzz-all time="30":
 [doc("Build all examples")]
 examples:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Building all examples...\n'
-    {{cargo}} build -p mssql-client --examples --all-features
+    {{cargo}} build -p mssql-client --examples
     printf '{{green}}[OK]{{reset}}   Examples built\n'
 
 [group('examples')]
 [doc("Run basic query example")]
 example-basic:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Running basic_query example...\n'
     MSSQL_HOST={{mssql_host}} MSSQL_PORT={{mssql_port}} MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
         RUST_LOG={{rust_log}} {{cargo}} run -p mssql-client --example basic_query
@@ -534,6 +804,7 @@ example-basic:
 [doc("Run transactions example")]
 example-transactions:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Running transactions example...\n'
     MSSQL_HOST={{mssql_host}} MSSQL_PORT={{mssql_port}} MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
         RUST_LOG={{rust_log}} {{cargo}} run -p mssql-client --example transactions
@@ -542,6 +813,7 @@ example-transactions:
 [doc("Run error handling example")]
 example-errors:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Running error_handling example...\n'
     MSSQL_HOST={{mssql_host}} MSSQL_PORT={{mssql_port}} MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
         RUST_LOG={{rust_log}} {{cargo}} run -p mssql-client --example error_handling
@@ -550,6 +822,7 @@ example-errors:
 [doc("Run connection pool example")]
 example-pool:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Running connection_pool example...\n'
     MSSQL_HOST={{mssql_host}} MSSQL_PORT={{mssql_port}} MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
         RUST_LOG={{rust_log}} {{cargo}} run -p mssql-client --example connection_pool
@@ -562,6 +835,7 @@ example-pool:
 [doc("Run benchmarks")]
 bench:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Running Benchmarks ══════{{reset}}\n\n'
     {{cargo}} bench --workspace
     printf '{{green}}[OK]{{reset}}   Benchmarks complete\n'
@@ -570,6 +844,7 @@ bench:
 [doc("Run benchmarks and save baseline")]
 bench-save name="baseline":
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Running benchmarks (saving baseline: {{name}})...\n'
     {{cargo}} bench --workspace -- --save-baseline {{name}}
     printf '{{green}}[OK]{{reset}}   Baseline saved: {{name}}\n'
@@ -578,6 +853,7 @@ bench-save name="baseline":
 [doc("Run benchmarks and compare to baseline")]
 bench-compare name="baseline":
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Comparing to baseline: {{name}}...\n'
     {{cargo}} bench --workspace -- --baseline {{name}}
     printf '{{green}}[OK]{{reset}}   Comparison complete\n'
@@ -590,6 +866,7 @@ bench-compare name="baseline":
 [doc("Start SQL Server 2022 container")]
 sql-server-start:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Starting SQL Server 2022...\n'
     {{docker}} run -d --name sql_server \
         -e 'ACCEPT_EULA=Y' \
@@ -605,6 +882,7 @@ sql-server-start:
 [doc("Start all SQL Server versions (2017, 2019, 2022)")]
 sql-server-all:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Starting all SQL Server versions...\n'
 
     # SQL Server 2022
@@ -640,6 +918,7 @@ sql-server-all:
 [doc("Stop and remove SQL Server containers")]
 sql-server-stop:
     #!/usr/bin/env bash
+    set -uo pipefail  # Note: no -e, intentional - containers may not exist
     printf '{{cyan}}[INFO]{{reset}} Stopping SQL Server containers...\n'
     {{docker}} stop sql_server sql_server_2019 sql_server_2017 2>/dev/null || true
     {{docker}} rm sql_server sql_server_2019 sql_server_2017 2>/dev/null || true
@@ -649,6 +928,7 @@ sql-server-stop:
 [doc("Show SQL Server container status")]
 sql-server-status:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} SQL Server container status:\n'
     {{docker}} ps --filter "name=sql_server" --format "table {{{{.Names}}}}\t{{{{.Status}}}}\t{{{{.Ports}}}}"
 
@@ -657,8 +937,13 @@ sql-server-status:
 # ============================================================================
 
 [group('dev')]
-[doc("Full development setup")]
+[doc("Full development setup (default features)")]
 dev: build test lint
+    @printf '{{green}}[OK]{{reset}}   Development environment ready\n'
+
+[group('dev')]
+[doc("Full development setup with ALL features")]
+dev-all: build-all test-all lint-all
     @printf '{{green}}[OK]{{reset}}   Development environment ready\n'
 
 [group('dev')]
@@ -666,24 +951,27 @@ dev: build test lint
 [doc("Watch mode: re-run tests on file changes")]
 watch:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Watching for changes (tests)...\n'
-    {{cargo}} watch -x "test --workspace --all-features"
+    {{cargo}} watch -x "test --workspace"
 
 [group('dev')]
 [no-exit-message]
 [doc("Watch mode: re-run check on file changes")]
 watch-check:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Watching for changes (check)...\n'
-    {{cargo}} watch -x "check --workspace --all-features"
+    {{cargo}} watch -x "check --workspace"
 
 [group('dev')]
 [no-exit-message]
 [doc("Watch mode: re-run clippy on file changes")]
 watch-clippy:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Watching for changes (clippy)...\n'
-    {{cargo}} watch -x "clippy --workspace --all-targets --all-features"
+    {{cargo}} watch -x "clippy --workspace --all-targets"
 
 # ============================================================================
 # CI/CD RECIPES
@@ -693,6 +981,7 @@ watch-clippy:
 [doc("Check documentation versions match Cargo.toml")]
 version-sync:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Checking version sync...\n'
     VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "mssql-client") | .version')
     MAJOR_MINOR=$(echo "$VERSION" | cut -d. -f1,2)
@@ -705,10 +994,19 @@ version-sync:
     printf '{{green}}[OK]{{reset}}   Version sync check complete (v%s)\n' "$VERSION"
 
 [group('ci')]
-[doc("Standard CI pipeline (matches GitHub Actions)")]
+[doc("Standard CI pipeline (default features, fast local checks)")]
 ci: fmt-check clippy test-locked doc-check
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ CI Pipeline Complete ══════{{reset}}\n\n'
+    printf '{{green}}[OK]{{reset}}   All CI checks passed\n'
+
+[group('ci')]
+[doc("CI pipeline with ALL features (matches GitHub Actions on Linux)")]
+ci-all: fmt-check clippy-all test-locked-all doc-check-all
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '\n{{bold}}{{blue}}══════ CI Pipeline Complete (all features) ══════{{reset}}\n\n'
     printf '{{green}}[OK]{{reset}}   All CI checks passed\n'
 
 [group('ci')]
@@ -719,6 +1017,11 @@ ci-fast: fmt-check clippy check
 [group('ci')]
 [doc("Full CI with coverage and security audit")]
 ci-full: ci coverage-lcov audit deny
+    @printf '{{green}}[OK]{{reset}}   Full CI pipeline passed\n'
+
+[group('ci')]
+[doc("Full CI with ALL features")]
+ci-full-all: ci-all coverage-lcov-all audit deny
     @printf '{{green}}[OK]{{reset}}   Full CI pipeline passed\n'
 
 [group('ci')]
@@ -744,6 +1047,7 @@ pre-push: ci
 [doc("Check for outdated dependencies")]
 outdated:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Checking for outdated dependencies...\n'
     {{cargo}} outdated -R
 
@@ -751,6 +1055,7 @@ outdated:
 [doc("Update Cargo.lock to latest compatible versions")]
 update:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Updating dependencies...\n'
     {{cargo}} update
     printf '{{green}}[OK]{{reset}}   Dependencies updated\n'
@@ -759,6 +1064,7 @@ update:
 [doc("Show dependency tree")]
 tree:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Dependency tree:\n'
     {{cargo}} tree --workspace
 
@@ -766,6 +1072,7 @@ tree:
 [doc("Show duplicate dependencies")]
 tree-duplicates:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Duplicate dependencies:\n'
     {{cargo}} tree --workspace --duplicates
 
@@ -777,6 +1084,7 @@ tree-duplicates:
 [doc("Check for WIP markers (TODO, FIXME, XXX, HACK, todo!, unimplemented!)")]
 wip-check:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Checking for WIP markers...\n'
 
     # Search for comment markers
@@ -804,6 +1112,7 @@ wip-check:
 [doc("Audit panic paths (.unwrap(), .expect()) in production code")]
 panic-audit:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Auditing panic paths in production code...\n'
 
     # Find .unwrap() in src/ directories (production code)
@@ -831,6 +1140,7 @@ panic-audit:
 [doc("Verify Cargo.toml metadata for crates.io publishing")]
 metadata-check:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Checking Cargo.toml metadata...\n'
 
     METADATA=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "mssql-client")')
@@ -868,8 +1178,9 @@ metadata-check:
 
 [group('release')]
 [doc("Prepare for release (full validation)")]
-release-check: ci-release wip-check panic-audit metadata-check
+release-check: ci-release wip-check panic-audit metadata-check url-check
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Release Validation ══════{{reset}}\n\n'
     printf '{{cyan}}[INFO]{{reset}} Checking for uncommitted changes...\n'
     if ! git diff-index --quiet HEAD --; then
@@ -886,6 +1197,7 @@ release-check: ci-release wip-check panic-audit metadata-check
 [doc("Publish all crates to crates.io (dry run)")]
 publish-dry:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Publishing (dry run) in dependency order...\n'
     # Tier 0: Independent crates
     {{cargo}} publish --dry-run -p tds-protocol
@@ -907,6 +1219,7 @@ publish-dry:
 [doc("Validate dependency graph for publishing")]
 dep-graph:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Dependency graph for publishing:\n\n'
     printf '{{bold}}Tier 0 (Independent):{{reset}}\n'
     printf '  tds-protocol\n'
@@ -929,6 +1242,7 @@ dep-graph:
 [doc("Check repository URLs are correct")]
 url-check:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Checking repository URLs...\n'
     REPO=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "mssql-client") | .repository')
     if [[ "$REPO" != *"praxiomlabs/rust-mssql-driver"* ]]; then
@@ -942,6 +1256,7 @@ url-check:
 [doc("Create git tag for release")]
 tag:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Creating tag v{{version}}...\n'
     git tag -a "v{{version}}" -m "Release v{{version}}"
     printf '{{green}}[OK]{{reset}}   Tag created: v{{version}}\n'
@@ -954,14 +1269,19 @@ tag:
 [doc("Count lines of code")]
 loc:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Lines of code:\n'
-    tokei . --exclude target --exclude node_modules 2>/dev/null || \
+    if command -v tokei &> /dev/null; then
+        tokei . --exclude target --exclude node_modules
+    else
         find crates -name '*.rs' | xargs wc -l | tail -1
+    fi
 
 [group('util')]
 [doc("Analyze binary size bloat")]
 bloat crate="mssql-client":
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Binary size analysis for {{crate}}...\n'
     {{cargo}} bloat --release -p {{crate}} --crates
 
@@ -969,11 +1289,12 @@ bloat crate="mssql-client":
 [doc("Check for unsafe code usage")]
 geiger:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Scanning for unsafe code...\n'
     for crate in crates/*/; do
         name=$(basename "$crate")
         printf '{{cyan}}[INFO]{{reset}} Scanning %s...\n' "$name"
-        {{cargo}} geiger -p "$name" --all-features --all-targets 2>/dev/null || true
+        {{cargo}} geiger -p "$name" --all-targets 2>/dev/null || true
     done
     printf '{{green}}[OK]{{reset}}   Unsafe code scan complete\n'
 
@@ -981,6 +1302,7 @@ geiger:
 [doc("Show expanded macros")]
 expand crate:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Expanding macros in {{crate}}...\n'
     {{cargo}} expand -p {{crate}}
 
@@ -988,6 +1310,7 @@ expand crate:
 [doc("Generate and display project statistics")]
 stats: loc
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Project Statistics ══════{{reset}}\n\n'
     printf '{{cyan}}Crates:{{reset}}\n'
     find crates -maxdepth 1 -type d | tail -n +2 | while read dir; do
@@ -1007,6 +1330,7 @@ stats: loc
 [doc("Show version and environment info")]
 info:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{project_name}} v{{version}}{{reset}}\n'
     printf '═══════════════════════════════════════\n'
     printf '{{cyan}}MSRV:{{reset}}      {{msrv}}\n'
@@ -1020,49 +1344,22 @@ info:
 
 [group('help')]
 [doc("Check which development tools are installed")]
-check-tools:
-    #!/usr/bin/env bash
-    printf '\n{{bold}}Development Tool Status{{reset}}\n'
-    printf '═══════════════════════════════════════\n'
-
-    check_tool() {
-        if command -v "$1" &> /dev/null || {{cargo}} "$1" --version &> /dev/null 2>&1; then
-            printf '{{green}}✓{{reset}} %s\n' "$1"
-        else
-            printf '{{red}}✗{{reset}} %s (not installed)\n' "$1"
-        fi
-    }
-
-    # Core tools
-    printf '\n{{cyan}}Core:{{reset}}\n'
-    check_tool "rustfmt"
-    check_tool "clippy"
-
-    # Cargo extensions
-    printf '\n{{cyan}}Cargo Extensions:{{reset}}\n'
-    for tool in nextest llvm-cov audit deny outdated watch \
-                semver-checks machete bloat geiger expand; do
-        if {{cargo}} $tool --version &> /dev/null 2>&1; then
-            printf '{{green}}✓{{reset}} cargo-%s\n' "$tool"
-        else
-            printf '{{red}}✗{{reset}} cargo-%s\n' "$tool"
-        fi
-    done
-
-    # External tools
-    printf '\n{{cyan}}External:{{reset}}\n'
-    check_tool "tokei"
-    check_tool "lychee"
-    check_tool "docker"
-    check_tool "jq"
-
-    printf '\n'
+check-tools: setup
 
 [group('help')]
 [doc("Show all available recipes grouped by category")]
 help:
     #!/usr/bin/env bash
+    set -euo pipefail
     printf '\n{{bold}}{{project_name}} v{{version}}{{reset}} — SQL Server Driver Development\n'
     printf 'MSRV: {{msrv}} | Edition: {{edition}} | Platform: {{platform}}\n\n'
     printf '{{bold}}Usage:{{reset}} just [recipe] [arguments...]\n\n'
+    printf '{{bold}}Recipe Naming Convention:{{reset}}\n'
+    printf '  Base recipes use DEFAULT features (work everywhere)\n'
+    printf '  -all variants use ALL features (need libkrb5-dev on Linux)\n\n'
+    printf '{{bold}}Quick Start:{{reset}}\n'
+    printf '  just setup     Check/install dependencies\n'
+    printf '  just dev       Build, test, lint (default features)\n'
+    printf '  just ci        Run CI pipeline (default features)\n'
+    printf '  just ci-all    Run CI pipeline (all features, matches GH Actions)\n\n'
     just --list --unsorted
