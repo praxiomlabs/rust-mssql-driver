@@ -10,17 +10,18 @@
 #   - `-all` variants (e.g., `build-all`, `test-all`, `clippy-all`) use
 #     --all-features and require libkrb5-dev on Linux for Kerberos support.
 #
-# QUICK START:
-#   just              - Show all available commands
-#   just setup        - Check/install required dependencies
-#   just dev          - Build, test, and lint (default features)
-#   just ci           - Run full CI pipeline (default features)
-#   just ci-all       - Run full CI pipeline (all features, matches GitHub Actions)
+# QUICK START (new developers):
+#   just bootstrap    - Full setup: system packages + tools + hooks (recommended)
+#   just ci-all       - Verify everything works with all features
+#
+# ALTERNATIVE (no sudo, default features only):
+#   just setup-all    - Install cargo tools + git hooks
+#   just ci           - Run CI pipeline with default features
 #
 # REQUIREMENTS:
 #   - Just >= 1.23.0 (for [group], [confirm], [doc] attributes)
 #   - Rust toolchain (rustup recommended)
-#   - For --all-features on Linux: libkrb5-dev (see `just setup-linux`)
+#   - For --all-features on Linux: libkrb5-dev + libclang-dev (installed by bootstrap)
 #
 # ============================================================================
 
@@ -207,7 +208,7 @@ setup-tools:
 
     # Security and dependency auditing
     cargo install cargo-audit --locked
-    cargo install cargo-deny --locked
+    cargo install cargo-deny@0.18.3 --locked
 
     # Code quality
     cargo install cargo-machete@0.7.0 --locked
@@ -270,11 +271,61 @@ setup-all: setup setup-tools setup-hooks
     printf 'All tools installed and hooks configured.\n'
     printf 'Run {{cyan}}just ci{{reset}} to verify everything works.\n\n'
     if [[ "{{platform}}" == "linux" ]]; then
-        if ! pkg-config --exists krb5-gssapi 2>/dev/null; then
-            printf '{{yellow}}[NOTE]{{reset}} For --all-features support, run:\n'
-            printf '       sudo apt-get install libkrb5-dev\n\n'
+        if ! pkg-config --exists krb5-gssapi 2>/dev/null || ! (command -v llvm-config &> /dev/null || [ -f /usr/lib/llvm-*/lib/libclang.so ]); then
+            printf '{{yellow}}[NOTE]{{reset}} For --all-features support (Kerberos), run:\n'
+            printf '       {{cyan}}just bootstrap{{reset}}  (includes sudo for system packages)\n'
+            printf '       {{cyan}}— or —{{reset}}\n'
+            printf '       sudo apt-get install libkrb5-dev libclang-dev\n\n'
         fi
     fi
+
+[group('setup')]
+[doc("Full bootstrap: system packages + tools + hooks (Linux: prompts for sudo)")]
+bootstrap:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '\n{{bold}}{{blue}}══════ Full Development Bootstrap ══════{{reset}}\n\n'
+
+    # Step 1: System packages (Linux only, requires sudo)
+    if [[ "{{platform}}" == "linux" ]]; then
+        NEED_SYSTEM=0
+        if ! pkg-config --exists krb5-gssapi 2>/dev/null; then
+            NEED_SYSTEM=1
+        fi
+        if ! (command -v llvm-config &> /dev/null || [ -f /usr/lib/llvm-*/lib/libclang.so ]); then
+            NEED_SYSTEM=1
+        fi
+
+        if [[ $NEED_SYSTEM -eq 1 ]]; then
+            printf '{{cyan}}[1/4]{{reset}} Installing system packages (requires sudo)...\n'
+            printf '{{cyan}}[INFO]{{reset}} - libkrb5-dev: Kerberos/GSSAPI headers\n'
+            printf '{{cyan}}[INFO]{{reset}} - libclang-dev: Required for bindgen (FFI generation)\n'
+            sudo apt-get update && sudo apt-get install -y libkrb5-dev libclang-dev
+            printf '{{green}}[OK]{{reset}}   System packages installed\n\n'
+        else
+            printf '{{cyan}}[1/4]{{reset}} System packages already installed\n'
+            printf '{{green}}[OK]{{reset}}   Skipping\n\n'
+        fi
+    else
+        printf '{{cyan}}[1/4]{{reset}} System packages (Linux-only)\n'
+        printf '{{green}}[OK]{{reset}}   Skipping (not Linux)\n\n'
+    fi
+
+    # Step 2: Check environment
+    printf '{{cyan}}[2/4]{{reset}} Checking development environment...\n'
+    just setup
+
+    # Step 3: Install cargo tools
+    printf '\n{{cyan}}[3/4]{{reset}} Installing cargo extensions...\n'
+    just setup-tools
+
+    # Step 4: Install git hooks
+    printf '\n{{cyan}}[4/4]{{reset}} Installing git hooks...\n'
+    just setup-hooks
+
+    printf '\n{{bold}}{{green}}══════ Bootstrap Complete ══════{{reset}}\n\n'
+    printf 'Your development environment is fully configured.\n'
+    printf 'Run {{cyan}}just ci-all{{reset}} to verify everything works with all features.\n\n'
 
 # ============================================================================
 # CORE BUILD RECIPES
@@ -1483,8 +1534,8 @@ help:
     printf '  Base recipes use DEFAULT features (work everywhere)\n'
     printf '  -all variants use ALL features (need libkrb5-dev on Linux)\n\n'
     printf '{{bold}}Quick Start:{{reset}}\n'
-    printf '  just setup     Check/install dependencies\n'
-    printf '  just dev       Build, test, lint (default features)\n'
-    printf '  just ci        Run CI pipeline (default features)\n'
-    printf '  just ci-all    Run CI pipeline (all features, matches GH Actions)\n\n'
+    printf '  just bootstrap   Full setup (system pkgs + tools + hooks)\n'
+    printf '  just setup       Check development environment\n'
+    printf '  just ci          Run CI pipeline (default features)\n'
+    printf '  just ci-all      Run CI pipeline (all features, matches GH Actions)\n\n'
     just --list --unsorted

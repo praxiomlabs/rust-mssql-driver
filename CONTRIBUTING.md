@@ -36,11 +36,19 @@ The fastest way to get started:
 git clone https://github.com/praxiomlabs/rust-mssql-driver.git
 cd rust-mssql-driver
 
-# Complete setup: check environment, install tools, configure hooks
-just setup-all
+# Full bootstrap: system packages + cargo tools + git hooks
+# (Linux: will prompt for sudo to install libkrb5-dev, libclang-dev)
+just bootstrap
 
-# Verify everything works
-just ci
+# Verify everything works with all features
+just ci-all
+```
+
+**Alternative (no sudo):** If you only need default features (no Kerberos):
+
+```bash
+just setup-all   # Cargo tools + git hooks only
+just ci          # CI with default features
 ```
 
 ### Prerequisites
