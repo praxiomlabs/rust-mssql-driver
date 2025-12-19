@@ -1876,84 +1876,97 @@ msrv:
 - [x] Set up CI pipeline (GitHub Actions)
 - [x] Create `mssql-testing` crate scaffolding
 
-### Phase 2: Protocol Layer (Week 3-5)
+### Phase 2: Protocol Layer ✅ Complete
 
 **`tds-protocol` crate:**
-- [ ] Implement `PacketHeader` and `PacketStatus` bitflags
-- [ ] Implement token parser framework
-- [ ] Implement core tokens: `ColMetaData`, `Row`, `Done`, `Error`, `Info`
-- [ ] Implement Login7 packet construction
-- [ ] Implement Prelogin packet construction
-- [ ] Verify strict `no_std` + `alloc` compatibility
+- [x] Implement `PacketHeader` and `PacketStatus` bitflags
+- [x] Implement token parser framework
+- [x] Implement core tokens: `ColMetaData`, `Row`, `Done`, `Error`, `Info`
+- [x] Implement Login7 packet construction
+- [x] Implement Prelogin packet construction
+- [x] Verify strict `no_std` + `alloc` compatibility
 - [ ] Fuzz testing for packet/token parsing
 
-### Phase 3: TLS Layer (Week 6-7)
+### Phase 3: TLS Layer ✅ Complete
 
 **`mssql-tls` crate:**
-- [ ] Implement TDS 7.x TLS negotiation (post-prelogin)
-- [ ] Implement TDS 8.0 strict mode (TLS-first)
-- [ ] Certificate validation and hostname verification
-- [ ] `TrustServerCertificate` support with warnings
+- [x] Implement TDS 7.x TLS negotiation (post-prelogin)
+- [x] Implement TDS 8.0 strict mode (TLS-first)
+- [x] Certificate validation and hostname verification
+- [x] `TrustServerCertificate` support with warnings
 
-### Phase 4: Codec Layer (Week 8-9)
+### Phase 4: Codec Layer ✅ Complete
 
 **`mssql-codec` crate:**
-- [ ] Implement `tokio_util::codec::Decoder` for TDS packets
-- [ ] Implement packet reassembly logic
-- [ ] Implement IO splitting for cancellation
-- [ ] Integration tests with mock server
+- [x] Implement `tokio_util::codec::Decoder` for TDS packets
+- [x] Implement packet reassembly logic
+- [x] Implement IO splitting for cancellation
+- [x] Integration tests with mock server
 
-### Phase 5: Authentication (Week 10-11)
+### Phase 5: Authentication (Tier 1 ✅, Tier 2-3 ⏳ Planned v0.2)
 
 **`mssql-auth` crate:**
-- [ ] Implement SQL Authentication (Login7 flow)
-- [ ] Implement Azure AD token authentication
-- [ ] Add `azure-identity` feature for Managed Identity
-- [ ] Add `integrated-auth` feature (Kerberos/NTLM)
+- [x] Implement SQL Authentication (Login7 flow)
+- [x] Implement Azure AD token authentication
+- [ ] Add `azure-identity` feature for Managed Identity (v0.2.0)
+- [ ] Add `integrated-auth` feature (Kerberos/NTLM) (v0.2.0)
 
-### Phase 6: Client API (Week 12-14)
+### Phase 6: Client API ✅ Complete
 
 **`mssql-client` crate:**
-- [ ] Implement connection string parser
-- [ ] Implement `Client<S>` type-state machine
-- [ ] Implement basic query execution
-- [ ] Implement `Row` struct with `Arc<Bytes>` pattern
-- [ ] Implement parameterized queries
-- [ ] Implement transaction support with savepoints
+- [x] Implement connection string parser
+- [x] Implement `Client<S>` type-state machine
+- [x] Implement basic query execution
+- [x] Implement `Row` struct with `Arc<Bytes>` pattern
+- [x] Implement parameterized queries
+- [x] Implement transaction support with savepoints
 
-### Phase 7: Type System (Week 15-16)
+### Phase 7: Type System ✅ Complete
 
 **`mssql-types` crate:**
-- [ ] Implement basic type mappings (integers, strings)
-- [ ] Implement date/time type mappings
-- [ ] Implement `Decimal` mapping
-- [ ] Implement `Uuid` mapping
-- [ ] Implement PLP chunk decoding for large objects
-- [ ] Implement streaming blob reader
+- [x] Implement basic type mappings (integers, strings)
+- [x] Implement date/time type mappings
+- [x] Implement `Decimal` mapping
+- [x] Implement `Uuid` mapping
+- [x] Implement PLP chunk decoding for large objects
+- [x] Implement streaming blob reader
 
-### Phase 8: Production Features (Week 17-20)
+### Phase 8: Production Features ✅ Complete
 
-- [ ] Implement `mssql-driver-pool` with `sp_reset_connection`
-- [ ] Implement bulk copy (BCP) support
-- [ ] Add OpenTelemetry instrumentation feature
-- [ ] Implement retry policies
-- [ ] Performance optimization and benchmarking
-- [ ] Documentation and examples
+- [x] Implement `mssql-driver-pool` with `sp_reset_connection`
+- [x] Implement bulk copy (BCP) support
+- [x] Add OpenTelemetry instrumentation feature
+- [x] Implement retry policies
+- [x] Performance optimization and benchmarking
+- [x] Documentation and examples
 
-### Phase 9: Derive Macros (Week 21-22)
+### Phase 9: Derive Macros (Partial)
 
 **`mssql-derive` crate:**
-- [ ] Implement `#[derive(FromRow)]`
-- [ ] Implement `#[derive(ToSql)]`
-- [ ] Implement `#[derive(Tvp)]`
+- [x] Implement `#[derive(FromRow)]`
+- [ ] Implement `#[derive(ToSql)]` (v0.2.0)
+- [ ] Implement `#[derive(Tvp)]` (v0.2.0)
 
-### Phase 10: Release Preparation (Week 23-24)
+### Phase 10: Release Preparation ✅ v0.1.0 Released
 
-- [ ] API review and stabilization
-- [ ] Security audit
-- [ ] Documentation review
-- [ ] Migration guide from `tiberius`
-- [ ] Publish to crates.io
+- [x] API review and stabilization
+- [x] Security audit (cargo-deny, cargo-audit)
+- [x] Documentation review
+- [x] Migration guide from `tiberius`
+- [x] Publish to crates.io
+
+### Future Releases
+
+**v0.2.0 Roadmap:**
+- [ ] Table-Valued Parameters (TVP)
+- [ ] Azure Managed Identity (`azure-identity` feature)
+- [ ] Integrated authentication (`integrated-auth` feature)
+- [ ] `#[derive(ToSql)]` and `#[derive(Tvp)]` macros
+
+**v0.3.0+ Roadmap:**
+- [ ] Always Encrypted client-side encryption
+- [ ] Connection resiliency improvements
+- [ ] Additional authentication methods
 
 ---
 

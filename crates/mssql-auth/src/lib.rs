@@ -7,30 +7,30 @@
 //!
 //! ## Supported Authentication Methods
 //!
-//! | Method | Feature Flag | Description |
-//! |--------|--------------|-------------|
-//! | SQL Authentication | default | Username/password |
-//! | Azure AD Token | default | Pre-obtained access token |
-//! | Azure Managed Identity | `azure-identity` | VM/container identity |
-//! | Service Principal | `azure-identity` | App credentials |
-//! | Integrated (Kerberos) | `integrated-auth` | GSSAPI/Kerberos |
-//! | Certificate | `cert-auth` | Client certificate |
+//! | Method | Feature Flag | Status | Description |
+//! |--------|--------------|--------|-------------|
+//! | SQL Authentication | default | ✅ Implemented | Username/password |
+//! | Azure AD Token | default | ✅ Implemented | Pre-obtained access token |
+//! | Azure Managed Identity | `azure-identity` | ⏳ Planned v0.2 | VM/container identity |
+//! | Service Principal | `azure-identity` | ⏳ Planned v0.2 | App credentials |
+//! | Integrated (Kerberos) | `integrated-auth` | ⏳ Planned v0.2 | GSSAPI/Kerberos |
+//! | Certificate | `cert-auth` | ⏳ Planned | Client certificate |
 //!
 //! ## Authentication Tiers
 //!
 //! Per ARCHITECTURE.md, authentication is tiered:
 //!
-//! ### Tier 1 (Core - Pure Rust, Default)
+//! ### Tier 1 (Core - Pure Rust, Default) ✅ Implemented
 //!
 //! - [`SqlServerAuth`] - Username/password via Login7
 //! - [`AzureAdAuth`] - Pre-acquired access token
 //!
-//! ### Tier 2 (Azure Native - `azure-identity` feature)
+//! ### Tier 2 (Azure Native - `azure-identity` feature) ⏳ Planned for v0.2.0
 //!
 //! - Managed Identity (Azure VM/Container)
 //! - Service Principal (Client ID + Secret)
 //!
-//! ### Tier 3 (Enterprise/Legacy - `integrated-auth` feature)
+//! ### Tier 3 (Enterprise/Legacy - `integrated-auth` feature) ⏳ Planned for v0.2.0
 //!
 //! - Kerberos (Linux/macOS via GSSAPI)
 //! - NTLM/Kerberos (Windows via SSPI)

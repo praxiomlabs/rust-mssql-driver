@@ -17,6 +17,23 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 - **Pure Rust TLS** - Uses rustls, no OpenSSL dependency
 - **Modern Rust** - 2024 Edition, MSRV 1.85
 
+### Feature Status (v0.1.x)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| SQL Authentication | ✅ | Username/password |
+| Azure AD Token | ✅ | Pre-acquired tokens |
+| Queries & Parameters | ✅ | Full support |
+| Transactions | ✅ | Commit, rollback, savepoints |
+| Connection Pooling | ✅ | Built-in via `mssql-driver-pool` |
+| Bulk Insert | ✅ | High-performance batch loading |
+| `#[derive(FromRow)]` | ✅ | Row-to-struct mapping |
+| TDS 8.0 Strict Mode | ✅ | SQL Server 2022+ |
+| Azure Managed Identity | ⏳ | Planned for v0.2 |
+| Kerberos/NTLM | ⏳ | Planned for v0.2 |
+| Table-Valued Parameters | ⏳ | Planned for v0.2 |
+| Always Encrypted | ⏳ | Planned for v0.3+ |
+
 ## Installation
 
 Add to your `Cargo.toml`:

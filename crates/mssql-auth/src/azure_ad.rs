@@ -13,15 +13,20 @@
 //! 4. Client sends FEDAUTH token packet
 //! 5. Server validates token and completes authentication
 //!
-//! ## Token Sources (Tier 1 - Core)
+//! ## Token Sources (Tier 1 - Core) ✅ Implemented
 //!
 //! - Pre-acquired access token (user provides token directly)
 //!
-//! ## Token Sources (Tier 2 - azure-identity feature)
+//! ## Token Sources (Tier 2 - azure-identity feature) ⏳ Planned for v0.2.0
+//!
+//! These require the `azure-identity` feature flag (not yet implemented):
 //!
 //! - Managed Identity (Azure VM/Container)
 //! - Service Principal (Client ID + Secret)
 //! - Azure CLI credentials
+//!
+//! **Current workaround**: Acquire tokens externally using the `azure_identity` crate
+//! and pass them via [`AzureAdAuth::with_token`].
 
 use std::borrow::Cow;
 use std::time::{Duration, Instant};

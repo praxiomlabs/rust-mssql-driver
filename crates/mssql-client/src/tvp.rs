@@ -6,18 +6,25 @@
 //! - String concatenation of values
 //! - Temporary tables
 //!
-//! ## Current Status: Not Yet Implemented
+//! ## Current Status: Planned for v0.2.0
 //!
-//! **Note:** TVP support is planned but not yet fully implemented. The types in this
+//! TVP support is **planned for a future release** (target: v0.2.0). The types in this
 //! module provide the foundation for TVP support, but attempting to use `TvpValue`
-//! as a query parameter will return an error.
+//! as a query parameter will return an error until implementation is complete.
 //!
-//! TVP encoding requires TDS-specific binary encoding (type_id 0xF3) which involves:
-//! 1. Adding a `SqlValue::Tvp` variant to the type system
-//! 2. TVP parameter metadata encoding in RPC requests
-//! 3. TVP row data encoding per MS-TDS specification
+//! ### Implementation Roadmap
 //!
-//! ### Workarounds
+//! Full TVP support requires TDS-specific binary encoding (type 0xF3):
+//!
+//! 1. ✅ API types defined ([`Tvp`], [`TvpValue`], [`TvpColumn`], [`TvpRow`])
+//! 2. ⏳ `SqlValue::Tvp` variant in `mssql-types` crate
+//! 3. ⏳ TVP parameter metadata encoding in RPC requests
+//! 4. ⏳ TVP row data encoding per [MS-TDS specification]
+//! 5. ⏳ `#[derive(Tvp)]` proc macro in `mssql-derive`
+//!
+//! [MS-TDS specification]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-tds/c264db71-c1ec-4fe8-b5ef-19d54b1e6566
+//!
+//! ### Workarounds (v0.1.x)
 //!
 //! Until TVP is fully implemented, consider these alternatives:
 //!
