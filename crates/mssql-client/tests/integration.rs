@@ -674,23 +674,11 @@ async fn test_large_string() {
 }
 
 // =============================================================================
-// Transaction Tests (TEST-018)
-//
-// NOTE: These tests currently fail with error 3989:
-// "New request is not allowed to start because it should come with valid transaction descriptor."
-//
-// This is because the ALL_HEADERS section in SQL batch and RPC requests needs to include
-// the transaction descriptor returned by the server in the BeginTransaction EnvChange token.
-// This requires:
-// 1. Extracting transaction descriptor from BeginTransaction EnvChange
-// 2. Storing it in Client<InTransaction> state
-// 3. Passing it in subsequent SQL batch/RPC ALL_HEADERS
-//
-// Until this is implemented, transaction support is incomplete.
+// Transaction Tests
 // =============================================================================
 
 #[tokio::test]
-#[ignore = "Requires transaction descriptor support - see TEST-018"]
+#[ignore = "Requires SQL Server"]
 async fn test_transaction_commit() {
     let config = get_test_config().expect("SQL Server config required");
     let mut client = Client::connect(config).await.expect("Failed to connect");
@@ -731,7 +719,7 @@ async fn test_transaction_commit() {
 }
 
 #[tokio::test]
-#[ignore = "Requires transaction descriptor support - see TEST-018"]
+#[ignore = "Requires SQL Server"]
 async fn test_transaction_rollback() {
     let config = get_test_config().expect("SQL Server config required");
     let mut client = Client::connect(config).await.expect("Failed to connect");
@@ -781,7 +769,7 @@ async fn test_transaction_rollback() {
 }
 
 #[tokio::test]
-#[ignore = "Requires transaction descriptor support - see TEST-018"]
+#[ignore = "Requires SQL Server"]
 async fn test_transaction_savepoint() {
     let config = get_test_config().expect("SQL Server config required");
     let mut client = Client::connect(config).await.expect("Failed to connect");
@@ -840,7 +828,7 @@ async fn test_transaction_savepoint() {
 }
 
 #[tokio::test]
-#[ignore = "Requires transaction descriptor support - see TEST-018"]
+#[ignore = "Requires SQL Server"]
 async fn test_query_within_transaction() {
     let config = get_test_config().expect("SQL Server config required");
     let client = Client::connect(config).await.expect("Failed to connect");
@@ -867,7 +855,7 @@ async fn test_query_within_transaction() {
 }
 
 #[tokio::test]
-#[ignore = "Requires transaction descriptor support - see TEST-018"]
+#[ignore = "Requires SQL Server"]
 async fn test_multiple_savepoints() {
     let config = get_test_config().expect("SQL Server config required");
     let mut client = Client::connect(config).await.expect("Failed to connect");
@@ -1137,7 +1125,7 @@ async fn test_multi_result_with_rows() {
 }
 
 // =============================================================================
-// Transaction Isolation Level Tests (TEST-018)
+// Transaction Isolation Level Tests
 // =============================================================================
 
 #[tokio::test]
