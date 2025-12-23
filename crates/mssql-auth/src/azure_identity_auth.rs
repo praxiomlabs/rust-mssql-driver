@@ -197,16 +197,19 @@ impl std::fmt::Debug for ManagedIdentityAuth {
     }
 }
 
-impl ManagedIdentityAuth {
-    /// Get the authentication method this provider uses.
-    pub fn method(&self) -> AuthMethod {
+impl crate::provider::AsyncAuthProvider for ManagedIdentityAuth {
+    fn method(&self) -> AuthMethod {
         AuthMethod::AzureAd
     }
 
-    /// Authenticate asynchronously and produce authentication data.
-    pub async fn authenticate_async(&self) -> Result<AuthData, AuthError> {
+    async fn authenticate_async(&self) -> Result<AuthData, AuthError> {
         let token = self.get_token().await?;
         Ok(AuthData::FedAuth { token, nonce: None })
+    }
+
+    fn needs_refresh(&self) -> bool {
+        // Managed identity tokens are acquired fresh each time
+        false
     }
 }
 
@@ -312,20 +315,24 @@ impl std::fmt::Debug for ServicePrincipalAuth {
     }
 }
 
-impl ServicePrincipalAuth {
-    /// Get the authentication method this provider uses.
-    pub fn method(&self) -> AuthMethod {
+impl crate::provider::AsyncAuthProvider for ServicePrincipalAuth {
+    fn method(&self) -> AuthMethod {
         AuthMethod::AzureAd
     }
 
-    /// Authenticate asynchronously and produce authentication data.
-    pub async fn authenticate_async(&self) -> Result<AuthData, AuthError> {
+    async fn authenticate_async(&self) -> Result<AuthData, AuthError> {
         let token = self.get_token().await?;
         Ok(AuthData::FedAuth { token, nonce: None })
+    }
+
+    fn needs_refresh(&self) -> bool {
+        // Service principal tokens are acquired fresh each time
+        false
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

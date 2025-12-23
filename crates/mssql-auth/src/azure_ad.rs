@@ -17,16 +17,16 @@
 //!
 //! - Pre-acquired access token (user provides token directly)
 //!
-//! ## Token Sources (Tier 2 - azure-identity feature) ⏳ Planned for v0.2.0
+//! ## Token Sources (Tier 2 - azure-identity feature) ✅ Implemented
 //!
-//! These require the `azure-identity` feature flag (not yet implemented):
+//! These require the `azure-identity` feature flag:
 //!
-//! - Managed Identity (Azure VM/Container)
-//! - Service Principal (Client ID + Secret)
-//! - Azure CLI credentials
+//! - [`ManagedIdentityAuth`](crate::ManagedIdentityAuth) - Azure VM/Container identity
+//! - [`ServicePrincipalAuth`](crate::ServicePrincipalAuth) - Client ID + Secret
 //!
-//! **Current workaround**: Acquire tokens externally using the `azure_identity` crate
-//! and pass them via [`AzureAdAuth::with_token`].
+//! ## Token Sources (Tier 3 - cert-auth feature) ✅ Implemented
+//!
+//! - [`CertificateAuth`](crate::CertificateAuth) - X.509 client certificate
 
 use std::borrow::Cow;
 use std::time::{Duration, Instant};

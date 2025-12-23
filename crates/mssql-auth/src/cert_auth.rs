@@ -60,7 +60,6 @@ use azure_identity::ClientCertificateCredential;
 
 use crate::AzureAdAuth;
 use crate::error::AuthError;
-use crate::provider::{AuthData, AuthMethod};
 
 /// The Azure SQL Database scope for token requests.
 const AZURE_SQL_SCOPE: &str = "https://database.windows.net/.default";
@@ -243,20 +242,24 @@ impl std::fmt::Debug for CertificateAuth {
     }
 }
 
-impl CertificateAuth {
-    /// Get the authentication method this provider uses.
-    pub fn method(&self) -> AuthMethod {
-        AuthMethod::AzureAd
+impl crate::provider::AsyncAuthProvider for CertificateAuth {
+    fn method(&self) -> crate::provider::AuthMethod {
+        crate::provider::AuthMethod::AzureAd
     }
 
-    /// Authenticate asynchronously and produce authentication data.
-    pub async fn authenticate_async(&self) -> Result<AuthData, AuthError> {
+    async fn authenticate_async(&self) -> Result<crate::provider::AuthData, AuthError> {
         let token = self.get_token().await?;
-        Ok(AuthData::FedAuth { token, nonce: None })
+        Ok(crate::provider::AuthData::FedAuth { token, nonce: None })
+    }
+
+    fn needs_refresh(&self) -> bool {
+        // Certificate-based tokens are acquired fresh each time
+        false
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
