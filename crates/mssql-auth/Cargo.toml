@@ -16,7 +16,9 @@ azure-identity = ["dep:azure_identity", "dep:azure_core", "dep:time"]
 # Integrated authentication (Kerberos/SPNEGO) - Linux only
 # Requires libkrb5-dev on Debian/Ubuntu or krb5-devel on RHEL/Fedora
 integrated-auth = ["dep:libgssapi"]
-cert-auth = []
+# Client certificate authentication (Azure AD Service Principal with X.509 certificate)
+# Note: This uses azure_identity's client_certificate feature which requires openssl
+cert-auth = ["dep:azure_identity", "dep:azure_core", "dep:time", "dep:base64", "azure_identity/client_certificate"]
 # Enable secure credential zeroization on drop
 zeroize = ["dep:zeroize"]
 
@@ -35,10 +37,14 @@ time = { version = "0.3", optional = true }
 # Optional: Integrated authentication (Kerberos/SPNEGO)
 libgssapi = { version = "0.9", optional = true }
 
+# Optional: Base64 encoding for certificate data
+base64 = { version = "0.22", optional = true }
+
 # Optional: Secure credential zeroization
 zeroize = { version = "1.8", features = ["derive"], optional = true }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
 tokio-test = { workspace = true }
 
 [lints]
