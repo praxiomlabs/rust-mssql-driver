@@ -17,6 +17,11 @@ use tds_protocol::rpc::{RpcParam, RpcRequest, TypeInfo as RpcTypeInfo};
 use tds_protocol::token::{
     ColMetaData, ColumnData, EnvChange, EnvChangeType, NbcRow, RawRow, Token, TokenParser,
 };
+use tds_protocol::tvp::{
+    TvpColumnDef as TvpWireColumnDef, TvpColumnFlags, TvpEncoder, TvpWireType, encode_tvp_bit,
+    encode_tvp_decimal, encode_tvp_float, encode_tvp_int, encode_tvp_null, encode_tvp_nvarchar,
+    encode_tvp_varbinary,
+};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
@@ -936,9 +941,225 @@ impl<S: ConnectionState> Client<S> {
                     }
                     #[cfg(feature = "json")]
                     SqlValue::Json(ref j) => RpcParam::nvarchar(&name, &j.to_string()),
+                    SqlValue::Tvp(ref tvp_data) => {
+                        // Encode TVP using the wire format
+                        Self::encode_tvp_param(&name, tvp_data)?
+                    }
                 })
             })
             .collect()
+    }
+
+    /// Encode a TVP parameter for RPC.
+    ///
+    /// This encodes the complete TVP structure including metadata and row data
+    /// into the TDS wire format.
+    fn encode_tvp_param(name: &str, tvp_data: &mssql_types::TvpData) -> Result<RpcParam> {
+        // Convert mssql-types column definitions to wire format
+        let wire_columns: Vec<TvpWireColumnDef> = tvp_data
+            .columns
+            .iter()
+            .map(|col| {
+                let wire_type = Self::convert_tvp_column_type(&col.column_type);
+                TvpWireColumnDef {
+                    wire_type,
+                    flags: TvpColumnFlags {
+                        nullable: col.nullable,
+                    },
+                }
+            })
+            .collect();
+
+        // Create encoder
+        let encoder = TvpEncoder::new(&tvp_data.schema, &tvp_data.type_name, &wire_columns);
+
+        // Encode to buffer
+        let mut buf = BytesMut::with_capacity(256);
+
+        // Encode metadata
+        encoder.encode_metadata(&mut buf);
+
+        // Encode each row
+        for row in &tvp_data.rows {
+            encoder.encode_row(&mut buf, |row_buf| {
+                for (col_idx, value) in row.iter().enumerate() {
+                    let wire_type = &wire_columns[col_idx].wire_type;
+                    Self::encode_tvp_value(value, wire_type, row_buf);
+                }
+            });
+        }
+
+        // Encode end marker
+        encoder.encode_end(&mut buf);
+
+        // Create RPC param with TVP type info
+        // For TVP, we use a special type info that indicates the parameter is a TVP
+        // The type info is encoded as part of the TVP data itself
+        let type_info = RpcTypeInfo {
+            type_id: 0xF3, // TVP type
+            max_length: None,
+            precision: None,
+            scale: None,
+            collation: None,
+        };
+
+        Ok(RpcParam {
+            name: name.to_string(),
+            flags: tds_protocol::rpc::ParamFlags::default(),
+            type_info,
+            value: Some(buf.freeze()),
+        })
+    }
+
+    /// Convert mssql-types TvpColumnType to wire TvpWireType.
+    fn convert_tvp_column_type(col_type: &mssql_types::TvpColumnType) -> TvpWireType {
+        match col_type {
+            mssql_types::TvpColumnType::Bit => TvpWireType::Bit,
+            mssql_types::TvpColumnType::TinyInt => TvpWireType::Int { size: 1 },
+            mssql_types::TvpColumnType::SmallInt => TvpWireType::Int { size: 2 },
+            mssql_types::TvpColumnType::Int => TvpWireType::Int { size: 4 },
+            mssql_types::TvpColumnType::BigInt => TvpWireType::Int { size: 8 },
+            mssql_types::TvpColumnType::Real => TvpWireType::Float { size: 4 },
+            mssql_types::TvpColumnType::Float => TvpWireType::Float { size: 8 },
+            mssql_types::TvpColumnType::Decimal { precision, scale } => TvpWireType::Decimal {
+                precision: *precision,
+                scale: *scale,
+            },
+            mssql_types::TvpColumnType::NVarChar { max_length } => TvpWireType::NVarChar {
+                max_length: *max_length,
+            },
+            mssql_types::TvpColumnType::VarChar { max_length } => TvpWireType::VarChar {
+                max_length: *max_length,
+            },
+            mssql_types::TvpColumnType::VarBinary { max_length } => TvpWireType::VarBinary {
+                max_length: *max_length,
+            },
+            mssql_types::TvpColumnType::UniqueIdentifier => TvpWireType::Guid,
+            mssql_types::TvpColumnType::Date => TvpWireType::Date,
+            mssql_types::TvpColumnType::Time { scale } => TvpWireType::Time { scale: *scale },
+            mssql_types::TvpColumnType::DateTime2 { scale } => {
+                TvpWireType::DateTime2 { scale: *scale }
+            }
+            mssql_types::TvpColumnType::DateTimeOffset { scale } => {
+                TvpWireType::DateTimeOffset { scale: *scale }
+            }
+            mssql_types::TvpColumnType::Xml => TvpWireType::Xml,
+        }
+    }
+
+    /// Encode a single TVP column value.
+    fn encode_tvp_value(
+        value: &mssql_types::SqlValue,
+        wire_type: &TvpWireType,
+        buf: &mut BytesMut,
+    ) {
+        use mssql_types::SqlValue;
+
+        match value {
+            SqlValue::Null => {
+                encode_tvp_null(wire_type, buf);
+            }
+            SqlValue::Bool(v) => {
+                encode_tvp_bit(*v, buf);
+            }
+            SqlValue::TinyInt(v) => {
+                encode_tvp_int(*v as i64, 1, buf);
+            }
+            SqlValue::SmallInt(v) => {
+                encode_tvp_int(*v as i64, 2, buf);
+            }
+            SqlValue::Int(v) => {
+                encode_tvp_int(*v as i64, 4, buf);
+            }
+            SqlValue::BigInt(v) => {
+                encode_tvp_int(*v, 8, buf);
+            }
+            SqlValue::Float(v) => {
+                encode_tvp_float(*v as f64, 4, buf);
+            }
+            SqlValue::Double(v) => {
+                encode_tvp_float(*v, 8, buf);
+            }
+            SqlValue::String(s) => {
+                let max_len = match wire_type {
+                    TvpWireType::NVarChar { max_length } => *max_length,
+                    _ => 4000,
+                };
+                encode_tvp_nvarchar(s, max_len, buf);
+            }
+            SqlValue::Binary(b) => {
+                let max_len = match wire_type {
+                    TvpWireType::VarBinary { max_length } => *max_length,
+                    _ => 8000,
+                };
+                encode_tvp_varbinary(b, max_len, buf);
+            }
+            #[cfg(feature = "decimal")]
+            SqlValue::Decimal(d) => {
+                let sign = if d.is_sign_negative() { 0u8 } else { 1u8 };
+                let mantissa = d.mantissa().unsigned_abs();
+                encode_tvp_decimal(sign, mantissa, buf);
+            }
+            #[cfg(feature = "uuid")]
+            SqlValue::Uuid(u) => {
+                let bytes = u.as_bytes();
+                tds_protocol::tvp::encode_tvp_guid(bytes, buf);
+            }
+            #[cfg(feature = "chrono")]
+            SqlValue::Date(d) => {
+                // Calculate days since 0001-01-01
+                let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
+                let days = d.signed_duration_since(base).num_days() as u32;
+                tds_protocol::tvp::encode_tvp_date(days, buf);
+            }
+            #[cfg(feature = "chrono")]
+            SqlValue::Time(t) => {
+                use chrono::Timelike;
+                let nanos =
+                    t.num_seconds_from_midnight() as u64 * 1_000_000_000 + t.nanosecond() as u64;
+                let intervals = nanos / 100;
+                let scale = match wire_type {
+                    TvpWireType::Time { scale } => *scale,
+                    _ => 7,
+                };
+                tds_protocol::tvp::encode_tvp_time(intervals, scale, buf);
+            }
+            #[cfg(feature = "chrono")]
+            SqlValue::DateTime(dt) => {
+                use chrono::Timelike;
+                // Time component
+                let nanos = dt.time().num_seconds_from_midnight() as u64 * 1_000_000_000
+                    + dt.time().nanosecond() as u64;
+                let intervals = nanos / 100;
+                // Date component
+                let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
+                let days = dt.date().signed_duration_since(base).num_days() as u32;
+                let scale = match wire_type {
+                    TvpWireType::DateTime2 { scale } => *scale,
+                    _ => 7,
+                };
+                tds_protocol::tvp::encode_tvp_datetime2(intervals, days, scale, buf);
+            }
+            #[cfg(feature = "chrono")]
+            SqlValue::DateTimeOffset(_dto) => {
+                // DateTimeOffset encoding is complex; encode as string for now
+                // TODO: Implement proper DateTimeOffset encoding
+                encode_tvp_null(wire_type, buf);
+            }
+            #[cfg(feature = "json")]
+            SqlValue::Json(j) => {
+                // JSON is encoded as NVARCHAR
+                encode_tvp_nvarchar(&j.to_string(), 0xFFFF, buf);
+            }
+            SqlValue::Xml(s) => {
+                // XML is encoded as NVARCHAR for TVP
+                encode_tvp_nvarchar(s, 0xFFFF, buf);
+            }
+            SqlValue::Tvp(_) => {
+                // Nested TVPs are not supported
+                encode_tvp_null(wire_type, buf);
+            }
+        }
     }
 
     /// Read complete query response including columns and rows.

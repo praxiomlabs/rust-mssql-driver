@@ -1890,3 +1890,373 @@ async fn test_binary_data_roundtrip() {
 
     client.close().await.expect("Failed to close");
 }
+
+// =============================================================================
+// Table-Valued Parameter (TVP) Tests
+// =============================================================================
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_tvp_basic_int_list() {
+    use mssql_client::{Tvp, TvpColumn, TvpRow, TvpValue};
+    use mssql_types::{ToSql, TypeError};
+
+    // Define a simple TVP struct for integer IDs
+    struct IntId {
+        id: i32,
+    }
+
+    impl Tvp for IntId {
+        fn type_name() -> &'static str {
+            "dbo.IntIdList"
+        }
+
+        fn columns() -> Vec<TvpColumn> {
+            vec![TvpColumn::new("Id", "INT", 0)]
+        }
+
+        fn to_row(&self) -> Result<TvpRow, TypeError> {
+            Ok(TvpRow::new(vec![self.id.to_sql()?]))
+        }
+    }
+
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Create the TVP type in SQL Server (if it doesn't exist)
+    // Note: This requires db_owner or ALTER permission on the schema
+    let create_type = r#"
+        IF TYPE_ID('dbo.IntIdList') IS NULL
+        BEGIN
+            CREATE TYPE dbo.IntIdList AS TABLE (
+                Id INT NOT NULL
+            );
+        END
+    "#;
+    if let Err(e) = client.execute(create_type, &[]).await {
+        println!("Could not create TVP type (may already exist): {:?}", e);
+    }
+
+    // Create test data table
+    client
+        .execute(
+            "CREATE TABLE #TvpTestData (Id INT PRIMARY KEY, Name NVARCHAR(50))",
+            &[],
+        )
+        .await
+        .expect("Failed to create test data table");
+
+    client
+        .execute(
+            "INSERT INTO #TvpTestData VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Charlie'), (4, 'Diana')",
+            &[],
+        )
+        .await
+        .expect("Failed to insert test data");
+
+    // Create a stored procedure that uses the TVP
+    let create_proc = r#"
+        CREATE PROCEDURE #GetUsersById
+            @Ids dbo.IntIdList READONLY
+        AS
+        BEGIN
+            SELECT d.Id, d.Name
+            FROM #TvpTestData d
+            INNER JOIN @Ids i ON d.Id = i.Id
+            ORDER BY d.Id;
+        END
+    "#;
+    client
+        .execute(create_proc, &[])
+        .await
+        .expect("Failed to create stored procedure");
+
+    // Create TVP data
+    let ids = vec![IntId { id: 1 }, IntId { id: 3 }];
+    let tvp = TvpValue::new(&ids).expect("Failed to create TVP");
+
+    // Execute stored procedure with TVP
+    let rows = client
+        .query("EXEC #GetUsersById @Ids = @p1", &[&tvp])
+        .await
+        .expect("TVP query failed");
+
+    let results: Vec<(i32, String)> = rows
+        .filter_map(|r| r.ok())
+        .map(|row| (row.get(0).unwrap(), row.get(1).unwrap()))
+        .collect();
+
+    assert_eq!(results.len(), 2, "Should return 2 matching rows");
+    assert_eq!(results[0], (1, "Alice".to_string()));
+    assert_eq!(results[1], (3, "Charlie".to_string()));
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_tvp_empty_table() {
+    use mssql_client::{Tvp, TvpColumn, TvpRow, TvpValue};
+    use mssql_types::{ToSql, TypeError};
+
+    struct IntId {
+        id: i32,
+    }
+
+    impl Tvp for IntId {
+        fn type_name() -> &'static str {
+            "dbo.IntIdList"
+        }
+
+        fn columns() -> Vec<TvpColumn> {
+            vec![TvpColumn::new("Id", "INT", 0)]
+        }
+
+        fn to_row(&self) -> Result<TvpRow, TypeError> {
+            Ok(TvpRow::new(vec![self.id.to_sql()?]))
+        }
+    }
+
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Ensure TVP type exists
+    let create_type = r#"
+        IF TYPE_ID('dbo.IntIdList') IS NULL
+        BEGIN
+            CREATE TYPE dbo.IntIdList AS TABLE (
+                Id INT NOT NULL
+            );
+        END
+    "#;
+    if let Err(e) = client.execute(create_type, &[]).await {
+        println!("Could not create TVP type: {:?}", e);
+    }
+
+    // Create an empty TVP
+    let tvp: TvpValue = TvpValue::empty::<IntId>();
+
+    // Query with empty TVP - should return no rows
+    let rows = client
+        .query(
+            "SELECT Id FROM (SELECT 1 AS Id UNION SELECT 2) AS t WHERE Id IN (SELECT Id FROM @p1)",
+            &[&tvp],
+        )
+        .await
+        .expect("Query with empty TVP failed");
+
+    let count = rows.filter_map(|r| r.ok()).count();
+    assert_eq!(count, 0, "Empty TVP should match no rows");
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_tvp_multi_column() {
+    use mssql_client::{Tvp, TvpColumn, TvpRow, TvpValue};
+    use mssql_types::{ToSql, TypeError};
+
+    // TVP with multiple columns
+    struct UserData {
+        id: i32,
+        name: String,
+        score: i32,
+    }
+
+    impl Tvp for UserData {
+        fn type_name() -> &'static str {
+            "dbo.UserDataList"
+        }
+
+        fn columns() -> Vec<TvpColumn> {
+            vec![
+                TvpColumn::new("Id", "INT", 0),
+                TvpColumn::new("Name", "NVARCHAR(50)", 1),
+                TvpColumn::new("Score", "INT", 2),
+            ]
+        }
+
+        fn to_row(&self) -> Result<TvpRow, TypeError> {
+            Ok(TvpRow::new(vec![
+                self.id.to_sql()?,
+                self.name.to_sql()?,
+                self.score.to_sql()?,
+            ]))
+        }
+    }
+
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Create the multi-column TVP type
+    let create_type = r#"
+        IF TYPE_ID('dbo.UserDataList') IS NULL
+        BEGIN
+            CREATE TYPE dbo.UserDataList AS TABLE (
+                Id INT NOT NULL,
+                Name NVARCHAR(50) NOT NULL,
+                Score INT NOT NULL
+            );
+        END
+    "#;
+    if let Err(e) = client.execute(create_type, &[]).await {
+        println!("Could not create TVP type: {:?}", e);
+    }
+
+    // Create TVP data
+    let users = vec![
+        UserData {
+            id: 1,
+            name: "Alice".to_string(),
+            score: 95,
+        },
+        UserData {
+            id: 2,
+            name: "Bob".to_string(),
+            score: 87,
+        },
+        UserData {
+            id: 3,
+            name: "Charlie".to_string(),
+            score: 92,
+        },
+    ];
+    let tvp = TvpValue::new(&users).expect("Failed to create TVP");
+
+    // Query to read back the TVP data
+    let rows = client
+        .query("SELECT Id, Name, Score FROM @p1 ORDER BY Id", &[&tvp])
+        .await
+        .expect("Multi-column TVP query failed");
+
+    let results: Vec<(i32, String, i32)> = rows
+        .filter_map(|r| r.ok())
+        .map(|row| {
+            (
+                row.get(0).unwrap(),
+                row.get(1).unwrap(),
+                row.get(2).unwrap(),
+            )
+        })
+        .collect();
+
+    assert_eq!(results.len(), 3);
+    assert_eq!(results[0], (1, "Alice".to_string(), 95));
+    assert_eq!(results[1], (2, "Bob".to_string(), 87));
+    assert_eq!(results[2], (3, "Charlie".to_string(), 92));
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_tvp_bulk_insert() {
+    use mssql_client::{Tvp, TvpColumn, TvpRow, TvpValue};
+    use mssql_types::{ToSql, TypeError};
+
+    struct BulkRow {
+        id: i32,
+        value: String,
+    }
+
+    impl Tvp for BulkRow {
+        fn type_name() -> &'static str {
+            "dbo.BulkRowList"
+        }
+
+        fn columns() -> Vec<TvpColumn> {
+            vec![
+                TvpColumn::new("Id", "INT", 0),
+                TvpColumn::new("Value", "NVARCHAR(100)", 1),
+            ]
+        }
+
+        fn to_row(&self) -> Result<TvpRow, TypeError> {
+            Ok(TvpRow::new(vec![self.id.to_sql()?, self.value.to_sql()?]))
+        }
+    }
+
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Create the TVP type
+    let create_type = r#"
+        IF TYPE_ID('dbo.BulkRowList') IS NULL
+        BEGIN
+            CREATE TYPE dbo.BulkRowList AS TABLE (
+                Id INT NOT NULL,
+                Value NVARCHAR(100) NOT NULL
+            );
+        END
+    "#;
+    if let Err(e) = client.execute(create_type, &[]).await {
+        println!("Could not create TVP type: {:?}", e);
+    }
+
+    // Create destination table
+    client
+        .execute(
+            "CREATE TABLE #BulkDest (Id INT PRIMARY KEY, Value NVARCHAR(100))",
+            &[],
+        )
+        .await
+        .expect("Failed to create destination table");
+
+    // Create stored procedure for bulk insert
+    let create_proc = r#"
+        CREATE PROCEDURE #BulkInsertFromTvp
+            @Data dbo.BulkRowList READONLY
+        AS
+        BEGIN
+            INSERT INTO #BulkDest (Id, Value)
+            SELECT Id, Value FROM @Data;
+
+            SELECT @@ROWCOUNT AS InsertedCount;
+        END
+    "#;
+    client
+        .execute(create_proc, &[])
+        .await
+        .expect("Failed to create stored procedure");
+
+    // Create 100 rows of test data
+    let rows: Vec<BulkRow> = (1..=100)
+        .map(|i| BulkRow {
+            id: i,
+            value: format!("Value {}", i),
+        })
+        .collect();
+
+    let tvp = TvpValue::new(&rows).expect("Failed to create TVP");
+
+    // Execute bulk insert
+    let result = client
+        .query("EXEC #BulkInsertFromTvp @Data = @p1", &[&tvp])
+        .await
+        .expect("Bulk insert failed");
+
+    let inserted: i32 = result
+        .filter_map(|r| r.ok())
+        .next()
+        .map(|row| row.get(0).unwrap())
+        .unwrap_or(0);
+
+    assert_eq!(inserted, 100, "Should have inserted 100 rows");
+
+    // Verify data
+    let rows = client
+        .query("SELECT COUNT(*) FROM #BulkDest", &[])
+        .await
+        .expect("Count query failed");
+
+    let count: i32 = rows
+        .filter_map(|r| r.ok())
+        .next()
+        .map(|row| row.get(0).unwrap())
+        .unwrap_or(0);
+
+    assert_eq!(count, 100, "Table should have 100 rows");
+
+    client.close().await.expect("Failed to close");
+}
