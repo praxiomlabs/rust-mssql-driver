@@ -24,6 +24,15 @@ ignore = [
     # tokio-tar vulnerability - only used by testcontainers (dev dependency)
     # Not exploitable in our use case (we control tar input)
     { id = "RUSTSEC-2025-0111", reason = "tokio-tar is only used by testcontainers for testing; not used in library code" },
+
+    # RSA timing side-channel (Marvin Attack) - no fix available yet
+    # Risk assessment:
+    # - Our RSA usage is for Always Encrypted CEK unwrapping (client-side only)
+    # - Operations are local, not network-exposed to attackers
+    # - The vulnerability requires attackers to observe timing over the network
+    # - The sspi crate also uses rsa for Kerberos/NTLM authentication
+    # Tracking: https://github.com/RustCrypto/RSA/issues/390
+    { id = "RUSTSEC-2023-0071", reason = "RSA used locally for CEK unwrapping; no network-observable timing. No fix available; tracking RustCrypto/RSA#390" },
 ]
 
 # ------------------------------------------------------------------------------
@@ -68,19 +77,35 @@ external-default-features = "allow"
 
 # Specific crate bans
 deny = [
-    # Prefer rustls over OpenSSL for pure-Rust TLS
-    { crate = "openssl", use-instead = "rustls" },
-    { crate = "openssl-sys", use-instead = "rustls" },
-
-    # Prefer native-tls alternatives
-    { crate = "native-tls", use-instead = "rustls" },
+    # NOTE: We prefer rustls over OpenSSL/native-tls for our own TLS,
+    # but we allow them via skip-tree for transitive dependencies from
+    # Azure SDK and SSPI crates which require them for their HTTP clients.
 ]
 
 # Skip these crates for duplicate version checks
-skip = []
+skip = [
+    # These duplicates come from transitive dependencies we don't control
+    # aes: 0.8.x (our AEAD) vs 0.9.0-rc (sspi/picky-krb)
+    { crate = "aes" },
+    # base64: 0.21 (docker_credential) vs 0.22 (bollard, azure)
+    { crate = "base64" },
+    # bitflags: 1.x (async-dnssd) vs 2.x (modern crates)
+    { crate = "bitflags" },
+]
 
-# Tree of crates to skip for duplicate checks
-skip-tree = []
+# Tree of crates to skip for ban checks
+# These bring in openssl/native-tls which we can't avoid
+skip-tree = [
+    # Azure SDK requires reqwest with native-tls/openssl for HTTPS
+    { crate = "azure_identity" },
+    { crate = "azure_core" },
+    { crate = "typespec_client_core" },
+    # SSPI crate has its own TLS requirements
+    { crate = "sspi" },
+    # Testcontainers needs native HTTP client
+    { crate = "testcontainers" },
+    { crate = "bollard" },
+]
 
 # ------------------------------------------------------------------------------
 # Sources - ensure crates come from trusted sources

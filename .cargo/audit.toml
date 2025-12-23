@@ -7,4 +7,8 @@ ignore = [
     "RUSTSEC-2025-0134",
     # tokio-tar vulnerability - only used by testcontainers for testing
     "RUSTSEC-2025-0111",
+    # RSA timing side-channel (Marvin Attack) - no fix available yet
+    # Our RSA usage is local (CEK unwrapping, SSPI auth), not network-observable
+    # Tracking: https://github.com/RustCrypto/RSA/issues/390
+    "RUSTSEC-2023-0071",
 ]
