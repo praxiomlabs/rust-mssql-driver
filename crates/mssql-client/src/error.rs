@@ -109,6 +109,14 @@ pub enum Error {
     /// Connection pool exhausted.
     #[error("connection pool exhausted")]
     PoolExhausted,
+
+    /// Query cancellation error.
+    #[error("query cancellation failed: {0}")]
+    Cancel(String),
+
+    /// Query was cancelled by user request.
+    #[error("query cancelled")]
+    Cancelled,
 }
 
 impl From<mssql_tls::TlsError> for Error {
