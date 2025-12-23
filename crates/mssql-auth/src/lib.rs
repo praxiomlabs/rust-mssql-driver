@@ -63,8 +63,12 @@
 #![deny(unsafe_code)]
 
 pub mod azure_ad;
+#[cfg(feature = "azure-identity")]
+pub mod azure_identity_auth;
 pub mod credentials;
 pub mod error;
+#[cfg(feature = "integrated-auth")]
+pub mod integrated_auth;
 pub mod provider;
 pub mod sql_auth;
 
@@ -84,3 +88,11 @@ pub use sql_auth::SqlAuthenticator;
 // Secure credential types (with zeroize feature)
 #[cfg(feature = "zeroize")]
 pub use credentials::{SecretString, SecureCredentials};
+
+// Azure Identity authentication (with azure-identity feature)
+#[cfg(feature = "azure-identity")]
+pub use azure_identity_auth::{ManagedIdentityAuth, ServicePrincipalAuth};
+
+// Integrated authentication (Kerberos/GSSAPI - with integrated-auth feature)
+#[cfg(feature = "integrated-auth")]
+pub use integrated_auth::IntegratedAuth;
