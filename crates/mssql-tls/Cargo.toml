@@ -13,9 +13,7 @@ categories = ["network-programming", "cryptography"]
 default = []
 
 [dependencies]
-tds-protocol = { workspace = true }
 rustls = { workspace = true }
-rustls-pemfile = { workspace = true }
 webpki-roots = { workspace = true }
 tokio = { workspace = true }
 tokio-rustls = { workspace = true }
@@ -24,6 +22,10 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
+
+[package.metadata.cargo-machete]
+# tokio-test is used in dev-dependencies for test utilities
+ignored = ["tokio-test"]
 
 [lints]
 workspace = true

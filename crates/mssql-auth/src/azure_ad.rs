@@ -21,12 +21,12 @@
 //!
 //! These require the `azure-identity` feature flag:
 //!
-//! - [`ManagedIdentityAuth`](crate::ManagedIdentityAuth) - Azure VM/Container identity
-//! - [`ServicePrincipalAuth`](crate::ServicePrincipalAuth) - Client ID + Secret
+//! - `ManagedIdentityAuth` - Azure VM/Container identity
+//! - `ServicePrincipalAuth` - Client ID + Secret
 //!
 //! ## Token Sources (Tier 3 - cert-auth feature) ✅ Implemented
 //!
-//! - [`CertificateAuth`](crate::CertificateAuth) - X.509 client certificate
+//! - `CertificateAuth` - X.509 client certificate
 
 use std::borrow::Cow;
 use std::time::{Duration, Instant};

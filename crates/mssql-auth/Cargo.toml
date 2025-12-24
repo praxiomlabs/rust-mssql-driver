@@ -29,7 +29,6 @@ zeroize = ["dep:zeroize"]
 always-encrypted = ["dep:aes", "dep:cbc", "dep:hmac", "dep:sha2", "dep:rsa", "dep:rand", "dep:parking_lot"]
 
 [dependencies]
-tds-protocol = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 bytes = { workspace = true }
@@ -64,6 +63,10 @@ parking_lot = { version = "0.12", optional = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
 tokio-test = { workspace = true }
+
+[package.metadata.cargo-machete]
+# tokio-test is used in dev-dependencies for test utilities
+ignored = ["tokio-test"]
 
 [lints]
 workspace = true

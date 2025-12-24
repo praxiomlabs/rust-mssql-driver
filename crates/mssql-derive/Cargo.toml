@@ -22,5 +22,9 @@ mssql-types = { workspace = true }
 mssql-client = { workspace = true }
 trybuild = "1.0"
 
+[package.metadata.cargo-machete]
+# trybuild is for compile-fail tests, mssql-client for testing derived impls
+ignored = ["trybuild", "mssql-client"]
+
 [lints]
 workspace = true

@@ -1,0 +1,22 @@
+# Typos configuration for rust-mssql-driver
+# See https://github.com/crate-ci/typos for documentation
+
+[default]
+extend-ignore-identifiers-re = [
+    # Technical terms in datetime encoding (300ths = three-hundredths of a second)
+    "300ths",
+    "time_300ths",
+]
+
+[default.extend-words]
+# ND5000 is a legitimate floating point format name (used in TDS protocol)
+ND = "ND"
+
+# AKS = Azure Kubernetes Service
+AKS = "AKS"
+
+# SELEKT is intentionally misspelled in tests to trigger SQL syntax errors
+SELEKT = "SELEKT"
+
+# ths as suffix for fractional time representation (300ths of a second)
+ths = "ths"

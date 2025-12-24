@@ -34,5 +34,9 @@ criterion = { workspace = true }
 name = "types"
 harness = false
 
+[package.metadata.cargo-machete]
+# proptest is for property-based tests, criterion for benchmarks
+ignored = ["proptest", "criterion"]
+
 [lints]
 workspace = true

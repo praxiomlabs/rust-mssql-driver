@@ -36,8 +36,6 @@ tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 futures-core = { workspace = true }
-futures-util = { workspace = true }
-async-trait = { workspace = true }
 once_cell = { workspace = true }
 regex = { workspace = true }
 lru = { workspace = true }
@@ -102,6 +100,11 @@ path = "examples/streaming.rs"
 [[bench]]
 name = "client"
 harness = false
+
+[package.metadata.cargo-machete]
+# tokio-test and mssql-derive are dev-dependencies for tests
+# opentelemetry_sdk and tracing-opentelemetry are behind the otel feature flag
+ignored = ["tokio-test", "mssql-derive", "opentelemetry_sdk", "tracing-opentelemetry"]
 
 [lints]
 workspace = true

@@ -28,17 +28,17 @@
 //!
 //! ### Tier 2 (Azure Native - `azure-identity` feature) ✅ Implemented
 //!
-//! - [`ManagedIdentityAuth`] - Azure VM/Container identity
-//! - [`ServicePrincipalAuth`] - Client ID + Secret
+//! - `ManagedIdentityAuth` - Azure VM/Container identity
+//! - `ServicePrincipalAuth` - Client ID + Secret
 //!
 //! ### Tier 3 (Enterprise - `integrated-auth` or `sspi-auth` feature) ✅ Implemented
 //!
-//! - [`IntegratedAuth`] - Kerberos (Linux/macOS via GSSAPI)
-//! - [`SspiAuth`] - Windows SSPI (native Windows, cross-platform via sspi-rs)
+//! - `IntegratedAuth` - Kerberos (Linux/macOS via GSSAPI)
+//! - `SspiAuth` - Windows SSPI (native Windows, cross-platform via sspi-rs)
 //!
 //! ### Tier 4 (Certificate - `cert-auth` feature) ✅ Implemented
 //!
-//! - [`CertificateAuth`] - Client certificate authentication (mTLS)
+//! - `CertificateAuth` - Client certificate authentication (mTLS)
 //!
 //! ## Secure Credential Handling
 //!

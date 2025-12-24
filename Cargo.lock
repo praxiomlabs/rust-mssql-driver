@@ -2201,7 +2201,6 @@ dependencies = [
  "rsa 0.9.9",
  "sha2 0.10.9",
  "sspi",
- "tds-protocol",
  "thiserror",
  "time",
  "tokio",
@@ -2214,12 +2213,10 @@ dependencies = [
 name = "mssql-client"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "bytes",
  "chrono",
  "criterion",
  "futures-core",
- "futures-util",
  "lru",
  "mssql-auth",
  "mssql-codec",
@@ -2252,7 +2249,6 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
- "mssql-tls",
  "pin-project-lite",
  "tds-protocol",
  "thiserror",
@@ -2279,7 +2275,6 @@ name = "mssql-driver-pool"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "hashbrown 0.16.1",
  "mssql-client",
  "parking_lot",
  "thiserror",
@@ -2306,8 +2301,6 @@ name = "mssql-tls"
 version = "0.1.0"
 dependencies = [
  "rustls",
- "rustls-pemfile",
- "tds-protocol",
  "thiserror",
  "tokio",
  "tokio-rustls",
