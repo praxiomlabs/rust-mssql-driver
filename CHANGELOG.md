@@ -7,16 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2024-12-24
+
 ### Added
 
-- Bulk Copy Protocol (BCP) support with packet type 0x07 for high-performance data loading
-- OpenTelemetry instrumentation module with SQL sanitization and span attributes
+#### Authentication
+- Azure Managed Identity authentication (`azure-identity` feature)
+- Azure Service Principal authentication (`azure-identity` feature)
+- Kerberos/GSSAPI authentication for Linux/macOS (`integrated-auth` feature)
+- Windows SSPI/Kerberos authentication (`sspi-auth` feature)
+- Client certificate authentication for Azure AD (`cert-auth` feature)
+
+#### Table-Valued Parameters (TVP)
+- Full TVP support with `#[derive(Tvp)]` macro
+- DateTimeOffset encoding for TVP columns
+- All SQL Server types supported in TVP rows
+
+#### Always Encrypted
+- Client-side encryption infrastructure
+- Column Encryption Key (CEK) management
+- AEAD_AES_256_CBC_HMAC_SHA256 algorithm support
+- RSA-OAEP key unwrapping
+
+#### Query Execution
+- Explicit query cancellation via `CancelHandle`
+- Per-query timeout configuration
+- Secure credential handling with `zeroize` feature
+
+#### Observability
+- OpenTelemetry Metrics integration (`otel` feature)
+- SQL sanitization for span attributes
+- Comprehensive instrumentation module
+
+#### Other
+- Bulk Copy Protocol (BCP) support for high-performance data loading
 - Comprehensive examples (basic, transactions, bulk_insert, derive_macros, streaming)
 
 ### Changed
 
 - Simplified `SavePoint` struct to remove unnecessary lifetime parameter
 - Row parsing now uses unified decode module from mssql-types for better performance
+- Added `#[non_exhaustive]` to public enums for semver safety
+- Updated dependencies: sspi 0.18, criterion 0.7, testcontainers 0.25, webpki-roots 1.0
+
+### Fixed
+
+- Cargo.lock consistency for webpki-roots versions
+- CI semver-checks configuration for Kerberos headers
 
 ## [0.1.0] - 2025-12-16
 
@@ -94,5 +131,6 @@ Initial release of the rust-mssql-driver project.
 - `mssql-derive` - Procedural macros
 - `mssql-testing` - Test infrastructure
 
-[Unreleased]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/praxiomlabs/rust-mssql-driver/releases/tag/v0.1.0
