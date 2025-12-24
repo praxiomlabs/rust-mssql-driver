@@ -67,7 +67,7 @@ opentelemetry-otlp = "0.31"
 tracing-opentelemetry = "0.32"
 
 # Testing
-criterion = { version = "0.5", features = ["async_tokio"] }
+criterion = { version = "0.7", features = ["async_tokio"] }
 proptest = "1.5"
 testcontainers = "0.23"
 tokio-test = "0.4"
