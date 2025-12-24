@@ -594,6 +594,20 @@ impl Drop for PooledConnection {
         self.pool.in_use_count.fetch_sub(1, Ordering::Relaxed);
 
         if let Some(client) = self.client.take() {
+            // Check if connection is in a transaction started via raw SQL.
+            // If so, we cannot safely return it to the pool because:
+            // 1. Drop is sync, so we can't execute ROLLBACK
+            // 2. The next user would get a connection mid-transaction
+            // Instead, we discard the connection entirely.
+            if client.is_in_transaction() {
+                tracing::warn!(
+                    connection_id = self.metadata.id,
+                    "connection returned to pool with active transaction - discarding"
+                );
+                // Connection is dropped here, not returned to pool
+                return;
+            }
+
             tracing::trace!(
                 connection_id = self.metadata.id,
                 "returning connection to pool"

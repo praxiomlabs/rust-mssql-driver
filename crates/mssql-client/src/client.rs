@@ -2811,6 +2811,29 @@ impl Client<Ready> {
         self.config.port
     }
 
+    /// Check if the connection is currently in a transaction.
+    ///
+    /// This returns `true` if a transaction was started via raw SQL
+    /// (`BEGIN TRANSACTION`) and has not yet been committed or rolled back.
+    ///
+    /// Note: This only tracks transactions started via raw SQL. Transactions
+    /// started via the type-state API (`begin_transaction()`) result in a
+    /// `Client<InTransaction>` which is a different type.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// client.execute("BEGIN TRANSACTION", &[]).await?;
+    /// assert!(client.is_in_transaction());
+    ///
+    /// client.execute("COMMIT", &[]).await?;
+    /// assert!(!client.is_in_transaction());
+    /// ```
+    #[must_use]
+    pub fn is_in_transaction(&self) -> bool {
+        self.transaction_descriptor != 0
+    }
+
     /// Get a handle for cancelling the current query.
     ///
     /// The cancel handle can be cloned and sent to other tasks, enabling
