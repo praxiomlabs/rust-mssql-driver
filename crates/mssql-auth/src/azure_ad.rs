@@ -307,7 +307,7 @@ mod tests {
         let auth = AzureAdAuth::from_credentials(&creds).unwrap();
 
         let data = auth.authenticate().unwrap();
-        match data {
+        match &data {
             AuthData::FedAuth { token, .. } => {
                 assert_eq!(token, "my_token");
             }

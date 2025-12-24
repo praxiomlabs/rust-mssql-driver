@@ -183,7 +183,7 @@ mod tests {
         assert_eq!(auth.username(), "sa");
 
         let data = auth.authenticate().unwrap();
-        match data {
+        match &data {
             AuthData::SqlServer {
                 username,
                 password_bytes,
