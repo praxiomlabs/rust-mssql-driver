@@ -44,7 +44,7 @@ time = { version = "0.3", optional = true }
 libgssapi = { version = "0.9", optional = true }
 
 # Optional: Windows SSPI authentication
-sspi = { version = "0.17", optional = true }
+sspi = { version = "0.18", optional = true }
 
 # Optional: Base64 encoding for certificate data
 base64 = { version = "0.22", optional = true }
