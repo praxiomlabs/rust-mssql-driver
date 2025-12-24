@@ -50,7 +50,7 @@ tracing = "0.1"
 
 # Utilities
 parking_lot = "0.12"
-hashbrown = "0.15"
+hashbrown = "0.16"
 smallvec = "1.13"
 pin-project-lite = "0.2"
 futures-core = "0.3"
