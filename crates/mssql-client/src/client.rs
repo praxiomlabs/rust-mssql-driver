@@ -795,6 +795,39 @@ impl Client<Disconnected> {
 
 // Private helper methods available to all connection states
 impl<S: ConnectionState> Client<S> {
+    /// Process transaction-related EnvChange tokens.
+    ///
+    /// This handles BeginTransaction, CommitTransaction, and RollbackTransaction
+    /// EnvChange tokens, updating the transaction descriptor accordingly.
+    ///
+    /// This enables executing BEGIN TRANSACTION, COMMIT, and ROLLBACK via raw SQL
+    /// while still having the transaction descriptor tracked correctly.
+    fn process_transaction_env_change(env: &EnvChange, transaction_descriptor: &mut u64) {
+        use tds_protocol::token::EnvChangeValue;
+
+        match env.env_type {
+            EnvChangeType::BeginTransaction => {
+                if let EnvChangeValue::Binary(ref data) = env.new_value {
+                    if data.len() >= 8 {
+                        let descriptor = u64::from_le_bytes([
+                            data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+                        ]);
+                        tracing::debug!(descriptor = descriptor, "transaction started via raw SQL");
+                        *transaction_descriptor = descriptor;
+                    }
+                }
+            }
+            EnvChangeType::CommitTransaction | EnvChangeType::RollbackTransaction => {
+                tracing::debug!(
+                    env_type = ?env.env_type,
+                    "transaction ended via raw SQL"
+                );
+                *transaction_descriptor = 0;
+            }
+            _ => {}
+        }
+    }
+
     /// Send a SQL batch to the server.
     ///
     /// Uses the client's current transaction descriptor in ALL_HEADERS.
@@ -1230,6 +1263,10 @@ impl<S: ConnectionState> Client<S> {
 
             match token {
                 Token::ColMetaData(meta) => {
+                    // New result set starting - clear previous rows
+                    // This enables multi-statement batches to return the last result set
+                    rows.clear();
+
                     columns = meta
                         .columns
                         .iter()
@@ -1294,7 +1331,11 @@ impl<S: ConnectionState> Client<S> {
                         has_more = done.status.more,
                         "query complete"
                     );
-                    break;
+                    // Only break if there are no more result sets
+                    // This enables multi-statement batches to process all results
+                    if !done.status.more {
+                        break;
+                    }
                 }
                 Token::DoneProc(done) => {
                     if done.status.error {
@@ -1312,6 +1353,12 @@ impl<S: ConnectionState> Client<S> {
                         message = %info.message,
                         "server info message"
                     );
+                }
+                Token::EnvChange(env) => {
+                    // Process transaction-related EnvChange tokens.
+                    // This allows BEGIN TRANSACTION, COMMIT, ROLLBACK via raw SQL
+                    // to properly update the transaction descriptor.
+                    Self::process_transaction_env_change(&env, &mut self.transaction_descriptor);
                 }
                 _ => {}
             }
@@ -2050,18 +2097,23 @@ impl<S: ConnectionState> Client<S> {
                         return Err(Error::Query("execution failed".to_string()));
                     }
                     if done.status.count {
-                        rows_affected = done.row_count;
+                        // Accumulate row counts from all statements in a batch
+                        rows_affected += done.row_count;
                     }
-                    break;
+                    // Only break if there are no more result sets
+                    // This enables multi-statement batches to report total affected rows
+                    if !done.status.more {
+                        break;
+                    }
                 }
                 Token::DoneProc(done) => {
                     if done.status.count {
-                        rows_affected = done.row_count;
+                        rows_affected += done.row_count;
                     }
                 }
                 Token::DoneInProc(done) => {
                     if done.status.count {
-                        rows_affected = done.row_count;
+                        rows_affected += done.row_count;
                     }
                 }
                 Token::Error(err) => {
@@ -2089,6 +2141,12 @@ impl<S: ConnectionState> Client<S> {
                         message = %info.message,
                         "server info message"
                     );
+                }
+                Token::EnvChange(env) => {
+                    // Process transaction-related EnvChange tokens.
+                    // This allows BEGIN TRANSACTION, COMMIT, ROLLBACK via raw SQL
+                    // to properly update the transaction descriptor.
+                    Self::process_transaction_env_change(&env, &mut self.transaction_descriptor);
                 }
                 _ => {}
             }
