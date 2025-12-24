@@ -3,8 +3,9 @@
 #![allow(clippy::unwrap_used, clippy::approx_constant, missing_docs)]
 
 use bytes::BytesMut;
-use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use mssql_types::{FromSql, SqlValue, ToSql, decode_utf16_string, encode_utf16_string};
+use std::hint::black_box;
 
 /// Helper to encode a UTF-16 string and return the bytes.
 fn encode_utf16_to_bytes(s: &str) -> Vec<u8> {

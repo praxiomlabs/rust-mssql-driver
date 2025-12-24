@@ -3,7 +3,8 @@
 #![allow(clippy::unwrap_used, missing_docs)]
 
 use bytes::{Bytes, BytesMut};
-use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use std::hint::black_box;
 use tds_protocol::{
     encode_sql_batch,
     packet::{PACKET_HEADER_SIZE, PacketHeader, PacketStatus, PacketType},

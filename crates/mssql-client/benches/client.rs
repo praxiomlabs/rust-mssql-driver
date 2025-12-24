@@ -5,8 +5,9 @@
 #![allow(missing_docs, clippy::unwrap_used, clippy::approx_constant)]
 
 use bytes::Bytes;
-use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use mssql_client::Config;
+use std::hint::black_box;
 use std::sync::Arc;
 
 // Re-export internal types for benchmarking
