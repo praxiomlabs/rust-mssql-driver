@@ -54,7 +54,6 @@ tracing-opentelemetry = { workspace = true, optional = true }
 [dev-dependencies]
 tokio-test = { workspace = true }
 mssql-derive = { workspace = true }
-mssql-driver-pool = { workspace = true }
 tracing-subscriber = "0.3"
 rust_decimal = { workspace = true }
 criterion = { workspace = true }
@@ -72,10 +71,6 @@ path = "examples/basic.rs"
 [[example]]
 name = "error_handling"
 path = "examples/error_handling.rs"
-
-[[example]]
-name = "connection_pool"
-path = "examples/connection_pool.rs"
 
 [[example]]
 name = "azure_sql"
