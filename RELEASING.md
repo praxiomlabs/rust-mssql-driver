@@ -4,6 +4,45 @@ Comprehensive guide for releasing new versions of rust-mssql-driver to crates.io
 
 ---
 
+## ⚠️ CRITICAL: Read Before Any Release
+
+### The Cardinal Rules
+
+1. **NEVER manually run `cargo publish`** — Always use the automated GitHub Actions workflow triggered by pushing a version tag. The `just publish` recipe exists only for disaster recovery.
+
+2. **NEVER push a tag until CI passes on main** — Always run `gh run watch` or `just ci-status` to verify CI passed before creating a tag.
+
+3. **ALWAYS use `--all-features` for pre-release checks** — Feature-gated code (like `zeroize`) must be validated before release. Run `just ci-all` not just `just ci`.
+
+4. **Publishing to crates.io is IRREVERSIBLE** — You can yank a version, but you cannot delete or re-upload it. A yanked version still counts as "used" forever.
+
+### The v0.2.1 Incident (Cautionary Tale)
+
+During the v0.2.1 release, we:
+- Ran `cargo clippy` without `--all-features`, missing a compilation error in the `zeroize` feature
+- Manually ran `cargo publish` instead of using the GitHub Actions workflow
+- Published all 9 crates before realizing v0.2.1 was broken
+
+**Result:** We had to yank all 9 crates at v0.2.1, release v0.2.2 as a hotfix, and lost a version number forever. **Don't repeat this mistake.**
+
+### Pre-Release Verification Checklist
+
+Before creating a tag, **always** verify:
+
+```bash
+# 1. Run the FULL release check with ALL features
+just release-check-all
+
+# 2. Verify CI passed on main (blocking check)
+just ci-status  # Must show "completed" with green check
+
+# 3. Only then create the tag
+just tag
+git push origin vX.Y.Z
+```
+
+---
+
 ## Quick Start
 
 For routine releases, use the automated workflow:
@@ -281,6 +320,16 @@ gh run watch    # Watch publish workflow
 
 ## Manual Publishing
 
+> **⚠️ WARNING: Manual publishing should be a LAST RESORT only.**
+>
+> The automated GitHub Actions workflow is the **only** sanctioned way to publish.
+> Manual publishing bypasses CI checks and has historically caused broken releases.
+>
+> **Only use manual publishing when:**
+> - GitHub Actions is completely down/unavailable
+> - The automated workflow failed mid-publish (some crates published, some didn't)
+> - You have explicitly verified ALL checks pass locally with `just release-check-all`
+
 If automated publishing fails, publish manually in this exact order:
 
 ```bash
@@ -410,24 +459,26 @@ The following checks are **automated in CI**:
 
 | Checklist Section | Recipe | What It Does |
 |-------------------|--------|--------------|
-| Pre-flight | `just release-check` | Full validation + git state |
+| **Pre-flight (REQUIRED)** | `just release-check-all` | Full validation with ALL features ⭐ |
+| Pre-flight | `just release-check` | Full validation (default features only) |
+| Pre-flight | `just ci-status` | Verify CI passed on main branch |
 | Code hygiene | `just wip-check` | TODO/FIXME/todo!/unimplemented! |
 | Code hygiene | `just panic-audit` | .unwrap()/.expect() audit |
 | Code hygiene | `just typos` | Spell checking |
 | Version sync | `just version-sync` | README version matches Cargo.toml |
 | Security | `just deny` | Licenses, bans, advisories |
 | Security | `just audit` | Vulnerability scan |
-| Documentation | `just doc-check` | Docs build without warnings |
+| Documentation | `just doc-check-all` | Docs build without warnings (all features) |
 | Documentation | `just link-check` | Markdown link validation |
 | Semver | `just semver` | Breaking change detection |
-| MSRV | `just msrv-check` | Compile with declared MSRV |
+| MSRV | `just msrv-check-all` | Compile with declared MSRV (all features) |
 | Publishing | `just publish-dry` | Dry-run all 9 crates |
-| Publishing | `just publish` | Publish all crates (with confirmation) |
+| Publishing | `just publish` | Publish all crates (**LAST RESORT ONLY**) |
 | Publishing | `just metadata-check` | crates.io metadata |
 | Publishing | `just url-check` | Repository URLs |
 | Publishing | `just dep-graph` | Dependency tier visualization |
 | Git | `just tag` | Create annotated version tag |
-| Full CI | `just ci-release` | ci-full + semver + msrv + features |
+| Full CI | `just ci-release-all` | Full release validation with ALL features ⭐ |
 
 ---
 

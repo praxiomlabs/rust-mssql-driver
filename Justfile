@@ -1204,9 +1204,65 @@ ci-full-all: ci-all coverage-lcov-all audit deny
     @printf '{{green}}[OK]{{reset}}   Full CI pipeline passed\n'
 
 [group('ci')]
-[doc("Complete CI with all checks (for releases)")]
+[doc("Complete CI with all checks (for releases, default features)")]
 ci-release: ci-full semver msrv-check test-features
     @printf '{{green}}[OK]{{reset}}   Release CI pipeline passed\n'
+
+[group('ci')]
+[doc("Complete CI with ALL FEATURES (REQUIRED for releases)")]
+ci-release-all: ci-full-all semver msrv-check-all test-features
+    @printf '{{green}}[OK]{{reset}}   Release CI pipeline passed (all features)\n'
+
+[group('ci')]
+[doc("Check if CI passed on the main branch (use before tagging)")]
+ci-status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '{{cyan}}[INFO]{{reset}} Checking CI status on main branch...\n'
+
+    # Check if gh CLI is available
+    if ! command -v gh &> /dev/null; then
+        printf '{{red}}[ERR]{{reset}}  GitHub CLI (gh) is required for this check\n'
+        printf '{{cyan}}[INFO]{{reset}} Install: https://cli.github.com/\n'
+        exit 1
+    fi
+
+    # Get the latest workflow run on main
+    STATUS=$(gh run list --branch main --limit 1 --json status,conclusion,headSha,displayTitle --jq '.[0]')
+
+    if [ -z "$STATUS" ]; then
+        printf '{{red}}[ERR]{{reset}}  No workflow runs found on main branch\n'
+        exit 1
+    fi
+
+    RUN_STATUS=$(echo "$STATUS" | jq -r '.status')
+    CONCLUSION=$(echo "$STATUS" | jq -r '.conclusion')
+    SHA=$(echo "$STATUS" | jq -r '.headSha' | cut -c1-7)
+    TITLE=$(echo "$STATUS" | jq -r '.displayTitle')
+
+    printf '{{cyan}}[INFO]{{reset}} Latest run: %s (%s)\n' "$TITLE" "$SHA"
+
+    if [ "$RUN_STATUS" != "completed" ]; then
+        printf '{{yellow}}[WARN]{{reset}} CI is still running (status: %s)\n' "$RUN_STATUS"
+        printf '{{cyan}}[INFO]{{reset}} Wait for CI to complete: gh run watch\n'
+        exit 1
+    fi
+
+    if [ "$CONCLUSION" != "success" ]; then
+        printf '{{red}}[ERR]{{reset}}  CI failed (conclusion: %s)\n' "$CONCLUSION"
+        printf '{{cyan}}[INFO]{{reset}} Check the workflow: gh run view\n'
+        exit 1
+    fi
+
+    # Verify HEAD matches the latest CI run
+    HEAD_SHA=$(git rev-parse HEAD | cut -c1-7)
+    if [ "$SHA" != "$HEAD_SHA" ]; then
+        printf '{{yellow}}[WARN]{{reset}} Latest CI run (%s) does not match HEAD (%s)\n' "$SHA" "$HEAD_SHA"
+        printf '{{cyan}}[INFO]{{reset}} Push your commits and wait for CI to pass\n'
+        exit 1
+    fi
+
+    printf '{{green}}[OK]{{reset}}   CI passed on main (commit %s)\n' "$SHA"
 
 [group('ci')]
 [doc("Pre-commit hook checks")]
@@ -1369,11 +1425,13 @@ typos:
     printf '{{green}}[OK]{{reset}}   Typos check passed\n'
 
 [group('release')]
-[doc("Prepare for release (full validation)")]
+[doc("Prepare for release (default features only - use release-check-all instead)")]
 release-check: ci-release wip-check panic-audit version-sync typos machete metadata-check url-check
     #!/usr/bin/env bash
     set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Release Validation ══════{{reset}}\n\n'
+    printf '{{yellow}}[WARN]{{reset}} This uses default features only!\n'
+    printf '{{yellow}}[WARN]{{reset}} For releases, use: just release-check-all\n\n'
     printf '{{cyan}}[INFO]{{reset}} Checking for uncommitted changes...\n'
     if ! git diff-index --quiet HEAD --; then
         printf '{{red}}[ERR]{{reset}}  Uncommitted changes detected\n'
@@ -1383,7 +1441,25 @@ release-check: ci-release wip-check panic-audit version-sync typos machete metad
     if [ -n "$(git log @{u}.. 2>/dev/null)" ]; then
         printf '{{yellow}}[WARN]{{reset}} Unpushed commits detected\n'
     fi
-    printf '{{green}}[OK]{{reset}}   Ready for release\n'
+    printf '{{green}}[OK]{{reset}}   Ready for release (default features)\n'
+
+[group('release')]
+[doc("Prepare for release with ALL FEATURES (REQUIRED before tagging)")]
+release-check-all: ci-release-all wip-check panic-audit version-sync typos machete metadata-check url-check
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '\n{{bold}}{{blue}}══════ Release Validation (All Features) ══════{{reset}}\n\n'
+    printf '{{cyan}}[INFO]{{reset}} Checking for uncommitted changes...\n'
+    if ! git diff-index --quiet HEAD --; then
+        printf '{{red}}[ERR]{{reset}}  Uncommitted changes detected\n'
+        exit 1
+    fi
+    printf '{{cyan}}[INFO]{{reset}} Checking for unpushed commits...\n'
+    if [ -n "$(git log @{u}.. 2>/dev/null)" ]; then
+        printf '{{yellow}}[WARN]{{reset}} Unpushed commits detected\n'
+    fi
+    printf '{{green}}[OK]{{reset}}   Ready for release (all features validated)\n'
+    printf '\n{{cyan}}[NEXT]{{reset}} Run: just ci-status && just tag\n'
 
 [group('release')]
 [doc("Publish all crates to crates.io (dry run)")]
@@ -1408,11 +1484,24 @@ publish-dry:
     printf '{{green}}[OK]{{reset}}   Dry run complete\n'
 
 [group('release')]
-[confirm("This will publish to crates.io. This action is IRREVERSIBLE. Continue?")]
-[doc("Publish all crates to crates.io in dependency order")]
+[confirm("⚠️ MANUAL PUBLISHING IS A LAST RESORT! Use the automated GitHub Actions workflow instead. Type 'yes' to acknowledge you understand this is IRREVERSIBLE:")]
+[doc("Publish all crates to crates.io (LAST RESORT - prefer automated release)")]
 publish:
     #!/usr/bin/env bash
     set -euo pipefail
+    printf '\n{{bold}}{{red}}════════════════════════════════════════════════════════════════{{reset}}\n'
+    printf '{{bold}}{{red}}  ⚠️  WARNING: MANUAL PUBLISHING IS A LAST RESORT!              {{reset}}\n'
+    printf '{{bold}}{{red}}════════════════════════════════════════════════════════════════{{reset}}\n\n'
+    printf '{{yellow}}You should almost NEVER use this command.{{reset}}\n\n'
+    printf 'The correct release workflow is:\n'
+    printf '  1. just release-check-all\n'
+    printf '  2. just ci-status\n'
+    printf '  3. just tag\n'
+    printf '  4. git push origin vX.Y.Z  (triggers automated publish)\n\n'
+    printf '{{yellow}}Only use this command when:{{reset}}\n'
+    printf '  - GitHub Actions is completely unavailable\n'
+    printf '  - Automated workflow failed mid-publish\n'
+    printf '  - You have run: just release-check-all\n\n'
     printf '{{cyan}}[INFO]{{reset}} Publishing to crates.io in dependency order...\n'
     printf '{{cyan}}[INFO]{{reset}} Note: 30s delays between tiers for index propagation\n\n'
 
@@ -1488,13 +1577,51 @@ url-check:
     printf '{{green}}[OK]{{reset}}   Repository URL correct: %s\n' "$REPO"
 
 [group('release')]
-[doc("Create git tag for release")]
+[doc("Create git tag for release (verifies CI passed first)")]
 tag:
     #!/usr/bin/env bash
     set -euo pipefail
+
+    printf '{{cyan}}[INFO]{{reset}} Verifying CI passed before tagging...\n'
+
+    # Check if gh CLI is available
+    if command -v gh &> /dev/null; then
+        STATUS=$(gh run list --branch main --limit 1 --json status,conclusion,headSha --jq '.[0]')
+        if [ -n "$STATUS" ]; then
+            RUN_STATUS=$(echo "$STATUS" | jq -r '.status')
+            CONCLUSION=$(echo "$STATUS" | jq -r '.conclusion')
+            SHA=$(echo "$STATUS" | jq -r '.headSha' | cut -c1-7)
+            HEAD_SHA=$(git rev-parse HEAD | cut -c1-7)
+
+            if [ "$RUN_STATUS" != "completed" ]; then
+                printf '{{red}}[ERR]{{reset}}  CI is still running. Wait for completion.\n'
+                printf '{{cyan}}[INFO]{{reset}} Run: gh run watch\n'
+                exit 1
+            fi
+
+            if [ "$CONCLUSION" != "success" ]; then
+                printf '{{red}}[ERR]{{reset}}  CI failed. Fix issues before tagging.\n'
+                printf '{{cyan}}[INFO]{{reset}} Run: gh run view\n'
+                exit 1
+            fi
+
+            if [ "$SHA" != "$HEAD_SHA" ]; then
+                printf '{{red}}[ERR]{{reset}}  CI run (%s) does not match HEAD (%s)\n' "$SHA" "$HEAD_SHA"
+                printf '{{cyan}}[INFO]{{reset}} Push your changes and wait for CI to pass.\n'
+                exit 1
+            fi
+
+            printf '{{green}}[OK]{{reset}}   CI passed on commit %s\n' "$SHA"
+        fi
+    else
+        printf '{{yellow}}[WARN]{{reset}} GitHub CLI not available. Cannot verify CI status.\n'
+        printf '{{yellow}}[WARN]{{reset}} MANUALLY verify CI passed before pushing tag!\n'
+    fi
+
     printf '{{cyan}}[INFO]{{reset}} Creating tag v{{version}}...\n'
     git tag -a "v{{version}}" -m "Release v{{version}}"
     printf '{{green}}[OK]{{reset}}   Tag created: v{{version}}\n'
+    printf '\n{{cyan}}[NEXT]{{reset}} Push tag to trigger release: git push origin v{{version}}\n'
 
 # ============================================================================
 # UTILITIES
