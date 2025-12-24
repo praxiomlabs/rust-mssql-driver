@@ -58,7 +58,7 @@ futures-util = "0.3"
 async-trait = "0.1"
 once_cell = "1.20"
 regex = "1.11"
-lru = "0.12"
+lru = "0.16"
 
 # Observability (used with `otel` feature in individual crates)
 opentelemetry = "0.31"
