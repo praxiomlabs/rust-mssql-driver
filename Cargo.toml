@@ -40,7 +40,7 @@ serde_json = "1.0"
 # TLS
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
 rustls-pemfile = "2.2"
-webpki-roots = "0.26"
+webpki-roots = "1.0"
 
 # Error handling
 thiserror = "2.0"
