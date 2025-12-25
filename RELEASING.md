@@ -30,8 +30,8 @@ During the v0.2.1 release, we:
 Before creating a tag, **always** verify:
 
 ```bash
-# 1. Run the FULL release check with ALL features
-just release-check-all
+# 1. Run the FULL release check (validates ALL features)
+just release-check
 
 # 2. Verify CI passed on main (blocking check)
 just ci-status  # Must show "completed" with green check
@@ -328,7 +328,7 @@ gh run watch    # Watch publish workflow
 > **Only use manual publishing when:**
 > - GitHub Actions is completely down/unavailable
 > - The automated workflow failed mid-publish (some crates published, some didn't)
-> - You have explicitly verified ALL checks pass locally with `just release-check-all`
+> - You have explicitly verified ALL checks pass locally with `just release-check`
 
 If automated publishing fails, publish manually in this exact order:
 
@@ -459,8 +459,7 @@ The following checks are **automated in CI**:
 
 | Checklist Section | Recipe | What It Does |
 |-------------------|--------|--------------|
-| **Pre-flight (REQUIRED)** | `just release-check-all` | Full validation with ALL features ⭐ |
-| Pre-flight | `just release-check` | Full validation (default features only) |
+| **Pre-flight (REQUIRED)** | `just release-check` | Full validation with ALL features ⭐ |
 | Pre-flight | `just ci-status` | Verify CI passed on main branch |
 | Code hygiene | `just wip-check` | TODO/FIXME/todo!/unimplemented! |
 | Code hygiene | `just panic-audit` | .unwrap()/.expect() audit |

@@ -1427,30 +1427,11 @@ typos:
     printf '{{green}}[OK]{{reset}}   Typos check passed\n'
 
 [group('release')]
-[doc("Prepare for release (default features only - use release-check-all instead)")]
-release-check: ci-release wip-check panic-audit version-sync typos machete metadata-check url-check
+[doc("Prepare for release (validates ALL features - REQUIRED before tagging)")]
+release-check: ci-release-all wip-check panic-audit version-sync typos machete metadata-check url-check
     #!/usr/bin/env bash
     set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Release Validation ══════{{reset}}\n\n'
-    printf '{{yellow}}[WARN]{{reset}} This uses default features only!\n'
-    printf '{{yellow}}[WARN]{{reset}} For releases, use: just release-check-all\n\n'
-    printf '{{cyan}}[INFO]{{reset}} Checking for uncommitted changes...\n'
-    if ! git diff-index --quiet HEAD --; then
-        printf '{{red}}[ERR]{{reset}}  Uncommitted changes detected\n'
-        exit 1
-    fi
-    printf '{{cyan}}[INFO]{{reset}} Checking for unpushed commits...\n'
-    if [ -n "$(git log @{u}.. 2>/dev/null)" ]; then
-        printf '{{yellow}}[WARN]{{reset}} Unpushed commits detected\n'
-    fi
-    printf '{{green}}[OK]{{reset}}   Ready for release (default features)\n'
-
-[group('release')]
-[doc("Prepare for release with ALL FEATURES (REQUIRED before tagging)")]
-release-check-all: ci-release-all wip-check panic-audit version-sync typos machete metadata-check url-check
-    #!/usr/bin/env bash
-    set -euo pipefail
-    printf '\n{{bold}}{{blue}}══════ Release Validation (All Features) ══════{{reset}}\n\n'
     printf '{{cyan}}[INFO]{{reset}} Checking for uncommitted changes...\n'
     if ! git diff-index --quiet HEAD --; then
         printf '{{red}}[ERR]{{reset}}  Uncommitted changes detected\n'
@@ -1462,6 +1443,11 @@ release-check-all: ci-release-all wip-check panic-audit version-sync typos mache
     fi
     printf '{{green}}[OK]{{reset}}   Ready for release (all features validated)\n'
     printf '\n{{cyan}}[NEXT]{{reset}} Run: just ci-status && just tag\n'
+
+# Backwards compatibility alias
+[group('release')]
+[doc("Alias for release-check (backwards compatibility)")]
+release-check-all: release-check
 
 [group('release')]
 [doc("Publish all crates to crates.io (dry run)")]
@@ -1496,14 +1482,14 @@ publish:
     printf '{{bold}}{{red}}════════════════════════════════════════════════════════════════{{reset}}\n\n'
     printf '{{yellow}}You should almost NEVER use this command.{{reset}}\n\n'
     printf 'The correct release workflow is:\n'
-    printf '  1. just release-check-all\n'
+    printf '  1. just release-check\n'
     printf '  2. just ci-status\n'
     printf '  3. just tag\n'
     printf '  4. git push origin vX.Y.Z  (triggers automated publish)\n\n'
     printf '{{yellow}}Only use this command when:{{reset}}\n'
     printf '  - GitHub Actions is completely unavailable\n'
     printf '  - Automated workflow failed mid-publish\n'
-    printf '  - You have run: just release-check-all\n\n'
+    printf '  - You have run: just release-check\n\n'
     printf '{{cyan}}[INFO]{{reset}} Publishing to crates.io in dependency order...\n'
     printf '{{cyan}}[INFO]{{reset}} Note: 30s delays between tiers for index propagation\n\n'
 
