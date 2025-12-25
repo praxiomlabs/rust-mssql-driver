@@ -17,7 +17,7 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 - **Pure Rust TLS** - Uses rustls, no OpenSSL dependency
 - **Modern Rust** - 2024 Edition, MSRV 1.85
 
-### Feature Status (v0.2.x)
+### Feature Status (v0.3.x)
 
 | Feature | Status | Notes |
 |---------|--------|-------|

@@ -20,3 +20,6 @@ SELEKT = "SELEKT"
 
 # ths as suffix for fractional time representation (300ths of a second)
 ths = "ths"
+
+# Hel is part of "Hello" split across chunks in UTF-16 encoding tests
+Hel = "Hel"
