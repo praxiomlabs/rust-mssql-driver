@@ -886,14 +886,9 @@ impl RawRow {
                 }
                 dst.extend_from_slice(&src.get_u32_le().to_le_bytes());
             }
+            // DATE type uses 1-byte length prefix (can be NULL)
             TypeId::Date => {
-                if src.remaining() < 3 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let b1 = src.get_u8();
-                let b2 = src.get_u8();
-                let b3 = src.get_u8();
-                dst.extend_from_slice(&[b1, b2, b3]);
+                Self::decode_bytelen_type(src, dst)?;
             }
 
             // Variable-length nullable types (length-prefixed)
@@ -949,8 +944,13 @@ impl RawRow {
                 Self::decode_bytelen_type(src, dst)?;
             }
 
-            // PLP (Partially Length Prefixed) types
-            TypeId::Text | TypeId::NText | TypeId::Image | TypeId::Xml => {
+            // TEXT/NTEXT/IMAGE - deprecated LOB types using textptr format
+            TypeId::Text | TypeId::NText | TypeId::Image => {
+                Self::decode_textptr_type(src, dst)?;
+            }
+
+            // XML - uses actual PLP format
+            TypeId::Xml => {
                 Self::decode_plp_type(src, dst)?;
             }
 
@@ -1051,6 +1051,73 @@ impl RawRow {
                 dst.extend_from_slice(&[src.get_u8()]);
             }
         }
+        Ok(())
+    }
+
+    /// Decode a TEXT/NTEXT/IMAGE type (textptr format).
+    ///
+    /// These deprecated LOB types use a special format:
+    /// - 1 byte: textptr_len (0 = NULL)
+    /// - textptr_len bytes: textptr (if not NULL)
+    /// - 8 bytes: timestamp (if not NULL)
+    /// - 4 bytes: data length (if not NULL)
+    /// - data_len bytes: the actual data (if not NULL)
+    ///
+    /// We convert this to PLP format for the client to parse:
+    /// - 8 bytes: total length (0xFFFFFFFFFFFFFFFF = NULL)
+    /// - 4 bytes: chunk length (= data length)
+    /// - chunk data
+    /// - 4 bytes: 0 (terminator)
+    fn decode_textptr_type(
+        src: &mut impl Buf,
+        dst: &mut bytes::BytesMut,
+    ) -> Result<(), ProtocolError> {
+        if src.remaining() < 1 {
+            return Err(ProtocolError::UnexpectedEof);
+        }
+
+        let textptr_len = src.get_u8() as usize;
+
+        if textptr_len == 0 {
+            // NULL value - write PLP NULL marker
+            dst.extend_from_slice(&0xFFFFFFFFFFFFFFFFu64.to_le_bytes());
+            return Ok(());
+        }
+
+        // Skip textptr bytes
+        if src.remaining() < textptr_len {
+            return Err(ProtocolError::UnexpectedEof);
+        }
+        src.advance(textptr_len);
+
+        // Skip 8-byte timestamp
+        if src.remaining() < 8 {
+            return Err(ProtocolError::UnexpectedEof);
+        }
+        src.advance(8);
+
+        // Read data length
+        if src.remaining() < 4 {
+            return Err(ProtocolError::UnexpectedEof);
+        }
+        let data_len = src.get_u32_le() as usize;
+
+        if src.remaining() < data_len {
+            return Err(ProtocolError::UnexpectedEof);
+        }
+
+        // Write in PLP format for client parsing:
+        // - 8 bytes: total length
+        // - 4 bytes: chunk length
+        // - chunk data
+        // - 4 bytes: 0 (terminator)
+        dst.extend_from_slice(&(data_len as u64).to_le_bytes());
+        dst.extend_from_slice(&(data_len as u32).to_le_bytes());
+        for _ in 0..data_len {
+            dst.extend_from_slice(&[src.get_u8()]);
+        }
+        dst.extend_from_slice(&0u32.to_le_bytes()); // PLP terminator
+
         Ok(())
     }
 
@@ -2523,5 +2590,221 @@ mod tests {
             type_info: TypeInfo::default(),
         };
         assert_eq!(col2.fixed_size(), None);
+    }
+
+    // ========================================================================
+    // End-to-End Decode Tests (Wire → Stored → Verification)
+    // ========================================================================
+    //
+    // These tests verify that RawRow::decode_column_value correctly stores
+    // column values in a format that can be parsed back.
+
+    #[test]
+    fn test_decode_nvarchar_then_intn_roundtrip() {
+        // Simulate wire data for: "World" (NVarChar), 42 (IntN)
+        // This tests the scenario from the MCP parameterized query
+
+        // Build wire data (what the server sends)
+        let mut wire_data = BytesMut::new();
+
+        // Column 0: NVarChar "World" - 2-byte length prefix in bytes
+        // "World" in UTF-16LE: W=0x0057, o=0x006F, r=0x0072, l=0x006C, d=0x0064
+        let word = "World";
+        let utf16: Vec<u16> = word.encode_utf16().collect();
+        wire_data.put_u16_le((utf16.len() * 2) as u16); // byte length = 10
+        for code_unit in &utf16 {
+            wire_data.put_u16_le(*code_unit);
+        }
+
+        // Column 1: IntN 42 - 1-byte length prefix
+        wire_data.put_u8(4); // 4 bytes for INT
+        wire_data.put_i32_le(42);
+
+        // Build column metadata
+        let metadata = ColMetaData {
+            columns: vec![
+                ColumnData {
+                    name: "greeting".to_string(),
+                    type_id: TypeId::NVarChar,
+                    col_type: 0xE7,
+                    flags: 0x01,
+                    user_type: 0,
+                    type_info: TypeInfo {
+                        max_length: Some(10), // non-MAX
+                        precision: None,
+                        scale: None,
+                        collation: None,
+                    },
+                },
+                ColumnData {
+                    name: "number".to_string(),
+                    type_id: TypeId::IntN,
+                    col_type: 0x26,
+                    flags: 0x01,
+                    user_type: 0,
+                    type_info: TypeInfo {
+                        max_length: Some(4),
+                        precision: None,
+                        scale: None,
+                        collation: None,
+                    },
+                },
+            ],
+        };
+
+        // Decode the wire data into stored format
+        let mut wire_cursor = wire_data.freeze();
+        let raw_row = RawRow::decode(&mut wire_cursor, &metadata).unwrap();
+
+        // Verify wire data was fully consumed
+        assert_eq!(
+            wire_cursor.remaining(),
+            0,
+            "wire data should be fully consumed"
+        );
+
+        // Now parse the stored data
+        let mut stored_cursor: &[u8] = &raw_row.data;
+
+        // Parse column 0 (NVarChar)
+        // Stored format for non-MAX NVarChar: [2-byte len][data]
+        assert!(
+            stored_cursor.remaining() >= 2,
+            "need at least 2 bytes for length"
+        );
+        let len0 = stored_cursor.get_u16_le() as usize;
+        assert_eq!(len0, 10, "NVarChar length should be 10 bytes");
+        assert!(
+            stored_cursor.remaining() >= len0,
+            "need {len0} bytes for data"
+        );
+
+        // Read UTF-16LE and convert to string
+        let mut utf16_read = Vec::new();
+        for _ in 0..(len0 / 2) {
+            utf16_read.push(stored_cursor.get_u16_le());
+        }
+        let string0 = String::from_utf16(&utf16_read).unwrap();
+        assert_eq!(string0, "World", "column 0 should be 'World'");
+
+        // Parse column 1 (IntN)
+        // Stored format for IntN: [1-byte len][data]
+        assert!(
+            stored_cursor.remaining() >= 1,
+            "need at least 1 byte for length"
+        );
+        let len1 = stored_cursor.get_u8();
+        assert_eq!(len1, 4, "IntN length should be 4");
+        assert!(stored_cursor.remaining() >= 4, "need 4 bytes for INT data");
+        let int1 = stored_cursor.get_i32_le();
+        assert_eq!(int1, 42, "column 1 should be 42");
+
+        // Verify stored data was fully consumed
+        assert_eq!(
+            stored_cursor.remaining(),
+            0,
+            "stored data should be fully consumed"
+        );
+    }
+
+    #[test]
+    fn test_decode_nvarchar_max_then_intn_roundtrip() {
+        // Test NVARCHAR(MAX) followed by IntN - uses PLP encoding
+
+        // Build wire data for PLP NVARCHAR(MAX) + IntN
+        let mut wire_data = BytesMut::new();
+
+        // Column 0: NVARCHAR(MAX) "Hello" - PLP format
+        // PLP: 8-byte total length, then chunks
+        let word = "Hello";
+        let utf16: Vec<u16> = word.encode_utf16().collect();
+        let byte_len = (utf16.len() * 2) as u64;
+
+        wire_data.put_u64_le(byte_len); // total length = 10
+        wire_data.put_u32_le(byte_len as u32); // chunk length = 10
+        for code_unit in &utf16 {
+            wire_data.put_u16_le(*code_unit);
+        }
+        wire_data.put_u32_le(0); // terminating zero-length chunk
+
+        // Column 1: IntN 99
+        wire_data.put_u8(4);
+        wire_data.put_i32_le(99);
+
+        // Build metadata with MAX type
+        let metadata = ColMetaData {
+            columns: vec![
+                ColumnData {
+                    name: "text".to_string(),
+                    type_id: TypeId::NVarChar,
+                    col_type: 0xE7,
+                    flags: 0x01,
+                    user_type: 0,
+                    type_info: TypeInfo {
+                        max_length: Some(0xFFFF), // MAX indicator
+                        precision: None,
+                        scale: None,
+                        collation: None,
+                    },
+                },
+                ColumnData {
+                    name: "num".to_string(),
+                    type_id: TypeId::IntN,
+                    col_type: 0x26,
+                    flags: 0x01,
+                    user_type: 0,
+                    type_info: TypeInfo {
+                        max_length: Some(4),
+                        precision: None,
+                        scale: None,
+                        collation: None,
+                    },
+                },
+            ],
+        };
+
+        // Decode wire data
+        let mut wire_cursor = wire_data.freeze();
+        let raw_row = RawRow::decode(&mut wire_cursor, &metadata).unwrap();
+
+        // Verify wire data was fully consumed
+        assert_eq!(
+            wire_cursor.remaining(),
+            0,
+            "wire data should be fully consumed"
+        );
+
+        // Parse stored PLP data for column 0
+        let mut stored_cursor: &[u8] = &raw_row.data;
+
+        // PLP stored format: [8-byte total][chunks...][4-byte 0]
+        let total_len = stored_cursor.get_u64_le();
+        assert_eq!(total_len, 10, "PLP total length should be 10");
+
+        let chunk_len = stored_cursor.get_u32_le();
+        assert_eq!(chunk_len, 10, "PLP chunk length should be 10");
+
+        let mut utf16_read = Vec::new();
+        for _ in 0..(chunk_len / 2) {
+            utf16_read.push(stored_cursor.get_u16_le());
+        }
+        let string0 = String::from_utf16(&utf16_read).unwrap();
+        assert_eq!(string0, "Hello", "column 0 should be 'Hello'");
+
+        let terminator = stored_cursor.get_u32_le();
+        assert_eq!(terminator, 0, "PLP should end with 0");
+
+        // Parse IntN
+        let len1 = stored_cursor.get_u8();
+        assert_eq!(len1, 4);
+        let int1 = stored_cursor.get_i32_le();
+        assert_eq!(int1, 99, "column 1 should be 99");
+
+        // Verify fully consumed
+        assert_eq!(
+            stored_cursor.remaining(),
+            0,
+            "stored data should be fully consumed"
+        );
     }
 }

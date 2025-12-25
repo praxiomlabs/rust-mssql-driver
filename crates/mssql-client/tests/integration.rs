@@ -2260,3 +2260,449 @@ async fn test_tvp_bulk_insert() {
 
     client.close().await.expect("Failed to close");
 }
+
+// =============================================================================
+// Data Type Regression Tests (v0.2.3+ fixes)
+// =============================================================================
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_data_type_date() {
+    use chrono::{Datelike, NaiveDate};
+
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Test DATE type - was causing "unexpected EOF reading DATE" before fix
+    let rows = client
+        .query("SELECT CAST('2025-12-24' AS DATE) AS christmas_eve", &[])
+        .await
+        .expect("DATE query failed");
+
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let date: NaiveDate = row.get(0).expect("Should get date");
+        assert_eq!(date.year(), 2025);
+        assert_eq!(date.month(), 12);
+        assert_eq!(date.day(), 24);
+    }
+
+    // Test NULL DATE
+    let rows = client
+        .query("SELECT CAST(NULL AS DATE) AS null_date", &[])
+        .await
+        .expect("NULL DATE query failed");
+
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let date: Option<NaiveDate> = row.try_get(0);
+        assert!(date.is_none(), "Should be NULL");
+    }
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_data_type_xml() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Test XML type - was causing "unexpected EOF reading Xml data" before fix
+    let rows = client
+        .query(
+            "SELECT CAST('<root><item id=\"1\">Test</item></root>' AS XML) AS xml_data",
+            &[],
+        )
+        .await
+        .expect("XML query failed");
+
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let xml: String = row.get(0).expect("Should get XML");
+        assert!(xml.contains("<root>"), "Should contain XML root");
+        assert!(xml.contains("Test"), "Should contain text content");
+    }
+
+    // Test NULL XML
+    let rows = client
+        .query("SELECT CAST(NULL AS XML) AS null_xml", &[])
+        .await
+        .expect("NULL XML query failed");
+
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let xml: Option<String> = row.try_get(0);
+        assert!(xml.is_none(), "Should be NULL");
+    }
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_data_type_text_deprecated() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Create a temp table with TEXT column (deprecated but still supported)
+    client
+        .execute("CREATE TABLE #TextTest (id INT, content TEXT)", &[])
+        .await
+        .expect("Failed to create temp table");
+
+    client
+        .execute(
+            "INSERT INTO #TextTest VALUES (1, 'Hello from TEXT column')",
+            &[],
+        )
+        .await
+        .expect("Failed to insert");
+
+    // Test TEXT type - was causing "unexpected end of stream" before fix
+    let rows = client
+        .query("SELECT content FROM #TextTest WHERE id = 1", &[])
+        .await
+        .expect("TEXT query failed");
+
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let text: String = row.get(0).expect("Should get TEXT");
+        assert_eq!(text, "Hello from TEXT column");
+    }
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_data_type_ntext_deprecated() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Create a temp table with NTEXT column (deprecated but still supported)
+    client
+        .execute("CREATE TABLE #NTextTest (id INT, content NTEXT)", &[])
+        .await
+        .expect("Failed to create temp table");
+
+    client
+        .execute(
+            "INSERT INTO #NTextTest VALUES (1, N'Hello \u{4e16}\u{754c} from NTEXT')",
+            &[],
+        )
+        .await
+        .expect("Failed to insert");
+
+    // Test NTEXT type - was causing "unexpected end of stream" before fix
+    let rows = client
+        .query("SELECT content FROM #NTextTest WHERE id = 1", &[])
+        .await
+        .expect("NTEXT query failed");
+
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let text: String = row.get(0).expect("Should get NTEXT");
+        assert!(text.contains("Hello"));
+        assert!(text.contains("\u{4e16}\u{754c}")); // Chinese characters
+    }
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_data_type_image_deprecated() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Create a temp table with IMAGE column (deprecated but still supported)
+    client
+        .execute("CREATE TABLE #ImageTest (id INT, data IMAGE)", &[])
+        .await
+        .expect("Failed to create temp table");
+
+    client
+        .execute("INSERT INTO #ImageTest VALUES (1, 0xDEADBEEF)", &[])
+        .await
+        .expect("Failed to insert");
+
+    // Test IMAGE type - was causing "unexpected end of stream" before fix
+    let rows = client
+        .query("SELECT data FROM #ImageTest WHERE id = 1", &[])
+        .await
+        .expect("IMAGE query failed");
+
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let data: Vec<u8> = row.get(0).expect("Should get IMAGE");
+        assert_eq!(data, vec![0xDE, 0xAD, 0xBE, 0xEF]);
+    }
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_data_type_decimal_high_scale() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Test high-scale DECIMAL - was causing hang before fix
+    // rust_decimal supports max scale of 28, so scale 30+ falls back to f64
+    let rows = client
+        .query(
+            "SELECT CAST(123456.123456789012345678901234567890 AS DECIMAL(38,30)) AS high_scale",
+            &[],
+        )
+        .await
+        .expect("High-scale DECIMAL query failed - driver may have hung");
+
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        // With scale > 28, we fall back to f64
+        let value: f64 = row.get(0).expect("Should get high-scale decimal as f64");
+        // Check approximate value (f64 won't have full precision)
+        assert!(
+            (value - 123456.123456789).abs() < 0.001,
+            "Value should be approximately correct: {}",
+            value
+        );
+    }
+
+    // Test normal scale DECIMAL still works with rust_decimal
+    let rows = client
+        .query(
+            "SELECT CAST(123.456789 AS DECIMAL(18,6)) AS normal_scale",
+            &[],
+        )
+        .await
+        .expect("Normal DECIMAL query failed");
+
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        // Normal scale should parse correctly
+        let value: f64 = row.get(0).expect("Should get decimal");
+        assert!(
+            (value - 123.456789).abs() < 0.000001,
+            "Value should match: {}",
+            value
+        );
+    }
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_data_type_nvarchar_max() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Test NVARCHAR(MAX) - was returning corrupted data before fix
+    let long_text = "Hello World! ".repeat(1000); // 13,000 chars
+
+    let rows = client
+        .query(
+            &format!(
+                "SELECT CAST(N'{}' AS NVARCHAR(MAX)) AS long_text",
+                long_text
+            ),
+            &[],
+        )
+        .await
+        .expect("NVARCHAR(MAX) query failed");
+
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let text: String = row.get(0).expect("Should get NVARCHAR(MAX)");
+        assert_eq!(text.len(), long_text.len(), "Length should match");
+        assert_eq!(text, long_text, "Content should match exactly");
+    }
+
+    // Test with Unicode
+    let unicode_text = "Hello \u{4e16}\u{754c}! ".repeat(500);
+    let rows = client
+        .query(
+            &format!(
+                "SELECT CAST(N'{}' AS NVARCHAR(MAX)) AS unicode_text",
+                unicode_text
+            ),
+            &[],
+        )
+        .await
+        .expect("Unicode NVARCHAR(MAX) query failed");
+
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let text: String = row.get(0).expect("Should get NVARCHAR(MAX)");
+        assert_eq!(text, unicode_text, "Unicode content should match");
+    }
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_data_type_varchar_max() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Test VARCHAR(MAX) - was returning corrupted data before fix
+    let long_text = "Test data! ".repeat(1000); // 11,000 chars
+
+    let rows = client
+        .query(
+            &format!("SELECT CAST('{}' AS VARCHAR(MAX)) AS long_text", long_text),
+            &[],
+        )
+        .await
+        .expect("VARCHAR(MAX) query failed");
+
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let text: String = row.get(0).expect("Should get VARCHAR(MAX)");
+        assert_eq!(text.len(), long_text.len(), "Length should match");
+        assert_eq!(text, long_text, "Content should match exactly");
+    }
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_data_type_varbinary_max() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Test VARBINARY(MAX) - was returning corrupted data before fix
+    // Create a large binary value
+    let rows = client
+        .query(
+            "SELECT CAST(REPLICATE(CAST(0xDEADBEEF AS VARBINARY(MAX)), 1000) AS VARBINARY(MAX)) AS big_binary",
+            &[],
+        )
+        .await
+        .expect("VARBINARY(MAX) query failed");
+
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let data: Vec<u8> = row.get(0).expect("Should get VARBINARY(MAX)");
+        // 4 bytes * 1000 = 4000 bytes
+        assert_eq!(data.len(), 4000, "Binary length should be 4000 bytes");
+        // Check pattern repeats correctly
+        assert_eq!(data[0..4], [0xDE, 0xAD, 0xBE, 0xEF]);
+        assert_eq!(data[3996..4000], [0xDE, 0xAD, 0xBE, 0xEF]);
+    }
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_multi_column_with_max_types() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Test multiple columns with MAX types in same row
+    let rows = client
+        .query(
+            "SELECT
+                42 AS int_col,
+                CAST('Hello World' AS NVARCHAR(MAX)) AS nvarchar_max_col,
+                CAST('Test' AS VARCHAR(MAX)) AS varchar_max_col,
+                123.456 AS float_col,
+                CAST(0xCAFEBABE AS VARBINARY(MAX)) AS varbinary_max_col",
+            &[],
+        )
+        .await
+        .expect("Multi-column MAX query failed");
+
+    for result in rows {
+        let row = result.expect("Row should be valid");
+
+        let int_val: i32 = row.get(0).expect("Should get int");
+        assert_eq!(int_val, 42);
+
+        let nvarchar_max: String = row.get(1).expect("Should get NVARCHAR(MAX)");
+        assert_eq!(nvarchar_max, "Hello World");
+
+        let varchar_max: String = row.get(2).expect("Should get VARCHAR(MAX)");
+        assert_eq!(varchar_max, "Test");
+
+        let float_val: f64 = row.get(3).expect("Should get float");
+        assert!((float_val - 123.456).abs() < 0.001);
+
+        let varbinary_max: Vec<u8> = row.get(4).expect("Should get VARBINARY(MAX)");
+        assert_eq!(varbinary_max, vec![0xCA, 0xFE, 0xBA, 0xBE]);
+    }
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_data_type_sql_variant() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Test SQL_VARIANT with integer
+    let rows = client
+        .query("SELECT CAST(42 AS SQL_VARIANT) AS variant_int", &[])
+        .await
+        .expect("SQL_VARIANT INT query failed");
+
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let value: i32 = row.get(0).expect("Should get SQL_VARIANT as int");
+        assert_eq!(value, 42);
+    }
+
+    // Test SQL_VARIANT with string
+    let rows = client
+        .query(
+            "SELECT CAST('Hello World' AS SQL_VARIANT) AS variant_str",
+            &[],
+        )
+        .await
+        .expect("SQL_VARIANT string query failed");
+
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let value: String = row.get(0).expect("Should get SQL_VARIANT as string");
+        assert_eq!(value, "Hello World");
+    }
+
+    // Test SQL_VARIANT with decimal
+    let rows = client
+        .query(
+            "SELECT CAST(123.456 AS SQL_VARIANT) AS variant_decimal",
+            &[],
+        )
+        .await
+        .expect("SQL_VARIANT decimal query failed");
+
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let value: f64 = row.get(0).expect("Should get SQL_VARIANT as f64");
+        assert!(
+            (value - 123.456).abs() < 0.001,
+            "Value should be approximately correct: {}",
+            value
+        );
+    }
+
+    // Test NULL SQL_VARIANT
+    let rows = client
+        .query("SELECT CAST(NULL AS SQL_VARIANT) AS variant_null", &[])
+        .await
+        .expect("SQL_VARIANT NULL query failed");
+
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let value: Option<i32> = row.try_get(0);
+        assert!(value.is_none(), "Should be NULL");
+    }
+
+    client.close().await.expect("Failed to close");
+}

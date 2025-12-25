@@ -118,6 +118,16 @@ impl FromSql for f64 {
         match value {
             SqlValue::Double(v) => Ok(*v),
             SqlValue::Float(v) => Ok(*v as f64),
+            #[cfg(feature = "decimal")]
+            SqlValue::Decimal(v) => {
+                use rust_decimal::prelude::ToPrimitive;
+                v.to_f64().ok_or_else(|| TypeError::TypeMismatch {
+                    expected: "f64",
+                    actual: "Decimal out of range".to_string(),
+                })
+            }
+            SqlValue::Int(v) => Ok(*v as f64),
+            SqlValue::BigInt(v) => Ok(*v as f64),
             SqlValue::Null => Err(TypeError::UnexpectedNull),
             _ => Err(TypeError::TypeMismatch {
                 expected: "f64",
