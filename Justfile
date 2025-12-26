@@ -18,6 +18,10 @@
 #   just setup-all    - Install cargo tools + git hooks
 #   just ci           - Run CI pipeline with default features
 #
+# DAILY WORKFLOW:
+#   just quick        - Fast feedback: fmt + clippy + check (no tests)
+#   just dev          - Full local cycle: build + test + lint
+#
 # REQUIREMENTS:
 #   - Just >= 1.23.0 (for [group], [confirm], [doc] attributes)
 #   - Rust toolchain (rustup recommended)
@@ -1191,6 +1195,11 @@ ci-all: fmt-check clippy-all nextest-locked-all doc-check-all examples-all
     printf '{{green}}[OK]{{reset}}   All CI checks passed\n'
 
 [group('ci')]
+[doc("Quick verification: fmt + clippy + check (no tests, fastest feedback)")]
+quick: fmt-check clippy check
+    @printf '{{green}}[OK]{{reset}}   Quick checks passed\n'
+
+[group('ci')]
 [doc("Fast CI checks (no tests)")]
 ci-fast: fmt-check clippy check
     @printf '{{green}}[OK]{{reset}}   Fast CI checks passed\n'
@@ -1616,6 +1625,22 @@ tag:
 # ============================================================================
 
 [group('util')]
+[doc("Open crate on crates.io")]
+crates-io crate="mssql-client":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '{{cyan}}[INFO]{{reset}} Opening {{crate}} on crates.io...\n'
+    {{open_cmd}} "https://crates.io/crates/{{crate}}"
+
+[group('util')]
+[doc("Open crate documentation on docs.rs")]
+docs-rs crate="mssql-client":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '{{cyan}}[INFO]{{reset}} Opening {{crate}} on docs.rs...\n'
+    {{open_cmd}} "https://docs.rs/{{crate}}"
+
+[group('util')]
 [doc("Count lines of code")]
 loc:
     #!/usr/bin/env bash
@@ -1710,6 +1735,7 @@ help:
     printf '{{bold}}Quick Start:{{reset}}\n'
     printf '  just bootstrap   Full setup (system pkgs + tools + hooks)\n'
     printf '  just setup       Check development environment\n'
+    printf '  just quick       Fast feedback (fmt + clippy + check)\n'
     printf '  just ci          Run CI pipeline (default features)\n'
     printf '  just ci-all      Run CI pipeline (all features, matches GH Actions)\n\n'
     just --list --unsorted
