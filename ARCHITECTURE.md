@@ -1,7 +1,7 @@
 # Architectural Reference: High-Performance Rust MS SQL Driver
 
-**Version:** 1.2.0
-**Status:** Design Complete (v0.2.0 Released)  
+**Version:** 1.3.0
+**Status:** Design Complete (v0.3.0 Released)  
 **Target Protocol:** MS-TDS 7.4 – 8.0 (SQL Server 2016 – 2025)  
 **Toolchain Standard:** Rust 2024 Edition (v1.85+, released February 20, 2025)  
 **MSRV Policy:** Rust 1.85.0 (6-month rolling window)
@@ -2146,6 +2146,7 @@ let client = Client::connect(&connection_string).await?;
 | 1.0.0 | 2025-12-11 | Initial comprehensive specification |
 | 1.1.0 | 2025-12-11 | Security guidance corrections (ADR-013 Always Encrypted), savepoint validation, prepared statement lifecycle (§4.5), Azure SQL routing (§4.6), OpenTelemetry 0.31, version constraint policy, cargo-deny/hakari integration, native async trait guidance, migration guide updates |
 | 1.2.0 | 2025-12-24 | Updated for v0.2.0 release: Phase 5 auth complete, ADR-013 status updated (cryptography implemented), feature flag matrix expanded, v0.2.0 delivered features documented, v0.3.0 roadmap updated |
+| 1.3.0 | 2025-12-25 | Updated for v0.3.0 release: Always Encrypted key providers (InMemoryKeyStore, KeyStoreProvider trait), true LOB streaming (LobStream), Change Tracking integration, all 12 data type parsing fixes complete |
 
 ---
 

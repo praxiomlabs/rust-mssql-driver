@@ -4,7 +4,7 @@ This document lists features that are explicitly **not supported** by rust-mssql
 
 ## Quick Reference: Feature Status
 
-For clarity, here's what **IS** implemented in v0.2.x:
+For clarity, here's what **IS** implemented in v0.3.x:
 
 ### Authentication (Tier 1-4) ✅
 - SQL Server authentication (username/password)
