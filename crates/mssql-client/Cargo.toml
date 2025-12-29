@@ -62,7 +62,7 @@ chrono = { workspace = true }
 # Always Encrypted test dependencies
 rsa = { version = "0.9", features = ["sha2"] }
 sha2 = "0.10"
-rand = "0.8"
+rand = "0.9"
 
 [[example]]
 name = "basic"
