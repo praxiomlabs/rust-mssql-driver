@@ -72,7 +72,7 @@ url = { version = "2.5", optional = true }
 
 # Optional: Windows Certificate Store CMK provider (Windows only)
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.59", features = ["Win32_Security_Cryptography", "Win32_Foundation"], optional = true }
+windows = { version = "0.62", features = ["Win32_Security_Cryptography", "Win32_Foundation"], optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
