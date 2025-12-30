@@ -1,9 +1,9 @@
 # Architectural Reference: High-Performance Rust MS SQL Driver
 
-**Version:** 1.3.0
-**Status:** Design Complete (v0.3.0 Released)  
-**Target Protocol:** MS-TDS 7.4 – 8.0 (SQL Server 2016 – 2025)  
-**Toolchain Standard:** Rust 2024 Edition (v1.85+, released February 20, 2025)  
+**Version:** 1.4.0
+**Status:** Design Complete (v0.3.0 Released)
+**Target Protocol:** MS-TDS 7.3 – 8.0 (SQL Server 2008 – 2025)
+**Toolchain Standard:** Rust 2024 Edition (v1.85+, released February 20, 2025)
 **MSRV Policy:** Rust 1.85.0 (6-month rolling window)
 
 ---
@@ -53,7 +53,18 @@ The following are explicitly out of scope for v1.0:
 - **MARS (Multiple Active Result Sets):** Deferred to v2.0 if demand warrants
 - **Named Pipe Transport:** Windows-only, limited use case
 - **Shared Memory Protocol:** Undocumented, no existing Rust implementations
-- **SQL Server 2008/2012 Support:** TDS 7.2/7.3 protocols are deprecated
+- **SQL Server 2005 and Earlier:** TDS 7.2 and earlier protocols are not supported
+
+### 1.4 TDS Protocol Version Support
+
+| TDS Version | SQL Server Version | Status |
+|-------------|-------------------|--------|
+| TDS 7.3A | SQL Server 2008 | Supported via `TdsVersion::V7_3A` |
+| TDS 7.3B | SQL Server 2008 R2 | Supported via `TdsVersion::V7_3B` |
+| TDS 7.4 | SQL Server 2012+ | Default, full support |
+| TDS 8.0 | SQL Server 2022+ | Full support (strict TLS mode) |
+
+The driver defaults to TDS 7.4 for maximum compatibility with modern SQL Server while supporting legacy TDS 7.3 connections for enterprise environments with SQL Server 2008/2008 R2 instances.
 
 ---
 

@@ -125,6 +125,9 @@ jobs:
     runs-on: ubuntu-latest
     # Only run on PRs to catch breaking changes before merge
     if: github.event_name == 'pull_request'
+    # Advisory for pre-1.0: semver spec allows breaking changes in 0.x minor versions
+    # This check warns but doesn't block PRs until we reach 1.0
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
         with:

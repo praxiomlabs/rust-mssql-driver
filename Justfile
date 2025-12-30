@@ -1573,7 +1573,7 @@ publish:
     printf '\n{{green}}[OK]{{reset}}   All crates published successfully\n'
 
 [group('release')]
-[confirm("⚠️ This will YANK all crates at version " + version + ". This is for SECURITY INCIDENTS only. Continue?")]
+[confirm("⚠️ This will YANK all crates at the current workspace version. This is for SECURITY INCIDENTS only. Continue?")]
 [doc("Yank all crates at current version (SECURITY INCIDENTS ONLY)")]
 yank-all:
     #!/usr/bin/env bash

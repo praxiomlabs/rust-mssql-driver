@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use mssql_auth::Credentials;
 use mssql_tls::TlsConfig;
+use tds_protocol::version::TdsVersion;
 
 /// Configuration for Azure SQL redirect handling.
 ///
@@ -269,7 +270,12 @@ impl RetryPolicy {
 }
 
 /// Configuration for connecting to SQL Server.
+///
+/// This struct is marked `#[non_exhaustive]` to allow adding new fields
+/// in future releases without breaking semver. Use [`Config::default()`]
+/// or [`Config::from_connection_string()`] to construct instances.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Config {
     /// Server hostname or IP address.
     pub host: String,
@@ -323,6 +329,20 @@ pub struct Config {
 
     /// Timeout configuration for various connection phases.
     pub timeouts: TimeoutConfig,
+
+    /// Requested TDS protocol version.
+    ///
+    /// This specifies which TDS protocol version to request during connection.
+    /// The server may negotiate a lower version if it doesn't support the requested version.
+    ///
+    /// Supported versions:
+    /// - `TdsVersion::V7_3A` - SQL Server 2008
+    /// - `TdsVersion::V7_3B` - SQL Server 2008 R2
+    /// - `TdsVersion::V7_4` - SQL Server 2012+ (default)
+    /// - `TdsVersion::V8_0` - SQL Server 2022+ strict mode (requires `strict_mode = true`)
+    ///
+    /// Note: When `strict_mode` is enabled, this is ignored and TDS 8.0 is used.
+    pub tds_version: TdsVersion,
 }
 
 impl Default for Config {
@@ -346,6 +366,7 @@ impl Default for Config {
             redirect: RedirectConfig::default(),
             retry: RetryPolicy::default(),
             timeouts,
+            tds_version: TdsVersion::V7_4, // Default to TDS 7.4 for broad compatibility
         }
     }
 }
@@ -463,6 +484,19 @@ impl Config {
                         crate::error::Error::Config(format!("invalid packet size: {value}"))
                     })?;
                 }
+                "tdsversion" | "tds version" | "protocolversion" | "protocol version" => {
+                    // Parse TDS version from connection string
+                    // Supports: "7.3", "7.3A", "7.3B", "7.4", "8.0"
+                    config.tds_version = TdsVersion::parse(value).ok_or_else(|| {
+                        crate::error::Error::Config(format!(
+                            "invalid TDS version: {value}. Supported values: 7.3, 7.3A, 7.3B, 7.4, 8.0"
+                        ))
+                    })?;
+                    // If TDS 8.0 is requested, enable strict mode
+                    if config.tds_version.is_tds_8() {
+                        config.strict_mode = true;
+                    }
+                }
                 _ => {
                     // Ignore unknown options for forward compatibility
                     tracing::debug!(
@@ -532,6 +566,43 @@ impl Config {
     pub fn strict_mode(mut self, enabled: bool) -> Self {
         self.strict_mode = enabled;
         self.tls = self.tls.strict_mode(enabled);
+        if enabled {
+            self.tds_version = TdsVersion::V8_0;
+        }
+        self
+    }
+
+    /// Set the TDS protocol version.
+    ///
+    /// This specifies which TDS protocol version to request during connection.
+    /// The server may negotiate a lower version if it doesn't support the requested version.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use mssql_client::Config;
+    /// use tds_protocol::version::TdsVersion;
+    ///
+    /// // Connect to SQL Server 2008
+    /// let config = Config::new()
+    ///     .host("legacy-server")
+    ///     .tds_version(TdsVersion::V7_3A);
+    ///
+    /// // Connect to SQL Server 2008 R2
+    /// let config = Config::new()
+    ///     .host("legacy-server")
+    ///     .tds_version(TdsVersion::V7_3B);
+    /// ```
+    ///
+    /// Note: When `strict_mode` is enabled, this is ignored and TDS 8.0 is used.
+    #[must_use]
+    pub fn tds_version(mut self, version: TdsVersion) -> Self {
+        self.tds_version = version;
+        // If TDS 8.0 is requested, automatically enable strict mode
+        if version.is_tds_8() {
+            self.strict_mode = true;
+            self.tls = self.tls.strict_mode(true);
+        }
         self
     }
 
@@ -803,5 +874,73 @@ mod tests {
         // Check that legacy fields are synced
         assert_eq!(config.connect_timeout, Duration::from_secs(5));
         assert_eq!(config.command_timeout, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn test_tds_version_default() {
+        let config = Config::default();
+        assert_eq!(config.tds_version, TdsVersion::V7_4);
+        assert!(!config.strict_mode);
+    }
+
+    #[test]
+    fn test_tds_version_builder() {
+        let config = Config::new().tds_version(TdsVersion::V7_3A);
+        assert_eq!(config.tds_version, TdsVersion::V7_3A);
+        assert!(!config.strict_mode);
+
+        let config = Config::new().tds_version(TdsVersion::V7_3B);
+        assert_eq!(config.tds_version, TdsVersion::V7_3B);
+        assert!(!config.strict_mode);
+
+        // TDS 8.0 should automatically enable strict mode
+        let config = Config::new().tds_version(TdsVersion::V8_0);
+        assert_eq!(config.tds_version, TdsVersion::V8_0);
+        assert!(config.strict_mode);
+    }
+
+    #[test]
+    fn test_strict_mode_sets_tds_8() {
+        let config = Config::new().strict_mode(true);
+        assert!(config.strict_mode);
+        assert_eq!(config.tds_version, TdsVersion::V8_0);
+    }
+
+    #[test]
+    fn test_connection_string_tds_version() {
+        // Test TDS 7.3
+        let config = Config::from_connection_string("Server=localhost;TDSVersion=7.3;").unwrap();
+        assert_eq!(config.tds_version, TdsVersion::V7_3A);
+
+        // Test TDS 7.3A explicitly
+        let config = Config::from_connection_string("Server=localhost;TDSVersion=7.3A;").unwrap();
+        assert_eq!(config.tds_version, TdsVersion::V7_3A);
+
+        // Test TDS 7.3B
+        let config = Config::from_connection_string("Server=localhost;TDSVersion=7.3B;").unwrap();
+        assert_eq!(config.tds_version, TdsVersion::V7_3B);
+
+        // Test TDS 7.4
+        let config = Config::from_connection_string("Server=localhost;TDSVersion=7.4;").unwrap();
+        assert_eq!(config.tds_version, TdsVersion::V7_4);
+
+        // Test TDS 8.0 enables strict mode
+        let config = Config::from_connection_string("Server=localhost;TDSVersion=8.0;").unwrap();
+        assert_eq!(config.tds_version, TdsVersion::V8_0);
+        assert!(config.strict_mode);
+
+        // Test alternative key names
+        let config =
+            Config::from_connection_string("Server=localhost;ProtocolVersion=7.3;").unwrap();
+        assert_eq!(config.tds_version, TdsVersion::V7_3A);
+    }
+
+    #[test]
+    fn test_connection_string_invalid_tds_version() {
+        let result = Config::from_connection_string("Server=localhost;TDSVersion=invalid;");
+        assert!(result.is_err());
+
+        let result = Config::from_connection_string("Server=localhost;TDSVersion=9.0;");
+        assert!(result.is_err());
     }
 }

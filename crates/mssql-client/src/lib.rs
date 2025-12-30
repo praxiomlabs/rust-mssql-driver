@@ -95,8 +95,11 @@ pub use cancel::CancelHandle;
 pub use client::Client;
 pub use config::{Config, RedirectConfig, RetryPolicy, TimeoutConfig};
 pub use error::Error;
+
+// Re-export TDS version for configuration
 pub use from_row::{FromRow, MapRows, RowIteratorExt};
 pub use mssql_auth::Credentials;
+pub use tds_protocol::version::TdsVersion;
 
 // Secure credential types (with zeroize feature)
 #[cfg(feature = "zeroize")]

@@ -272,6 +272,37 @@ impl Client<Disconnected> {
         let prelogin_response =
             PreLogin::decode(&response_buf[..]).map_err(|e| Error::Protocol(e.to_string()))?;
 
+        // Log negotiated TDS version
+        let server_version = prelogin_response.version;
+        let client_version = config.tds_version;
+        tracing::debug!(
+            client_version = %client_version,
+            server_version = %server_version,
+            server_sql_version = server_version.sql_server_version_name(),
+            "TDS version negotiation"
+        );
+
+        // Warn if server returned a lower version than requested
+        if server_version < client_version && !client_version.is_tds_8() {
+            tracing::warn!(
+                client_version = %client_version,
+                server_version = %server_version,
+                "Server supports lower TDS version than requested. \
+                 Connection will use server's version: {}",
+                server_version.sql_server_version_name()
+            );
+        }
+
+        // Check for legacy version (TDS 7.2 or earlier)
+        if server_version.is_legacy() {
+            tracing::warn!(
+                server_version = %server_version,
+                "Server uses legacy TDS version ({}). \
+                 Some features may not be available.",
+                server_version.sql_server_version_name()
+            );
+        }
+
         // Check server encryption response
         let server_encryption = prelogin_response.encryption;
         tracing::debug!(encryption = ?server_encryption, "server encryption level");
@@ -602,7 +633,16 @@ impl Client<Disconnected> {
 
     /// Build a PreLogin packet.
     fn build_prelogin(config: &Config, encryption: EncryptionLevel) -> PreLogin {
-        let mut prelogin = PreLogin::new().with_encryption(encryption);
+        // Use the configured TDS version (strict_mode overrides to V8_0)
+        let version = if config.strict_mode {
+            tds_protocol::version::TdsVersion::V8_0
+        } else {
+            config.tds_version
+        };
+
+        let mut prelogin = PreLogin::new()
+            .with_version(version)
+            .with_encryption(encryption);
 
         if config.mars {
             prelogin = prelogin.with_mars(true);
@@ -617,7 +657,15 @@ impl Client<Disconnected> {
 
     /// Build a Login7 packet.
     fn build_login7(config: &Config) -> Login7 {
+        // Use the configured TDS version (strict_mode overrides to V8_0)
+        let version = if config.strict_mode {
+            tds_protocol::version::TdsVersion::V8_0
+        } else {
+            config.tds_version
+        };
+
         let mut login = Login7::new()
+            .with_tds_version(version)
             .with_packet_size(config.packet_size as u32)
             .with_app_name(&config.application_name)
             .with_server_name(&config.host)
