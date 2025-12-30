@@ -92,6 +92,10 @@ path = "examples/derive_macros.rs"
 name = "streaming"
 path = "examples/streaming.rs"
 
+[[example]]
+name = "chinese_query"
+path = "examples/chinese_query.rs"
+
 [[bench]]
 name = "client"
 harness = false

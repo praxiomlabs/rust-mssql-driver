@@ -698,7 +698,7 @@ members = ["crates/*", "xtask"]
 [workspace.package]
 version = "0.2.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = ""
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/praxiomlabs/rust-mssql-driver"
 

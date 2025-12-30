@@ -1419,6 +1419,18 @@ impl<S: ConnectionState> Client<S> {
         use bytes::Buf;
         use mssql_types::SqlValue;
         use tds_protocol::types::TypeId;
+        fn decode_string(data: &[u8], col: &ColumnData) -> Result<String> {
+            match col.type_info.collation.and_then(|c| c.encoding()) {
+                Some(encoding) => {
+                    let (result, _, had_errors) = encoding.decode(data);
+                    if had_errors {
+                        return Err(Error::Protocol(format!("decoding {} fail", col.name)));
+                    }
+                    Ok(result.into_owned())
+                }
+                None => Ok(String::from_utf8_lossy(data).into_owned()),
+            }
+        }
 
         let value = match col.type_id {
             // Fixed-length null type
@@ -1921,7 +1933,7 @@ impl<S: ConnectionState> Client<S> {
                     ));
                 } else {
                     let data = &buf[..len as usize];
-                    let s = String::from_utf8_lossy(data).into_owned();
+                    let s = decode_string(data, col)?;
                     buf.advance(len as usize);
                     SqlValue::String(s)
                 }
@@ -1949,7 +1961,7 @@ impl<S: ConnectionState> Client<S> {
                         ));
                     } else {
                         let data = &buf[..len as usize];
-                        let s = String::from_utf8_lossy(data).into_owned();
+                        let s = decode_string(data, col)?;
                         buf.advance(len as usize);
                         SqlValue::String(s)
                     }

@@ -195,6 +195,18 @@ pub struct Collation {
     /// Sort ID.
     pub sort_id: u8,
 }
+impl Collation {
+    /// Collation encoding
+    pub fn encoding(&self) -> Option<&'static encoding_rs::Encoding> {
+        match self.lcid & 0xFFFF {
+            0x0804 => Some(encoding_rs::GB18030),
+            0x0404 => Some(encoding_rs::BIG5),
+            0x0411 => Some(encoding_rs::SHIFT_JIS),
+            0x0412 => Some(encoding_rs::EUC_KR),
+            _ => None,
+        }
+    }
+}
 
 /// Raw row data (not yet decoded).
 #[derive(Debug, Clone)]
