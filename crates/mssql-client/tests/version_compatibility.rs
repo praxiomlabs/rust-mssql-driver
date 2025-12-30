@@ -756,8 +756,8 @@ async fn test_tds_7_3b_connection() {
 #[ignore = "Requires SQL Server 2008 or later"]
 async fn test_tds_7_3_datetime_types() {
     let tds_version = get_env_tds_version().unwrap_or(TdsVersion::V7_4);
-    let config = get_test_config_with_tds_version(Some(tds_version))
-        .expect("SQL Server config required");
+    let config =
+        get_test_config_with_tds_version(Some(tds_version)).expect("SQL Server config required");
 
     println!("Testing TDS 7.3+ datetime types with {}...", tds_version);
 
@@ -767,9 +767,7 @@ async fn test_tds_7_3_datetime_types() {
         return;
     }
 
-    let mut client = Client::connect(config)
-        .await
-        .expect("Failed to connect");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
 
     // Test DATE type (TDS 7.3+)
     let rows = client
@@ -855,9 +853,7 @@ async fn test_tds_version_negotiation() {
 
     println!("Testing TDS version negotiation...");
 
-    let mut client = Client::connect(config)
-        .await
-        .expect("Failed to connect");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
 
     // Get server version info
     let rows = client
@@ -902,16 +898,40 @@ async fn test_tds_7_3_feature_detection() {
     let v8_0 = TdsVersion::V8_0;
 
     // TDS 7.3+ supports new datetime types
-    assert!(v7_3a.supports_date_time_types(), "TDS 7.3A should support datetime types");
-    assert!(v7_3b.supports_date_time_types(), "TDS 7.3B should support datetime types");
-    assert!(v7_4.supports_date_time_types(), "TDS 7.4 should support datetime types");
-    assert!(v8_0.supports_date_time_types(), "TDS 8.0 should support datetime types");
+    assert!(
+        v7_3a.supports_date_time_types(),
+        "TDS 7.3A should support datetime types"
+    );
+    assert!(
+        v7_3b.supports_date_time_types(),
+        "TDS 7.3B should support datetime types"
+    );
+    assert!(
+        v7_4.supports_date_time_types(),
+        "TDS 7.4 should support datetime types"
+    );
+    assert!(
+        v8_0.supports_date_time_types(),
+        "TDS 8.0 should support datetime types"
+    );
 
     // TDS 7.3 does NOT support session recovery (TDS 7.4+ only)
-    assert!(!v7_3a.supports_session_recovery(), "TDS 7.3A should NOT support session recovery");
-    assert!(!v7_3b.supports_session_recovery(), "TDS 7.3B should NOT support session recovery");
-    assert!(v7_4.supports_session_recovery(), "TDS 7.4 should support session recovery");
-    assert!(v8_0.supports_session_recovery(), "TDS 8.0 should support session recovery");
+    assert!(
+        !v7_3a.supports_session_recovery(),
+        "TDS 7.3A should NOT support session recovery"
+    );
+    assert!(
+        !v7_3b.supports_session_recovery(),
+        "TDS 7.3B should NOT support session recovery"
+    );
+    assert!(
+        v7_4.supports_session_recovery(),
+        "TDS 7.4 should support session recovery"
+    );
+    assert!(
+        v8_0.supports_session_recovery(),
+        "TDS 8.0 should support session recovery"
+    );
 
     // TDS 7.3 is not legacy (SQL Server 2005 and earlier are legacy)
     assert!(!v7_3a.is_legacy(), "TDS 7.3A should NOT be legacy");
@@ -980,14 +1000,12 @@ async fn test_tds_7_3_encryption_options() {
 #[ignore = "Requires SQL Server 2008 or later"]
 async fn test_tds_7_3_basic_operations() {
     let tds_version = get_env_tds_version().unwrap_or(TdsVersion::V7_3A);
-    let config = get_test_config_with_tds_version(Some(tds_version))
-        .expect("SQL Server config required");
+    let config =
+        get_test_config_with_tds_version(Some(tds_version)).expect("SQL Server config required");
 
     println!("Testing basic operations with {}...", tds_version);
 
-    let mut client = Client::connect(config)
-        .await
-        .expect("Failed to connect");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
 
     // Create temp table
     client
@@ -1019,7 +1037,13 @@ async fn test_tds_7_3_basic_operations() {
         let id: i32 = row.get(0).expect("Should get id");
         let name: String = row.get(1).expect("Should get name");
         let value: rust_decimal::Decimal = row.get(2).expect("Should get value");
-        println!("  Row {}: id={}, name='{}', value={}", count + 1, id, name, value);
+        println!(
+            "  Row {}: id={}, name='{}', value={}",
+            count + 1,
+            id,
+            name,
+            value
+        );
         count += 1;
     }
     assert_eq!(count, 2, "Should have 2 rows");
@@ -1069,14 +1093,12 @@ async fn test_tds_7_3_basic_operations() {
 #[ignore = "Requires SQL Server 2008 or later"]
 async fn test_tds_7_3_transactions() {
     let tds_version = get_env_tds_version().unwrap_or(TdsVersion::V7_3A);
-    let config = get_test_config_with_tds_version(Some(tds_version))
-        .expect("SQL Server config required");
+    let config =
+        get_test_config_with_tds_version(Some(tds_version)).expect("SQL Server config required");
 
     println!("Testing transactions with {}...", tds_version);
 
-    let mut client = Client::connect(config)
-        .await
-        .expect("Failed to connect");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
 
     // Create temp table
     client
@@ -1097,7 +1119,10 @@ async fn test_tds_7_3_transactions() {
     client = tx.commit().await.expect("Commit should succeed");
 
     let rows = client
-        .query("SELECT COUNT(*) FROM #TxTest73 WHERE value = 'committed'", &[])
+        .query(
+            "SELECT COUNT(*) FROM #TxTest73 WHERE value = 'committed'",
+            &[],
+        )
         .await
         .expect("Query should succeed");
 
@@ -1121,7 +1146,10 @@ async fn test_tds_7_3_transactions() {
     client = tx.rollback().await.expect("Rollback should succeed");
 
     let rows = client
-        .query("SELECT COUNT(*) FROM #TxTest73 WHERE value = 'rolled_back'", &[])
+        .query(
+            "SELECT COUNT(*) FROM #TxTest73 WHERE value = 'rolled_back'",
+            &[],
+        )
         .await
         .expect("Query should succeed");
 

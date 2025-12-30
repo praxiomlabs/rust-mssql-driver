@@ -215,12 +215,12 @@ impl TdsVersion {
     #[must_use]
     pub const fn minor(self) -> u8 {
         match self.0 {
-            0x70000000 => 0,               // TDS 7.0
-            0x71000000 | 0x71000001 => 1,  // TDS 7.1, 7.1 Rev 1
-            0x72090002 => 2,               // TDS 7.2
-            0x730A0003 | 0x730B0003 => 3,  // TDS 7.3A, 7.3B
-            0x74000004 => 4,               // TDS 7.4
-            0x08000000 => 0,               // TDS 8.0
+            0x70000000 => 0,              // TDS 7.0
+            0x71000000 | 0x71000001 => 1, // TDS 7.1, 7.1 Rev 1
+            0x72090002 => 2,              // TDS 7.2
+            0x730A0003 | 0x730B0003 => 3, // TDS 7.3A, 7.3B
+            0x74000004 => 4,              // TDS 7.4
+            0x08000000 => 0,              // TDS 8.0
             _ => {
                 // For unknown versions, extract from first byte's low nibble
                 // This is a best-effort fallback
@@ -363,10 +363,22 @@ mod tests {
 
     #[test]
     fn test_sql_server_version_name() {
-        assert_eq!(TdsVersion::V7_3A.sql_server_version_name(), "SQL Server 2008");
-        assert_eq!(TdsVersion::V7_3B.sql_server_version_name(), "SQL Server 2008 R2");
-        assert_eq!(TdsVersion::V7_4.sql_server_version_name(), "SQL Server 2012+");
-        assert_eq!(TdsVersion::V8_0.sql_server_version_name(), "SQL Server 2022+ (strict mode)");
+        assert_eq!(
+            TdsVersion::V7_3A.sql_server_version_name(),
+            "SQL Server 2008"
+        );
+        assert_eq!(
+            TdsVersion::V7_3B.sql_server_version_name(),
+            "SQL Server 2008 R2"
+        );
+        assert_eq!(
+            TdsVersion::V7_4.sql_server_version_name(),
+            "SQL Server 2012+"
+        );
+        assert_eq!(
+            TdsVersion::V8_0.sql_server_version_name(),
+            "SQL Server 2022+ (strict mode)"
+        );
     }
 
     #[test]

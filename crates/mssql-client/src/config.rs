@@ -270,7 +270,12 @@ impl RetryPolicy {
 }
 
 /// Configuration for connecting to SQL Server.
+///
+/// This struct is marked `#[non_exhaustive]` to allow adding new fields
+/// in the future without breaking semver. Use [`Config::default()`] or
+/// [`Config::from_connection_string()`] to construct instances.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Config {
     /// Server hostname or IP address.
     pub host: String,
@@ -904,59 +909,38 @@ mod tests {
     #[test]
     fn test_connection_string_tds_version() {
         // Test TDS 7.3
-        let config = Config::from_connection_string(
-            "Server=localhost;TDSVersion=7.3;",
-        )
-        .unwrap();
+        let config = Config::from_connection_string("Server=localhost;TDSVersion=7.3;").unwrap();
         assert_eq!(config.tds_version, TdsVersion::V7_3A);
 
         // Test TDS 7.3A explicitly
-        let config = Config::from_connection_string(
-            "Server=localhost;TDSVersion=7.3A;",
-        )
-        .unwrap();
+        let config = Config::from_connection_string("Server=localhost;TDSVersion=7.3A;").unwrap();
         assert_eq!(config.tds_version, TdsVersion::V7_3A);
 
         // Test TDS 7.3B
-        let config = Config::from_connection_string(
-            "Server=localhost;TDSVersion=7.3B;",
-        )
-        .unwrap();
+        let config = Config::from_connection_string("Server=localhost;TDSVersion=7.3B;").unwrap();
         assert_eq!(config.tds_version, TdsVersion::V7_3B);
 
         // Test TDS 7.4
-        let config = Config::from_connection_string(
-            "Server=localhost;TDSVersion=7.4;",
-        )
-        .unwrap();
+        let config = Config::from_connection_string("Server=localhost;TDSVersion=7.4;").unwrap();
         assert_eq!(config.tds_version, TdsVersion::V7_4);
 
         // Test TDS 8.0 enables strict mode
-        let config = Config::from_connection_string(
-            "Server=localhost;TDSVersion=8.0;",
-        )
-        .unwrap();
+        let config = Config::from_connection_string("Server=localhost;TDSVersion=8.0;").unwrap();
         assert_eq!(config.tds_version, TdsVersion::V8_0);
         assert!(config.strict_mode);
 
         // Test alternative key names
-        let config = Config::from_connection_string(
-            "Server=localhost;ProtocolVersion=7.3;",
-        )
-        .unwrap();
+        let config =
+            Config::from_connection_string("Server=localhost;ProtocolVersion=7.3;").unwrap();
         assert_eq!(config.tds_version, TdsVersion::V7_3A);
     }
 
     #[test]
     fn test_connection_string_invalid_tds_version() {
-        let result = Config::from_connection_string(
-            "Server=localhost;TDSVersion=invalid;",
-        );
+        let result = Config::from_connection_string("Server=localhost;TDSVersion=invalid;");
         assert!(result.is_err());
 
-        let result = Config::from_connection_string(
-            "Server=localhost;TDSVersion=9.0;",
-        );
+        let result = Config::from_connection_string("Server=localhost;TDSVersion=9.0;");
         assert!(result.is_err());
     }
 }
