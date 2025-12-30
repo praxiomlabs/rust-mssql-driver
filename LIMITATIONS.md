@@ -100,15 +100,65 @@ let plaintext = cipher.decrypt(nonce, &ciphertext)?;
 
 ## SQL Server Version Limitations
 
-### SQL Server 2014 and Earlier
+### SQL Server 2008/2008 R2/2012/2014 (TDS 7.3/7.4)
+
+**Status:** Supported via TDS version configuration
+
+**Description:** SQL Server 2008 and later versions are supported by configuring the TDS protocol version. The driver defaults to TDS 7.4 (SQL Server 2012+) for broad compatibility.
+
+**Configuration:**
+
+```rust
+use mssql_client::Config;
+use tds_protocol::version::TdsVersion;
+
+// For SQL Server 2008
+let config = Config::new()
+    .host("legacy-server")
+    .tds_version(TdsVersion::V7_3A);
+
+// For SQL Server 2008 R2
+let config = Config::new()
+    .host("legacy-server")
+    .tds_version(TdsVersion::V7_3B);
+
+// Connection string syntax
+let config = Config::from_connection_string(
+    "Server=localhost;TDSVersion=7.3;User Id=sa;Password=secret;"
+)?;
+```
+
+**Supported TDS Versions:**
+
+| TDS Version | SQL Server Version | Configuration |
+|-------------|-------------------|---------------|
+| TDS 7.3A | SQL Server 2008 | `TdsVersion::V7_3A` or `TDSVersion=7.3` |
+| TDS 7.3B | SQL Server 2008 R2 | `TdsVersion::V7_3B` or `TDSVersion=7.3B` |
+| TDS 7.4 | SQL Server 2012+ (default) | `TdsVersion::V7_4` or `TDSVersion=7.4` |
+| TDS 8.0 | SQL Server 2022+ strict mode | `TdsVersion::V8_0` or `Encrypt=strict` |
+
+**Data Type Availability:**
+
+| Feature | TDS 7.3+ | TDS 7.4+ |
+|---------|----------|----------|
+| DATE, TIME, DATETIME2, DATETIMEOFFSET | ✅ | ✅ |
+| Session Recovery | ❌ | ✅ |
+| Column Encryption (Always Encrypted) | ❌ | ✅ |
+| UTF-8 Collations | ❌ | ✅ (SQL 2019+) |
+
+**Note:** While TDS 7.3 is supported, SQL Server 2008/2008 R2 reached end of extended support. Consider upgrading when possible.
+
+---
+
+### SQL Server 2005 and Earlier (TDS 7.2 and Earlier)
 
 **Status:** Not supported
 
-**Description:** SQL Server versions before 2016 use TDS protocol versions that are not fully tested with this driver.
+**Description:** SQL Server 2005 and earlier use legacy TDS protocol versions (7.2 and earlier) that are not supported by this driver.
 
-**Reason:** These versions are past their extended support lifecycle. Focus is on modern SQL Server.
+**Reason:** These versions are significantly past their extended support lifecycle and have different protocol behaviors.
 
-**Workaround:** Upgrade to SQL Server 2016 or later.
+**Workaround:** Upgrade to SQL Server 2008 or later and use TDS 7.3.
 
 ---
 
