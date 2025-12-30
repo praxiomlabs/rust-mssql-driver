@@ -271,9 +271,11 @@ impl RetryPolicy {
 
 /// Configuration for connecting to SQL Server.
 ///
-/// Use [`Config::default()`] or [`Config::from_connection_string()`] to
-/// construct instances.
+/// This struct is marked `#[non_exhaustive]` to allow adding new fields
+/// in future releases without breaking semver. Use [`Config::default()`]
+/// or [`Config::from_connection_string()`] to construct instances.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Config {
     /// Server hostname or IP address.
     pub host: String,
