@@ -957,7 +957,7 @@ async fn test_tds_7_3_feature_detection() {
 async fn test_tds_7_3_encryption_options() {
     let host = std::env::var("MSSQL_HOST").unwrap_or_else(|_| {
         println!("MSSQL_HOST not set, skipping test");
-        return String::new();
+        String::new()
     });
     if host.is_empty() {
         return;
