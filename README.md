@@ -9,7 +9,7 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 
 ## Features
 
-- **TDS 8.0 First-Class Support** - Built for SQL Server 2022+ strict encryption mode with TLS 1.3
+- **TDS 7.3 – 8.0 Support** - SQL Server 2008+ legacy support through SQL Server 2022+ strict encryption
 - **Tokio-Native** - Designed for the Tokio async runtime with no compatibility layers
 - **Type-State Connections** - Compile-time enforcement of valid connection states
 - **Built-in Connection Pooling** - No external pooling crate required
@@ -28,6 +28,7 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 | Connection Pooling | ✅ | Built-in via `mssql-driver-pool` |
 | Bulk Insert | ✅ | High-performance batch loading |
 | `#[derive(FromRow)]` | ✅ | Row-to-struct mapping |
+| TDS 7.3 (Legacy) | ✅ | SQL Server 2008/2008 R2 |
 | TDS 8.0 Strict Mode | ✅ | SQL Server 2022+ |
 | Azure Managed Identity | ✅ | Via `azure-identity` |
 | Kerberos/GSSAPI | ✅ | Unix via `libgssapi` |
@@ -93,6 +94,7 @@ Server=hostname,port;Database=dbname;User Id=user;Password=pass;Encrypt=strict;
 | `Password` | `PWD` | SQL authentication password |
 | `Encrypt` | | `true`, `false`, `strict` (TDS 8.0) |
 | `TrustServerCertificate` | | Skip certificate validation (dev only) |
+| `TDSVersion` | `ProtocolVersion` | TDS protocol version: `7.3`, `7.3A`, `7.3B`, `7.4`, `8.0` |
 | `Application Name` | | Application identifier |
 | `Connect Timeout` | | Connection timeout in seconds |
 | `Command Timeout` | | Default command timeout |
@@ -219,14 +221,20 @@ mssql-auth = { version = "0.3", features = ["sspi-auth"] }
 
 ## SQL Server Compatibility
 
-| SQL Server Version | Supported | TDS Version |
-|-------------------|-----------|-------------|
-| 2016 | ✅ | 7.4 |
-| 2017 | ✅ | 7.4 |
-| 2019 | ✅ | 7.4 |
-| 2022+ | ✅ | 8.0 |
-| Azure SQL Database | ✅ | 7.4/8.0 |
-| Azure SQL Managed Instance | ✅ | 7.4/8.0 |
+| SQL Server Version | Supported | TDS Version | Notes |
+|-------------------|-----------|-------------|-------|
+| 2008 | ✅ | 7.3A | Legacy support |
+| 2008 R2 | ✅ | 7.3B | Legacy support |
+| 2012 | ✅ | 7.4 | |
+| 2014 | ✅ | 7.4 | |
+| 2016 | ✅ | 7.4 | |
+| 2017 | ✅ | 7.4 | Recommended minimum |
+| 2019 | ✅ | 7.4 | |
+| 2022+ | ✅ | 8.0 | Strict TLS mode |
+| Azure SQL Database | ✅ | 7.4/8.0 | |
+| Azure SQL Managed Instance | ✅ | 7.4/8.0 | |
+
+**Legacy Support (SQL Server 2008/2008 R2):** Configure via connection string (`TDSVersion=7.3`) or builder pattern. See [LIMITATIONS.md](LIMITATIONS.md) for details.
 
 ## API Stability
 
@@ -241,6 +249,7 @@ See [STABILITY.md](STABILITY.md) for details on what's considered stable.
 
 | Feature | rust-mssql-driver | tiberius |
 |---------|-------------------|----------|
+| TDS 7.3 (SQL 2008) | Configurable | Supported |
 | TDS 8.0 (strict mode) | First-class | Not supported |
 | Connection pooling | Built-in | External (bb8/deadpool) |
 | Runtime | Tokio-native | Runtime agnostic |

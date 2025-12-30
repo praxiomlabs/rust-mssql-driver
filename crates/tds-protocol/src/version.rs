@@ -126,14 +126,22 @@ impl TdsVersion {
     ///
     /// Useful for version negotiation where the client and server
     /// agree on the lowest common version.
+    ///
+    /// Note: TDS 8.0 uses a different encoding (0x08000000) which is numerically
+    /// lower than TDS 7.x versions, but semantically higher. This method handles
+    /// that special case correctly.
     #[must_use]
     pub const fn min(self, other: Self) -> Self {
         // Special handling for TDS 8.0 which has a different encoding
+        // TDS 8.0 (0x08000000) is numerically lower but semantically higher than TDS 7.x
         if self.is_tds_8() && !other.is_tds_8() {
+            // self is TDS 8.0, other is TDS 7.x - return TDS 7.x as the "lower" version
             other
         } else if !self.is_tds_8() && other.is_tds_8() {
+            // self is TDS 7.x, other is TDS 8.0 - return TDS 7.x as the "lower" version
             self
-        } else if self.0 < other.0 {
+        } else if self.0 <= other.0 {
+            // Both are same type (both 7.x or both 8.0), compare numerically
             self
         } else {
             other
@@ -184,24 +192,54 @@ impl TdsVersion {
     /// Get the major version number.
     ///
     /// Returns 7 for TDS 7.x versions, 8 for TDS 8.0.
+    ///
+    /// Note: This extracts the major version from the wire format. All TDS 7.x
+    /// versions return 7, and TDS 8.0 returns 8.
     #[must_use]
     pub const fn major(self) -> u8 {
         if self.is_tds_8() {
             8
         } else {
-            // TDS 7.x versions encode as 0x7X where X is the sub-version
-            // Extract high nibble of first byte to get the major version (7)
-            (((self.0 >> 24) & 0xFF) >> 4) as u8
+            // TDS 7.x versions encode major version in high nibble of first byte
+            // 0x7X... where X encodes the sub-version (0, 1, 2, 3, 4)
+            7
         }
     }
 
     /// Get the minor version number.
+    ///
+    /// Returns the TDS sub-version: 0, 1, 2, 3, or 4 for TDS 7.x, and 0 for TDS 8.0.
+    ///
+    /// Note: The wire format uses different encoding for different versions.
+    /// This method extracts the logical minor version (e.g., 3 for TDS 7.3).
     #[must_use]
     pub const fn minor(self) -> u8 {
-        if self.is_tds_8() {
-            0
-        } else {
-            ((self.0 >> 16) & 0xFF) as u8
+        match self.0 {
+            0x70000000 => 0,               // TDS 7.0
+            0x71000000 | 0x71000001 => 1,  // TDS 7.1, 7.1 Rev 1
+            0x72090002 => 2,               // TDS 7.2
+            0x730A0003 | 0x730B0003 => 3,  // TDS 7.3A, 7.3B
+            0x74000004 => 4,               // TDS 7.4
+            0x08000000 => 0,               // TDS 8.0
+            _ => {
+                // For unknown versions, extract from first byte's low nibble
+                // This is a best-effort fallback
+                ((self.0 >> 24) & 0x0F) as u8
+            }
+        }
+    }
+
+    /// Get the revision suffix for TDS 7.3 versions.
+    ///
+    /// Returns Some('A') for TDS 7.3A (SQL Server 2008),
+    /// Some('B') for TDS 7.3B (SQL Server 2008 R2),
+    /// and None for all other versions.
+    #[must_use]
+    pub const fn revision_suffix(self) -> Option<char> {
+        match self.0 {
+            0x730A0003 => Some('A'),
+            0x730B0003 => Some('B'),
+            _ => None,
         }
     }
 }
@@ -216,6 +254,9 @@ impl fmt::Display for TdsVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_tds_8() {
             write!(f, "TDS 8.0")
+        } else if let Some(suffix) = self.revision_suffix() {
+            // TDS 7.3A or 7.3B
+            write!(f, "TDS {}.{}{}", self.major(), self.minor(), suffix)
         } else {
             write!(f, "TDS {}.{}", self.major(), self.minor())
         }
@@ -345,9 +386,44 @@ mod tests {
 
     #[test]
     fn test_display() {
-        assert_eq!(format!("{}", TdsVersion::V7_3A), "TDS 7.10");
-        assert_eq!(format!("{}", TdsVersion::V7_3B), "TDS 7.11");
-        assert_eq!(format!("{}", TdsVersion::V7_4), "TDS 7.0");
+        assert_eq!(format!("{}", TdsVersion::V7_0), "TDS 7.0");
+        assert_eq!(format!("{}", TdsVersion::V7_1), "TDS 7.1");
+        assert_eq!(format!("{}", TdsVersion::V7_2), "TDS 7.2");
+        assert_eq!(format!("{}", TdsVersion::V7_3A), "TDS 7.3A");
+        assert_eq!(format!("{}", TdsVersion::V7_3B), "TDS 7.3B");
+        assert_eq!(format!("{}", TdsVersion::V7_4), "TDS 7.4");
         assert_eq!(format!("{}", TdsVersion::V8_0), "TDS 8.0");
+    }
+
+    #[test]
+    fn test_major_minor() {
+        // All TDS 7.x versions have major = 7
+        assert_eq!(TdsVersion::V7_0.major(), 7);
+        assert_eq!(TdsVersion::V7_1.major(), 7);
+        assert_eq!(TdsVersion::V7_2.major(), 7);
+        assert_eq!(TdsVersion::V7_3A.major(), 7);
+        assert_eq!(TdsVersion::V7_3B.major(), 7);
+        assert_eq!(TdsVersion::V7_4.major(), 7);
+        assert_eq!(TdsVersion::V8_0.major(), 8);
+
+        // Minor version extracts the logical sub-version
+        assert_eq!(TdsVersion::V7_0.minor(), 0);
+        assert_eq!(TdsVersion::V7_1.minor(), 1);
+        assert_eq!(TdsVersion::V7_2.minor(), 2);
+        assert_eq!(TdsVersion::V7_3A.minor(), 3);
+        assert_eq!(TdsVersion::V7_3B.minor(), 3);
+        assert_eq!(TdsVersion::V7_4.minor(), 4);
+        assert_eq!(TdsVersion::V8_0.minor(), 0);
+    }
+
+    #[test]
+    fn test_revision_suffix() {
+        assert_eq!(TdsVersion::V7_0.revision_suffix(), None);
+        assert_eq!(TdsVersion::V7_1.revision_suffix(), None);
+        assert_eq!(TdsVersion::V7_2.revision_suffix(), None);
+        assert_eq!(TdsVersion::V7_3A.revision_suffix(), Some('A'));
+        assert_eq!(TdsVersion::V7_3B.revision_suffix(), Some('B'));
+        assert_eq!(TdsVersion::V7_4.revision_suffix(), None);
+        assert_eq!(TdsVersion::V8_0.revision_suffix(), None);
     }
 }
