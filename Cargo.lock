@@ -2209,7 +2209,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-auth"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aes 0.8.4",
  "async-trait",
@@ -2238,7 +2238,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-client"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -2270,7 +2270,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-codec"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "futures-core",
@@ -2286,7 +2286,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-derive"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2295,7 +2295,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-driver-pool"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "async-trait",
  "mssql-client",
@@ -2309,7 +2309,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-testing"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "mssql-client",
@@ -2322,7 +2322,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-tls"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rustls",
  "thiserror",
@@ -2335,7 +2335,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-types"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -4090,7 +4090,7 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
 name = "tds-protocol"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bitflags 2.10.0",
  "bytes",

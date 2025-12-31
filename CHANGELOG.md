@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2025-12-31
+
+### Added
+
+#### TDS 7.3 Protocol Support (SQL Server 2008/2008 R2)
+- `TdsVersion::V7_3A` constant for SQL Server 2008
+- `TdsVersion::V7_3B` constant for SQL Server 2008 R2
+- Connection string option `TDSVersion` (or `ProtocolVersion`) to specify TDS version
+- `Config::tds_version()` builder method for programmatic configuration
+- `TdsVersion::parse()` for parsing version strings ("7.3", "7.3A", "7.3B", "7.4", "8.0")
+- `TdsVersion::sql_server_version_name()` for human-readable SQL Server version names
+- `TdsVersion::is_tds_7_3()` and `TdsVersion::is_tds_7_4()` helper methods
+- `TdsVersion::is_legacy()` to detect TDS 7.2 and earlier
+- `TdsVersion::supports_date_time_types()` for feature detection
+- Version negotiation logging during connection
+
+#### Testing & CI
+- Comprehensive version compatibility test suite (19 tests)
+- SQL Server version detection tests
+
+### Changed
+
+- **BREAKING**: `Config` struct marked `#[non_exhaustive]`
+  - Use `Config::new()`, `Config::default()`, or builder methods to construct
+  - Allows future field additions without breaking changes
+- `TdsVersion::Display` now shows correct format (e.g., "TDS 7.3A" instead of "TDS 7.10")
+- Default TDS version is `V7_4` for broad compatibility with SQL Server 2012+
+- Setting `TdsVersion::V8_0` automatically enables `strict_mode`
+
+### Fixed
+
+- Justfile `confirm` syntax compatibility with just 1.45+
+- Semver check is now advisory for pre-1.0 releases (breaking changes allowed in 0.x.y)
+
 ## [0.3.0] - 2025-12-24
 
 ### Added
@@ -178,6 +212,8 @@ Initial release of the rust-mssql-driver project.
 - `mssql-derive` - Procedural macros
 - `mssql-testing` - Test infrastructure
 
-[Unreleased]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/praxiomlabs/rust-mssql-driver/releases/tag/v0.1.0
