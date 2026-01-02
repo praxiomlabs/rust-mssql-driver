@@ -72,6 +72,12 @@ pub struct Column {
     pub precision: Option<u8>,
     /// Scale for numeric types.
     pub scale: Option<u8>,
+    /// Collation for string types (VARCHAR, CHAR, TEXT).
+    ///
+    /// Used for proper encoding/decoding of non-Unicode string data.
+    /// When present, enables collation-aware decoding that correctly
+    /// handles locale-specific ANSI encodings (e.g., Shift_JIS, GB18030).
+    pub collation: Option<tds_protocol::Collation>,
 }
 
 impl Column {
@@ -85,6 +91,7 @@ impl Column {
             max_length: None,
             precision: None,
             scale: None,
+            collation: None,
         }
     }
 
@@ -110,6 +117,49 @@ impl Column {
         self
     }
 
+    /// Set the collation for string types.
+    ///
+    /// Used for proper encoding/decoding of non-Unicode string data (VARCHAR, CHAR, TEXT).
+    #[must_use]
+    pub fn with_collation(mut self, collation: tds_protocol::Collation) -> Self {
+        self.collation = Some(collation);
+        self
+    }
+
+    /// Get the encoding name for this column's collation.
+    ///
+    /// Returns the name of the character encoding used for this column's data,
+    /// or "unknown" if the collation is not set or the encoding feature is disabled.
+    ///
+    /// # Examples
+    ///
+    /// - `"Shift_JIS"` - Japanese encoding (LCID 0x0411)
+    /// - `"GB18030"` - Simplified Chinese (LCID 0x0804)
+    /// - `"UTF-8"` - SQL Server 2019+ UTF-8 collation
+    /// - `"windows-1252"` - Latin/Western European (LCID 0x0409)
+    /// - `"unknown"` - No collation or unsupported encoding
+    #[must_use]
+    pub fn encoding_name(&self) -> &'static str {
+        #[cfg(feature = "encoding")]
+        if let Some(ref collation) = self.collation {
+            return collation.encoding_name();
+        }
+        "unknown"
+    }
+
+    /// Check if this column uses UTF-8 encoding.
+    ///
+    /// Returns `true` if the column has a SQL Server 2019+ UTF-8 collation,
+    /// which is indicated by bit 27 (0x0800_0000) being set in the LCID.
+    #[must_use]
+    pub fn is_utf8_collation(&self) -> bool {
+        #[cfg(feature = "encoding")]
+        if let Some(ref collation) = self.collation {
+            return collation.is_utf8();
+        }
+        false
+    }
+
     /// Convert column metadata to TDS TypeInfo for decoding.
     ///
     /// Maps type names to TDS type IDs and constructs appropriate TypeInfo.
@@ -120,7 +170,10 @@ impl Column {
             length: self.max_length,
             scale: self.scale,
             precision: self.precision,
-            collation: None,
+            collation: self.collation.map(|c| mssql_types::decode::Collation {
+                lcid: c.lcid,
+                flags: c.sort_id,
+            }),
         }
     }
 }
@@ -316,7 +369,21 @@ impl Row {
     /// Returns Cow - borrowed if valid UTF-8, owned if conversion needed.
     ///
     /// For UTF-8 data, this returns a borrowed reference (zero allocation).
-    /// For UTF-16 data (NVARCHAR), this allocates a new String.
+    /// For VARCHAR data with collation, uses collation-aware decoding.
+    /// For UTF-16 data (NVARCHAR), decodes as UTF-16LE.
+    ///
+    /// # Collation-Aware Decoding
+    ///
+    /// When the `encoding` feature is enabled and the column has collation metadata,
+    /// VARCHAR data is decoded using the appropriate character encoding based on the
+    /// collation's LCID. This correctly handles:
+    ///
+    /// - Japanese (Shift_JIS/CP932)
+    /// - Simplified Chinese (GB18030/CP936)
+    /// - Traditional Chinese (Big5/CP950)
+    /// - Korean (EUC-KR/CP949)
+    /// - Windows code pages 874, 1250-1258
+    /// - SQL Server 2019+ UTF-8 collations
     #[must_use]
     pub fn get_str(&self, index: usize) -> Option<Cow<'_, str>> {
         let bytes = self.get_bytes(index)?;
@@ -325,6 +392,36 @@ impl Row {
         match std::str::from_utf8(bytes) {
             Ok(s) => Some(Cow::Borrowed(s)),
             Err(_) => {
+                // Check if we have collation metadata for this column
+                #[cfg(feature = "encoding")]
+                if let Some(column) = self.metadata.get(index) {
+                    if let Some(ref collation) = column.collation {
+                        // Use collation-aware decoding for VARCHAR/CHAR types
+                        if let Some(encoding) = collation.encoding() {
+                            let (decoded, _, had_errors) = encoding.decode(bytes);
+                            if had_errors {
+                                tracing::warn!(
+                                    column_name = %column.name,
+                                    column_index = index,
+                                    encoding = %encoding.name(),
+                                    lcid = collation.lcid,
+                                    byte_len = bytes.len(),
+                                    "collation-aware decoding had errors, falling back to UTF-16LE"
+                                );
+                            } else {
+                                return Some(Cow::Owned(decoded.into_owned()));
+                            }
+                        } else {
+                            tracing::debug!(
+                                column_name = %column.name,
+                                column_index = index,
+                                lcid = collation.lcid,
+                                "no encoding found for LCID, falling back to UTF-16LE"
+                            );
+                        }
+                    }
+                }
+
                 // Assume UTF-16LE (SQL Server NVARCHAR encoding)
                 // This requires allocation for the conversion
                 let utf16: Vec<u16> = bytes

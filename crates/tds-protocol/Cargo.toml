@@ -10,14 +10,19 @@ keywords = ["tds", "sql-server", "protocol", "no_std"]
 categories = ["parser-implementations", "no-std"]
 
 [features]
-default = ["std"]
+default = ["std", "encoding"]
 std = []
 alloc = []
+# Collation-aware string encoding/decoding support
+# Enables Collation::encoding() method for proper VARCHAR decoding
+encoding = ["dep:encoding_rs"]
 
 [dependencies]
 bytes = { workspace = true }
 thiserror = { workspace = true }
 bitflags = "2.6"
+# Optional: encoding support for collation-aware VARCHAR decoding
+encoding_rs = { version = "0.8", optional = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

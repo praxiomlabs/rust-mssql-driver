@@ -10,6 +10,52 @@
 //!
 //! - `std` (default): Enable standard library support
 //! - `alloc`: Enable allocation without full std (requires `alloc` crate)
+//! - `encoding` (default): Enable collation-aware string encoding/decoding
+//!   via the [`Collation::encoding()`] method. Uses the `encoding_rs` crate.
+//!
+//! ## Collation-Aware VARCHAR Decoding
+//!
+//! When the `encoding` feature is enabled (default), this crate provides
+//! comprehensive support for decoding VARCHAR data with locale-specific
+//! character encodings. This is essential for databases using non-ASCII
+//! collations (e.g., Japanese, Chinese, Korean, Cyrillic, Arabic, etc.).
+//!
+//! ### Supported Encodings
+//!
+//! | Code Page | Encoding | Languages |
+//! |-----------|----------|-----------|
+//! | 874 | Windows-874 (TIS-620) | Thai |
+//! | 932 | Shift_JIS | Japanese |
+//! | 936 | GBK/GB18030 | Simplified Chinese |
+//! | 949 | EUC-KR | Korean |
+//! | 950 | Big5 | Traditional Chinese |
+//! | 1250 | Windows-1250 | Central/Eastern European |
+//! | 1251 | Windows-1251 | Cyrillic |
+//! | 1252 | Windows-1252 | Western European (default) |
+//! | 1253 | Windows-1253 | Greek |
+//! | 1254 | Windows-1254 | Turkish |
+//! | 1255 | Windows-1255 | Hebrew |
+//! | 1256 | Windows-1256 | Arabic |
+//! | 1257 | Windows-1257 | Baltic |
+//! | 1258 | Windows-1258 | Vietnamese |
+//! | UTF-8 | UTF-8 | SQL Server 2019+ collations |
+//!
+//! ### Example
+//!
+//! ```rust,ignore
+//! use tds_protocol::Collation;
+//!
+//! // Japanese collation (LCID 0x0411 = Japanese_CI_AS)
+//! let collation = Collation { lcid: 0x0411, sort_id: 0 };
+//! if let Some(encoding) = collation.encoding() {
+//!     // encoding is Shift_JIS
+//!     let (decoded, _, _) = encoding.decode(varchar_bytes);
+//! }
+//!
+//! // Check if UTF-8 collation (SQL Server 2019+)
+//! let utf8_collation = Collation { lcid: 0x0800_0409, sort_id: 0 };
+//! assert!(utf8_collation.is_utf8()); // true, no transcoding needed
+//! ```
 //!
 //! ## Design Philosophy
 //!
@@ -40,6 +86,7 @@
 extern crate alloc;
 
 pub mod codec;
+pub mod collation;
 pub mod crypto;
 pub mod error;
 pub mod login7;

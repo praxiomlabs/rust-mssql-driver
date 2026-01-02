@@ -10,7 +10,7 @@ keywords = ["sql-server", "mssql", "database", "async", "tokio"]
 categories = ["database", "asynchronous"]
 
 [features]
-default = ["chrono", "uuid", "decimal"]
+default = ["chrono", "uuid", "decimal", "encoding"]
 chrono = ["mssql-types/chrono", "dep:chrono"]
 uuid = ["mssql-types/uuid"]
 decimal = ["mssql-types/decimal", "dep:rust_decimal"]
@@ -24,6 +24,10 @@ otel = [
 zeroize = ["mssql-auth/zeroize"]
 # Always Encrypted client-side encryption support
 always-encrypted = ["mssql-auth/always-encrypted"]
+# Collation-aware string encoding/decoding for VARCHAR columns
+# Enables proper handling of non-ASCII text in VARCHAR/CHAR columns with
+# locale-specific encodings (Japanese Shift_JIS, Chinese GB18030/Big5, Korean EUC-KR, etc.)
+encoding = ["tds-protocol/encoding"]
 
 [dependencies]
 tds-protocol = { workspace = true }
@@ -91,6 +95,10 @@ path = "examples/derive_macros.rs"
 [[example]]
 name = "streaming"
 path = "examples/streaming.rs"
+
+[[example]]
+name = "collation_encoding"
+path = "examples/collation_encoding.rs"
 
 [[bench]]
 name = "client"

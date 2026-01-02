@@ -422,6 +422,7 @@ mod tests {
             max_length: Some(4),
             precision: Some(0),
             scale: Some(0),
+            collation: None,
         }];
 
         let stream = QueryStream::new(columns, Vec::new());
@@ -443,6 +444,7 @@ mod tests {
                 max_length: Some(4),
                 precision: None,
                 scale: None,
+                collation: None,
             },
             Column {
                 name: "name".to_string(),
@@ -452,6 +454,7 @@ mod tests {
                 max_length: Some(100),
                 precision: None,
                 scale: None,
+                collation: None,
             },
         ];
 
@@ -498,6 +501,7 @@ mod tests {
             max_length: None,
             precision: None,
             scale: None,
+            collation: None,
         }];
 
         let rows = vec![

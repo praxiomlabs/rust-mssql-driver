@@ -188,12 +188,102 @@ pub struct TypeInfo {
 }
 
 /// SQL Server collation.
+///
+/// Collations in SQL Server define the character encoding and sorting rules
+/// for string data. For `VARCHAR` columns, the collation determines which
+/// code page (character encoding) is used to store the data.
+///
+/// # Encoding Support
+///
+/// When the `encoding` feature is enabled, the [`Collation::encoding()`] method
+/// returns the appropriate [`encoding_rs::Encoding`] for decoding `VARCHAR` data.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use tds_protocol::token::Collation;
+///
+/// let collation = Collation { lcid: 0x0804, sort_id: 0 }; // Chinese (PRC)
+/// if let Some(encoding) = collation.encoding() {
+///     let (decoded, _, _) = encoding.decode(raw_bytes);
+///     // decoded is now proper Chinese text
+/// }
+/// ```
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Collation {
-    /// Locale ID.
+    /// Locale ID (LCID).
+    ///
+    /// The LCID encodes both the language and region. The lower 16 bits
+    /// contain the primary language ID, and bits 16-19 contain the sort ID
+    /// for some collations.
+    ///
+    /// For UTF-8 collations (SQL Server 2019+), bit 27 (0x0800_0000) is set.
     pub lcid: u32,
     /// Sort ID.
+    ///
+    /// Used with certain collations to specify sorting behavior.
     pub sort_id: u8,
+}
+
+impl Collation {
+    /// Returns the character encoding for this collation.
+    ///
+    /// This method maps the collation's LCID to the appropriate character
+    /// encoding from the `encoding_rs` crate.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(&Encoding)` - The encoding to use for decoding `VARCHAR` data
+    /// - `None` - If the collation uses UTF-8 (no transcoding needed) or
+    ///   the LCID is not recognized (caller should use Windows-1252 fallback)
+    ///
+    /// # UTF-8 Collations
+    ///
+    /// SQL Server 2019+ supports UTF-8 collations (identified by the `_UTF8`
+    /// suffix). These return `None` because no transcoding is needed.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let collation = Collation { lcid: 0x0419, sort_id: 0 }; // Russian
+    /// if let Some(encoding) = collation.encoding() {
+    ///     // encoding is Windows-1251 for Cyrillic
+    ///     let (text, _, had_errors) = encoding.decode(&raw_bytes);
+    /// }
+    /// ```
+    #[cfg(feature = "encoding")]
+    pub fn encoding(&self) -> Option<&'static encoding_rs::Encoding> {
+        crate::collation::encoding_for_lcid(self.lcid)
+    }
+
+    /// Returns whether this collation uses UTF-8 encoding.
+    ///
+    /// UTF-8 collations were introduced in SQL Server 2019 and are
+    /// identified by the `_UTF8` suffix in the collation name.
+    #[cfg(feature = "encoding")]
+    pub fn is_utf8(&self) -> bool {
+        crate::collation::is_utf8_collation(self.lcid)
+    }
+
+    /// Returns the Windows code page number for this collation.
+    ///
+    /// Useful for error messages and debugging.
+    ///
+    /// # Returns
+    ///
+    /// The code page number (e.g., 1252 for Western European, 932 for Japanese).
+    #[cfg(feature = "encoding")]
+    pub fn code_page(&self) -> Option<u16> {
+        crate::collation::code_page_for_lcid(self.lcid)
+    }
+
+    /// Returns the encoding name for this collation.
+    ///
+    /// Useful for error messages and debugging.
+    #[cfg(feature = "encoding")]
+    pub fn encoding_name(&self) -> &'static str {
+        crate::collation::encoding_name_for_lcid(self.lcid)
+    }
 }
 
 /// Raw row data (not yet decoded).

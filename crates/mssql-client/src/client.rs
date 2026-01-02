@@ -1332,6 +1332,11 @@ impl<S: ConnectionState> Client<S> {
                             {
                                 column = column.with_precision_scale(prec, scale);
                             }
+                            // Store collation for VARCHAR/CHAR types to enable
+                            // collation-aware string decoding
+                            if let Some(collation) = col.type_info.collation {
+                                column = column.with_collation(collation);
+                            }
                             column
                         })
                         .collect();
@@ -3064,6 +3069,11 @@ impl Client<Ready> {
                                 (col.type_info.precision, col.type_info.scale)
                             {
                                 column = column.with_precision_scale(prec, scale);
+                            }
+                            // Store collation for VARCHAR/CHAR types to enable
+                            // collation-aware string decoding
+                            if let Some(collation) = col.type_info.collation {
+                                column = column.with_collation(collation);
                             }
                             column
                         })
