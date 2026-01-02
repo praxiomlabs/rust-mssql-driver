@@ -96,11 +96,16 @@ todo = "warn"
 dbg_macro = "warn"
 
 # cargo-semver-checks configuration
-# Allow adding #[non_exhaustive] to enums during 0.x development
+# Allow adding #[non_exhaustive] to enums and structs during 0.x development
 # This is a one-time breaking change that prevents future breaking changes
-# from adding new enum variants. Acceptable in pre-1.0 per semver spec.
+# from adding new variants/fields. Acceptable in pre-1.0 per semver spec.
 [workspace.metadata.cargo-semver-checks.lints]
 enum_marked_non_exhaustive = "allow"
 # Allow new enum variants added alongside the #[non_exhaustive] migration
 # These variants were added before non_exhaustive was applied
 enum_variant_added = "allow"
+# Allow marking structs as #[non_exhaustive] during 0.x development
+struct_marked_non_exhaustive = "allow"
+# Allow adding fields to public structs during 0.x development
+# This covers fields added before #[non_exhaustive] was applied
+constructible_struct_adds_field = "allow"

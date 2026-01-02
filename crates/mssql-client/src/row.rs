@@ -56,7 +56,12 @@ impl ColumnSlice {
 }
 
 /// Column metadata describing a result set column.
+///
+/// This struct is marked `#[non_exhaustive]` to allow adding new fields
+/// in future versions without breaking semver compatibility. Use
+/// [`Column::new()`] or builder methods to construct instances.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Column {
     /// Column name.
     pub name: String,
