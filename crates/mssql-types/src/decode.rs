@@ -41,6 +41,108 @@ pub struct Collation {
     pub flags: u8,
 }
 
+impl Collation {
+    /// Check if this collation uses UTF-8 encoding (SQL Server 2019+).
+    ///
+    /// UTF-8 collations have bit 27 (0x0800_0000) set in the LCID.
+    #[must_use]
+    pub fn is_utf8(&self) -> bool {
+        (self.lcid & 0x0800_0000) != 0
+    }
+
+    /// Get the encoding for this collation.
+    ///
+    /// Returns the appropriate `encoding_rs::Encoding` for the collation's LCID,
+    /// or `None` if the encoding is not supported.
+    #[cfg(feature = "encoding")]
+    #[must_use]
+    pub fn encoding(&self) -> Option<&'static encoding_rs::Encoding> {
+        encoding_for_lcid(self.lcid)
+    }
+}
+
+/// UTF-8 collation flag bit (bit 27).
+#[cfg(feature = "encoding")]
+const UTF8_COLLATION_FLAG: u32 = 0x0800_0000;
+
+/// Get the encoding for an LCID value.
+#[cfg(feature = "encoding")]
+fn encoding_for_lcid(lcid: u32) -> Option<&'static encoding_rs::Encoding> {
+    // Check for UTF-8 collation first (SQL Server 2019+)
+    if (lcid & UTF8_COLLATION_FLAG) != 0 {
+        return Some(encoding_rs::UTF_8);
+    }
+
+    // Get code page from LCID
+    let code_page = code_page_for_lcid(lcid)?;
+
+    // Map code page to encoding
+    match code_page {
+        874 => Some(encoding_rs::WINDOWS_874),
+        932 => Some(encoding_rs::SHIFT_JIS),
+        936 => Some(encoding_rs::GB18030),
+        949 => Some(encoding_rs::EUC_KR),
+        950 => Some(encoding_rs::BIG5),
+        1250 => Some(encoding_rs::WINDOWS_1250),
+        1251 => Some(encoding_rs::WINDOWS_1251),
+        1252 => Some(encoding_rs::WINDOWS_1252),
+        1253 => Some(encoding_rs::WINDOWS_1253),
+        1254 => Some(encoding_rs::WINDOWS_1254),
+        1255 => Some(encoding_rs::WINDOWS_1255),
+        1256 => Some(encoding_rs::WINDOWS_1256),
+        1257 => Some(encoding_rs::WINDOWS_1257),
+        1258 => Some(encoding_rs::WINDOWS_1258),
+        _ => None,
+    }
+}
+
+/// Get the Windows code page for an LCID value.
+#[cfg(feature = "encoding")]
+fn code_page_for_lcid(lcid: u32) -> Option<u16> {
+    // Mask for primary language ID (lower 10 bits)
+    const PRIMARY_LANGUAGE_MASK: u32 = 0x3FF;
+    let primary_lang = lcid & PRIMARY_LANGUAGE_MASK;
+
+    match primary_lang {
+        0x0411 => Some(932),                   // Japanese - Shift_JIS
+        0x0804 | 0x1004 => Some(936),          // Chinese Simplified - GBK
+        0x0404 | 0x0C04 | 0x1404 => Some(950), // Chinese Traditional - Big5
+        0x0412 => Some(949),                   // Korean - EUC-KR
+        0x041E => Some(874),                   // Thai
+        0x042A => Some(1258),                  // Vietnamese
+
+        // Code Page 1250 - Central European
+        0x0405 | 0x0415 | 0x040E | 0x041A | 0x081A | 0x141A | 0x101A | 0x041B | 0x0424 | 0x0418
+        | 0x041C => Some(1250),
+
+        // Code Page 1251 - Cyrillic
+        0x0419 | 0x0422 | 0x0423 | 0x0402 | 0x042F | 0x0C1A | 0x201A | 0x0440 | 0x0843 | 0x0444
+        | 0x0450 | 0x0485 => Some(1251),
+
+        0x0408 => Some(1253),          // Greek
+        0x041F | 0x042C => Some(1254), // Turkish, Azerbaijani
+        0x040D => Some(1255),          // Hebrew
+
+        // Code Page 1256 - Arabic
+        0x0401 | 0x0801 | 0x0C01 | 0x1001 | 0x1401 | 0x1801 | 0x1C01 | 0x2001 | 0x2401 | 0x2801
+        | 0x2C01 | 0x3001 | 0x3401 | 0x3801 | 0x3C01 | 0x4001 | 0x0429 | 0x0420 | 0x048C
+        | 0x0463 => Some(1256),
+
+        // Code Page 1257 - Baltic
+        0x0425..=0x0427 => Some(1257),
+
+        // Default to 1252 (Western European) for English and related languages
+        0x0409 | 0x0809 | 0x0C09 | 0x1009 | 0x1409 | 0x1809 | 0x1C09 | 0x2009 | 0x2409 | 0x2809
+        | 0x2C09 | 0x3009 | 0x3409 | 0x0407 | 0x0807 | 0x0C07 | 0x1007 | 0x1407 | 0x040C
+        | 0x080C | 0x0C0C | 0x100C | 0x140C | 0x180C | 0x0410 | 0x0810 | 0x0413 | 0x0813
+        | 0x0416 | 0x0816 | 0x040A | 0x080A | 0x0C0A | 0x100A | 0x140A | 0x180A | 0x1C0A
+        | 0x200A | 0x240A | 0x280A | 0x2C0A | 0x300A | 0x340A | 0x380A | 0x3C0A | 0x400A
+        | 0x440A | 0x480A | 0x4C0A | 0x500A => Some(1252),
+
+        _ => Some(1252), // Default fallback
+    }
+}
+
 impl TypeInfo {
     /// Create type info for a fixed-length integer type.
     #[must_use]
@@ -268,7 +370,7 @@ fn decode_nvarchar(buf: &mut Bytes, _type_info: &TypeInfo) -> Result<SqlValue, T
     Ok(SqlValue::String(s))
 }
 
-fn decode_varchar(buf: &mut Bytes, _type_info: &TypeInfo) -> Result<SqlValue, TypeError> {
+fn decode_varchar(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, TypeError> {
     if buf.remaining() < 2 {
         return Err(TypeError::BufferTooSmall {
             needed: 2,
@@ -291,9 +393,31 @@ fn decode_varchar(buf: &mut Bytes, _type_info: &TypeInfo) -> Result<SqlValue, Ty
     }
 
     let data = buf.copy_to_bytes(byte_len);
-    let s =
-        String::from_utf8(data.to_vec()).map_err(|e| TypeError::InvalidEncoding(e.to_string()))?;
-    Ok(SqlValue::String(s))
+
+    // Try UTF-8 first (most common case and zero-cost for ASCII)
+    if let Ok(s) = String::from_utf8(data.to_vec()) {
+        return Ok(SqlValue::String(s));
+    }
+
+    // If UTF-8 fails, try collation-aware decoding
+    #[cfg(feature = "encoding")]
+    if let Some(ref collation) = type_info.collation {
+        if let Some(encoding) = collation.encoding() {
+            let (decoded, _, had_errors) = encoding.decode(&data);
+            if !had_errors {
+                return Ok(SqlValue::String(decoded.into_owned()));
+            }
+        }
+    }
+
+    // Suppress unused warning when encoding feature is disabled
+    #[cfg(not(feature = "encoding"))]
+    let _ = type_info;
+
+    // Fallback: lossy UTF-8 conversion
+    Ok(SqlValue::String(
+        String::from_utf8_lossy(&data).into_owned(),
+    ))
 }
 
 fn decode_varbinary(buf: &mut Bytes, _type_info: &TypeInfo) -> Result<SqlValue, TypeError> {

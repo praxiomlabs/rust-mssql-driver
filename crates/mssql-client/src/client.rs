@@ -15,7 +15,8 @@ use tds_protocol::packet::{MAX_PACKET_SIZE, PacketType};
 use tds_protocol::prelogin::{EncryptionLevel, PreLogin};
 use tds_protocol::rpc::{RpcParam, RpcRequest, TypeInfo as RpcTypeInfo};
 use tds_protocol::token::{
-    ColMetaData, ColumnData, EnvChange, EnvChangeType, NbcRow, RawRow, Token, TokenParser,
+    ColMetaData, Collation, ColumnData, EnvChange, EnvChangeType, NbcRow, RawRow, Token,
+    TokenParser,
 };
 use tds_protocol::tvp::{
     TvpColumnDef as TvpWireColumnDef, TvpColumnFlags, TvpEncoder, TvpWireType, encode_tvp_bit,
@@ -1954,7 +1955,7 @@ impl<S: ConnectionState> Client<S> {
             }
 
             // TEXT type - always uses PLP encoding (deprecated LOB type)
-            TypeId::Text => Self::parse_plp_varchar(buf)?,
+            TypeId::Text => Self::parse_plp_varchar(buf, col.type_info.collation.as_ref())?,
 
             // Legacy byte-length string types (Char, VarChar) - 1-byte length prefix
             TypeId::Char | TypeId::VarChar => {
@@ -1974,7 +1975,8 @@ impl<S: ConnectionState> Client<S> {
                     ));
                 } else {
                     let data = &buf[..len as usize];
-                    let s = String::from_utf8_lossy(data).into_owned();
+                    // Use collation-aware decoding for non-ASCII text
+                    let s = Self::decode_varchar_string(data, col.type_info.collation.as_ref());
                     buf.advance(len as usize);
                     SqlValue::String(s)
                 }
@@ -1985,7 +1987,7 @@ impl<S: ConnectionState> Client<S> {
                 // Check if this is a MAX type (uses PLP encoding)
                 if col.type_info.max_length == Some(0xFFFF) {
                     // PLP format: 8-byte total length, then chunks
-                    Self::parse_plp_varchar(buf)?
+                    Self::parse_plp_varchar(buf, col.type_info.collation.as_ref())?
                 } else {
                     // 2-byte length prefix for non-MAX types
                     if buf.remaining() < 2 {
@@ -2002,7 +2004,8 @@ impl<S: ConnectionState> Client<S> {
                         ));
                     } else {
                         let data = &buf[..len as usize];
-                        let s = String::from_utf8_lossy(data).into_owned();
+                        // Use collation-aware decoding for non-ASCII text
+                        let s = Self::decode_varchar_string(data, col.type_info.collation.as_ref());
                         buf.advance(len as usize);
                         SqlValue::String(s)
                     }
@@ -2219,8 +2222,38 @@ impl<S: ConnectionState> Client<S> {
         Ok(SqlValue::String(s))
     }
 
+    /// Decode VARCHAR bytes to a String using collation-aware encoding.
+    ///
+    /// When the `encoding` feature is enabled and a collation is provided,
+    /// this decodes the bytes using the appropriate character encoding based
+    /// on the collation's LCID. Otherwise falls back to UTF-8 lossy conversion.
+    #[allow(unused_variables)]
+    fn decode_varchar_string(data: &[u8], collation: Option<&Collation>) -> String {
+        // Try UTF-8 first (most common case and zero-cost for ASCII)
+        if let Ok(s) = std::str::from_utf8(data) {
+            return s.to_owned();
+        }
+
+        // If UTF-8 fails, try collation-aware decoding
+        #[cfg(feature = "encoding")]
+        if let Some(coll) = collation {
+            if let Some(encoding) = coll.encoding() {
+                let (decoded, _, had_errors) = encoding.decode(data);
+                if !had_errors {
+                    return decoded.into_owned();
+                }
+            }
+        }
+
+        // Fallback: lossy UTF-8 conversion
+        String::from_utf8_lossy(data).into_owned()
+    }
+
     /// Parse PLP-encoded VARCHAR(MAX) data.
-    fn parse_plp_varchar(buf: &mut &[u8]) -> Result<mssql_types::SqlValue> {
+    fn parse_plp_varchar(
+        buf: &mut &[u8],
+        collation: Option<&Collation>,
+    ) -> Result<mssql_types::SqlValue> {
         use bytes::Buf;
         use mssql_types::SqlValue;
 
@@ -2256,8 +2289,8 @@ impl<S: ConnectionState> Client<S> {
             buf.advance(chunk_len);
         }
 
-        // VARCHAR is UTF-8/ASCII
-        let s = String::from_utf8_lossy(&all_data).into_owned();
+        // Decode using collation-aware encoding
+        let s = Self::decode_varchar_string(&all_data, collation);
         Ok(SqlValue::String(s))
     }
 
@@ -2564,12 +2597,22 @@ impl<S: ConnectionState> Client<S> {
             }
             0xA7 | 0x2F | 0x27 => {
                 // BigVarChar/BigChar/VarChar/Char - 7 prop bytes (collation 5 + maxlen 2)
-                buf.advance(prop_count);
+                // Parse collation from property bytes (5 bytes: 4 LCID + 1 sort_id)
+                let collation = if prop_count >= 5 && buf.remaining() >= 5 {
+                    let lcid = buf.get_u32_le();
+                    let sort_id = buf.get_u8();
+                    buf.advance(prop_count.saturating_sub(5)); // Skip remaining props (max_length)
+                    Some(Collation { lcid, sort_id })
+                } else {
+                    buf.advance(prop_count);
+                    None
+                };
                 if data_len == 0 {
                     return Ok(SqlValue::String(String::new()));
                 }
                 let data = &buf[..data_len];
-                let s = String::from_utf8_lossy(data).into_owned();
+                // Use collation-aware decoding for non-ASCII text
+                let s = Self::decode_varchar_string(data, collation.as_ref());
                 buf.advance(data_len);
                 Ok(SqlValue::String(s))
             }
@@ -3922,7 +3965,7 @@ mod tests {
         let plp = make_plp_data(11, &[data]);
         let mut buf: &[u8] = &plp;
 
-        let result = Client::<Ready>::parse_plp_varchar(&mut buf).unwrap();
+        let result = Client::<Ready>::parse_plp_varchar(&mut buf, None).unwrap();
         match result {
             mssql_types::SqlValue::String(s) => assert_eq!(s, "Hello World"),
             _ => panic!("expected String"),
@@ -3934,7 +3977,7 @@ mod tests {
         let plp = 0xFFFFFFFFFFFFFFFFu64.to_le_bytes();
         let mut buf: &[u8] = &plp;
 
-        let result = Client::<Ready>::parse_plp_varchar(&mut buf).unwrap();
+        let result = Client::<Ready>::parse_plp_varchar(&mut buf, None).unwrap();
         assert!(matches!(result, mssql_types::SqlValue::Null));
     }
 

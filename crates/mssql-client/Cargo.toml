@@ -27,7 +27,7 @@ always-encrypted = ["mssql-auth/always-encrypted"]
 # Collation-aware string encoding/decoding for VARCHAR columns
 # Enables proper handling of non-ASCII text in VARCHAR/CHAR columns with
 # locale-specific encodings (Japanese Shift_JIS, Chinese GB18030/Big5, Korean EUC-KR, etc.)
-encoding = ["tds-protocol/encoding"]
+encoding = ["tds-protocol/encoding", "mssql-types/encoding"]
 
 [dependencies]
 tds-protocol = { workspace = true }

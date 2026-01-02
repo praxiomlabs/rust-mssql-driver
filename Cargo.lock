@@ -2349,6 +2349,7 @@ dependencies = [
  "bytes",
  "chrono",
  "criterion",
+ "encoding_rs",
  "proptest",
  "rust_decimal",
  "serde_json",
