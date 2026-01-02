@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-01-01
+
+### Added
+
+#### Collation-Aware VARCHAR Decoding
+- New `encoding` feature for proper decoding of VARCHAR columns with non-UTF-8 collations
+- `Collation::encoding()` method returns the `encoding_rs::Encoding` for a collation's LCID
+- `Collation::encoding_name()` method returns human-readable encoding name
+- `Column.collation` field exposes collation metadata for string columns
+- `Column.encoding_name()` convenience method (requires `encoding` feature)
+- Support for Windows code pages: 1252 (Latin1), 1251 (Cyrillic), 1250 (Central European),
+  932 (Shift_JIS), 936 (GB18030), 949 (Korean), 950 (Big5), and more
+- Example: `collation_encoding.rs` demonstrating collation-aware decoding
+
+### Changed
+
+- **BREAKING**: `Column` struct marked `#[non_exhaustive]`
+  - Use `Column::new()` or builder methods to construct instances
+  - Allows future field additions without breaking changes
+
+### Fixed
+
+- VARCHAR columns with non-UTF-8 collations (e.g., `SQL_Latin1_General_CP1_CI_AS`) now decode correctly
+- Previously, characters like "Café" would display as "Caf�" when using Windows-1252 encoding
+
 ## [0.4.0] - 2025-12-31
 
 ### Added
