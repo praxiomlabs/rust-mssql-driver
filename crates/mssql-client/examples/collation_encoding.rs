@@ -47,35 +47,30 @@
 //! non-UTF-8 data, which may produce incorrect results for VARCHAR columns.
 
 // Allow common patterns in example code
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use mssql_client::{Client, Config, Error, Ready};
-
-fn required_env(name: &str) -> String {
-    std::env::var(name).unwrap_or_else(|_| {
-        panic!(
-            "Required environment variable {name} is not set.\n\n\
-             Usage:\n  \
-             MSSQL_HOST=<host> \\\n  \
-             MSSQL_USER=<user> \\\n  \
-             MSSQL_PASSWORD=<password> \\\n  \
-             cargo run --example collation_encoding\n\n\
-             Optional variables:\n  \
-             MSSQL_DATABASE (default: master)\n  \
-             MSSQL_ENCRYPT (default: true)"
-        )
-    })
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     // Initialize tracing for logging (shows collation fallback warnings)
     tracing_subscriber::fmt::init();
 
-    // Build configuration from environment (required vars panic with helpful message)
-    let host = required_env("MSSQL_HOST");
-    let user = required_env("MSSQL_USER");
-    let password = required_env("MSSQL_PASSWORD");
+    // Build configuration from environment
+    // Required: MSSQL_HOST, MSSQL_USER, MSSQL_PASSWORD
+    // Optional: MSSQL_DATABASE (default: master), MSSQL_ENCRYPT (default: true)
+    let host = std::env::var("MSSQL_HOST").expect(
+        "MSSQL_HOST environment variable is required.\n\
+         Usage: MSSQL_HOST=<host> MSSQL_USER=<user> MSSQL_PASSWORD=<pass> cargo run --example collation_encoding"
+    );
+    let user = std::env::var("MSSQL_USER").expect(
+        "MSSQL_USER environment variable is required.\n\
+         Usage: MSSQL_HOST=<host> MSSQL_USER=<user> MSSQL_PASSWORD=<pass> cargo run --example collation_encoding"
+    );
+    let password = std::env::var("MSSQL_PASSWORD").expect(
+        "MSSQL_PASSWORD environment variable is required.\n\
+         Usage: MSSQL_HOST=<host> MSSQL_USER=<user> MSSQL_PASSWORD=<pass> cargo run --example collation_encoding"
+    );
     let database = std::env::var("MSSQL_DATABASE").unwrap_or_else(|_| "master".into());
     let encrypt = std::env::var("MSSQL_ENCRYPT").unwrap_or_else(|_| "true".into());
 
