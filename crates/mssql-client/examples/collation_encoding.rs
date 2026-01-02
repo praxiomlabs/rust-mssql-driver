@@ -47,20 +47,36 @@
 //! non-UTF-8 data, which may produce incorrect results for VARCHAR columns.
 
 // Allow common patterns in example code
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use mssql_client::{Client, Config, Error, Ready};
+
+fn required_env(name: &str) -> String {
+    std::env::var(name).unwrap_or_else(|_| {
+        panic!(
+            "Required environment variable {name} is not set.\n\n\
+             Usage:\n  \
+             MSSQL_HOST=<host> \\\n  \
+             MSSQL_USER=<user> \\\n  \
+             MSSQL_PASSWORD=<password> \\\n  \
+             cargo run --example collation_encoding\n\n\
+             Optional variables:\n  \
+             MSSQL_DATABASE (default: master)\n  \
+             MSSQL_ENCRYPT (default: true)"
+        )
+    })
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     // Initialize tracing for logging (shows collation fallback warnings)
     tracing_subscriber::fmt::init();
 
-    // Build configuration from environment
-    let host = std::env::var("MSSQL_HOST").unwrap_or_else(|_| "localhost".into());
+    // Build configuration from environment (required vars panic with helpful message)
+    let host = required_env("MSSQL_HOST");
+    let user = required_env("MSSQL_USER");
+    let password = required_env("MSSQL_PASSWORD");
     let database = std::env::var("MSSQL_DATABASE").unwrap_or_else(|_| "master".into());
-    let user = std::env::var("MSSQL_USER").unwrap_or_else(|_| "sa".into());
-    let password = std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "Password123!".into());
     let encrypt = std::env::var("MSSQL_ENCRYPT").unwrap_or_else(|_| "true".into());
 
     let conn_str = format!(
