@@ -14,7 +14,7 @@
 
 use bytes::Bytes;
 use mssql_client::Config;
-use mssql_types::{FromSql, SqlValue, ToSql};
+use mssql_types::{FromSql, SqlValue};
 
 // =============================================================================
 // NULL Handling Tests
@@ -76,7 +76,7 @@ fn test_empty_string_is_not_null() {
 #[test]
 fn test_null_binary() {
     let null = SqlValue::Null;
-    let result: Result<Option<Bytes>, _> = Option::<Bytes>::from_sql(&null);
+    let result: Result<Option<Vec<u8>>, _> = Option::<Vec<u8>>::from_sql(&null);
     assert!(result.is_ok());
     assert!(result.unwrap().is_none());
 }
@@ -86,7 +86,7 @@ fn test_empty_binary_is_not_null() {
     let value = SqlValue::Binary(Bytes::new());
     assert!(!value.is_null());
 
-    let result: Result<Bytes, _> = Bytes::from_sql(&value);
+    let result: Result<Vec<u8>, _> = Vec::<u8>::from_sql(&value);
     assert!(result.is_ok());
     assert!(result.unwrap().is_empty());
 }
@@ -198,7 +198,7 @@ fn test_large_binary_data() {
     let data: Vec<u8> = (0..size).map(|i| (i % 256) as u8).collect();
     let value = SqlValue::Binary(Bytes::from(data.clone()));
 
-    let result: Result<Bytes, _> = Bytes::from_sql(&value);
+    let result: Result<Vec<u8>, _> = Vec::<u8>::from_sql(&value);
     let bytes = result.unwrap();
     assert_eq!(bytes.len(), size);
     assert_eq!(&bytes[..], &data[..]);
@@ -301,11 +301,11 @@ fn test_float_infinity() {
     let pos_inf = SqlValue::Double(f64::INFINITY);
     let neg_inf = SqlValue::Double(f64::NEG_INFINITY);
 
-    let result_pos: Result<f64, _> = f64::from_sql(&pos_inf);
-    let result_neg: Result<f64, _> = f64::from_sql(&neg_inf);
+    let result_pos: f64 = f64::from_sql(&pos_inf).expect("Should convert infinity");
+    let result_neg: f64 = f64::from_sql(&neg_inf).expect("Should convert neg infinity");
 
-    assert!(result_pos.unwrap().is_infinite() && result_pos.unwrap().is_sign_positive());
-    assert!(result_neg.unwrap().is_infinite() && result_neg.unwrap().is_sign_negative());
+    assert!(result_pos.is_infinite() && result_pos.is_sign_positive());
+    assert!(result_neg.is_infinite() && result_neg.is_sign_negative());
 }
 
 // =============================================================================
@@ -444,7 +444,7 @@ fn get_test_config() -> Option<Config> {
     let host = std::env::var("MSSQL_TEST_HOST").ok()?;
     let port = std::env::var("MSSQL_TEST_PORT").unwrap_or_else(|_| "1433".into());
     let user = std::env::var("MSSQL_TEST_USER").unwrap_or_else(|_| "sa".into());
-    let password = std::env::var("MSSQL_TEST_PASSWORD")?;
+    let password = std::env::var("MSSQL_TEST_PASSWORD").ok()?;
 
     let conn_str = format!(
         "Server={},{};Database=master;User Id={};Password={};TrustServerCertificate=true",
@@ -468,7 +468,7 @@ async fn test_null_handling_live() {
         .await
         .expect("Query failed");
 
-    if let Some(row) = stream.next().await {
+    if let Some(row) = stream.next() {
         let row = row.expect("Row error");
         let null_val: Option<i32> = row.get(0).expect("Get failed");
         let int_val: Option<i32> = row.get(1).expect("Get failed");
@@ -494,7 +494,7 @@ async fn test_unicode_handling_live() {
         .await
         .expect("Query failed");
 
-    if let Some(row) = stream.next().await {
+    if let Some(row) = stream.next() {
         let row = row.expect("Row error");
         let result: String = row.get(0).expect("Get failed");
         assert_eq!(result, test_string);
@@ -521,7 +521,7 @@ async fn test_large_result_set_live() {
         .expect("Query failed");
 
     let mut count = 0;
-    while let Some(row) = stream.next().await {
+    while let Some(row) = stream.next() {
         let _ = row.expect("Row error");
         count += 1;
     }

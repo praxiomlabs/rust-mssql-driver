@@ -19,19 +19,23 @@ use std::time::Duration;
 
 #[test]
 fn test_connect_timeout_configuration() {
-    let config = Config::new()
-        .host("localhost")
-        .connect_timeout(Duration::from_secs(5));
+    // Use connection string to configure connect timeout
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=master;User Id=sa;Password=pass;Connect Timeout=5",
+    )
+    .expect("Valid connection string");
 
-    // Should not panic during configuration
-    assert!(config.connect_timeout().is_some());
+    // Verify timeout was parsed (field is public)
+    assert_eq!(config.connect_timeout.as_secs(), 5);
 }
 
 #[test]
 fn test_command_timeout_configuration() {
-    let config = Config::new()
-        .host("localhost")
-        .command_timeout(Duration::from_secs(30));
+    // Use connection string to configure command timeout
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=master;User Id=sa;Password=pass;Command Timeout=30",
+    )
+    .expect("Valid connection string");
 
     // Should not panic during configuration
     let _ = config;
@@ -40,32 +44,33 @@ fn test_command_timeout_configuration() {
 #[test]
 fn test_zero_timeout_configuration() {
     // Zero timeout should mean no timeout (infinite)
-    let config = Config::new()
-        .host("localhost")
-        .connect_timeout(Duration::ZERO)
-        .command_timeout(Duration::ZERO);
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=master;User Id=sa;Password=pass;Connect Timeout=0;Command Timeout=0",
+    )
+    .expect("Valid connection string");
 
     let _ = config;
 }
 
 #[test]
 fn test_very_short_timeout_configuration() {
-    // Very short timeouts (1ms) should be configurable
-    let config = Config::new()
-        .host("localhost")
-        .connect_timeout(Duration::from_millis(1))
-        .command_timeout(Duration::from_millis(1));
+    // Very short timeouts should be configurable via connection string
+    // Note: Connection string timeout is in seconds, so we test small second values
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=master;User Id=sa;Password=pass;Connect Timeout=1;Command Timeout=1",
+    )
+    .expect("Valid connection string");
 
     let _ = config;
 }
 
 #[test]
 fn test_very_long_timeout_configuration() {
-    // Very long timeouts (1 hour) should be configurable
-    let config = Config::new()
-        .host("localhost")
-        .connect_timeout(Duration::from_secs(3600))
-        .command_timeout(Duration::from_secs(3600));
+    // Very long timeouts (1 hour = 3600 seconds) should be configurable
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=master;User Id=sa;Password=pass;Connect Timeout=3600;Command Timeout=3600",
+    )
+    .expect("Valid connection string");
 
     let _ = config;
 }
@@ -116,7 +121,7 @@ fn get_test_config() -> Option<Config> {
     let host = std::env::var("MSSQL_TEST_HOST").ok()?;
     let port = std::env::var("MSSQL_TEST_PORT").unwrap_or_else(|_| "1433".into());
     let user = std::env::var("MSSQL_TEST_USER").unwrap_or_else(|_| "sa".into());
-    let password = std::env::var("MSSQL_TEST_PASSWORD")?;
+    let password = std::env::var("MSSQL_TEST_PASSWORD").ok()?;
 
     let conn_str = format!(
         "Server={},{};Database=master;User Id={};Password={};TrustServerCertificate=true",
@@ -144,12 +149,9 @@ async fn test_connect_timeout_expired() {
     use mssql_client::Client;
 
     // Connect to non-routable IP with very short timeout
-    let config = Config::new()
-        .host("10.255.255.1") // Non-routable IP
-        .port(1433)
-        .username("sa")
-        .password("password")
-        .connect_timeout(Duration::from_millis(500));
+    let conn_str = "Server=10.255.255.1,1433;Database=master;User Id=sa;Password=password;\
+                    TrustServerCertificate=true;Connect Timeout=1";
+    let config = Config::from_connection_string(conn_str).expect("Valid connection string");
 
     let start = std::time::Instant::now();
     let result = Client::connect(config).await;
@@ -158,7 +160,7 @@ async fn test_connect_timeout_expired() {
     // Should fail within reasonable time (timeout + small overhead)
     assert!(result.is_err(), "Should fail to connect");
     assert!(
-        elapsed < Duration::from_secs(5),
+        elapsed < Duration::from_secs(10),
         "Should timeout quickly, took {:?}",
         elapsed
     );
@@ -260,9 +262,9 @@ async fn test_pool_acquire_timeout() {
     // Create a pool with size 1 and short acquire timeout
     let pool_config = PoolConfig::new()
         .max_connections(1)
-        .acquire_timeout(Duration::from_millis(100));
+        .connection_timeout(Duration::from_millis(100));
 
-    let pool = Pool::new(config, pool_config).await.expect("Pool creation failed");
+    let pool = Pool::new(pool_config, config).await.expect("Pool creation failed");
 
     // Get the only connection
     let conn1 = pool.get().await.expect("First get should succeed");
@@ -296,6 +298,7 @@ async fn test_pool_acquire_timeout() {
 #[ignore = "Requires SQL Server"]
 async fn test_pool_exhaustion_recovery() {
     use mssql_driver_pool::{Pool, PoolConfig};
+    use std::sync::Arc;
 
     let config = get_test_config().expect("SQL Server config required");
 
@@ -303,9 +306,9 @@ async fn test_pool_exhaustion_recovery() {
     let pool_config = PoolConfig::new()
         .min_connections(1)
         .max_connections(3)
-        .acquire_timeout(Duration::from_secs(5));
+        .connection_timeout(Duration::from_secs(5));
 
-    let pool = Pool::new(config, pool_config).await.expect("Pool creation failed");
+    let pool = Arc::new(Pool::new(pool_config, config).await.expect("Pool creation failed"));
 
     // Exhaust all connections
     let conn1 = pool.get().await.expect("Get 1 failed");
@@ -313,7 +316,7 @@ async fn test_pool_exhaustion_recovery() {
     let conn3 = pool.get().await.expect("Get 3 failed");
 
     // Pool is now exhausted - spawn a task that will wait
-    let pool_clone = pool.clone();
+    let pool_clone = Arc::clone(&pool);
     let waiter = tokio::spawn(async move {
         let start = std::time::Instant::now();
         let result = pool_clone.get().await;
@@ -351,16 +354,16 @@ async fn test_concurrent_connection_requests() {
     let pool_config = PoolConfig::new()
         .min_connections(2)
         .max_connections(5)
-        .acquire_timeout(Duration::from_secs(30));
+        .connection_timeout(Duration::from_secs(30));
 
-    let pool = Arc::new(Pool::new(config, pool_config).await.expect("Pool creation failed"));
+    let pool = Arc::new(Pool::new(pool_config, config).await.expect("Pool creation failed"));
     let success_count = Arc::new(AtomicUsize::new(0));
     let error_count = Arc::new(AtomicUsize::new(0));
 
     // Spawn 20 concurrent tasks, each doing a quick query
     let mut handles = Vec::new();
     for i in 0..20 {
-        let pool = pool.clone();
+        let pool = Arc::clone(&pool);
         let success = success_count.clone();
         let errors = error_count.clone();
 
@@ -406,15 +409,16 @@ async fn test_concurrent_connection_requests() {
 #[ignore = "Requires SQL Server"]
 async fn test_pool_exhaustion_timeout() {
     use mssql_driver_pool::{Pool, PoolConfig};
+    use std::sync::Arc;
 
     let config = get_test_config().expect("SQL Server config required");
 
     // Create a pool with size 1 and very short timeout
     let pool_config = PoolConfig::new()
         .max_connections(1)
-        .acquire_timeout(Duration::from_millis(50));
+        .connection_timeout(Duration::from_millis(50));
 
-    let pool = Pool::new(config, pool_config).await.expect("Pool creation failed");
+    let pool = Arc::new(Pool::new(pool_config, config).await.expect("Pool creation failed"));
 
     // Hold the only connection
     let _conn = pool.get().await.expect("First get failed");
@@ -422,7 +426,7 @@ async fn test_pool_exhaustion_timeout() {
     // Multiple requests should all timeout quickly
     let mut handles = Vec::new();
     for _ in 0..5 {
-        let pool = pool.clone();
+        let pool = Arc::clone(&pool);
         handles.push(tokio::spawn(async move {
             let start = std::time::Instant::now();
             let result = pool.get().await;

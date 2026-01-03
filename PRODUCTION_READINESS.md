@@ -105,7 +105,7 @@ This document defines the criteria for declaring rust-mssql-driver production-re
 ### 2.5 Performance Tests
 - [x] Benchmark suite with criterion (3 crates have benchmarks)
 - [x] Baseline performance documented (`docs/PERFORMANCE_BASELINES.md`)
-- [ ] CI regression detection (planned)
+- [x] CI regression detection (`.github/workflows/benchmarks.yml`)
 
 ---
 

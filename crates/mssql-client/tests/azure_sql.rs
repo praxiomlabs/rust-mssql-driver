@@ -28,7 +28,7 @@ fn get_azure_config() -> Option<Config> {
     let host = std::env::var("AZURE_SQL_HOST").ok()?;
     let database = std::env::var("AZURE_SQL_DATABASE").ok()?;
     let user = std::env::var("AZURE_SQL_USER").ok()?;
-    let password = std::env::var("AZURE_SQL_PASSWORD")?;
+    let password = std::env::var("AZURE_SQL_PASSWORD").ok()?;
 
     let conn_str = format!(
         "Server={};Database={};User Id={};Password={};Encrypt=true;TrustServerCertificate=false",
@@ -42,7 +42,7 @@ fn get_azure_config_strict() -> Option<Config> {
     let host = std::env::var("AZURE_SQL_HOST").ok()?;
     let database = std::env::var("AZURE_SQL_DATABASE").ok()?;
     let user = std::env::var("AZURE_SQL_USER").ok()?;
-    let password = std::env::var("AZURE_SQL_PASSWORD")?;
+    let password = std::env::var("AZURE_SQL_PASSWORD").ok()?;
 
     let conn_str = format!(
         "Server={};Database={};User Id={};Password={};Encrypt=strict",
@@ -110,15 +110,14 @@ fn test_azure_managed_instance_format() {
 
 #[test]
 fn test_encrypt_strict_config() {
-    let config = Config::new()
-        .host("myserver.database.windows.net")
-        .database("mydb")
-        .username("admin")
-        .password("password")
-        .strict_mode(true);
+    // Use connection string with strict mode
+    let config = Config::from_connection_string(
+        "Server=myserver.database.windows.net;Database=mydb;User Id=admin;Password=password;Encrypt=strict",
+    )
+    .expect("Valid connection string");
 
     // strict_mode should be set
-    let _ = config;
+    assert!(config.strict_mode);
 }
 
 #[test]
@@ -318,11 +317,19 @@ async fn test_azure_database_properties() {
 async fn test_azure_connection_with_timeout() {
     use mssql_client::Client;
 
-    let mut config = get_azure_config().expect("Azure SQL config required");
-    config = config
-        .connect_timeout(Duration::from_secs(30))
-        .command_timeout(Duration::from_secs(60));
+    // Use connection string with timeout settings
+    let host = std::env::var("AZURE_SQL_HOST").expect("AZURE_SQL_HOST required");
+    let database = std::env::var("AZURE_SQL_DATABASE").expect("AZURE_SQL_DATABASE required");
+    let user = std::env::var("AZURE_SQL_USER").expect("AZURE_SQL_USER required");
+    let password = std::env::var("AZURE_SQL_PASSWORD").expect("AZURE_SQL_PASSWORD required");
 
+    let conn_str = format!(
+        "Server={};Database={};User Id={};Password={};Encrypt=true;\
+         TrustServerCertificate=false;Connect Timeout=30;Command Timeout=60",
+        host, database, user, password
+    );
+
+    let config = Config::from_connection_string(&conn_str).expect("Valid connection string");
     let mut client = Client::connect(config).await.expect("Connection failed");
 
     // Quick query to verify connection
@@ -354,15 +361,17 @@ async fn test_azure_transaction() {
         .await
         .expect("Create table failed");
 
-    // Transaction with rollback
-    let tx = client.begin_transaction().await.expect("Begin failed");
+    // Transaction with rollback - type-state pattern: begin_transaction consumes client
+    let mut tx = client.begin_transaction().await.expect("Begin failed");
     tx.execute(
         "INSERT INTO #azure_test (id, name) VALUES (1, N'Test')",
         &[],
     )
     .await
     .expect("Insert failed");
-    tx.rollback().await.expect("Rollback failed");
+
+    // Rollback returns the client in Ready state
+    let mut client = tx.rollback().await.expect("Rollback failed");
 
     // Verify rollback
     let rows = client
@@ -383,27 +392,34 @@ async fn test_azure_transaction() {
 #[ignore = "Requires Azure SQL Database"]
 async fn test_azure_pool() {
     use mssql_driver_pool::{Pool, PoolConfig};
+    use std::sync::Arc;
 
     let config = get_azure_config().expect("Azure SQL config required");
 
     let pool_config = PoolConfig::new()
         .min_connections(1)
         .max_connections(5)
-        .acquire_timeout(Duration::from_secs(30));
+        .connection_timeout(Duration::from_secs(30));
 
-    let pool = Pool::new(config, pool_config)
+    let pool = Arc::new(Pool::new(pool_config, config)
         .await
-        .expect("Pool creation failed");
+        .expect("Pool creation failed"));
 
     // Get multiple connections
     let mut handles = Vec::new();
     for i in 0..10 {
-        let pool = pool.clone();
+        let pool = Arc::clone(&pool);
         handles.push(tokio::spawn(async move {
-            let mut conn = pool.get().await?;
-            let rows = conn.query(&format!("SELECT {} AS num", i), &[]).await?;
+            let mut conn = match pool.get().await {
+                Ok(c) => c,
+                Err(_) => return Err(format!("Failed to get connection for task {}", i)),
+            };
+            let rows = match conn.query(&format!("SELECT {} AS num", i), &[]).await {
+                Ok(r) => r,
+                Err(e) => return Err(format!("Query failed for task {}: {}", i, e)),
+            };
             for _ in rows {}
-            Ok::<_, mssql_client::Error>(i)
+            Ok::<_, String>(i)
         }));
     }
 
