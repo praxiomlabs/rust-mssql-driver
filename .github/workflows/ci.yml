@@ -204,3 +204,49 @@ jobs:
           MSSQL_TEST_PORT: 1433
           MSSQL_TEST_USER: sa
           MSSQL_TEST_PASSWORD: YourStrong@Passw0rd
+
+  feature-flags:
+    name: Feature Flag Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Kerberos headers
+        run: sudo apt-get update && sudo apt-get install -y libkrb5-dev
+      - name: Test individual features compile
+        run: |
+          echo "Testing mssql-client features..."
+          cargo check -p mssql-client --no-default-features
+          cargo check -p mssql-client --features chrono
+          cargo check -p mssql-client --features uuid
+          cargo check -p mssql-client --features decimal
+          cargo check -p mssql-client --features json
+          cargo check -p mssql-client --features otel
+          cargo check -p mssql-client --features zeroize
+          cargo check -p mssql-client --features always-encrypted
+          cargo check -p mssql-client --features encoding
+
+          echo "Testing mssql-auth features..."
+          cargo check -p mssql-auth --no-default-features
+          cargo check -p mssql-auth --features azure-identity
+          cargo check -p mssql-auth --features integrated-auth
+          cargo check -p mssql-auth --features zeroize
+          cargo check -p mssql-auth --features always-encrypted
+          cargo check -p mssql-auth --features azure-keyvault
+
+          echo "Testing tds-protocol features..."
+          cargo check -p tds-protocol --no-default-features
+          cargo check -p tds-protocol --features encoding
+          cargo check -p tds-protocol --features alloc
+
+          echo "All feature flags validated successfully!"
+      - name: Run feature-specific tests
+        run: |
+          echo "Running zeroize feature tests..."
+          cargo test -p mssql-auth --features zeroize -- credentials::tests
+
+          echo "Running otel feature tests..."
+          cargo test -p mssql-client --features otel --lib -- instrumentation::tests
+
+          echo "Feature-specific tests passed!"
