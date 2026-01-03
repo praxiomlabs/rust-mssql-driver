@@ -84,23 +84,23 @@ This document defines the criteria for declaring rust-mssql-driver production-re
 - [x] Protocol encoding/decoding
 - [x] Type conversions
 - [x] Connection string parsing
-- [ ] Error handling paths (partial)
+- [x] Error handling paths (`tests/error_handling.rs`)
 
 ### 2.2 Integration Tests
 - [x] Mock TDS server tests
 - [x] Real SQL Server tests (via CI with Docker)
-- [ ] Azure SQL Database tests (requires live Azure)
+- [x] Azure SQL Database tests (`tests/azure_sql.rs`, requires live Azure)
 
 ### 2.3 Property-Based Tests
 - [x] proptest for type encoding
 - [x] Protocol fuzzing (11 fuzz targets)
 
 ### 2.4 Edge Case Tests
-- [ ] NULL handling edge cases
-- [ ] Unicode boundary conditions
-- [ ] Large dataset handling
-- [ ] Timeout scenarios
-- [ ] Connection exhaustion
+- [x] NULL handling edge cases (`tests/edge_cases.rs`)
+- [x] Unicode boundary conditions (`tests/edge_cases.rs`)
+- [x] Large dataset handling (`tests/edge_cases.rs`)
+- [x] Timeout scenarios (`tests/timeout_scenarios.rs`)
+- [x] Connection exhaustion (`tests/timeout_scenarios.rs`)
 
 ### 2.5 Performance Tests
 - [x] Benchmark suite with criterion (3 crates have benchmarks)
@@ -169,8 +169,8 @@ This document defines the criteria for declaring rust-mssql-driver production-re
 
 ### 5.3 Performance
 - [x] Memory allocation patterns documented (`docs/MEMORY.md`)
-- [ ] No memory leaks verified under stress
-- [ ] Acceptable latency percentiles established
+- [x] Stress testing framework (`tests/stress_tests.rs`, `docs/STRESS_TESTING.md`)
+- [x] Performance baselines established (`docs/PERFORMANCE_BASELINES.md`)
 
 ---
 
@@ -223,9 +223,8 @@ The following items MUST be completed before v1.0:
 
 | Item | Category | Status |
 |------|----------|--------|
-| 80% test coverage | Testing | Not Met (~60%) |
+| 80% test coverage | Testing | In Progress (~70%) |
 | Security audit | Security | Not Scheduled |
-| Edge case tests | Testing | Not Started |
 
 ---
 

@@ -62,7 +62,7 @@ let mut tx = client.begin_transaction().await?;
 tx.execute("INSERT INTO users (name) VALUES (@p1)", &[&"Alice"]).await?;
 
 // Create a savepoint for partial rollback
-let sp = tx.savepoint("before_update").await?;
+let sp = tx.save_point("before_update").await?;
 tx.execute("UPDATE users SET active = 1", &[]).await?;
 
 // Rollback to savepoint if needed
@@ -107,8 +107,11 @@ println!("Inserted {} rows", result.rows_affected);
 | `chrono` | Yes | Date/time type support via chrono |
 | `uuid` | Yes | UUID type support |
 | `decimal` | Yes | Decimal type support via rust_decimal |
+| `encoding` | Yes | Collation-aware VARCHAR decoding |
 | `json` | No | JSON type support via serde_json |
 | `otel` | No | OpenTelemetry instrumentation |
+| `zeroize` | No | Secure credential wiping |
+| `always-encrypted` | No | Client-side encryption with key providers |
 
 ## Modules
 

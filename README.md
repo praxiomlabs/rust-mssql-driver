@@ -195,12 +195,13 @@ for result in rows {
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `otel` | No | OpenTelemetry tracing and metrics |
-| `zeroize` | No | Secure credential wiping |
 | `chrono` | Yes | Date/time type support via chrono |
 | `uuid` | Yes | UUID type support |
 | `decimal` | Yes | Decimal type support via rust_decimal |
-| `json` | Yes | JSON type support via serde_json |
+| `encoding` | Yes | Collation-aware VARCHAR decoding |
+| `json` | No | JSON type support via serde_json |
+| `otel` | No | OpenTelemetry tracing and metrics |
+| `zeroize` | No | Secure credential wiping |
 
 ### Authentication Features (mssql-auth crate)
 
@@ -212,7 +213,6 @@ for result in rows {
 | `cert-auth` | Client certificate authentication |
 | `zeroize` | Secure credential wiping from memory |
 | `always-encrypted` | Client-side encryption with key providers |
-| `encoding` | Collation-aware VARCHAR decoding |
 
 Enable optional features:
 

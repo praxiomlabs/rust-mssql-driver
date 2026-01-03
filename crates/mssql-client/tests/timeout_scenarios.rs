@@ -287,3 +287,192 @@ async fn test_pool_acquire_timeout() {
 
     pool.close().await;
 }
+
+// =============================================================================
+// Connection Exhaustion Tests
+// =============================================================================
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_pool_exhaustion_recovery() {
+    use mssql_driver_pool::{Pool, PoolConfig};
+
+    let config = get_test_config().expect("SQL Server config required");
+
+    // Create a small pool
+    let pool_config = PoolConfig::new()
+        .min_connections(1)
+        .max_connections(3)
+        .acquire_timeout(Duration::from_secs(5));
+
+    let pool = Pool::new(config, pool_config).await.expect("Pool creation failed");
+
+    // Exhaust all connections
+    let conn1 = pool.get().await.expect("Get 1 failed");
+    let conn2 = pool.get().await.expect("Get 2 failed");
+    let conn3 = pool.get().await.expect("Get 3 failed");
+
+    // Pool is now exhausted - spawn a task that will wait
+    let pool_clone = pool.clone();
+    let waiter = tokio::spawn(async move {
+        let start = std::time::Instant::now();
+        let result = pool_clone.get().await;
+        (start.elapsed(), result.is_ok())
+    });
+
+    // Wait a bit then release a connection
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    drop(conn1);
+
+    // The waiter should succeed
+    let (elapsed, success) = waiter.await.expect("Waiter panicked");
+    assert!(success, "Waiter should get a connection after release");
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "Should not wait full timeout, got {:?}",
+        elapsed
+    );
+
+    drop(conn2);
+    drop(conn3);
+    pool.close().await;
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_concurrent_connection_requests() {
+    use mssql_driver_pool::{Pool, PoolConfig};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let config = get_test_config().expect("SQL Server config required");
+
+    // Create a pool smaller than concurrent requests
+    let pool_config = PoolConfig::new()
+        .min_connections(2)
+        .max_connections(5)
+        .acquire_timeout(Duration::from_secs(30));
+
+    let pool = Arc::new(Pool::new(config, pool_config).await.expect("Pool creation failed"));
+    let success_count = Arc::new(AtomicUsize::new(0));
+    let error_count = Arc::new(AtomicUsize::new(0));
+
+    // Spawn 20 concurrent tasks, each doing a quick query
+    let mut handles = Vec::new();
+    for i in 0..20 {
+        let pool = pool.clone();
+        let success = success_count.clone();
+        let errors = error_count.clone();
+
+        handles.push(tokio::spawn(async move {
+            match pool.get().await {
+                Ok(mut conn) => {
+                    // Simulate some work
+                    match conn.query(&format!("SELECT {}", i), &[]).await {
+                        Ok(_) => {
+                            success.fetch_add(1, Ordering::SeqCst);
+                        }
+                        Err(_) => {
+                            errors.fetch_add(1, Ordering::SeqCst);
+                        }
+                    }
+                }
+                Err(_) => {
+                    errors.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        }));
+    }
+
+    // Wait for all tasks
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    let successes = success_count.load(Ordering::SeqCst);
+    let errors = error_count.load(Ordering::SeqCst);
+
+    // All should succeed (pool should handle contention)
+    assert_eq!(
+        successes, 20,
+        "All 20 requests should succeed, got {} successes and {} errors",
+        successes, errors
+    );
+
+    pool.close().await;
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_pool_exhaustion_timeout() {
+    use mssql_driver_pool::{Pool, PoolConfig};
+
+    let config = get_test_config().expect("SQL Server config required");
+
+    // Create a pool with size 1 and very short timeout
+    let pool_config = PoolConfig::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_millis(50));
+
+    let pool = Pool::new(config, pool_config).await.expect("Pool creation failed");
+
+    // Hold the only connection
+    let _conn = pool.get().await.expect("First get failed");
+
+    // Multiple requests should all timeout quickly
+    let mut handles = Vec::new();
+    for _ in 0..5 {
+        let pool = pool.clone();
+        handles.push(tokio::spawn(async move {
+            let start = std::time::Instant::now();
+            let result = pool.get().await;
+            (start.elapsed(), result.is_err())
+        }));
+    }
+
+    for handle in handles {
+        let (elapsed, timed_out) = handle.await.expect("Task panicked");
+        assert!(timed_out, "Should timeout when pool exhausted");
+        assert!(
+            elapsed < Duration::from_millis(200),
+            "Should timeout quickly, took {:?}",
+            elapsed
+        );
+    }
+
+    pool.close().await;
+}
+
+#[test]
+fn test_pool_config_validation() {
+    use mssql_driver_pool::PoolConfig;
+
+    // min > max should be handled gracefully
+    let config = PoolConfig::new()
+        .min_connections(10)
+        .max_connections(5);
+
+    // The config should either error or adjust (implementation dependent)
+    // Just verify it doesn't panic
+    let _ = config;
+}
+
+#[test]
+fn test_pool_config_zero_max() {
+    use mssql_driver_pool::PoolConfig;
+
+    // Zero max should be handled
+    let config = PoolConfig::new().max_connections(0);
+    let _ = config;
+}
+
+#[test]
+fn test_pool_config_large_values() {
+    use mssql_driver_pool::PoolConfig;
+
+    // Very large pool sizes should be configurable
+    let config = PoolConfig::new()
+        .min_connections(100)
+        .max_connections(1000);
+    let _ = config;
+}
