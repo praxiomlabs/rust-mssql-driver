@@ -1905,7 +1905,7 @@ msrv:
 - [x] Implement Login7 packet construction
 - [x] Implement Prelogin packet construction
 - [x] Verify strict `no_std` + `alloc` compatibility
-- [ ] Fuzz testing for packet/token parsing
+- [x] Fuzz testing for packet/token parsing (11 fuzz targets)
 
 ### Phase 3: TLS Layer ✅ Complete
 
@@ -1962,12 +1962,12 @@ msrv:
 - [x] Performance optimization and benchmarking
 - [x] Documentation and examples
 
-### Phase 9: Derive Macros (Partial)
+### Phase 9: Derive Macros ✅ Complete
 
 **`mssql-derive` crate:**
 - [x] Implement `#[derive(FromRow)]`
 - [x] Implement `#[derive(ToParams)]`
-- [ ] Implement `#[derive(Tvp)]` (v0.3.0)
+- [x] Implement `#[derive(Tvp)]`
 
 ### Phase 10: Release Preparation ✅ v0.2.0 Released
 
@@ -2007,9 +2007,9 @@ msrv:
 - [x] Windows code page support (1252, 1251, 1250, etc.)
 
 **v1.0.0+ Roadmap:**
-- [ ] `#[derive(Tvp)]` macro (procedural)
-- [ ] True network-level LOB streaming
-- [ ] Connection resiliency improvements
+- [x] `#[derive(Tvp)]` macro (procedural) - Completed in v0.5.0
+- [ ] True network-level LOB streaming (currently buffered up to 100MB)
+- [ ] Connection resiliency improvements (automatic reconnection)
 
 ---
 

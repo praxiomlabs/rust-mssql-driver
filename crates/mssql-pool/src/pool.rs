@@ -163,6 +163,21 @@ impl Pool {
             Self::reaper_task(reaper_inner, reaper_interval).await;
         });
 
+        let pool = Self {
+            config: config.clone(),
+            client_config: client_config.clone(),
+            inner,
+        };
+
+        // Warm up the pool by creating min_connections initial connections
+        if config.min_connections > 0 {
+            tracing::info!(
+                count = config.min_connections,
+                "warming up connection pool"
+            );
+            pool.warm_up(config.min_connections).await;
+        }
+
         tracing::info!(
             min = config.min_connections,
             max = config.max_connections,
@@ -171,11 +186,53 @@ impl Pool {
             "connection pool created with reaper task"
         );
 
-        Ok(Self {
-            config,
-            client_config,
-            inner,
-        })
+        Ok(pool)
+    }
+
+    /// Warm up the pool by creating initial connections.
+    ///
+    /// This creates up to `count` connections and adds them to the idle pool.
+    /// Connection failures during warm-up are logged but don't prevent pool creation.
+    async fn warm_up(&self, count: u32) {
+        let mut created = 0u32;
+        for _ in 0..count {
+            // Acquire a permit first
+            let permit = match self.inner.semaphore.clone().try_acquire_owned() {
+                Ok(p) => p,
+                Err(_) => {
+                    tracing::debug!("warm-up: no permits available");
+                    break;
+                }
+            };
+
+            let id = self.next_connection_id();
+            match Client::connect(self.client_config.clone()).await {
+                Ok(client) => {
+                    let metadata = ConnectionMetadata::new(id);
+                    let entry = PooledEntry { client, metadata };
+                    self.inner.idle_connections.lock().push_back(entry);
+                    self.inner.total_connections.fetch_add(1, Ordering::Relaxed);
+                    self.inner.metrics.lock().connections_created += 1;
+                    // Release the permit back so it can be acquired during get()
+                    drop(permit);
+                    created += 1;
+                    tracing::debug!(connection_id = id, "warm-up: created connection");
+                }
+                Err(e) => {
+                    // Release permit on failure
+                    drop(permit);
+                    tracing::warn!(
+                        error = %e,
+                        "warm-up: failed to create connection, continuing"
+                    );
+                }
+            }
+        }
+        tracing::info!(
+            requested = count,
+            created = created,
+            "connection pool warm-up complete"
+        );
     }
 
     /// Background reaper task that cleans up expired connections.
@@ -345,9 +402,40 @@ impl Pool {
         };
 
         let (client, mut metadata) = match entry {
-            Some(entry) => {
+            Some(mut entry) => {
                 tracing::trace!(connection_id = entry.metadata.id, "reusing idle connection");
-                (entry.client, entry.metadata)
+
+                // Perform health check if configured
+                if self.config.test_on_checkout {
+                    if !self.health_check(&mut entry.client, entry.metadata.id).await {
+                        tracing::debug!(
+                            connection_id = entry.metadata.id,
+                            "discarding unhealthy connection, will create new"
+                        );
+                        self.inner.metrics.lock().connections_closed += 1;
+
+                        // Connection is unhealthy, create a new one instead
+                        let id = self.next_connection_id();
+                        tracing::debug!(connection_id = id, "creating new connection after health check failure");
+
+                        match Client::connect(self.client_config.clone()).await {
+                            Ok(client) => {
+                                self.inner.total_connections.fetch_add(1, Ordering::Relaxed);
+                                self.inner.metrics.lock().connections_created += 1;
+                                (client, ConnectionMetadata::new(id))
+                            }
+                            Err(e) => {
+                                drop(permit);
+                                self.inner.metrics.lock().checkouts_failed += 1;
+                                return Err(PoolError::Connection(e.to_string()));
+                            }
+                        }
+                    } else {
+                        (entry.client, entry.metadata)
+                    }
+                } else {
+                    (entry.client, entry.metadata)
+                }
             }
             None => {
                 // No idle connection, create a new one
@@ -511,11 +599,43 @@ impl Pool {
     }
 
     /// Generate a new unique connection ID.
-    #[allow(dead_code)] // Used when connection creation is implemented
     fn next_connection_id(&self) -> u64 {
         self.inner
             .next_connection_id
             .fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Perform a health check on a connection.
+    ///
+    /// Returns `true` if the connection is healthy, `false` otherwise.
+    async fn health_check(&self, client: &mut Client<Ready>, connection_id: u64) -> bool {
+        let health_query = &*self.config.health_check_query;
+        tracing::trace!(
+            connection_id = connection_id,
+            query = %health_query,
+            "performing health check"
+        );
+
+        match client.query(health_query, &[]).await {
+            Ok(rows) => {
+                // Consume the result set
+                for _ in rows {}
+                tracing::trace!(connection_id = connection_id, "health check passed");
+                self.inner.metrics.lock().health_checks_performed += 1;
+                true
+            }
+            Err(e) => {
+                tracing::debug!(
+                    connection_id = connection_id,
+                    error = %e,
+                    "health check failed"
+                );
+                let mut metrics = self.inner.metrics.lock();
+                metrics.health_checks_performed += 1;
+                metrics.health_checks_failed += 1;
+                false
+            }
+        }
     }
 }
 

@@ -431,10 +431,11 @@ async fn test_recovery_after_server_restart() {
 
 ## Future Improvements
 
-The following improvements are planned:
+The following improvements are planned or implemented:
 
+- [x] Connection warm-up after pool creation (v0.5.1)
+- [x] Health check on checkout with automatic reconnection (v0.5.1)
+- [x] Configurable health check query (v0.5.0)
 - [ ] Connection monitoring with proactive refresh
-- [ ] Configurable connection validation interval
 - [ ] More granular retry policies per error type
 - [ ] Circuit breaker integration
-- [ ] Connection warm-up after pool creation
