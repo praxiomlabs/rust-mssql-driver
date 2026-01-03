@@ -449,3 +449,140 @@ impl From<Credentials> for SecureCredentials {
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::panic)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_credentials_sql_server() {
+        let creds = Credentials::sql_server("user", "password");
+        assert!(creds.is_sql_auth());
+        assert!(!creds.is_azure_ad());
+        match creds {
+            Credentials::SqlServer { username, password } => {
+                assert_eq!(username.as_ref(), "user");
+                assert_eq!(password.as_ref(), "password");
+            }
+            _ => panic!("Expected SqlServer variant"),
+        }
+    }
+
+    #[test]
+    fn test_credentials_azure_token() {
+        let creds = Credentials::azure_token("my-token");
+        assert!(!creds.is_sql_auth());
+        assert!(creds.is_azure_ad());
+        match creds {
+            Credentials::AzureAccessToken { token } => {
+                assert_eq!(token.as_ref(), "my-token");
+            }
+            _ => panic!("Expected AzureAccessToken variant"),
+        }
+    }
+
+    #[test]
+    fn test_credentials_debug_redacts_password() {
+        let creds = Credentials::sql_server("user", "supersecret");
+        let debug = format!("{:?}", creds);
+        assert!(debug.contains("user"));
+        assert!(!debug.contains("supersecret"));
+        assert!(debug.contains("REDACTED"));
+    }
+
+    #[test]
+    fn test_credentials_debug_redacts_token() {
+        let creds = Credentials::azure_token("supersecrettoken");
+        let debug = format!("{:?}", creds);
+        assert!(!debug.contains("supersecrettoken"));
+        assert!(debug.contains("REDACTED"));
+    }
+
+    #[cfg(feature = "zeroize")]
+    mod zeroize_tests {
+        use super::*;
+
+        #[test]
+        fn test_secret_string_creation() {
+            let secret = SecretString::new("my-password");
+            assert_eq!(secret.expose_secret(), "my-password");
+        }
+
+        #[test]
+        fn test_secret_string_from_string() {
+            let secret: SecretString = String::from("password").into();
+            assert_eq!(secret.expose_secret(), "password");
+        }
+
+        #[test]
+        fn test_secret_string_from_str() {
+            let secret: SecretString = "password".into();
+            assert_eq!(secret.expose_secret(), "password");
+        }
+
+        #[test]
+        fn test_secret_string_debug_redacted() {
+            let secret = SecretString::new("supersecret");
+            let debug = format!("{:?}", secret);
+            assert!(!debug.contains("supersecret"));
+            assert!(debug.contains("REDACTED"));
+        }
+
+        #[test]
+        fn test_secret_string_clone() {
+            let secret = SecretString::new("password");
+            let cloned = secret.clone();
+            assert_eq!(cloned.expose_secret(), "password");
+        }
+
+        #[test]
+        fn test_secure_credentials_sql_server() {
+            let creds = SecureCredentials::sql_server("user", "password");
+            assert_eq!(creds.username(), Some("user"));
+            assert_eq!(creds.password(), Some("password"));
+            assert!(creds.token().is_none());
+        }
+
+        #[test]
+        fn test_secure_credentials_azure_token() {
+            let creds = SecureCredentials::azure_token("my-token");
+            assert!(creds.username().is_none());
+            assert!(creds.password().is_none());
+            assert_eq!(creds.token(), Some("my-token"));
+        }
+
+        #[test]
+        fn test_secure_credentials_debug_redacts_password() {
+            let creds = SecureCredentials::sql_server("user", "supersecret");
+            let debug = format!("{:?}", creds);
+            assert!(debug.contains("user"));
+            assert!(!debug.contains("supersecret"));
+            assert!(debug.contains("REDACTED"));
+        }
+
+        #[test]
+        fn test_secure_credentials_debug_redacts_token() {
+            let creds = SecureCredentials::azure_token("supersecrettoken");
+            let debug = format!("{:?}", creds);
+            assert!(!debug.contains("supersecrettoken"));
+            assert!(debug.contains("REDACTED"));
+        }
+
+        #[test]
+        fn test_secure_credentials_from_credentials() {
+            let creds = Credentials::sql_server("user", "password");
+            let secure: SecureCredentials = creds.into();
+            assert_eq!(secure.username(), Some("user"));
+            assert_eq!(secure.password(), Some("password"));
+        }
+
+        #[test]
+        fn test_secure_credentials_clone() {
+            let creds = SecureCredentials::sql_server("user", "password");
+            let cloned = creds.clone();
+            assert_eq!(cloned.username(), Some("user"));
+            assert_eq!(cloned.password(), Some("password"));
+        }
+    }
+}
