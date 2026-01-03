@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- CI: Feature flag validation job to catch no_std/alloc compatibility issues early
+- Tests: Unit tests for credentials module and query builder
+
+### Fixed
+
+- `tds-protocol` no_std + alloc support: Added internal prelude module for consistent type imports
+- Benchmark CI workflow: Fixed output format compatibility with github-action-benchmark
+- Benchmark CI workflow: Graceful handling when no baseline exists for PR comparisons
+
+### Changed
+
+- Documentation: Updated production readiness and contributing guidelines
+
 ## [0.5.0] - 2026-01-01
 
 ### Added
