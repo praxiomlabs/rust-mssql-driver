@@ -119,14 +119,45 @@ docker run -d --name jaeger \
 
 Then access the Jaeger UI at http://localhost:16686.
 
-## Metrics (Future)
+## Metrics
 
-Metrics instrumentation is planned for a future release:
+Metrics instrumentation is available via the `DatabaseMetrics` struct when the `otel` feature is enabled.
 
-- Connection pool size
-- Active connections
-- Query latency histogram
-- Error counts by type
+### Available Metrics
+
+| Metric Name | Type | Description |
+|-------------|------|-------------|
+| `db.client.connections.usage` | Gauge | Number of connections currently in use |
+| `db.client.connections.idle` | Gauge | Number of idle connections available |
+| `db.client.connections.max` | Gauge | Maximum connections allowed in the pool |
+| `db.client.connections.create.total` | Counter | Total connections created |
+| `db.client.connections.close.total` | Counter | Total connections closed |
+| `db.client.operation.duration` | Histogram | Duration of database operations (seconds) |
+| `db.client.operations.total` | Counter | Total operations performed |
+| `db.client.errors.total` | Counter | Total operation errors |
+| `db.client.connections.wait_time` | Histogram | Time spent waiting for a connection |
+
+### Usage Example
+
+```rust
+use mssql_client::instrumentation::DatabaseMetrics;
+
+// Create metrics collector (typically done once at pool creation)
+let metrics = DatabaseMetrics::new(
+    Some("main-pool"),  // Pool name for labeling
+    "db.example.com",   // Server address
+    1433                // Port
+);
+
+// Record pool status (called periodically or on change)
+metrics.record_pool_status(5, 10, 20);  // in_use, idle, max
+
+// Record operation timing
+metrics.record_operation("SELECT", 0.025, true);  // operation, duration_secs, success
+
+// Record connection wait time
+metrics.record_connection_wait(0.003);  // seconds
+```
 
 ## Performance Impact
 
