@@ -18,10 +18,11 @@ use tds_protocol::token::{
     ColMetaData, Collation, ColumnData, EnvChange, EnvChangeType, NbcRow, RawRow, Token,
     TokenParser,
 };
+#[cfg(feature = "decimal")]
+use tds_protocol::tvp::encode_tvp_decimal;
 use tds_protocol::tvp::{
     TvpColumnDef as TvpWireColumnDef, TvpColumnFlags, TvpEncoder, TvpWireType, encode_tvp_bit,
-    encode_tvp_decimal, encode_tvp_float, encode_tvp_int, encode_tvp_null, encode_tvp_nvarchar,
-    encode_tvp_varbinary,
+    encode_tvp_float, encode_tvp_int, encode_tvp_null, encode_tvp_nvarchar, encode_tvp_varbinary,
 };
 use tokio::net::TcpStream;
 use tokio::time::timeout;
@@ -1838,7 +1839,6 @@ impl<S: ConnectionState> Client<S> {
                 } else if buf.remaining() < len {
                     return Err(Error::Protocol("unexpected EOF reading TIME".into()));
                 } else {
-                    let scale = col.type_info.scale.unwrap_or(7);
                     let mut time_bytes = [0u8; 8];
                     for byte in time_bytes.iter_mut().take(len) {
                         *byte = buf.get_u8();
@@ -1846,6 +1846,7 @@ impl<S: ConnectionState> Client<S> {
                     let intervals = u64::from_le_bytes(time_bytes);
                     #[cfg(feature = "chrono")]
                     {
+                        let scale = col.type_info.scale.unwrap_or(7);
                         let time = Self::intervals_to_time(intervals, scale);
                         SqlValue::Time(time)
                     }
@@ -2468,7 +2469,12 @@ impl<S: ConnectionState> Client<S> {
             }
             0x6F => {
                 // DATETIMEN - 1 prop byte (length)
+                #[cfg(feature = "chrono")]
                 let dt_len = if prop_count >= 1 { buf.get_u8() } else { 8 };
+                #[cfg(not(feature = "chrono"))]
+                if prop_count >= 1 {
+                    buf.get_u8();
+                }
                 buf.advance(prop_count.saturating_sub(1));
 
                 #[cfg(feature = "chrono")]

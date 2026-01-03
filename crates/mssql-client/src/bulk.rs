@@ -998,6 +998,7 @@ fn decimal_byte_length(precision: u8) -> u8 {
 }
 
 /// Calculate byte length for time based on scale.
+#[cfg(feature = "chrono")]
 fn time_byte_length(scale: u8) -> u8 {
     match scale {
         0..=2 => 3,
@@ -1008,6 +1009,7 @@ fn time_byte_length(scale: u8) -> u8 {
 }
 
 /// Get the divisor for time scale.
+#[cfg(feature = "chrono")]
 fn time_scale_divisor(scale: u8) -> u64 {
     match scale {
         0 => 1_000_000_000,
@@ -1097,6 +1099,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "chrono")]
     fn test_time_byte_length() {
         assert_eq!(time_byte_length(0), 3);
         assert_eq!(time_byte_length(3), 4);
