@@ -464,7 +464,7 @@ async fn test_azure_unicode_support() {
         let rows = client
             .query(&format!("SELECT N'{}'", value), &[])
             .await
-            .expect(&format!("Query for {} failed", name));
+            .unwrap_or_else(|_| panic!("Query for {} failed", name));
 
         for row_result in rows {
             let row = row_result.expect("Row error");

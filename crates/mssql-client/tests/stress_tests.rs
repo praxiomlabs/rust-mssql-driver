@@ -58,7 +58,7 @@ fn stress_error_creation() {
     use std::sync::Arc;
 
     // Create many errors to check for memory leaks
-    for i in 0..10_000 {
+    for i in 0i32..10_000 {
         let errors: Vec<Error> = vec![
             Error::Connection(format!("connection error {}", i)),
             Error::ConnectionClosed,
@@ -66,7 +66,7 @@ fn stress_error_creation() {
             Error::Protocol(format!("protocol error {}", i)),
             Error::Query(format!("query error {}", i)),
             Error::Server {
-                number: i as i32,
+                number: i,
                 class: 16,
                 state: 1,
                 message: format!("server error {}", i),

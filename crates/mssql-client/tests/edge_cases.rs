@@ -36,7 +36,7 @@ fn test_option_none_is_null() {
 fn test_option_some_is_not_null() {
     let value: Option<i32> = Some(42);
     assert!(value.is_some());
-    assert_eq!(value.unwrap(), 42);
+    assert_eq!(value, Some(42));
 }
 
 #[test]
@@ -181,7 +181,7 @@ fn test_unicode_max_codepoint() {
 fn test_very_long_unicode_string() {
     // Create a long string with various Unicode characters
     let base = "Hello 世界 🌍 ";
-    let s: String = std::iter::repeat(base).take(1000).collect();
+    let s: String = base.repeat(1000);
     let value = SqlValue::String(s.clone());
     let result: Result<String, _> = String::from_sql(&value);
     assert_eq!(result.unwrap(), s);
@@ -208,7 +208,7 @@ fn test_large_binary_data() {
 fn test_large_string() {
     // 1 MB string
     let size = 1024 * 1024;
-    let s: String = std::iter::repeat('x').take(size).collect();
+    let s: String = "x".repeat(size);
     let value = SqlValue::String(s.clone());
 
     let result: Result<String, _> = String::from_sql(&value);
@@ -219,7 +219,7 @@ fn test_large_string() {
 fn test_many_small_values() {
     // Test creating and reading many small values
     let count = 100_000;
-    let values: Vec<SqlValue> = (0..count).map(|i| SqlValue::Int(i)).collect();
+    let values: Vec<SqlValue> = (0..count).map(SqlValue::Int).collect();
 
     for (i, value) in values.iter().enumerate() {
         let result: Result<i32, _> = i32::from_sql(value);
@@ -411,11 +411,11 @@ fn test_bool_from_various_types() {
     // Bool should be extractable from Bool value
     let value = SqlValue::Bool(true);
     let result: Result<bool, _> = bool::from_sql(&value);
-    assert_eq!(result.unwrap(), true);
+    assert!(result.unwrap());
 
     let value = SqlValue::Bool(false);
     let result: Result<bool, _> = bool::from_sql(&value);
-    assert_eq!(result.unwrap(), false);
+    assert!(!result.unwrap());
 }
 
 #[test]
@@ -512,7 +512,7 @@ async fn test_large_result_set_live() {
     let mut client = Client::connect(config).await.expect("Failed to connect");
 
     // Generate 10000 rows using system tables
-    let mut stream = client
+    let stream = client
         .query(
             "SELECT TOP 10000 ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS n FROM sys.all_columns a CROSS JOIN sys.all_columns b",
             &[],
@@ -521,7 +521,7 @@ async fn test_large_result_set_live() {
         .expect("Query failed");
 
     let mut count = 0;
-    while let Some(row) = stream.next() {
+    for row in stream {
         let _ = row.expect("Row error");
         count += 1;
     }
