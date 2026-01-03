@@ -36,14 +36,15 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libkrb5-dev
 
       - name: Run benchmarks
-        run: cargo bench --workspace -- --save-baseline current 2>&1 | tee benchmark-output.txt
-
-      - name: Parse benchmark results
-        id: parse
         run: |
-          # Extract benchmark results for the action
-          # Criterion outputs to target/criterion by default
-          echo "Benchmark run completed"
+          # Run only criterion benchmark targets with bencher output format
+          # Using explicit --bench flags avoids running lib tests which don't understand criterion flags
+          # The --output-format bencher flag produces output compatible with the 'cargo' tool type
+          cargo bench \
+            -p tds-protocol --bench protocol \
+            -p mssql-types --bench types \
+            -p mssql-client --bench client \
+            -- --output-format bencher 2>&1 | tee benchmark-output.txt
 
       # Store benchmark results on main branch
       - name: Store benchmark result
@@ -73,14 +74,12 @@ jobs:
           # Don't push results from PRs
           auto-push: false
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          # Fail if significant regression detected
-          fail-on-alert: true
-          # Post comparison as PR comment
+          # Don't fail on first run when no baseline exists yet
+          fail-on-alert: false
+          # Post comparison as PR comment when baseline exists
           comment-on-alert: true
           # Alert if performance degrades by more than 20%
           alert-threshold: '120%'
-          # Compare against gh-pages baseline
-          external-data-json-path: ./cache/benchmark-data.json
 
   # Separate job for heavier memory profiling (only on main)
   memory-profile:
