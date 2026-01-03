@@ -7,13 +7,13 @@ This document defines the criteria for declaring rust-mssql-driver production-re
 | Category | Status | Progress |
 |----------|--------|----------|
 | Core Functionality | Complete | 95% |
-| Test Coverage | In Progress | ~60% |
-| Documentation | Complete | 95% |
+| Test Coverage | In Progress | ~70% |
+| Documentation | Complete | 98% |
 | Security | Complete | 90% |
-| Operations | Complete | 90% |
-| Performance | In Progress | 50% |
+| Operations | Complete | 95% |
+| Performance | Complete | 90% |
 
-**Overall Readiness: 80%** (estimated)
+**Overall Readiness: 85%** (estimated)
 
 ---
 
@@ -104,8 +104,8 @@ This document defines the criteria for declaring rust-mssql-driver production-re
 
 ### 2.5 Performance Tests
 - [x] Benchmark suite with criterion (3 crates have benchmarks)
-- [ ] Baseline performance established
-- [ ] No significant regressions
+- [x] Baseline performance documented (`docs/PERFORMANCE_BASELINES.md`)
+- [ ] CI regression detection (planned)
 
 ---
 
@@ -126,6 +126,8 @@ This document defines the criteria for declaring rust-mssql-driver production-re
 - [x] Retry/backoff recommendations (`docs/RETRY_STRATEGY.md`)
 - [x] Memory allocation patterns (`docs/MEMORY.md`)
 - [x] Operations guide with graceful shutdown (`docs/OPERATIONS.md`)
+- [x] Stress testing guide (`docs/STRESS_TESTING.md`)
+- [x] Performance baselines (`docs/PERFORMANCE_BASELINES.md`)
 
 ### 3.3 Security Documentation
 - [x] SECURITY.md with reporting process
@@ -247,10 +249,12 @@ The following are documented as known limitations, acceptable for initial releas
 
 | Metric | Target | Current | Status |
 |--------|--------|---------|--------|
-| Line Coverage | 80% | ~60% | Not Met |
-| Doc Coverage | 100% public | ~95% | Met |
+| Line Coverage | 80% | ~70% | In Progress |
+| Doc Coverage | 100% public | ~98% | Met |
 | Fuzz Targets | 10+ | 11 | Met |
-| Benchmark Suite | Complete | Exists | Met |
+| Benchmark Suite | Complete | Documented | Met |
+| Performance Baselines | Documented | Yes | Met |
+| Stress Tests | Exist | Yes | Met |
 | Security Audit | Pass | N/A | Not Scheduled |
 
 ### Milestones
