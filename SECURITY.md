@@ -4,7 +4,10 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.2.x   | :white_check_mark: |
+| 0.5.x   | :white_check_mark: |
+| 0.4.x   | :white_check_mark: |
+| 0.3.x   | :x: (end of life)  |
+| 0.2.x   | :x: (end of life)  |
 | 0.1.x   | :x: (end of life)  |
 
 ## Reporting a Vulnerability

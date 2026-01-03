@@ -65,36 +65,53 @@ let (result1, result2) = tokio::join!(
 
 ---
 
-### Always Encrypted Key Providers
+### Always Encrypted
 
-**Status:** Partial (cryptography implemented, key providers not yet available)
+**Status:** Fully Supported (v0.2.0+)
 
-**Description:** SQL Server's Always Encrypted feature has client-side encryption infrastructure implemented (AEAD_AES_256_CBC_HMAC_SHA256, RSA-OAEP key unwrapping, CEK management), but key providers for retrieving Column Master Keys are not yet available.
+**Description:** SQL Server's Always Encrypted feature is fully implemented with client-side encryption and multiple key provider options.
 
-**Missing Key Providers:**
-- Azure Key Vault
-- Windows Certificate Store
-- Custom key providers
+**Implemented Features:**
+- AEAD_AES_256_CBC_HMAC_SHA256 encryption/decryption
+- RSA-OAEP key unwrapping for CEK decryption
+- Column Encryption Key (CEK) caching with TTL
+- Deterministic and randomized encryption types
 
-**Workaround:** Use application-layer encryption:
+**Available Key Providers:**
+- **InMemoryKeyStore** - For development and testing
+- **AzureKeyVaultProvider** - Azure Key Vault integration (`azure-identity` feature)
+- **WindowsCertStoreProvider** - Windows Certificate Store (`sspi-auth` feature, Windows only)
+- **Custom providers** - Implement the `KeyStoreProvider` trait
+
+**Usage Example:**
 
 ```rust
-use aes_gcm::{Aes256Gcm, Key, Nonce};
-use aes_gcm::aead::Aead;
+use mssql_client::{Client, Config};
+use mssql_auth::{AlwaysEncrypted, InMemoryKeyStore};
 
-// Encrypt before insert
-let ciphertext = cipher.encrypt(nonce, plaintext)?;
-client.execute("INSERT INTO users (encrypted_data) VALUES (@p1)", &[&ciphertext]).await?;
+// Create a key store with your Column Master Key
+let mut key_store = InMemoryKeyStore::new();
+key_store.add_key("CMK1", &master_key_bytes);
 
-// Decrypt after select
-let rows = client.query("SELECT encrypted_data FROM users WHERE id = @p1", &[&id]).await?;
-let ciphertext: Vec<u8> = row.get(0)?;
-let plaintext = cipher.decrypt(nonce, &ciphertext)?;
+// Configure Always Encrypted
+let config = Config::from_connection_string(
+    "Server=localhost;Database=mydb;User Id=sa;Password=secret;"
+)?
+.with_always_encrypted(AlwaysEncrypted::new(key_store));
+
+let client = Client::connect(config).await?;
+
+// Encrypted columns are automatically decrypted on read
+// and encrypted on write
+let rows = client.query(
+    "SELECT SSN FROM employees WHERE id = @p1",
+    &[&employee_id]
+).await?;
 ```
 
-**Important:** Do NOT use SQL Server's `ENCRYPTBYKEY` as a workaround. It provides different security guarantees (keys stored on server, DBAs can access plaintext).
+**Important:** Do NOT use SQL Server's `ENCRYPTBYKEY` as an alternative. Always Encrypted provides client-side encryption where keys never leave the client, protecting data even from DBAs and server compromise. `ENCRYPTBYKEY` stores keys on the server and provides different (weaker) security guarantees.
 
-**Available Key Providers:** Azure Key Vault (`azure-identity` feature), Windows Certificate Store (`sspi-auth` feature).
+See [SECURITY.md](SECURITY.md#always-encrypted-considerations) for threat model details.
 
 ---
 
