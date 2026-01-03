@@ -41,26 +41,24 @@ async fn azure_sql_config() -> Result<Pool, Error> {
 }
 ```
 
-### Azure SQL with Managed Identity (Future)
+### Azure SQL with Managed Identity
 
 ```rust
-// Note: Azure Managed Identity support is planned for v1.1
-// This is a preview of the expected API
+// Requires the `azure-identity` feature:
+// mssql-auth = { version = "0.5", features = ["azure-identity"] }
 
 use azure_identity::DefaultAzureCredential;
+use mssql_auth::AzureIdentityAuth;
 
 async fn azure_sql_managed_identity() -> Result<Pool, Error> {
+    // Use Azure Default Credential (Managed Identity, CLI, etc.)
     let credential = DefaultAzureCredential::default();
-    let token = credential
-        .get_token("https://database.windows.net/")
-        .await?;
 
-    let config = Config::builder()
+    let config = Config::new()
         .host("your-server.database.windows.net")
         .database("your-database")
-        .authentication(Authentication::AadToken(token.token.secret().to_string()))
-        .encryption(Encryption::Strict)
-        .build()?;
+        .authentication(AzureIdentityAuth::new(credential))
+        .encryption(Encryption::Strict);
 
     Pool::builder()
         .max_size(30)
