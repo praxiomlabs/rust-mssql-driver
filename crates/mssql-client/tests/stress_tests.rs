@@ -267,7 +267,10 @@ async fn stress_query_cycle() {
     // Run many queries
     for i in 0..1000 {
         let result = client
-            .query(&format!("SELECT {} AS num, 'iteration {}' AS txt", i, i), &[])
+            .query(
+                &format!("SELECT {} AS num, 'iteration {}' AS txt", i, i),
+                &[],
+            )
             .await;
 
         match result {
@@ -323,8 +326,8 @@ async fn stress_pool_acquire_release() {
 #[ignore = "Requires SQL Server - Long running stress test"]
 async fn stress_concurrent_pool_usage() {
     use mssql_driver_pool::{Pool, PoolConfig};
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     let config = get_test_config().expect("SQL Server config required");
 

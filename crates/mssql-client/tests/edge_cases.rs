@@ -396,8 +396,9 @@ fn test_connection_string_whitespace_handling() {
 #[test]
 fn test_connection_string_duplicate_keywords() {
     // Last value should win for duplicate keywords
-    let result =
-        Config::from_connection_string("Server=first;Server=second;Database=test;User Id=sa;Password=x");
+    let result = Config::from_connection_string(
+        "Server=first;Server=second;Database=test;User Id=sa;Password=x",
+    );
     // Should parse without error
     let _ = result;
 }

@@ -96,9 +96,8 @@ fn test_timeout_zero_from_connection_string() {
 #[test]
 fn test_invalid_timeout_from_connection_string() {
     // Negative timeout should fail or be treated as zero
-    let result = Config::from_connection_string(
-        "Server=localhost;Connect Timeout=-5;User Id=sa;Password=x",
-    );
+    let result =
+        Config::from_connection_string("Server=localhost;Connect Timeout=-5;User Id=sa;Password=x");
     // Should handle gracefully (either error or treat as default)
     let _ = result;
 }
@@ -139,7 +138,9 @@ async fn test_connect_timeout_success() {
     let mut config = get_test_config().expect("SQL Server config required");
     config = config.connect_timeout(Duration::from_secs(30));
 
-    let client = Client::connect(config).await.expect("Should connect within timeout");
+    let client = Client::connect(config)
+        .await
+        .expect("Should connect within timeout");
     client.close().await.expect("Close failed");
 }
 
@@ -264,7 +265,9 @@ async fn test_pool_acquire_timeout() {
         .max_connections(1)
         .connection_timeout(Duration::from_millis(100));
 
-    let pool = Pool::new(pool_config, config).await.expect("Pool creation failed");
+    let pool = Pool::new(pool_config, config)
+        .await
+        .expect("Pool creation failed");
 
     // Get the only connection
     let conn1 = pool.get().await.expect("First get should succeed");
@@ -308,7 +311,11 @@ async fn test_pool_exhaustion_recovery() {
         .max_connections(3)
         .connection_timeout(Duration::from_secs(5));
 
-    let pool = Arc::new(Pool::new(pool_config, config).await.expect("Pool creation failed"));
+    let pool = Arc::new(
+        Pool::new(pool_config, config)
+            .await
+            .expect("Pool creation failed"),
+    );
 
     // Exhaust all connections
     let conn1 = pool.get().await.expect("Get 1 failed");
@@ -345,8 +352,8 @@ async fn test_pool_exhaustion_recovery() {
 #[ignore = "Requires SQL Server"]
 async fn test_concurrent_connection_requests() {
     use mssql_driver_pool::{Pool, PoolConfig};
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     let config = get_test_config().expect("SQL Server config required");
 
@@ -356,7 +363,11 @@ async fn test_concurrent_connection_requests() {
         .max_connections(5)
         .connection_timeout(Duration::from_secs(30));
 
-    let pool = Arc::new(Pool::new(pool_config, config).await.expect("Pool creation failed"));
+    let pool = Arc::new(
+        Pool::new(pool_config, config)
+            .await
+            .expect("Pool creation failed"),
+    );
     let success_count = Arc::new(AtomicUsize::new(0));
     let error_count = Arc::new(AtomicUsize::new(0));
 
@@ -418,7 +429,11 @@ async fn test_pool_exhaustion_timeout() {
         .max_connections(1)
         .connection_timeout(Duration::from_millis(50));
 
-    let pool = Arc::new(Pool::new(pool_config, config).await.expect("Pool creation failed"));
+    let pool = Arc::new(
+        Pool::new(pool_config, config)
+            .await
+            .expect("Pool creation failed"),
+    );
 
     // Hold the only connection
     let _conn = pool.get().await.expect("First get failed");
@@ -452,9 +467,7 @@ fn test_pool_config_validation() {
     use mssql_driver_pool::PoolConfig;
 
     // min > max should be handled gracefully
-    let config = PoolConfig::new()
-        .min_connections(10)
-        .max_connections(5);
+    let config = PoolConfig::new().min_connections(10).max_connections(5);
 
     // The config should either error or adjust (implementation dependent)
     // Just verify it doesn't panic
@@ -475,8 +488,6 @@ fn test_pool_config_large_values() {
     use mssql_driver_pool::PoolConfig;
 
     // Very large pool sizes should be configurable
-    let config = PoolConfig::new()
-        .min_connections(100)
-        .max_connections(1000);
+    let config = PoolConfig::new().min_connections(100).max_connections(1000);
     let _ = config;
 }

@@ -72,7 +72,10 @@ fn test_azure_connection_string_with_port() {
                     User Id=admin;Password=Password123!;Encrypt=true";
 
     let result = Config::from_connection_string(conn_str);
-    assert!(result.is_ok(), "Azure connection string with port should parse");
+    assert!(
+        result.is_ok(),
+        "Azure connection string with port should parse"
+    );
 }
 
 #[test]
@@ -243,7 +246,10 @@ async fn test_azure_strict_mode_connection() {
         }
         Err(e) => {
             // Strict mode might not be supported yet
-            println!("Strict mode connection failed (may not be supported): {}", e);
+            println!(
+                "Strict mode connection failed (may not be supported): {}",
+                e
+            );
         }
     }
 }
@@ -333,7 +339,10 @@ async fn test_azure_connection_with_timeout() {
     let mut client = Client::connect(config).await.expect("Connection failed");
 
     // Quick query to verify connection
-    let rows = client.query("SELECT 1 AS num", &[]).await.expect("Query failed");
+    let rows = client
+        .query("SELECT 1 AS num", &[])
+        .await
+        .expect("Query failed");
     for _ in rows {}
 
     client.close().await.expect("Close failed");
@@ -401,9 +410,11 @@ async fn test_azure_pool() {
         .max_connections(5)
         .connection_timeout(Duration::from_secs(30));
 
-    let pool = Arc::new(Pool::new(pool_config, config)
-        .await
-        .expect("Pool creation failed"));
+    let pool = Arc::new(
+        Pool::new(pool_config, config)
+            .await
+            .expect("Pool creation failed"),
+    );
 
     // Get multiple connections
     let mut handles = Vec::new();
@@ -469,11 +480,7 @@ async fn test_azure_unicode_support() {
         for row_result in rows {
             let row = row_result.expect("Row error");
             let result: String = row.get(0).expect("Get failed");
-            assert_eq!(
-                result, value,
-                "{} string should roundtrip correctly",
-                name
-            );
+            assert_eq!(result, value, "{} string should roundtrip correctly", name);
         }
     }
 

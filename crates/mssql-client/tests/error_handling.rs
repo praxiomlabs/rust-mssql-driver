@@ -149,7 +149,10 @@ fn test_invalid_identifier_display() {
 
 #[test]
 fn test_pool_exhausted_display() {
-    assert_eq!(Error::PoolExhausted.to_string(), "connection pool exhausted");
+    assert_eq!(
+        Error::PoolExhausted.to_string(),
+        "connection pool exhausted"
+    );
 }
 
 #[test]
@@ -202,15 +205,18 @@ fn test_io_error_is_clone() {
 fn test_is_protocol_error() {
     assert!(Error::Protocol("test".into()).is_protocol_error());
     assert!(!Error::Query("test".into()).is_protocol_error());
-    assert!(!Error::Server {
-        number: 102,
-        class: 16,
-        state: 1,
-        message: "test".into(),
-        server: None,
-        procedure: None,
-        line: 1,
-    }.is_protocol_error());
+    assert!(
+        !Error::Server {
+            number: 102,
+            class: 16,
+            state: 1,
+            message: "test".into(),
+            server: None,
+            procedure: None,
+            line: 1,
+        }
+        .is_protocol_error()
+    );
 }
 
 #[test]
@@ -431,7 +437,11 @@ fn test_object_errors_are_terminal() {
 #[test]
 fn test_constraint_errors_are_terminal() {
     // 547: Constraint violation
-    let err = make_server_error(547, 16, "The INSERT statement conflicted with the FOREIGN KEY constraint");
+    let err = make_server_error(
+        547,
+        16,
+        "The INSERT statement conflicted with the FOREIGN KEY constraint",
+    );
     assert!(err.is_terminal());
 
     // 2627: Unique constraint violation
@@ -489,9 +499,15 @@ fn test_all_error_variants_are_debug() {
         Error::TlsTimeout,
         Error::ConnectionTimeout,
         Error::CommandTimeout,
-        Error::Routing { host: "h".into(), port: 1 },
+        Error::Routing {
+            host: "h".into(),
+            port: 1,
+        },
         Error::TooManyRedirects { max: 1 },
-        Error::Io(Arc::new(std::io::Error::new(std::io::ErrorKind::Other, "test"))),
+        Error::Io(Arc::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "test",
+        ))),
         Error::InvalidIdentifier("test".into()),
         Error::PoolExhausted,
         Error::Cancel("test".into()),

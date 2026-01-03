@@ -171,10 +171,7 @@ impl Pool {
 
         // Warm up the pool by creating min_connections initial connections
         if config.min_connections > 0 {
-            tracing::info!(
-                count = config.min_connections,
-                "warming up connection pool"
-            );
+            tracing::info!(count = config.min_connections, "warming up connection pool");
             pool.warm_up(config.min_connections).await;
         }
 
@@ -407,7 +404,10 @@ impl Pool {
 
                 // Perform health check if configured
                 if self.config.test_on_checkout {
-                    if !self.health_check(&mut entry.client, entry.metadata.id).await {
+                    if !self
+                        .health_check(&mut entry.client, entry.metadata.id)
+                        .await
+                    {
                         tracing::debug!(
                             connection_id = entry.metadata.id,
                             "discarding unhealthy connection, will create new"
@@ -416,7 +416,10 @@ impl Pool {
 
                         // Connection is unhealthy, create a new one instead
                         let id = self.next_connection_id();
-                        tracing::debug!(connection_id = id, "creating new connection after health check failure");
+                        tracing::debug!(
+                            connection_id = id,
+                            "creating new connection after health check failure"
+                        );
 
                         match Client::connect(self.client_config.clone()).await {
                             Ok(client) => {
