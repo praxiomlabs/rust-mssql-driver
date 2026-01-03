@@ -12,11 +12,15 @@ Comprehensive guide for releasing new versions of rust-mssql-driver to crates.io
 
 1. **NEVER manually run `cargo publish`** — Always use the automated GitHub Actions workflow triggered by pushing a version tag. The `just publish` recipe exists only for disaster recovery.
 
-2. **NEVER push a tag until CI passes on main** — Always run `gh run watch` or `just ci-status` to verify CI passed before creating a tag.
+2. **NEVER push a tag until ALL CI workflows pass on main** — This means CI, Security Audit, AND Benchmarks must all show green. Run `just ci-status-all` to verify ALL workflows passed, not just the most recent one.
 
 3. **ALWAYS use `--all-features` for pre-release checks** — Feature-gated code (like `zeroize`) must be validated before release. Run `just ci-all` not just `just ci`.
 
 4. **Publishing to crates.io is IRREVERSIBLE** — You can yank a version, but you cannot delete or re-upload it. A yanked version still counts as "used" forever.
+
+5. **ALWAYS run `just version-refs-check` before tagging** — Verify that ALL version references in documentation (RELEASING.md, ARCHITECTURE.md, etc.) are updated to the new version. The `just release-check` recipe includes this automatically.
+
+6. **NEVER cancel a release workflow mid-publish** — If you cancel after some crates are published, you'll have a partial release requiring manual recovery. Either let it complete or don't start it.
 
 ### The v0.2.1 Incident (Cautionary Tale)
 
@@ -822,6 +826,31 @@ This section documents issues encountered in past releases and patterns to avoid
 **Issue**: Forgot to update all crate versions, causing dependency resolution failures.
 
 **Solution**: Use workspace.package.version inheritance. All crates share the same version automatically.
+
+### 11. The v0.5.1 Incident (Partial Publish + Version Reference Drift)
+
+**Issue**: Released v0.5.1 with multiple failures:
+- Pushed tag while Benchmarks workflow was still running (only checked most recent workflow, not all)
+- Cancelled release workflow mid-publish, resulting in 6 of 9 crates published
+- Had to manually publish remaining 3 crates with `--allow-dirty` and circular dev-dep workarounds
+- RELEASING.md header still showed `0.4.0` instead of `0.5.1`
+- ARCHITECTURE.md example showed `0.5.0` instead of `0.5.1`
+
+**What went wrong**:
+1. `just ci-status` only checks the most recent workflow run, not all workflows
+2. Benchmarks workflow failed due to missing gh-pages branch, was still re-running
+3. Tag was pushed prematurely, triggering the release workflow
+4. Release workflow was cancelled mid-flight, leaving partial publish state
+5. No automated check for version references in documentation files
+
+**Result**: Messy partial release requiring manual intervention, documentation out of sync.
+
+**Solution**:
+- Added `just ci-status-all` recipe that checks ALL workflows (CI, Security, Benchmarks)
+- Added `just version-refs-check` recipe that scans for stale version references
+- Updated `just tag` to require ALL workflows to pass, not just the most recent
+- Added Cardinal Rule #5 (version refs check) and #6 (never cancel mid-publish)
+- Updated `release-check` to include version-refs-check
 
 ---
 

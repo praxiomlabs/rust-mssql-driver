@@ -1359,6 +1359,56 @@ ci-status:
     printf '{{green}}[OK]{{reset}}   CI passed on main (commit %s)\n' "$SHA"
 
 [group('ci')]
+[doc("Check if ALL CI workflows passed on main (CI, Security, Benchmarks) - REQUIRED before tagging")]
+ci-status-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '{{cyan}}[INFO]{{reset}} Checking ALL workflow statuses on main branch...\n'
+
+    if ! command -v gh &> /dev/null; then
+        printf '{{red}}[ERR]{{reset}}  GitHub CLI (gh) is required for this check\n'
+        exit 1
+    fi
+
+    HEAD_SHA=$(git rev-parse HEAD | cut -c1-7)
+    FAILED=0
+
+    # Check each workflow type
+    for WORKFLOW in "CI" "Security Audit" "Benchmarks"; do
+        STATUS=$(gh run list --branch main --workflow="${WORKFLOW}" --limit 1 --json status,conclusion,headSha --jq '.[0]' 2>/dev/null || echo "{}")
+
+        if [ -z "$STATUS" ] || [ "$STATUS" = "{}" ]; then
+            printf '{{yellow}}[WARN]{{reset}} No runs found for workflow: %s\n' "$WORKFLOW"
+            continue
+        fi
+
+        RUN_STATUS=$(echo "$STATUS" | jq -r '.status // "unknown"')
+        CONCLUSION=$(echo "$STATUS" | jq -r '.conclusion // "unknown"')
+        SHA=$(echo "$STATUS" | jq -r '.headSha // "unknown"' | cut -c1-7)
+
+        if [ "$RUN_STATUS" != "completed" ]; then
+            printf '{{red}}[ERR]{{reset}}  %s: still running\n' "$WORKFLOW"
+            FAILED=1
+        elif [ "$CONCLUSION" != "success" ]; then
+            printf '{{red}}[ERR]{{reset}}  %s: %s (commit %s)\n' "$WORKFLOW" "$CONCLUSION" "$SHA"
+            FAILED=1
+        elif [ "$SHA" != "$HEAD_SHA" ]; then
+            printf '{{yellow}}[WARN]{{reset}} %s: passed but on different commit (%s vs HEAD %s)\n' "$WORKFLOW" "$SHA" "$HEAD_SHA"
+            FAILED=1
+        else
+            printf '{{green}}[OK]{{reset}}   %s: passed (commit %s)\n' "$WORKFLOW" "$SHA"
+        fi
+    done
+
+    if [ $FAILED -ne 0 ]; then
+        printf '\n{{red}}[ERR]{{reset}}  Not all workflows passed. Fix issues before tagging.\n'
+        printf '{{cyan}}[INFO]{{reset}} Run: gh run list --branch main\n'
+        exit 1
+    fi
+
+    printf '\n{{green}}[OK]{{reset}}   All workflows passed on HEAD (%s)\n' "$HEAD_SHA"
+
+[group('ci')]
 [doc("Pre-commit hook checks")]
 pre-commit: fmt-check clippy check
     @printf '{{green}}[OK]{{reset}}   Pre-commit checks passed\n'
@@ -1466,6 +1516,61 @@ panic-audit:
     fi
 
 [group('release')]
+[doc("Check for stale version references in documentation (REQUIRED before release)")]
+version-refs-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '{{cyan}}[INFO]{{reset}} Checking for stale version references...\n'
+
+    # Get current version from Cargo.toml
+    CURRENT_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+    printf '{{cyan}}[INFO]{{reset}} Current version: %s\n' "$CURRENT_VERSION"
+
+    # Extract major.minor for pattern matching
+    MAJOR_MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f1,2)
+
+    # Files that should have version references updated
+    DOCS_TO_CHECK="RELEASING.md ARCHITECTURE.md"
+    FAILED=0
+
+    for DOC in $DOCS_TO_CHECK; do
+        if [ ! -f "$DOC" ]; then
+            continue
+        fi
+
+        # Check for version header patterns (e.g., "Version: 0.4.0")
+        # Skip changelog-style references and comparison URLs
+        STALE=$(grep -n "Version.*${MAJOR_MINOR}\." "$DOC" 2>/dev/null | grep -v "$CURRENT_VERSION" | grep -v "CHANGELOG" | grep -v "compare/v" || true)
+
+        if [ -n "$STALE" ]; then
+            printf '{{red}}[ERR]{{reset}}  %s has stale version references:\n' "$DOC"
+            echo "$STALE" | while read -r line; do
+                printf '         %s\n' "$line"
+            done
+            FAILED=1
+        fi
+
+        # Check for example Cargo.toml snippets with old version
+        STALE_EXAMPLES=$(grep -n "version = \"${MAJOR_MINOR}\." "$DOC" 2>/dev/null | grep -v "$CURRENT_VERSION" | grep -v '\[workspace.dependencies\]' || true)
+
+        if [ -n "$STALE_EXAMPLES" ]; then
+            printf '{{red}}[ERR]{{reset}}  %s has stale version in code examples:\n' "$DOC"
+            echo "$STALE_EXAMPLES" | while read -r line; do
+                printf '         %s\n' "$line"
+            done
+            FAILED=1
+        fi
+    done
+
+    if [ $FAILED -ne 0 ]; then
+        printf '\n{{red}}[ERR]{{reset}}  Update version references before release!\n'
+        printf '{{cyan}}[INFO]{{reset}} Files to update: %s\n' "$DOCS_TO_CHECK"
+        exit 1
+    fi
+
+    printf '{{green}}[OK]{{reset}}   All version references are current (%s)\n' "$CURRENT_VERSION"
+
+[group('release')]
 [doc("Verify Cargo.toml metadata for crates.io publishing")]
 metadata-check:
     #!/usr/bin/env bash
@@ -1520,7 +1625,7 @@ typos:
 
 [group('release')]
 [doc("Prepare for release (validates ALL features - REQUIRED before tagging)")]
-release-check: ci-release-all check-feature-flags wip-check panic-audit version-sync typos machete metadata-check url-check
+release-check: ci-release-all check-feature-flags wip-check panic-audit version-sync version-refs-check typos machete metadata-check url-check
     #!/usr/bin/env bash
     set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Release Validation ══════{{reset}}\n\n'
@@ -1534,7 +1639,7 @@ release-check: ci-release-all check-feature-flags wip-check panic-audit version-
         printf '{{yellow}}[WARN]{{reset}} Unpushed commits detected\n'
     fi
     printf '{{green}}[OK]{{reset}}   Ready for release (all features validated)\n'
-    printf '\n{{cyan}}[NEXT]{{reset}} Run: just ci-status && just tag\n'
+    printf '\n{{cyan}}[NEXT]{{reset}} Run: just ci-status-all && just tag\n'
 
 # Backwards compatibility alias
 [group('release')]
@@ -1677,51 +1782,67 @@ url-check:
     printf '{{green}}[OK]{{reset}}   Repository URL correct: %s\n' "$REPO"
 
 [group('release')]
-[doc("Create git tag for release (verifies CI passed first)")]
+[doc("Create git tag for release (verifies ALL CI workflows passed first)")]
 tag:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    printf '{{cyan}}[INFO]{{reset}} Verifying CI passed before tagging...\n'
+    printf '{{cyan}}[INFO]{{reset}} Verifying ALL workflows passed before tagging...\n'
 
     # Check if gh CLI is available
-    if command -v gh &> /dev/null; then
-        STATUS=$(gh run list --branch main --limit 1 --json status,conclusion,headSha --jq '.[0]')
-        if [ -n "$STATUS" ]; then
-            RUN_STATUS=$(echo "$STATUS" | jq -r '.status')
-            CONCLUSION=$(echo "$STATUS" | jq -r '.conclusion')
-            SHA=$(echo "$STATUS" | jq -r '.headSha' | cut -c1-7)
-            HEAD_SHA=$(git rev-parse HEAD | cut -c1-7)
-
-            if [ "$RUN_STATUS" != "completed" ]; then
-                printf '{{red}}[ERR]{{reset}}  CI is still running. Wait for completion.\n'
-                printf '{{cyan}}[INFO]{{reset}} Run: gh run watch\n'
-                exit 1
-            fi
-
-            if [ "$CONCLUSION" != "success" ]; then
-                printf '{{red}}[ERR]{{reset}}  CI failed. Fix issues before tagging.\n'
-                printf '{{cyan}}[INFO]{{reset}} Run: gh run view\n'
-                exit 1
-            fi
-
-            if [ "$SHA" != "$HEAD_SHA" ]; then
-                printf '{{red}}[ERR]{{reset}}  CI run (%s) does not match HEAD (%s)\n' "$SHA" "$HEAD_SHA"
-                printf '{{cyan}}[INFO]{{reset}} Push your changes and wait for CI to pass.\n'
-                exit 1
-            fi
-
-            printf '{{green}}[OK]{{reset}}   CI passed on commit %s\n' "$SHA"
-        fi
-    else
-        printf '{{yellow}}[WARN]{{reset}} GitHub CLI not available. Cannot verify CI status.\n'
-        printf '{{yellow}}[WARN]{{reset}} MANUALLY verify CI passed before pushing tag!\n'
+    if ! command -v gh &> /dev/null; then
+        printf '{{red}}[ERR]{{reset}}  GitHub CLI (gh) is required.\n'
+        printf '{{red}}[ERR]{{reset}}  Cannot create tag without verifying CI status.\n'
+        printf '{{cyan}}[INFO]{{reset}} Install: https://cli.github.com/\n'
+        exit 1
     fi
 
-    printf '{{cyan}}[INFO]{{reset}} Creating tag v{{version}}...\n'
+    HEAD_SHA=$(git rev-parse HEAD | cut -c1-7)
+    FAILED=0
+
+    # Check ALL workflow types (not just the most recent run!)
+    for WORKFLOW in "CI" "Security Audit" "Benchmarks"; do
+        STATUS=$(gh run list --branch main --workflow="${WORKFLOW}" --limit 1 --json status,conclusion,headSha --jq '.[0]' 2>/dev/null || echo "{}")
+
+        if [ -z "$STATUS" ] || [ "$STATUS" = "{}" ]; then
+            printf '{{yellow}}[WARN]{{reset}} No runs found for workflow: %s\n' "$WORKFLOW"
+            continue
+        fi
+
+        RUN_STATUS=$(echo "$STATUS" | jq -r '.status // "unknown"')
+        CONCLUSION=$(echo "$STATUS" | jq -r '.conclusion // "unknown"')
+        SHA=$(echo "$STATUS" | jq -r '.headSha // "unknown"' | cut -c1-7)
+
+        if [ "$RUN_STATUS" != "completed" ]; then
+            printf '{{red}}[ERR]{{reset}}  %s: still running. Wait for completion.\n' "$WORKFLOW"
+            FAILED=1
+        elif [ "$CONCLUSION" != "success" ]; then
+            printf '{{red}}[ERR]{{reset}}  %s: failed (%s). Fix before tagging.\n' "$WORKFLOW" "$CONCLUSION"
+            FAILED=1
+        elif [ "$SHA" != "$HEAD_SHA" ]; then
+            printf '{{red}}[ERR]{{reset}}  %s: passed on %s but HEAD is %s. Push and wait for CI.\n' "$WORKFLOW" "$SHA" "$HEAD_SHA"
+            FAILED=1
+        else
+            printf '{{green}}[OK]{{reset}}   %s: passed (commit %s)\n' "$WORKFLOW" "$SHA"
+        fi
+    done
+
+    if [ $FAILED -ne 0 ]; then
+        printf '\n{{red}}[ERR]{{reset}}  Cannot create tag. Fix ALL workflow failures first.\n'
+        printf '{{cyan}}[INFO]{{reset}} Run: gh run list --branch main\n'
+        exit 1
+    fi
+
+    printf '\n{{cyan}}[INFO]{{reset}} Creating tag v{{version}}...\n'
     git tag -a "v{{version}}" -m "Release v{{version}}"
     printf '{{green}}[OK]{{reset}}   Tag created: v{{version}}\n'
+    printf '\n{{bold}}{{yellow}}⚠️  FINAL CHECK before pushing tag:{{reset}}\n'
+    printf '    1. Confirm version {{version}} is correct\n'
+    printf '    2. Confirm CHANGELOG has entry for v{{version}}\n'
+    printf '    3. Confirm all version references are updated (just version-refs-check)\n'
     printf '\n{{cyan}}[NEXT]{{reset}} Push tag to trigger release: git push origin v{{version}}\n'
+    printf '{{red}}[WARN]{{reset}} Once pushed, the release workflow will publish to crates.io.\n'
+    printf '{{red}}[WARN]{{reset}} DO NOT cancel the workflow mid-flight!\n'
 
 # ============================================================================
 # UTILITIES
