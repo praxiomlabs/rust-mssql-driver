@@ -64,8 +64,11 @@ jobs:
           alert-threshold: '150%'
 
       # Compare against baseline for PRs
+      # Note: This step will fail if gh-pages branch doesn't exist yet.
+      # Once the first commit to main runs, the baseline will be established.
       - name: Compare benchmarks (PR)
         if: github.event_name == 'pull_request'
+        continue-on-error: true  # Allow failure when no baseline exists
         uses: benchmark-action/github-action-benchmark@v1
         with:
           name: Rust Benchmarks
