@@ -50,13 +50,9 @@
 
 use bytes::{Buf, Bytes};
 
-#[cfg(not(feature = "std"))]
-use alloc::string::String;
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
-
 use crate::codec::{read_b_varchar, read_us_varchar};
 use crate::error::ProtocolError;
+use crate::prelude::*;
 
 /// Column flags bit indicating the column is encrypted.
 pub const COLUMN_FLAG_ENCRYPTED: u16 = 0x0800;

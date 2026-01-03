@@ -10,6 +10,7 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 use crate::error::ProtocolError;
+use crate::prelude::*;
 use crate::version::TdsVersion;
 
 /// Pre-login option types.
@@ -366,7 +367,7 @@ impl PreLogin {
                     // Instance name is null-terminated string
                     let instance_data = &data[data_offset..data_offset + length];
                     if let Some(null_pos) = instance_data.iter().position(|&b| b == 0) {
-                        if let Ok(s) = std::str::from_utf8(&instance_data[..null_pos]) {
+                        if let Ok(s) = core::str::from_utf8(&instance_data[..null_pos]) {
                             if !s.is_empty() {
                                 prelogin.instance = Some(s.to_string());
                             }
@@ -393,11 +394,6 @@ impl PreLogin {
         Ok(prelogin)
     }
 }
-
-#[cfg(not(feature = "std"))]
-use alloc::string::String;
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]

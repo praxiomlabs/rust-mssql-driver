@@ -82,8 +82,19 @@
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
 
+// This crate requires heap allocation (String, Vec). When std is disabled,
+// the alloc feature must be enabled to provide these types.
+#[cfg(all(not(feature = "std"), not(feature = "alloc")))]
+compile_error!(
+    "tds-protocol requires either the `std` feature (default) or the `alloc` feature. \
+     Enable at least one: `--features std` or `--features alloc`"
+);
+
 #[cfg(feature = "alloc")]
 extern crate alloc;
+
+// Internal prelude for no_std compatibility - provides String, Vec, Box, etc.
+mod prelude;
 
 pub mod codec;
 pub mod collation;

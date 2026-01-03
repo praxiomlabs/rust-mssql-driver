@@ -18,6 +18,7 @@
 use bytes::{BufMut, Bytes, BytesMut};
 
 use crate::codec::write_utf16_string;
+use crate::prelude::*;
 use crate::version::TdsVersion;
 
 /// LOGIN7 packet header size (fixed portion).
@@ -617,11 +618,6 @@ impl Login7 {
         }
     }
 }
-
-#[cfg(not(feature = "std"))]
-use alloc::string::String;
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]

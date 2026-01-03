@@ -236,7 +236,9 @@ jobs:
           cargo check -p mssql-auth --features azure-keyvault
 
           echo "Testing tds-protocol features..."
-          cargo check -p tds-protocol --no-default-features
+          # Note: tds-protocol requires std OR alloc (heap allocation needed)
+          # Pure no_std without alloc is not supported - see compile_error in lib.rs
+          cargo check -p tds-protocol --no-default-features --features alloc
           cargo check -p tds-protocol --features encoding
           cargo check -p tds-protocol --features alloc
 

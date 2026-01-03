@@ -588,6 +588,43 @@ test-features:
     printf '{{green}}[OK]{{reset}}   Feature matrix tests passed\n'
 
 [group('test')]
+[doc("Test individual feature flags in isolation (mirrors CI feature-flags job)")]
+check-feature-flags:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '\n{{bold}}{{blue}}══════ Feature Flag Isolation Check ══════{{reset}}\n\n'
+
+    printf '{{cyan}}[INFO]{{reset}} Testing mssql-client features...\n'
+    {{cargo}} check -p mssql-client --no-default-features
+    {{cargo}} check -p mssql-client --features chrono
+    {{cargo}} check -p mssql-client --features uuid
+    {{cargo}} check -p mssql-client --features decimal
+    {{cargo}} check -p mssql-client --features json
+    {{cargo}} check -p mssql-client --features otel
+    {{cargo}} check -p mssql-client --features zeroize
+    {{cargo}} check -p mssql-client --features always-encrypted
+    {{cargo}} check -p mssql-client --features encoding
+
+    printf '{{cyan}}[INFO]{{reset}} Testing mssql-auth features...\n'
+    {{cargo}} check -p mssql-auth --no-default-features
+    {{cargo}} check -p mssql-auth --features azure-identity
+    if [[ "{{platform}}" == "linux" ]]; then
+        {{cargo}} check -p mssql-auth --features integrated-auth
+    fi
+    {{cargo}} check -p mssql-auth --features zeroize
+    {{cargo}} check -p mssql-auth --features always-encrypted
+    {{cargo}} check -p mssql-auth --features azure-keyvault
+
+    printf '{{cyan}}[INFO]{{reset}} Testing tds-protocol features...\n'
+    # Note: tds-protocol requires std OR alloc (heap allocation needed)
+    # Pure no_std without alloc is not supported - see compile_error in lib.rs
+    {{cargo}} check -p tds-protocol --no-default-features --features alloc
+    {{cargo}} check -p tds-protocol --features encoding
+    {{cargo}} check -p tds-protocol --features alloc
+
+    printf '{{green}}[OK]{{reset}}   All feature flags validated\n'
+
+[group('test')]
 [doc("Test zeroize feature (security-critical memory wiping)")]
 test-zeroize:
     #!/usr/bin/env bash
@@ -1483,7 +1520,7 @@ typos:
 
 [group('release')]
 [doc("Prepare for release (validates ALL features - REQUIRED before tagging)")]
-release-check: ci-release-all wip-check panic-audit version-sync typos machete metadata-check url-check
+release-check: ci-release-all check-feature-flags wip-check panic-audit version-sync typos machete metadata-check url-check
     #!/usr/bin/env bash
     set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Release Validation ══════{{reset}}\n\n'

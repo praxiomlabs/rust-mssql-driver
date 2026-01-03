@@ -31,6 +31,7 @@ use bytes::{Buf, BufMut, Bytes};
 
 use crate::codec::{read_b_varchar, read_us_varchar};
 use crate::error::ProtocolError;
+use crate::prelude::*;
 use crate::types::TypeId;
 
 /// Token type identifier.
@@ -2327,15 +2328,6 @@ impl TokenParser {
         self.position = 0;
     }
 }
-
-// =============================================================================
-// no_std support
-// =============================================================================
-
-#[cfg(not(feature = "std"))]
-use alloc::string::String;
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 // =============================================================================
 // Tests

@@ -5,6 +5,8 @@
 
 use bytes::{Buf, BufMut};
 
+use crate::prelude::*;
+
 /// Read a length-prefixed UTF-16LE string.
 ///
 /// The format is: 1-byte length (in characters) followed by UTF-16LE bytes.
@@ -87,11 +89,6 @@ pub fn read_null_terminated_ascii(src: &mut impl Buf) -> Option<String> {
 pub fn utf16_byte_len(s: &str) -> usize {
     s.encode_utf16().count() * 2
 }
-
-#[cfg(not(feature = "std"))]
-use alloc::string::String;
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
