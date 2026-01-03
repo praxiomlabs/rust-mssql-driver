@@ -435,6 +435,53 @@ fn should_[expected_behavior]_when_[condition]() {
 - All bug fixes should include a regression test
 - Property tests for encoding/decoding
 
+### Test Patterns for Database Drivers
+
+This project uses specific patterns for tests and documentation examples:
+
+#### Integration Tests with `#[ignore]`
+
+Tests that require a live SQL Server are marked with `#[ignore = "Requires SQL Server"]`:
+
+```rust
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_query_execution() {
+    // This test requires SQL Server to be running
+}
+```
+
+These tests:
+- Run automatically in CI (with Docker SQL Server)
+- Are skipped locally unless you run `cargo test -- --ignored`
+- Can be run locally with `just sql-server-start` first
+
+#### Doc Examples with `rust,ignore`
+
+Documentation examples that require async runtime or SQL Server use `rust,ignore`:
+
+```rust
+/// Execute a query against the database.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// let mut client = Client::connect(config).await?;
+/// let rows = client.query("SELECT 1", &[]).await?;
+/// ```
+pub async fn query(&mut self, sql: &str) -> Result<QueryResult, Error> {
+    // ...
+}
+```
+
+Why `ignore`?
+- **Async context**: Examples need `#[tokio::main]` or async runtime
+- **SQL Server connection**: Examples would fail without a database
+- **Illustrative**: The code shows usage patterns, not runnable tests
+
+This is standard practice for database driver documentation. The examples are
+syntactically checked by `cargo doc` but not executed as tests.
+
 ## Documentation
 
 ### Doc Comments
