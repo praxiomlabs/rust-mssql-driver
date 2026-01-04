@@ -94,7 +94,7 @@ Server=hostname,port;Database=dbname;User Id=user;Password=pass;Encrypt=strict;
 | `Database` | `Initial Catalog` | Database name |
 | `User Id` | `UID`, `User` | SQL authentication username |
 | `Password` | `PWD` | SQL authentication password |
-| `Encrypt` | | `true`, `false`, `strict` (TDS 8.0) |
+| `Encrypt` | | `true`, `false`, `strict`, `no_tls` |
 | `TrustServerCertificate` | | Skip certificate validation (dev only) |
 | `TDSVersion` | `ProtocolVersion` | TDS protocol version: `7.3`, `7.3A`, `7.3B`, `7.4`, `8.0` |
 | `Application Name` | | Application identifier |

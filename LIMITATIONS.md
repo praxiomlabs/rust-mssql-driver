@@ -165,6 +165,26 @@ let config = Config::from_connection_string(
 
 **Note:** While TDS 7.3 is supported, SQL Server 2008/2008 R2 reached end of extended support. Consider upgrading when possible.
 
+**TLS Compatibility:**
+
+Legacy SQL Server instances (2012 and earlier) may only support TLS 1.0/1.1. Since this driver uses rustls (which requires TLS 1.2+), encrypted connections to these servers will fail with a TLS handshake error.
+
+For legacy servers that cannot be upgraded, use the `no_tls` option to disable encryption entirely:
+
+```rust
+// Connection string
+let config = Config::from_connection_string(
+    "Server=legacy-server;User Id=sa;Password=secret;Encrypt=no_tls"
+)?;
+
+// Builder API
+let config = Config::new()
+    .host("legacy-server")
+    .no_tls(true);
+```
+
+⚠️ **Security Warning:** `no_tls` transmits credentials and data in plaintext. Only use on isolated, trusted networks with legacy SQL Server instances that cannot support TLS 1.2+.
+
 ---
 
 ### SQL Server 2005 and Earlier (TDS 7.2 and Earlier)

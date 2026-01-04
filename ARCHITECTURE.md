@@ -356,7 +356,7 @@ Server=tcp:hostname,port;Database=dbname;User Id=user;Password=pass;Encrypt=stri
 | `Database` | `Initial Catalog` | Database name |
 | `User Id` | `UID`, `User` | SQL authentication username |
 | `Password` | `PWD` | SQL authentication password |
-| `Encrypt` | | `true`, `false`, `strict` (TDS 8.0) |
+| `Encrypt` | | `true`, `false`, `strict`, `no_tls` |
 | `TrustServerCertificate` | | Skip certificate validation |
 | `Authentication` | | `SqlPassword`, `ActiveDirectoryPassword`, `ActiveDirectoryManagedIdentity`, `ActiveDirectoryServicePrincipal` |
 | `Application Name` | | Application identifier |

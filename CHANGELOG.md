@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Encrypt=no_tls` connection string option to disable TLS entirely for legacy SQL Server instances
+- `Config::no_tls()` builder method for programmatic configuration
+- `SqlServerVersion` type for proper SQL Server product version representation
+
+### Fixed
+
+- PreLogin VERSION field now correctly identified as SQL Server product version, not TDS protocol version
+- Logging now shows correct product names (e.g., "SQL Server 2012") instead of "Unknown SQL Server version"
+
 ## [0.5.1] - 2026-01-03
 
 ### Added
