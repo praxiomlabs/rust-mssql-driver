@@ -339,7 +339,7 @@ pub struct Config {
     /// - All traffic including login credentials is unencrypted
     ///
     /// **Do not use in production without understanding the security implications.**
-    pub danger_plaintext: bool,
+    pub no_tls: bool,
 
     /// Redirect handling configuration (for Azure SQL).
     pub redirect: RedirectConfig,
@@ -382,8 +382,8 @@ impl Default for Config {
             trust_server_certificate: false,
             instance: None,
             mars: false,
-            encrypt: true,           // Default to encrypted for security
-            danger_plaintext: false, // Never plaintext by default
+            encrypt: true, // Default to encrypted for security
+            no_tls: false, // Never plaintext by default
             redirect: RedirectConfig::default(),
             retry: RetryPolicy::default(),
             timeouts,
@@ -479,28 +479,28 @@ impl Config {
                         || value == "1";
                 }
                 "encrypt" => {
-                    // Handle encryption levels: strict, true, false, yes, no, 1, 0, DANGER_PLAINTEXT
+                    // Handle encryption levels: strict, true, false, yes, no, 1, 0, no_tls
                     if value.eq_ignore_ascii_case("strict") {
                         config.strict_mode = true;
                         config.encrypt = true;
-                        config.danger_plaintext = false;
-                    } else if value.eq_ignore_ascii_case("DANGER_PLAINTEXT") {
+                        config.no_tls = false;
+                    } else if value.eq_ignore_ascii_case("no_tls") {
                         // Tiberius-compatible option for truly unencrypted connections.
                         // This is for legacy SQL Server instances that don't support TLS 1.2+.
-                        config.danger_plaintext = true;
+                        config.no_tls = true;
                         config.encrypt = false;
                     } else if value.eq_ignore_ascii_case("true")
                         || value.eq_ignore_ascii_case("yes")
                         || value == "1"
                     {
                         config.encrypt = true;
-                        config.danger_plaintext = false;
+                        config.no_tls = false;
                     } else if value.eq_ignore_ascii_case("false")
                         || value.eq_ignore_ascii_case("no")
                         || value == "0"
                     {
                         config.encrypt = false;
-                        config.danger_plaintext = false;
+                        config.no_tls = false;
                     }
                 }
                 "multipleactiveresultsets" | "mars" => {
@@ -674,17 +674,17 @@ impl Config {
     /// ```rust,ignore
     /// // Connection string (Tiberius-compatible)
     /// let config = Config::from_connection_string(
-    ///     "Server=legacy-server;User Id=sa;Password=secret;Encrypt=DANGER_PLAINTEXT"
+    ///     "Server=legacy-server;User Id=sa;Password=secret;Encrypt=no_tls"
     /// )?;
     ///
     /// // Builder API
     /// let config = Config::new()
     ///     .host("legacy-server")
-    ///     .danger_plaintext(true);
+    ///     .no_tls(true);
     /// ```
     #[must_use]
-    pub fn danger_plaintext(mut self, enabled: bool) -> Self {
-        self.danger_plaintext = enabled;
+    pub fn no_tls(mut self, enabled: bool) -> Self {
+        self.no_tls = enabled;
         if enabled {
             self.encrypt = false;
         }
@@ -1017,40 +1017,38 @@ mod tests {
     }
 
     #[test]
-    fn test_connection_string_danger_plaintext() {
-        // DANGER_PLAINTEXT should disable TLS entirely
-        let config =
-            Config::from_connection_string("Server=legacy;Encrypt=DANGER_PLAINTEXT;").unwrap();
-        assert!(config.danger_plaintext);
+    fn test_connection_string_no_tls() {
+        // no_tls should disable TLS entirely
+        let config = Config::from_connection_string("Server=legacy;Encrypt=no_tls;").unwrap();
+        assert!(config.no_tls);
         assert!(!config.encrypt);
         assert!(!config.strict_mode);
 
         // Case insensitive
-        let config =
-            Config::from_connection_string("Server=legacy;Encrypt=danger_plaintext;").unwrap();
-        assert!(config.danger_plaintext);
+        let config = Config::from_connection_string("Server=legacy;Encrypt=no_tls;").unwrap();
+        assert!(config.no_tls);
 
-        // Encrypt=true should disable danger_plaintext
+        // Encrypt=true should disable no_tls
         let config = Config::from_connection_string("Server=localhost;Encrypt=true;").unwrap();
-        assert!(!config.danger_plaintext);
+        assert!(!config.no_tls);
         assert!(config.encrypt);
 
-        // Encrypt=strict should disable danger_plaintext
+        // Encrypt=strict should disable no_tls
         let config = Config::from_connection_string("Server=localhost;Encrypt=strict;").unwrap();
-        assert!(!config.danger_plaintext);
+        assert!(!config.no_tls);
         assert!(config.encrypt);
         assert!(config.strict_mode);
     }
 
     #[test]
-    fn test_danger_plaintext_builder() {
+    fn test_no_tls_builder() {
         // Builder method
-        let config = Config::new().danger_plaintext(true);
-        assert!(config.danger_plaintext);
+        let config = Config::new().no_tls(true);
+        assert!(config.no_tls);
         assert!(!config.encrypt);
 
         // Disable
-        let config = Config::new().danger_plaintext(true).danger_plaintext(false);
-        assert!(!config.danger_plaintext);
+        let config = Config::new().no_tls(true).no_tls(false);
+        assert!(!config.no_tls);
     }
 }

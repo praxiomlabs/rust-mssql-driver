@@ -230,10 +230,10 @@ impl Client<Disconnected> {
 
         // Build PreLogin packet
         // Determine client encryption level based on configuration
-        let client_encryption = if config.danger_plaintext {
-            // DANGER_PLAINTEXT: Completely disable TLS
+        let client_encryption = if config.no_tls {
+            // no_tls: Completely disable TLS
             tracing::warn!(
-                "⚠️  DANGER_PLAINTEXT mode enabled. Connection will be UNENCRYPTED. \
+                "⚠️  no_tls mode enabled. Connection will be UNENCRYPTED. \
                  Credentials and data will be transmitted in plaintext. \
                  This should only be used for development/testing with legacy SQL Server."
             );
