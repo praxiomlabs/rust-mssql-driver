@@ -22,6 +22,8 @@ Comprehensive guide for releasing new versions of rust-mssql-driver to crates.io
 
 6. **NEVER cancel a release workflow mid-publish** — If you cancel after some crates are published, you'll have a partial release requiring manual recovery. Either let it complete or don't start it.
 
+7. **NEVER commit directly to main during releases** — Use a release branch. Batch ALL release prep into ONE commit. Push ONCE when ready. Multiple small commits to main trigger CI repeatedly (wasting resources) and create messy git history.
+
 ### The v0.2.1 Incident (Cautionary Tale)
 
 During the v0.2.1 release, we:
@@ -76,24 +78,125 @@ git push origin vX.Y.Z      # Triggers automated publish
 
 ## Table of Contents
 
-1. [Version Numbering](#version-numbering)
-2. [Crate Dependency Graph](#crate-dependency-graph)
-3. [Pre-Release Checklist](#pre-release-checklist)
-4. [Feature-Specific Testing](#feature-specific-testing)
-5. [Release Workflow](#release-workflow)
-6. [Manual Publishing](#manual-publishing)
-7. [Post-Release Verification](#post-release-verification)
-8. [CI Automation Coverage](#ci-automation-coverage)
-9. [CI Parity](#ci-parity)
-10. [Justfile Recipe Reference](#justfile-recipe-reference)
-11. [Troubleshooting](#troubleshooting)
-12. [Platform-Specific Notes](#platform-specific-notes)
-13. [Security Incident Response](#security-incident-response)
-14. [SBOM Generation](#sbom-generation)
-15. [Lessons Learned](#lessons-learned)
-16. [Release Checklist Template](#release-checklist-template)
-17. [Manual Recovery Procedures](#manual-recovery-procedures)
-18. [Additional Resources](#additional-resources)
+1. [Git Hygiene Protocol](#git-hygiene-protocol)
+2. [Version Numbering](#version-numbering)
+3. [Crate Dependency Graph](#crate-dependency-graph)
+4. [Pre-Release Checklist](#pre-release-checklist)
+5. [Feature-Specific Testing](#feature-specific-testing)
+6. [Release Workflow](#release-workflow)
+7. [Manual Publishing](#manual-publishing)
+8. [Post-Release Verification](#post-release-verification)
+9. [CI Automation Coverage](#ci-automation-coverage)
+10. [CI Parity](#ci-parity)
+11. [Justfile Recipe Reference](#justfile-recipe-reference)
+12. [Troubleshooting](#troubleshooting)
+13. [Platform-Specific Notes](#platform-specific-notes)
+14. [Security Incident Response](#security-incident-response)
+15. [SBOM Generation](#sbom-generation)
+16. [Lessons Learned](#lessons-learned)
+17. [Release Checklist Template](#release-checklist-template)
+18. [Manual Recovery Procedures](#manual-recovery-procedures)
+19. [Additional Resources](#additional-resources)
+
+---
+
+## Git Hygiene Protocol
+
+**CRITICAL**: Every push to `main` triggers CI workflows. This costs money and time. Messy commit history is unprofessional. Follow these rules strictly.
+
+### The Golden Rules
+
+1. **Use a release branch** — Never commit release prep directly to main
+2. **Batch everything into ONE commit** — Version bump + CHANGELOG + doc updates = 1 commit
+3. **Push ONCE when ready** — Complete ALL checks locally before pushing
+4. **Squash before merging** — The release branch becomes a single commit on main
+
+### The Release Branch Workflow
+
+```bash
+# 1. Create release branch
+git checkout -b release/vX.Y.Z
+
+# 2. Make ALL changes locally (version bump, CHANGELOG, doc updates)
+#    - Edit Cargo.toml version
+#    - Update CHANGELOG.md
+#    - Update any version references in docs
+#    - Run just version-refs-check to verify
+
+# 3. Run ALL checks locally BEFORE any push
+just release-check        # Full validation
+just ci-all               # Full CI simulation
+
+# 4. Commit everything as ONE commit
+git add -A
+git commit -m "chore: release vX.Y.Z"
+
+# 5. Push the branch ONCE (triggers CI on branch, not main)
+git push -u origin release/vX.Y.Z
+
+# 6. Wait for CI to pass on the branch
+gh run watch
+
+# 7. Squash-merge to main (creates ONE commit on main)
+gh pr create --title "Release vX.Y.Z" --body "Release prep"
+gh pr merge --squash --delete-branch
+
+# 8. Only NOW tag and release
+git checkout main && git pull
+just tag
+git push origin vX.Y.Z
+```
+
+### What NOT To Do
+
+**BAD** (v0.5.1 pattern - DON'T DO THIS):
+```bash
+# Commit 1: version bump
+git commit -m "chore: bump version"
+git push origin main              # ← Triggers CI
+
+# Commit 2: changelog
+git commit -m "docs: update changelog"
+git push origin main              # ← Triggers CI again
+
+# Commit 3: fix something
+git commit -m "fix: typo"
+git push origin main              # ← Triggers CI again
+
+# Commit 4: fix something else
+git commit -m "fix: another thing"
+git push origin main              # ← Triggers CI AGAIN
+
+# Result: 4 CI runs, messy history, wasted resources
+```
+
+**GOOD** (proper workflow):
+```bash
+git checkout -b release/v0.5.2
+# ... make ALL changes ...
+just release-check                # Local validation
+git add -A
+git commit -m "chore: release v0.5.2"
+git push -u origin release/v0.5.2 # ← Only 1 CI run on branch
+# ... wait for CI, then squash-merge ...
+# Result: 1 clean commit on main, 1 CI run
+```
+
+### Why This Matters
+
+| Bad Pattern | Cost |
+|-------------|------|
+| Push after every small change | Each push = CI run = compute costs |
+| Multiple commits for one release | Messy git history, hard to bisect |
+| Committing directly to main | No review opportunity, no PR artifacts |
+| Fixing things after pushing | More commits, more CI runs, more mess |
+
+### Quick Reference
+
+```
+✅ DO:  release branch → batch changes → local checks → ONE push → squash-merge
+❌ DON'T: commit → push → commit → push → commit → push (directly to main)
+```
 
 ---
 
