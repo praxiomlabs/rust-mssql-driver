@@ -321,6 +321,26 @@ pub struct Config {
     /// When false, encryption is used only if the server requires it.
     pub encrypt: bool,
 
+    /// Disable TLS entirely and connect with plaintext.
+    ///
+    /// **⚠️ SECURITY WARNING:** This completely disables TLS/SSL encryption.
+    /// Credentials and data will be transmitted in plaintext. Only use this
+    /// for development/testing on trusted networks with legacy SQL Server
+    /// instances that don't support modern TLS versions.
+    ///
+    /// This option exists for compatibility with legacy SQL Server versions
+    /// (2008 and earlier) that may only support TLS 1.0/1.1, which modern
+    /// TLS libraries (like rustls) don't support for security reasons.
+    ///
+    /// When `true`:
+    /// - Overrides the `encrypt` setting
+    /// - Sends `ENCRYPT_NOT_SUP` in PreLogin
+    /// - No TLS handshake occurs
+    /// - All traffic including login credentials is unencrypted
+    ///
+    /// **Do not use in production without understanding the security implications.**
+    pub danger_plaintext: bool,
+
     /// Redirect handling configuration (for Azure SQL).
     pub redirect: RedirectConfig,
 
@@ -362,7 +382,8 @@ impl Default for Config {
             trust_server_certificate: false,
             instance: None,
             mars: false,
-            encrypt: true, // Default to encrypted for security
+            encrypt: true,           // Default to encrypted for security
+            danger_plaintext: false, // Never plaintext by default
             redirect: RedirectConfig::default(),
             retry: RetryPolicy::default(),
             timeouts,
@@ -458,20 +479,28 @@ impl Config {
                         || value == "1";
                 }
                 "encrypt" => {
-                    // Handle encryption levels: strict, true, false, yes, no, 1, 0
+                    // Handle encryption levels: strict, true, false, yes, no, 1, 0, DANGER_PLAINTEXT
                     if value.eq_ignore_ascii_case("strict") {
                         config.strict_mode = true;
                         config.encrypt = true;
+                        config.danger_plaintext = false;
+                    } else if value.eq_ignore_ascii_case("DANGER_PLAINTEXT") {
+                        // Tiberius-compatible option for truly unencrypted connections.
+                        // This is for legacy SQL Server instances that don't support TLS 1.2+.
+                        config.danger_plaintext = true;
+                        config.encrypt = false;
                     } else if value.eq_ignore_ascii_case("true")
                         || value.eq_ignore_ascii_case("yes")
                         || value == "1"
                     {
                         config.encrypt = true;
+                        config.danger_plaintext = false;
                     } else if value.eq_ignore_ascii_case("false")
                         || value.eq_ignore_ascii_case("no")
                         || value == "0"
                     {
                         config.encrypt = false;
+                        config.danger_plaintext = false;
                     }
                 }
                 "multipleactiveresultsets" | "mars" => {
@@ -616,6 +645,49 @@ impl Config {
     #[must_use]
     pub fn encrypt(mut self, enabled: bool) -> Self {
         self.encrypt = enabled;
+        self
+    }
+
+    /// Disable TLS entirely and connect with plaintext (Tiberius-compatible).
+    ///
+    /// **⚠️ SECURITY WARNING:** This completely disables TLS/SSL encryption.
+    /// Credentials and all data will be transmitted in plaintext over the network.
+    ///
+    /// # When to use this
+    ///
+    /// This option exists for compatibility with legacy SQL Server versions
+    /// (2008 and earlier) that may only support TLS 1.0/1.1. Modern TLS libraries
+    /// like rustls require TLS 1.2 or higher for security reasons, making it
+    /// impossible to establish encrypted connections to these older servers.
+    ///
+    /// # Security implications
+    ///
+    /// When enabled:
+    /// - Login credentials are sent in plaintext
+    /// - All query data is transmitted without encryption
+    /// - Network traffic can be intercepted and read by attackers
+    ///
+    /// **Only use this for development/testing on isolated, trusted networks.**
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Connection string (Tiberius-compatible)
+    /// let config = Config::from_connection_string(
+    ///     "Server=legacy-server;User Id=sa;Password=secret;Encrypt=DANGER_PLAINTEXT"
+    /// )?;
+    ///
+    /// // Builder API
+    /// let config = Config::new()
+    ///     .host("legacy-server")
+    ///     .danger_plaintext(true);
+    /// ```
+    #[must_use]
+    pub fn danger_plaintext(mut self, enabled: bool) -> Self {
+        self.danger_plaintext = enabled;
+        if enabled {
+            self.encrypt = false;
+        }
         self
     }
 
@@ -942,5 +1014,43 @@ mod tests {
 
         let result = Config::from_connection_string("Server=localhost;TDSVersion=9.0;");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_connection_string_danger_plaintext() {
+        // DANGER_PLAINTEXT should disable TLS entirely
+        let config =
+            Config::from_connection_string("Server=legacy;Encrypt=DANGER_PLAINTEXT;").unwrap();
+        assert!(config.danger_plaintext);
+        assert!(!config.encrypt);
+        assert!(!config.strict_mode);
+
+        // Case insensitive
+        let config =
+            Config::from_connection_string("Server=legacy;Encrypt=danger_plaintext;").unwrap();
+        assert!(config.danger_plaintext);
+
+        // Encrypt=true should disable danger_plaintext
+        let config = Config::from_connection_string("Server=localhost;Encrypt=true;").unwrap();
+        assert!(!config.danger_plaintext);
+        assert!(config.encrypt);
+
+        // Encrypt=strict should disable danger_plaintext
+        let config = Config::from_connection_string("Server=localhost;Encrypt=strict;").unwrap();
+        assert!(!config.danger_plaintext);
+        assert!(config.encrypt);
+        assert!(config.strict_mode);
+    }
+
+    #[test]
+    fn test_danger_plaintext_builder() {
+        // Builder method
+        let config = Config::new().danger_plaintext(true);
+        assert!(config.danger_plaintext);
+        assert!(!config.encrypt);
+
+        // Disable
+        let config = Config::new().danger_plaintext(true).danger_plaintext(false);
+        assert!(!config.danger_plaintext);
     }
 }

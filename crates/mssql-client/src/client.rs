@@ -229,8 +229,16 @@ impl Client<Disconnected> {
         tracing::debug!("using TDS 7.x flow (PreLogin first)");
 
         // Build PreLogin packet
-        // Use EncryptionLevel::On if client wants encryption, Off otherwise
-        let client_encryption = if config.encrypt {
+        // Determine client encryption level based on configuration
+        let client_encryption = if config.danger_plaintext {
+            // DANGER_PLAINTEXT: Completely disable TLS
+            tracing::warn!(
+                "⚠️  DANGER_PLAINTEXT mode enabled. Connection will be UNENCRYPTED. \
+                 Credentials and data will be transmitted in plaintext. \
+                 This should only be used for development/testing with legacy SQL Server."
+            );
+            EncryptionLevel::NotSupported
+        } else if config.encrypt {
             EncryptionLevel::On
         } else {
             EncryptionLevel::Off
