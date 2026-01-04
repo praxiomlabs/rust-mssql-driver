@@ -11,7 +11,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 use crate::error::ProtocolError;
 use crate::prelude::*;
-use crate::version::TdsVersion;
+use crate::version::{SqlServerVersion, TdsVersion};
 
 /// Pre-login option types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,12 +93,34 @@ impl EncryptionLevel {
 }
 
 /// Pre-login message builder and parser.
+///
+/// This struct is used for both client requests and server responses:
+/// - **Client → Server**: Set `version` to the requested TDS version
+/// - **Server → Client**: `server_version` contains the SQL Server product version
+///
+/// Note: The VERSION field has different semantics in each direction:
+/// - Client sends: TDS protocol version (e.g., 7.4)
+/// - Server sends: SQL Server product version (e.g., 13.0.6300 for SQL Server 2016)
 #[derive(Debug, Clone, Default)]
 pub struct PreLogin {
-    /// TDS version.
+    /// TDS version (client request).
+    ///
+    /// This is the TDS protocol version the client requests. When sending a
+    /// PreLogin, set this to the desired TDS version.
     pub version: TdsVersion,
-    /// Sub-build version.
+
+    /// SQL Server product version (server response).
+    ///
+    /// When decoding a PreLogin response from the server, this contains the
+    /// SQL Server product version (e.g., 13.0.6300 for SQL Server 2016).
+    /// This is NOT the TDS version - the actual TDS version is negotiated
+    /// in the LOGINACK token after login.
+    pub server_version: Option<SqlServerVersion>,
+
+    /// Sub-build version (legacy, now part of server_version).
+    #[deprecated(since = "0.5.2", note = "Use server_version.sub_build instead")]
     pub sub_build: u16,
+
     /// Encryption level.
     pub encryption: EncryptionLevel,
     /// Instance name (for named instances).
@@ -127,9 +149,11 @@ pub struct TraceId {
 impl PreLogin {
     /// Create a new pre-login message with default values.
     #[must_use]
+    #[allow(deprecated)] // sub_build is deprecated but we need to initialize it
     pub fn new() -> Self {
         Self {
             version: TdsVersion::V7_4,
+            server_version: None,
             sub_build: 0,
             encryption: EncryptionLevel::Required,
             instance: None,
@@ -171,6 +195,7 @@ impl PreLogin {
 
     /// Encode the pre-login message to bytes.
     #[must_use]
+    #[allow(deprecated)] // sub_build is deprecated but we still encode it
     pub fn encode(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(256);
 
@@ -339,9 +364,16 @@ impl PreLogin {
                 continue;
             }
 
+            #[allow(deprecated)] // We still populate sub_build for backward compatibility
             match option {
-                PreLoginOption::Version if length >= 6 => {
-                    // Per MS-TDS: UL_VERSION is 4 bytes big-endian, US_SUBBUILD is 2 bytes little-endian
+                PreLoginOption::Version if length >= 4 => {
+                    // Per MS-TDS 2.2.6.4: The server sends its SQL Server product version
+                    // in the VERSION field, NOT the TDS protocol version.
+                    //
+                    // Format: UL_VERSION (4 bytes big-endian) + US_SUBBUILD (2 bytes little-endian)
+                    // UL_VERSION contains: [major][minor][build_hi][build_lo]
+                    //
+                    // For example, SQL Server 2016 sends 13.0.xxxx (major=13, minor=0)
                     let version_bytes = &data[data_offset..data_offset + 4];
                     let version_raw = u32::from_be_bytes([
                         version_bytes[0],
@@ -349,13 +381,22 @@ impl PreLogin {
                         version_bytes[2],
                         version_bytes[3],
                     ]);
-                    prelogin.version = TdsVersion::new(version_raw);
 
-                    if length >= 6 {
+                    // Extract sub_build if present
+                    let sub_build = if length >= 6 {
                         let sub_build_bytes = &data[data_offset + 4..data_offset + 6];
-                        prelogin.sub_build =
-                            u16::from_le_bytes([sub_build_bytes[0], sub_build_bytes[1]]);
-                    }
+                        u16::from_le_bytes([sub_build_bytes[0], sub_build_bytes[1]])
+                    } else {
+                        0
+                    };
+
+                    // Populate the new SqlServerVersion field (correct semantics)
+                    prelogin.server_version =
+                        Some(SqlServerVersion::from_raw(version_raw, sub_build));
+
+                    // Also set deprecated fields for backward compatibility
+                    prelogin.version = TdsVersion::new(version_raw);
+                    prelogin.sub_build = sub_build;
                 }
                 PreLoginOption::Encryption if length >= 1 => {
                     prelogin.encryption = EncryptionLevel::from_u8(data[data_offset]);

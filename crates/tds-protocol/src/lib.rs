@@ -134,7 +134,7 @@ pub use tvp::{
     encode_tvp_int, encode_tvp_null, encode_tvp_nvarchar, encode_tvp_time, encode_tvp_varbinary,
 };
 pub use types::{ColumnFlags, TypeId, Updateable};
-pub use version::TdsVersion;
+pub use version::{SqlServerVersion, TdsVersion};
 
 // Always Encrypted metadata types
 pub use crypto::{

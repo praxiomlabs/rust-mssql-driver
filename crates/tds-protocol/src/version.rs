@@ -1,4 +1,14 @@
 //! TDS protocol version definitions.
+//!
+//! This module provides types for both TDS protocol versions and SQL Server
+//! product versions. These are distinct concepts:
+//!
+//! - **TDS Version** ([`TdsVersion`]): The wire protocol version (7.0, 7.1, 7.2, 7.3, 7.4, 8.0)
+//! - **SQL Server Version** ([`SqlServerVersion`]): The SQL Server product version (11.0, 12.0, 13.0, etc.)
+//!
+//! During PreLogin, the client sends its requested TDS version, but the server
+//! responds with its SQL Server product version. The actual TDS version is
+//! negotiated in the LOGINACK token.
 
 use core::fmt;
 
@@ -275,6 +285,121 @@ impl From<TdsVersion> for u32 {
     }
 }
 
+/// SQL Server product version.
+///
+/// Represents the SQL Server product version (e.g., 11.0.5058 for SQL Server 2012).
+/// This is distinct from the TDS protocol version - during PreLogin, the server
+/// sends its product version, not the TDS version it will use.
+///
+/// # Wire Format
+///
+/// Per MS-TDS 2.2.6.4, the VERSION option in PreLogin response contains:
+/// - `UL_VERSION` (4 bytes): Major.Minor.Build in format `[major][minor][build_hi][build_lo]`
+/// - `US_SUBBUILD` (2 bytes): Sub-build number
+///
+/// # SQL Server Version Mapping
+///
+/// | Major | SQL Server Version |
+/// |-------|-------------------|
+/// | 8     | SQL Server 2000   |
+/// | 9     | SQL Server 2005   |
+/// | 10    | SQL Server 2008/2008 R2 |
+/// | 11    | SQL Server 2012   |
+/// | 12    | SQL Server 2014   |
+/// | 13    | SQL Server 2016   |
+/// | 14    | SQL Server 2017   |
+/// | 15    | SQL Server 2019   |
+/// | 16    | SQL Server 2022   |
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SqlServerVersion {
+    /// Major version (e.g., 11 for SQL Server 2012)
+    pub major: u8,
+    /// Minor version
+    pub minor: u8,
+    /// Build number
+    pub build: u16,
+    /// Sub-build number
+    pub sub_build: u16,
+}
+
+impl SqlServerVersion {
+    /// Create a new SQL Server version from raw PreLogin bytes.
+    ///
+    /// The PreLogin VERSION field contains 6 bytes:
+    /// - Bytes 0-3: `UL_VERSION` (major, minor, build_hi, build_lo) in big-endian
+    /// - Bytes 4-5: `US_SUBBUILD` in little-endian
+    #[must_use]
+    pub const fn from_prelogin_bytes(version_bytes: [u8; 4], sub_build: u16) -> Self {
+        Self {
+            major: version_bytes[0],
+            minor: version_bytes[1],
+            build: ((version_bytes[2] as u16) << 8) | (version_bytes[3] as u16),
+            sub_build,
+        }
+    }
+
+    /// Create from a raw u32 value (as decoded from PreLogin).
+    #[must_use]
+    pub const fn from_raw(raw: u32, sub_build: u16) -> Self {
+        Self {
+            major: ((raw >> 24) & 0xFF) as u8,
+            minor: ((raw >> 16) & 0xFF) as u8,
+            build: (raw & 0xFFFF) as u16,
+            sub_build,
+        }
+    }
+
+    /// Get the SQL Server product name for this version.
+    #[must_use]
+    pub const fn product_name(&self) -> &'static str {
+        match self.major {
+            8 => "SQL Server 2000",
+            9 => "SQL Server 2005",
+            10 => {
+                // 10.0 = 2008, 10.50 = 2008 R2
+                if self.minor >= 50 {
+                    "SQL Server 2008 R2"
+                } else {
+                    "SQL Server 2008"
+                }
+            }
+            11 => "SQL Server 2012",
+            12 => "SQL Server 2014",
+            13 => "SQL Server 2016",
+            14 => "SQL Server 2017",
+            15 => "SQL Server 2019",
+            16 => "SQL Server 2022",
+            _ => "Unknown SQL Server version",
+        }
+    }
+
+    /// Get the corresponding TDS version for this SQL Server version.
+    ///
+    /// This returns the maximum TDS version supported by this SQL Server version.
+    #[must_use]
+    pub const fn max_tds_version(&self) -> TdsVersion {
+        match self.major {
+            8 => TdsVersion::V7_1,                       // SQL Server 2000
+            9 => TdsVersion::V7_2,                       // SQL Server 2005
+            10 if self.minor >= 50 => TdsVersion::V7_3B, // SQL Server 2008 R2
+            10 => TdsVersion::V7_3A,                     // SQL Server 2008
+            11..=15 => TdsVersion::V7_4,                 // SQL Server 2012-2019
+            16 => TdsVersion::V8_0,                      // SQL Server 2022
+            _ => TdsVersion::V7_4,                       // Default to 7.4 for unknown
+        }
+    }
+}
+
+impl fmt::Display for SqlServerVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}.{}.{}.{}",
+            self.major, self.minor, self.build, self.sub_build
+        )
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -437,5 +562,111 @@ mod tests {
         assert_eq!(TdsVersion::V7_3B.revision_suffix(), Some('B'));
         assert_eq!(TdsVersion::V7_4.revision_suffix(), None);
         assert_eq!(TdsVersion::V8_0.revision_suffix(), None);
+    }
+
+    // SqlServerVersion tests
+
+    #[test]
+    fn test_sql_server_version_from_raw() {
+        // SQL Server 2012: 11.0.5058.0
+        // Raw bytes: [0x0B, 0x00, 0x13, 0xC2] = 0x0B0013C2
+        let v = SqlServerVersion::from_raw(0x0B0013C2, 0);
+        assert_eq!(v.major, 11);
+        assert_eq!(v.minor, 0);
+        assert_eq!(v.build, 0x13C2); // 5058
+        assert_eq!(v.product_name(), "SQL Server 2012");
+    }
+
+    #[test]
+    fn test_sql_server_version_from_prelogin_bytes() {
+        // SQL Server 2016: 13.0.6300.x
+        let v = SqlServerVersion::from_prelogin_bytes([13, 0, 0x18, 0x9C], 2);
+        assert_eq!(v.major, 13);
+        assert_eq!(v.minor, 0);
+        assert_eq!(v.build, 0x189C); // 6300
+        assert_eq!(v.sub_build, 2);
+        assert_eq!(v.product_name(), "SQL Server 2016");
+    }
+
+    #[test]
+    fn test_sql_server_version_product_names() {
+        assert_eq!(
+            SqlServerVersion::from_raw(0x08000000, 0).product_name(),
+            "SQL Server 2000"
+        );
+        assert_eq!(
+            SqlServerVersion::from_raw(0x09000000, 0).product_name(),
+            "SQL Server 2005"
+        );
+        assert_eq!(
+            SqlServerVersion::from_raw(0x0A000000, 0).product_name(),
+            "SQL Server 2008"
+        );
+        assert_eq!(
+            SqlServerVersion::from_raw(0x0A320000, 0).product_name(),
+            "SQL Server 2008 R2"
+        ); // 10.50
+        assert_eq!(
+            SqlServerVersion::from_raw(0x0B000000, 0).product_name(),
+            "SQL Server 2012"
+        );
+        assert_eq!(
+            SqlServerVersion::from_raw(0x0C000000, 0).product_name(),
+            "SQL Server 2014"
+        );
+        assert_eq!(
+            SqlServerVersion::from_raw(0x0D000000, 0).product_name(),
+            "SQL Server 2016"
+        );
+        assert_eq!(
+            SqlServerVersion::from_raw(0x0E000000, 0).product_name(),
+            "SQL Server 2017"
+        );
+        assert_eq!(
+            SqlServerVersion::from_raw(0x0F000000, 0).product_name(),
+            "SQL Server 2019"
+        );
+        assert_eq!(
+            SqlServerVersion::from_raw(0x10000000, 0).product_name(),
+            "SQL Server 2022"
+        );
+    }
+
+    #[test]
+    fn test_sql_server_version_max_tds() {
+        assert_eq!(
+            SqlServerVersion::from_raw(0x08000000, 0).max_tds_version(),
+            TdsVersion::V7_1
+        ); // SQL Server 2000
+        assert_eq!(
+            SqlServerVersion::from_raw(0x09000000, 0).max_tds_version(),
+            TdsVersion::V7_2
+        ); // SQL Server 2005
+        assert_eq!(
+            SqlServerVersion::from_raw(0x0A000000, 0).max_tds_version(),
+            TdsVersion::V7_3A
+        ); // SQL Server 2008
+        assert_eq!(
+            SqlServerVersion::from_raw(0x0A320000, 0).max_tds_version(),
+            TdsVersion::V7_3B
+        ); // SQL Server 2008 R2
+        assert_eq!(
+            SqlServerVersion::from_raw(0x0B000000, 0).max_tds_version(),
+            TdsVersion::V7_4
+        ); // SQL Server 2012
+        assert_eq!(
+            SqlServerVersion::from_raw(0x0D000000, 0).max_tds_version(),
+            TdsVersion::V7_4
+        ); // SQL Server 2016
+        assert_eq!(
+            SqlServerVersion::from_raw(0x10000000, 0).max_tds_version(),
+            TdsVersion::V8_0
+        ); // SQL Server 2022
+    }
+
+    #[test]
+    fn test_sql_server_version_display() {
+        let v = SqlServerVersion::from_raw(0x0D00189C, 2);
+        assert_eq!(format!("{}", v), "13.0.6300.2");
     }
 }
