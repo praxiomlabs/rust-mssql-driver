@@ -160,6 +160,8 @@ pub struct TypeInfo {
     pub scale: Option<u8>,
     /// Collation for string types.
     pub collation: Option<[u8; 5]>,
+    /// TVP type name (e.g., "dbo.IntIdList") for Table-Valued Parameters.
+    pub tvp_type_name: Option<String>,
 }
 
 impl TypeInfo {
@@ -171,6 +173,7 @@ impl TypeInfo {
             precision: None,
             scale: None,
             collation: None,
+            tvp_type_name: None,
         }
     }
 
@@ -182,6 +185,7 @@ impl TypeInfo {
             precision: None,
             scale: None,
             collation: None,
+            tvp_type_name: None,
         }
     }
 
@@ -193,6 +197,7 @@ impl TypeInfo {
             precision: None,
             scale: None,
             collation: None,
+            tvp_type_name: None,
         }
     }
 
@@ -204,6 +209,7 @@ impl TypeInfo {
             precision: None,
             scale: None,
             collation: None,
+            tvp_type_name: None,
         }
     }
 
@@ -215,6 +221,7 @@ impl TypeInfo {
             precision: None,
             scale: None,
             collation: None,
+            tvp_type_name: None,
         }
     }
 
@@ -226,6 +233,7 @@ impl TypeInfo {
             precision: None,
             scale: None,
             collation: None,
+            tvp_type_name: None,
         }
     }
 
@@ -237,6 +245,7 @@ impl TypeInfo {
             precision: None,
             scale: None,
             collation: None,
+            tvp_type_name: None,
         }
     }
 
@@ -249,6 +258,7 @@ impl TypeInfo {
             scale: None,
             // Default collation (Latin1_General_CI_AS equivalent)
             collation: Some([0x09, 0x04, 0xD0, 0x00, 0x34]),
+            tvp_type_name: None,
         }
     }
 
@@ -260,6 +270,7 @@ impl TypeInfo {
             precision: None,
             scale: None,
             collation: Some([0x09, 0x04, 0xD0, 0x00, 0x34]),
+            tvp_type_name: None,
         }
     }
 
@@ -271,6 +282,7 @@ impl TypeInfo {
             precision: None,
             scale: None,
             collation: None,
+            tvp_type_name: None,
         }
     }
 
@@ -282,6 +294,7 @@ impl TypeInfo {
             precision: None,
             scale: None,
             collation: None,
+            tvp_type_name: None,
         }
     }
 
@@ -293,6 +306,7 @@ impl TypeInfo {
             precision: None,
             scale: None,
             collation: None,
+            tvp_type_name: None,
         }
     }
 
@@ -304,6 +318,7 @@ impl TypeInfo {
             precision: None,
             scale: Some(scale),
             collation: None,
+            tvp_type_name: None,
         }
     }
 
@@ -315,6 +330,22 @@ impl TypeInfo {
             precision: Some(precision),
             scale: Some(scale),
             collation: None,
+            tvp_type_name: None,
+        }
+    }
+
+    /// Create type info for a Table-Valued Parameter.
+    ///
+    /// # Arguments
+    /// * `type_name` - The fully qualified table type name (e.g., "dbo.IntIdList")
+    pub fn tvp(type_name: impl Into<String>) -> Self {
+        Self {
+            type_id: 0xF3, // TVP type
+            max_length: None,
+            precision: None,
+            scale: None,
+            collation: None,
+            tvp_type_name: Some(type_name.into()),
         }
     }
 
@@ -665,6 +696,16 @@ impl RpcRequest {
                         let precision = p.type_info.precision.unwrap_or(18);
                         let scale = p.type_info.scale.unwrap_or(0);
                         format!("decimal({}, {})", precision, scale)
+                    }
+                    0xF3 => {
+                        // TVP - Table-Valued Parameter
+                        // Must be declared with the table type name and READONLY
+                        if let Some(ref tvp_name) = p.type_info.tvp_type_name {
+                            format!("{} READONLY", tvp_name)
+                        } else {
+                            // Fallback if type name is missing (shouldn't happen)
+                            "sql_variant".to_string()
+                        }
                     }
                     _ => "sql_variant".to_string(),
                 };

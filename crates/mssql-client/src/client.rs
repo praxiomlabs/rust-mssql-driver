@@ -1101,16 +1101,16 @@ impl<S: ConnectionState> Client<S> {
         // Encode end marker
         encoder.encode_end(&mut buf);
 
-        // Create RPC param with TVP type info
-        // For TVP, we use a special type info that indicates the parameter is a TVP
-        // The type info is encoded as part of the TVP data itself
-        let type_info = RpcTypeInfo {
-            type_id: 0xF3, // TVP type
-            max_length: None,
-            precision: None,
-            scale: None,
-            collation: None,
+        // Build the full TVP type name (schema.TypeName)
+        let full_type_name = if tvp_data.schema.is_empty() {
+            tvp_data.type_name.clone()
+        } else {
+            format!("{}.{}", tvp_data.schema, tvp_data.type_name)
         };
+
+        // Create RPC param with TVP type info
+        // The type info includes the TVP type name for parameter declarations
+        let type_info = RpcTypeInfo::tvp(&full_type_name);
 
         Ok(RpcParam {
             name: name.to_string(),
