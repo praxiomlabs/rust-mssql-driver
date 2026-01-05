@@ -707,7 +707,7 @@ resolver = "2"
 members = ["crates/*", "xtask"]
 
 [workspace.package]
-version = "0.5.1"
+version = "0.5.2"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
@@ -2033,11 +2033,15 @@ msrv:
 
 | SQL Server Version | Supported | Notes |
 |-------------------|-----------|-------|
-| 2016 | ✅ | Minimum supported |
-| 2017 | ✅ | |
-| 2019 | ✅ | |
-| 2022 | ✅ | TDS 8.0 support |
-| 2025 | ✅ | Managed Identity enhancements |
+| 2008 | ✅ | TDS 7.3A, requires `Encrypt=no_tls` |
+| 2008 R2 | ✅ | TDS 7.3B, requires `Encrypt=no_tls` |
+| 2012 | ✅ | TDS 7.4, requires `Encrypt=no_tls` |
+| 2014 | ✅ | TDS 7.4, requires `Encrypt=no_tls` |
+| 2016 | ✅ | TDS 7.4, requires `Encrypt=no_tls` |
+| 2017 | ✅ | TDS 7.4 |
+| 2019 | ✅ | TDS 7.4 |
+| 2022 | ✅ | TDS 7.4/8.0 |
+| 2025 | ✅ | TDS 7.4/8.0, Managed Identity enhancements |
 | Azure SQL Database | ✅ | All authentication methods |
 | Azure SQL Managed Instance | ✅ | All authentication methods |
 

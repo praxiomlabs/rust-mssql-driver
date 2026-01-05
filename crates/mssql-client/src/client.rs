@@ -56,6 +56,10 @@ pub struct Client<S: ConnectionState> {
     /// Per MS-TDS spec, this value must be included in ALL_HEADERS for subsequent
     /// requests within an explicit transaction. 0 indicates auto-commit mode.
     transaction_descriptor: u64,
+    /// Whether this connection needs a reset on next use.
+    /// Set by connection pool on checkin, cleared after first query/execute.
+    /// When true, the RESETCONNECTION flag is set on the first TDS packet.
+    needs_reset: bool,
     /// OpenTelemetry instrumentation context (when otel feature is enabled)
     #[cfg(feature = "otel")]
     instrumentation: InstrumentationContext,
@@ -208,6 +212,7 @@ impl Client<Disconnected> {
             current_database: current_database.clone(),
             statement_cache: StatementCache::with_default_size(),
             transaction_descriptor: 0, // Auto-commit mode initially
+            needs_reset: false,        // Fresh connection, no reset needed
             #[cfg(feature = "otel")]
             instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
                 .with_database(current_database.unwrap_or_default()),
@@ -453,6 +458,7 @@ impl Client<Disconnected> {
                     current_database: current_database.clone(),
                     statement_cache: StatementCache::with_default_size(),
                     transaction_descriptor: 0, // Auto-commit mode initially
+                    needs_reset: false,        // Fresh connection, no reset needed
                     #[cfg(feature = "otel")]
                     instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
                         .with_database(current_database.unwrap_or_default()),
@@ -483,6 +489,7 @@ impl Client<Disconnected> {
                     current_database: current_database.clone(),
                     statement_cache: StatementCache::with_default_size(),
                     transaction_descriptor: 0, // Auto-commit mode initially
+                    needs_reset: false,        // Fresh connection, no reset needed
                     #[cfg(feature = "otel")]
                     instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
                         .with_database(current_database.unwrap_or_default()),
@@ -645,6 +652,7 @@ impl Client<Disconnected> {
                 current_database: current_database.clone(),
                 statement_cache: StatementCache::with_default_size(),
                 transaction_descriptor: 0, // Auto-commit mode initially
+                needs_reset: false,        // Fresh connection, no reset needed
                 #[cfg(feature = "otel")]
                 instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
                     .with_database(current_database.unwrap_or_default()),
@@ -902,26 +910,36 @@ impl<S: ConnectionState> Client<S> {
     /// Uses the client's current transaction descriptor in ALL_HEADERS.
     /// Per MS-TDS spec, when in an explicit transaction, the descriptor
     /// returned by BeginTransaction must be included.
+    ///
+    /// If `needs_reset` is set (from pool return), the RESETCONNECTION flag
+    /// is included in the first packet to reset connection state.
     async fn send_sql_batch(&mut self, sql: &str) -> Result<()> {
         let payload =
             tds_protocol::encode_sql_batch_with_transaction(sql, self.transaction_descriptor);
         let max_packet = self.config.packet_size as usize;
 
+        // Check if we need to reset the connection on this request
+        let reset = self.needs_reset;
+        if reset {
+            self.needs_reset = false; // Clear flag before sending
+            tracing::debug!("sending SQL batch with RESETCONNECTION flag");
+        }
+
         let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         match connection {
             ConnectionHandle::Tls(conn) => {
-                conn.send_message(PacketType::SqlBatch, payload, max_packet)
+                conn.send_message_with_reset(PacketType::SqlBatch, payload, max_packet, reset)
                     .await
                     .map_err(|e| Error::Protocol(e.to_string()))?;
             }
             ConnectionHandle::TlsPrelogin(conn) => {
-                conn.send_message(PacketType::SqlBatch, payload, max_packet)
+                conn.send_message_with_reset(PacketType::SqlBatch, payload, max_packet, reset)
                     .await
                     .map_err(|e| Error::Protocol(e.to_string()))?;
             }
             ConnectionHandle::Plain(conn) => {
-                conn.send_message(PacketType::SqlBatch, payload, max_packet)
+                conn.send_message_with_reset(PacketType::SqlBatch, payload, max_packet, reset)
                     .await
                     .map_err(|e| Error::Protocol(e.to_string()))?;
             }
@@ -933,25 +951,35 @@ impl<S: ConnectionState> Client<S> {
     /// Send an RPC request to the server.
     ///
     /// Uses the client's current transaction descriptor in ALL_HEADERS.
+    ///
+    /// If `needs_reset` is set (from pool return), the RESETCONNECTION flag
+    /// is included in the first packet to reset connection state.
     async fn send_rpc(&mut self, rpc: &RpcRequest) -> Result<()> {
         let payload = rpc.encode_with_transaction(self.transaction_descriptor);
         let max_packet = self.config.packet_size as usize;
+
+        // Check if we need to reset the connection on this request
+        let reset = self.needs_reset;
+        if reset {
+            self.needs_reset = false; // Clear flag before sending
+            tracing::debug!("sending RPC with RESETCONNECTION flag");
+        }
 
         let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         match connection {
             ConnectionHandle::Tls(conn) => {
-                conn.send_message(PacketType::Rpc, payload, max_packet)
+                conn.send_message_with_reset(PacketType::Rpc, payload, max_packet, reset)
                     .await
                     .map_err(|e| Error::Protocol(e.to_string()))?;
             }
             ConnectionHandle::TlsPrelogin(conn) => {
-                conn.send_message(PacketType::Rpc, payload, max_packet)
+                conn.send_message_with_reset(PacketType::Rpc, payload, max_packet, reset)
                     .await
                     .map_err(|e| Error::Protocol(e.to_string()))?;
             }
             ConnectionHandle::Plain(conn) => {
-                conn.send_message(PacketType::Rpc, payload, max_packet)
+                conn.send_message_with_reset(PacketType::Rpc, payload, max_packet, reset)
                     .await
                     .map_err(|e| Error::Protocol(e.to_string()))?;
             }
@@ -2920,6 +2948,29 @@ impl<S: ConnectionState> Client<S> {
 }
 
 impl Client<Ready> {
+    /// Mark this connection as needing a reset on next use.
+    ///
+    /// Called by the connection pool when a connection is returned.
+    /// The next SQL batch or RPC will include the RESETCONNECTION flag
+    /// in the TDS packet header, causing SQL Server to reset connection
+    /// state (temp tables, SET options, transaction isolation level, etc.)
+    /// before executing the command.
+    ///
+    /// This is more efficient than calling `sp_reset_connection` as a
+    /// separate command because it's handled at the TDS protocol level.
+    pub fn mark_needs_reset(&mut self) {
+        self.needs_reset = true;
+    }
+
+    /// Check if this connection needs a reset.
+    ///
+    /// Returns true if `mark_needs_reset()` was called and the reset
+    /// hasn't been performed yet.
+    #[must_use]
+    pub fn needs_reset(&self) -> bool {
+        self.needs_reset
+    }
+
     /// Execute a query and return a streaming result set.
     ///
     /// Per ADR-007, results are streamed by default for memory efficiency.
@@ -3375,6 +3426,7 @@ impl Client<Ready> {
             current_database: self.current_database,
             statement_cache: self.statement_cache,
             transaction_descriptor, // Store the descriptor from server
+            needs_reset: self.needs_reset,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
         })
@@ -3438,6 +3490,7 @@ impl Client<Ready> {
             current_database: self.current_database,
             statement_cache: self.statement_cache,
             transaction_descriptor,
+            needs_reset: self.needs_reset,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
         })
@@ -3711,6 +3764,7 @@ impl Client<InTransaction> {
             current_database: self.current_database,
             statement_cache: self.statement_cache,
             transaction_descriptor: 0, // Reset to auto-commit mode
+            needs_reset: self.needs_reset,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
         })
@@ -3754,6 +3808,7 @@ impl Client<InTransaction> {
             current_database: self.current_database,
             statement_cache: self.statement_cache,
             transaction_descriptor: 0, // Reset to auto-commit mode
+            needs_reset: self.needs_reset,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
         })

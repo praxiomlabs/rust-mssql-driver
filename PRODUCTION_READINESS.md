@@ -109,7 +109,7 @@ This document defines the criteria for declaring rust-mssql-driver production-re
 
 ### 2.5 Performance Tests
 - [x] Benchmark suite with criterion (3 crates have benchmarks)
-- [x] Baseline performance documented (`docs/PERFORMANCE_BASELINES.md`)
+- [x] Baseline performance documented (`docs/BENCHMARKS.md`)
 - [x] CI regression detection (`.github/workflows/benchmarks.yml`)
 
 ---
@@ -132,7 +132,7 @@ This document defines the criteria for declaring rust-mssql-driver production-re
 - [x] Memory allocation patterns (`docs/MEMORY.md`)
 - [x] Operations guide with graceful shutdown (`docs/OPERATIONS.md`)
 - [x] Stress testing guide (`docs/STRESS_TESTING.md`)
-- [x] Performance baselines (`docs/PERFORMANCE_BASELINES.md`)
+- [x] Performance baselines (`docs/BENCHMARKS.md`)
 
 ### 3.3 Security Documentation
 - [x] SECURITY.md with reporting process
@@ -183,7 +183,7 @@ This document defines the criteria for declaring rust-mssql-driver production-re
 ### 5.3 Performance
 - [x] Memory allocation patterns documented (`docs/MEMORY.md`)
 - [x] Stress testing framework (`tests/stress_tests.rs`, `docs/STRESS_TESTING.md`)
-- [x] Performance baselines established (`docs/PERFORMANCE_BASELINES.md`)
+- [x] Performance baselines established (`docs/BENCHMARKS.md`)
 
 ---
 
@@ -213,8 +213,10 @@ This document defines the criteria for declaring rust-mssql-driver production-re
 - [x] SQL Server 2022 (TDS 8.0)
 - [x] SQL Server 2019 (TDS 7.4)
 - [x] SQL Server 2017 (TDS 7.4)
-- [x] SQL Server 2016 (TDS 7.4)
-- [x] SQL Server 2008/2008 R2 (TDS 7.3, v0.4.0+)
+- [x] SQL Server 2016 (TDS 7.4, `Encrypt=no_tls`)
+- [x] SQL Server 2014 (TDS 7.4, `Encrypt=no_tls`)
+- [x] SQL Server 2012 (TDS 7.4, `Encrypt=no_tls`)
+- [x] SQL Server 2008/2008 R2 (TDS 7.3, `Encrypt=no_tls`)
 - [x] Azure SQL Database
 - [x] Azure SQL Managed Instance
 
@@ -293,7 +295,8 @@ The following are documented as known limitations, acceptable for initial releas
 |-----------|-------------|--------|
 | 0.1.0 Release | 2025-12-16 | Complete |
 | 0.5.0 Release | 2026-01-01 | Complete |
-| 0.5.1 Release | 2026-01-03 | In Progress |
+| 0.5.1 Release | 2026-01-03 | Complete |
+| 0.5.2 Release | 2026-01-04 | In Progress |
 | Test Coverage 60% | TBD | In Progress (46%) |
 | Security Audit | TBD | Not Scheduled |
 | 1.0.0 Release | TBD | Blocked |

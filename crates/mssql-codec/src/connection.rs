@@ -159,11 +159,33 @@ where
     }
 
     /// Send a complete message, splitting into multiple packets if needed.
+    ///
+    /// If `reset_connection` is true, the RESETCONNECTION flag is set on the
+    /// first packet. This causes SQL Server to reset connection state (temp
+    /// tables, SET options, isolation level, etc.) before executing the command.
+    /// Per TDS spec, this flag MUST only be set on the first packet of a message.
     pub async fn send_message(
         &mut self,
         packet_type: PacketType,
         payload: Bytes,
         max_packet_size: usize,
+    ) -> Result<(), CodecError> {
+        self.send_message_with_reset(packet_type, payload, max_packet_size, false)
+            .await
+    }
+
+    /// Send a complete message with optional connection reset.
+    ///
+    /// If `reset_connection` is true, the RESETCONNECTION flag is set on the
+    /// first packet. This causes SQL Server to reset connection state (temp
+    /// tables, SET options, isolation level, etc.) before executing the command.
+    /// Per TDS spec, this flag MUST only be set on the first packet of a message.
+    pub async fn send_message_with_reset(
+        &mut self,
+        packet_type: PacketType,
+        payload: Bytes,
+        max_packet_size: usize,
+        reset_connection: bool,
     ) -> Result<(), CodecError> {
         let max_payload = max_packet_size - PACKET_HEADER_SIZE;
         let chunks: Vec<_> = payload.chunks(max_payload).collect();
@@ -172,12 +194,20 @@ where
         let mut writer = self.writer.lock().await;
 
         for (i, chunk) in chunks.into_iter().enumerate() {
+            let is_first = i == 0;
             let is_last = i == total_chunks - 1;
-            let status = if is_last {
+
+            // Build status flags
+            let mut status = if is_last {
                 PacketStatus::END_OF_MESSAGE
             } else {
                 PacketStatus::NORMAL
             };
+
+            // Per TDS spec, RESETCONNECTION must be on the first packet only
+            if is_first && reset_connection {
+                status |= PacketStatus::RESET_CONNECTION;
+            }
 
             let header = PacketHeader::new(packet_type, status, 0);
             let packet = Packet::new(header, BytesMut::from(chunk));

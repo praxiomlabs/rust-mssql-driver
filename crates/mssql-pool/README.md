@@ -102,16 +102,20 @@ println!("Avg checkout time: {:?}", metrics.avg_checkout_time);
 
 ## sp_reset_connection
 
-SQL Server's `sp_reset_connection` resets connection state including:
+When enabled (the default), connections are marked for reset when returned to the pool.
+On the next use, the `RESETCONNECTION` flag is set in the TDS packet header, causing
+SQL Server to reset connection state before executing the command. This includes:
 
 - Clears temporary tables
 - Resets session options (SET statements)
 - Clears open transactions
 - Drops temporary stored procedures
 - Releases locks
-- Resets the current database
+- Resets the current database to the login default
 
-This ensures each checkout receives a clean connection state.
+This is the same mechanism used by ADO.NET and other production SQL Server drivers.
+It's more efficient than calling `sp_reset_connection` as a separate command because
+the reset happens as part of the next request with no additional round-trip.
 
 ## Modules
 

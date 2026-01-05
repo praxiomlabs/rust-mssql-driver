@@ -23,3 +23,6 @@ ths = "ths"
 
 # Hel is part of "Hello" split across chunks in UTF-16 encoding tests
 Hel = "Hel"
+
+# Caf appears in CHANGELOG showing encoding corruption example ("Café" → "Caf�")
+Caf = "Caf"

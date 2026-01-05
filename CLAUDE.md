@@ -8,7 +8,7 @@ A high-performance MS SQL Server driver for Rust that aims to surpass `prisma/ti
 
 ## Goals
 
-1. **First-class TDS 8.0 support** - SQL Server 2022+ strict encryption mode
+1. **Broad TDS support** - TDS 7.3 (SQL Server 2008+) through TDS 8.0 (SQL Server 2022+ strict mode)
 2. **Built-in connection pooling** - Unlike Tiberius which defers to bb8/deadpool
 3. **Type-state pattern** - Compile-time connection state enforcement
 4. **Tokio-native** - No runtime agnosticism; Tokio 1.48+ hard dependency
