@@ -1516,6 +1516,44 @@ impl<S: ConnectionState> Client<S> {
         Ok(crate::row::Row::from_values(columns.to_vec(), values))
     }
 
+    /// Parse money value from buffer and convert to appropriate type.
+    ///
+    /// Money is stored as fixed-point with 4 decimal places.
+    /// - 4 bytes: SMALLMONEY
+    /// - 8 bytes: MONEY
+    fn parse_money_value(buf: &mut &[u8], bytes: usize) -> Result<mssql_types::SqlValue> {
+        use bytes::Buf;
+        use mssql_types::SqlValue;
+
+        if bytes == 0 {
+            return Ok(SqlValue::Null);
+        }
+
+        let cents = match bytes {
+            4 => buf.get_i32_le() as i64,
+            8 => {
+                let high = buf.get_i32_le();
+                let low = buf.get_u32_le();
+                ((high as i64) << 32) | (low as i64)
+            }
+            _ => return Err(Error::Protocol(format!("invalid money length: {bytes}"))),
+        };
+
+        #[cfg(feature = "decimal")]
+        {
+            use rust_decimal::Decimal;
+            Ok(SqlValue::Decimal(Decimal::from_i128_with_scale(
+                cents as i128,
+                4,
+            )))
+        }
+
+        #[cfg(not(feature = "decimal"))]
+        {
+            Ok(SqlValue::Double((cents as f64) / 10000.0))
+        }
+    }
+
     /// Parse a single column value from a buffer based on column metadata.
     fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<mssql_types::SqlValue> {
         use bytes::Buf;
@@ -1575,24 +1613,30 @@ impl<S: ConnectionState> Client<S> {
                 }
                 SqlValue::Double(buf.get_f64_le())
             }
-            TypeId::Money => {
-                if buf.remaining() < 8 {
-                    return Err(Error::Protocol("unexpected EOF reading MONEY".into()));
+
+            // Money types (fixed-point with 4 decimal places)
+            TypeId::Money | TypeId::Money4 | TypeId::MoneyN => {
+                let bytes = match col.type_id {
+                    TypeId::Money => 8,
+                    TypeId::Money4 => 4,
+                    TypeId::MoneyN => {
+                        if buf.remaining() < 1 {
+                            return Err(Error::Protocol(
+                                "unexpected EOF reading MoneyN length".into(),
+                            ));
+                        }
+                        buf.get_u8() as usize
+                    }
+                    _ => unreachable!(),
+                };
+
+                if buf.remaining() < bytes {
+                    return Err(Error::Protocol(format!(
+                        "unexpected EOF reading money data ({bytes} bytes)"
+                    )));
                 }
-                // MONEY is stored as 8 bytes, fixed-point with 4 decimal places
-                let high = buf.get_i32_le();
-                let low = buf.get_u32_le();
-                let cents = ((high as i64) << 32) | (low as i64);
-                let value = (cents as f64) / 10000.0;
-                SqlValue::Double(value)
-            }
-            TypeId::Money4 => {
-                if buf.remaining() < 4 {
-                    return Err(Error::Protocol("unexpected EOF reading SMALLMONEY".into()));
-                }
-                let cents = buf.get_i32_le();
-                let value = (cents as f64) / 10000.0;
-                SqlValue::Double(value)
+
+                Self::parse_money_value(buf, bytes)?
             }
 
             // Variable-length nullable types (IntN, FloatN, etc.)
@@ -1641,30 +1685,7 @@ impl<S: ConnectionState> Client<S> {
                     }
                 }
             }
-            TypeId::MoneyN => {
-                if buf.remaining() < 1 {
-                    return Err(Error::Protocol(
-                        "unexpected EOF reading MoneyN length".into(),
-                    ));
-                }
-                let len = buf.get_u8();
-                match len {
-                    0 => SqlValue::Null,
-                    4 => {
-                        let cents = buf.get_i32_le();
-                        SqlValue::Double((cents as f64) / 10000.0)
-                    }
-                    8 => {
-                        let high = buf.get_i32_le();
-                        let low = buf.get_u32_le();
-                        let cents = ((high as i64) << 32) | (low as i64);
-                        SqlValue::Double((cents as f64) / 10000.0)
-                    }
-                    _ => {
-                        return Err(Error::Protocol(format!("invalid MoneyN length: {len}")));
-                    }
-                }
-            }
+
             // DECIMAL/NUMERIC types (1-byte length prefix)
             TypeId::Decimal | TypeId::Numeric | TypeId::DecimalN | TypeId::NumericN => {
                 if buf.remaining() < 1 {
@@ -2277,7 +2298,7 @@ impl<S: ConnectionState> Client<S> {
     /// on the collation's LCID. Otherwise falls back to UTF-8 lossy conversion.
     #[allow(unused_variables)]
     fn decode_varchar_string(data: &[u8], collation: Option<&Collation>) -> String {
-        // Remove this initial UTF-8 check first. Some non-UTF8 encoding strings incorrectly return Ok(s) when calling std::str::from_utf8 
+        // Remove this initial UTF-8 check first. Some non-UTF8 encoding strings incorrectly return Ok(s) when calling std::str::from_utf8
         //   for example, the GBK-encoded Chinese characters "肖英" would return Ok("Ф?")
         // if let Ok(s) = std::str::from_utf8(data) {
         //     return s.to_owned();
@@ -2501,17 +2522,12 @@ impl<S: ConnectionState> Client<S> {
                 let money_len = if prop_count >= 1 { buf.get_u8() } else { 8 };
                 buf.advance(prop_count.saturating_sub(1));
 
-                if money_len == 4 && data_len >= 4 {
-                    let raw = buf.get_i32_le();
-                    let value = raw as f64 / 10000.0;
-                    Ok(SqlValue::Double(value))
-                } else if data_len >= 8 {
-                    let high = buf.get_i32_le() as i64;
-                    let low = buf.get_u32_le() as i64;
-                    let raw = (high << 32) | low;
-                    let value = raw as f64 / 10000.0;
-                    Ok(SqlValue::Double(value))
+                if money_len == 0 || data_len == 0 {
+                    Ok(SqlValue::Null)
+                } else if (money_len == 4 && data_len >= 4) || (money_len == 8 && data_len >= 8) {
+                    Self::parse_money_value(buf, money_len as usize)
                 } else {
+                    buf.advance(data_len);
                     Ok(SqlValue::Null)
                 }
             }
