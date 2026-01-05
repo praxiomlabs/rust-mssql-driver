@@ -34,14 +34,18 @@ use mssql_client::{Client, Config};
 /// Helper to get test configuration from environment variables.
 fn get_test_config() -> Option<Config> {
     let host = std::env::var("MSSQL_HOST").ok()?;
+    let port = std::env::var("MSSQL_PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(1433);
     let user = std::env::var("MSSQL_USER").unwrap_or_else(|_| "sa".into());
     let password = std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "MyStrongPassw0rd".into());
     let database = std::env::var("MSSQL_DATABASE").unwrap_or_else(|_| "master".into());
     let encrypt = std::env::var("MSSQL_ENCRYPT").unwrap_or_else(|_| "false".into());
 
     let conn_str = format!(
-        "Server={};Database={};User Id={};Password={};TrustServerCertificate=true;Encrypt={}",
-        host, database, user, password, encrypt
+        "Server={},{};Database={};User Id={};Password={};TrustServerCertificate=true;Encrypt={}",
+        host, port, database, user, password, encrypt
     );
 
     Config::from_connection_string(&conn_str).ok()
@@ -64,12 +68,16 @@ async fn test_basic_connection() {
 #[ignore = "Requires SQL Server"]
 async fn test_connection_with_invalid_credentials() {
     let host = std::env::var("MSSQL_HOST").unwrap_or_else(|_| "localhost".into());
+    let port = std::env::var("MSSQL_PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(1433);
     let encrypt = std::env::var("MSSQL_ENCRYPT").unwrap_or_else(|_| "false".into());
 
     let conn_str = format!(
-        "Server={};Database=master;User Id=invalid_user;Password=wrong_password;\
+        "Server={},{};Database=master;User Id=invalid_user;Password=wrong_password;\
          TrustServerCertificate=true;Encrypt={}",
-        host, encrypt
+        host, port, encrypt
     );
 
     let config = Config::from_connection_string(&conn_str).expect("Config should parse");
@@ -82,14 +90,18 @@ async fn test_connection_with_invalid_credentials() {
 #[ignore = "Requires SQL Server"]
 async fn test_connection_to_nonexistent_database() {
     let host = std::env::var("MSSQL_HOST").unwrap_or_else(|_| "localhost".into());
+    let port = std::env::var("MSSQL_PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(1433);
     let user = std::env::var("MSSQL_USER").unwrap_or_else(|_| "sa".into());
     let password = std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "MyStrongPassw0rd".into());
     let encrypt = std::env::var("MSSQL_ENCRYPT").unwrap_or_else(|_| "false".into());
 
     let conn_str = format!(
-        "Server={};Database=nonexistent_db_12345;User Id={};Password={};\
+        "Server={},{};Database=nonexistent_db_12345;User Id={};Password={};\
          TrustServerCertificate=true;Encrypt={}",
-        host, user, password, encrypt
+        host, port, user, password, encrypt
     );
 
     let config = Config::from_connection_string(&conn_str).expect("Config should parse");
@@ -1484,13 +1496,17 @@ async fn test_same_sql_different_params() {
 /// Helper to get config with specific encryption mode
 fn get_config_with_encrypt(encrypt: &str) -> Option<Config> {
     let host = std::env::var("MSSQL_HOST").ok()?;
+    let port = std::env::var("MSSQL_PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(1433);
     let user = std::env::var("MSSQL_USER").unwrap_or_else(|_| "sa".into());
     let password = std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "MyStrongPassw0rd".into());
     let database = std::env::var("MSSQL_DATABASE").unwrap_or_else(|_| "master".into());
 
     let conn_str = format!(
-        "Server={};Database={};User Id={};Password={};TrustServerCertificate=true;Encrypt={}",
-        host, database, user, password, encrypt
+        "Server={},{};Database={};User Id={};Password={};TrustServerCertificate=true;Encrypt={}",
+        host, port, database, user, password, encrypt
     );
 
     Config::from_connection_string(&conn_str).ok()

@@ -168,11 +168,19 @@ async fn test_version_detection() {
         "Should contain Microsoft SQL Server"
     );
 
-    // Check for known version patterns
-    let is_known_version = version_string.contains("2017")
+    // Check for known version patterns (all supported SQL Server versions)
+    let is_known_version = version_string.contains("2008")
+        || version_string.contains("2012")
+        || version_string.contains("2014")
+        || version_string.contains("2016")
+        || version_string.contains("2017")
         || version_string.contains("2019")
         || version_string.contains("2022");
-    assert!(is_known_version, "Should be a known SQL Server version");
+    assert!(
+        is_known_version,
+        "Should be a known SQL Server version (2008+), got: {}",
+        version_string
+    );
 
     client.close().await.expect("Failed to close");
 }
@@ -185,10 +193,10 @@ async fn test_product_version() {
     let mut client = Client::connect(config).await.expect("Failed to connect");
 
     // Use CAST to avoid SQL_VARIANT type issues
+    // Note: ProductMajorVersion returns NULL in SQL Server 2014 RTM, so we parse from ProductVersion
     let rows = client
         .query(
-            "SELECT CAST(SERVERPROPERTY('ProductVersion') AS NVARCHAR(128)) AS Version, \
-                    CAST(SERVERPROPERTY('ProductMajorVersion') AS NVARCHAR(10)) AS Major",
+            "SELECT CAST(SERVERPROPERTY('ProductVersion') AS NVARCHAR(128)) AS Version",
             &[],
         )
         .await
@@ -197,15 +205,22 @@ async fn test_product_version() {
     for result in rows {
         let row = result.expect("Row should be valid");
         let version: String = row.get(0).expect("Should get version");
-        let major: String = row.get(1).expect("Should get major version");
 
-        println!("Product Version: {}, Major: {}", version, major);
+        // Parse major version from ProductVersion string (e.g., "16.0.4225.2" -> 16)
+        let major_num: i32 = version
+            .split('.')
+            .next()
+            .and_then(|s| s.parse().ok())
+            .expect("Should parse major version from ProductVersion");
 
-        // Major version should be 14 (2017), 15 (2019), or 16 (2022)
-        let major_num: i32 = major.parse().expect("Major should be numeric");
+        println!("Product Version: {}, Major: {}", version, major_num);
+
+        // Major version should be 10+ (SQL Server 2008+)
+        // 10 = 2008, 11 = 2012, 12 = 2014, 13 = 2016, 14 = 2017, 15 = 2019, 16 = 2022
         assert!(
-            major_num >= 14,
-            "Should be SQL Server 2017 or later (major >= 14)"
+            major_num >= 10,
+            "Should be SQL Server 2008 or later (major >= 10), got: {}",
+            major_num
         );
     }
 
@@ -562,6 +577,35 @@ async fn test_sql_2017_features() {
     let config = get_test_config().expect("SQL Server config required");
     let mut client = Client::connect(config).await.expect("Failed to connect");
 
+    // Check if we're on 2017+ (major version 14+)
+    let rows = client
+        .query(
+            "SELECT CAST(SERVERPROPERTY('ProductVersion') AS NVARCHAR(128))",
+            &[],
+        )
+        .await
+        .expect("Version query should succeed");
+
+    let mut major_version = 0;
+    for result in rows {
+        let row = result.expect("Row should be valid");
+        let version: String = row.get(0).expect("Should get version");
+        major_version = version
+            .split('.')
+            .next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+    }
+
+    if major_version < 14 {
+        println!(
+            "Skipping SQL Server 2017 features test (running on major version {})",
+            major_version
+        );
+        client.close().await.expect("Failed to close");
+        return;
+    }
+
     // STRING_AGG is available in 2017+
     client
         .execute(
@@ -615,10 +659,11 @@ async fn test_sql_2019_features() {
     let config = get_test_config().expect("SQL Server config required");
     let mut client = Client::connect(config).await.expect("Failed to connect");
 
-    // Check if we're on 2019+
+    // Check if we're on 2019+ (major version 15+)
+    // Note: ProductMajorVersion returns NULL in SQL Server 2014 RTM, so parse from ProductVersion
     let rows = client
         .query(
-            "SELECT CAST(SERVERPROPERTY('ProductMajorVersion') AS NVARCHAR(10))",
+            "SELECT CAST(SERVERPROPERTY('ProductVersion') AS NVARCHAR(128))",
             &[],
         )
         .await
@@ -627,13 +672,17 @@ async fn test_sql_2019_features() {
     let mut major_version = 0;
     for result in rows {
         let row = result.expect("Row should be valid");
-        let major: String = row.get(0).expect("Should get version");
-        major_version = major.parse().unwrap_or(0);
+        let version: String = row.get(0).expect("Should get version");
+        major_version = version
+            .split('.')
+            .next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
     }
 
     if major_version < 15 {
         println!(
-            "Skipping SQL Server 2019 features test (running on version {})",
+            "Skipping SQL Server 2019 features test (running on major version {})",
             major_version
         );
         client.close().await.expect("Failed to close");
@@ -856,10 +905,10 @@ async fn test_tds_version_negotiation() {
     let mut client = Client::connect(config).await.expect("Failed to connect");
 
     // Get server version info
+    // Note: ProductMajorVersion returns NULL in SQL Server 2014 RTM, so parse from ProductVersion
     let rows = client
         .query(
-            "SELECT CAST(SERVERPROPERTY('ProductVersion') AS NVARCHAR(128)) AS Version, \
-                    CAST(SERVERPROPERTY('ProductMajorVersion') AS NVARCHAR(10)) AS Major",
+            "SELECT CAST(SERVERPROPERTY('ProductVersion') AS NVARCHAR(128)) AS Version",
             &[],
         )
         .await
@@ -868,8 +917,11 @@ async fn test_tds_version_negotiation() {
     for result in rows {
         let row = result.expect("Row should be valid");
         let version: String = row.get(0).expect("Should get version");
-        let major: String = row.get(1).expect("Should get major version");
-        let major_num: i32 = major.parse().unwrap_or(0);
+        let major_num: i32 = version
+            .split('.')
+            .next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
 
         println!("Connected to SQL Server {} (major: {})", version, major_num);
 
