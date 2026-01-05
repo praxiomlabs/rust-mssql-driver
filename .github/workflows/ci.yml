@@ -134,8 +134,18 @@ jobs:
           fetch-depth: 0
       - name: Install Kerberos headers
         run: sudo apt-get update && sudo apt-get install -y libkrb5-dev
+      - name: Get latest release tag
+        id: latest_tag
+        run: |
+          # Get the latest release tag for baseline comparison
+          LATEST_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Latest tag: $LATEST_TAG"
       - uses: obi1kenobi/cargo-semver-checks-action@v2
         with:
+          # Use git tag as baseline to avoid workspace dependency issues.
+          # When using crates.io baseline, workspace deps get mixed with local versions.
+          baseline-rev: ${{ steps.latest_tag.outputs.tag }}
           # Exclude mssql-testing: testcontainers -> home@0.5.12 requires Rust 1.88,
           # but we support MSRV 1.85. Testing utilities have relaxed API stability requirements.
           # Re-enable when upstream testcontainers updates their dependencies.
