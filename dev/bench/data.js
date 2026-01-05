@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1767485620524,
+  "lastUpdate": 1767586392778,
   "repoUrl": "https://github.com/praxiomlabs/rust-mssql-driver",
   "entries": {
     "Rust Benchmarks": [
@@ -719,6 +719,366 @@ window.BENCHMARK_DATA = {
             "name": "sql_batch_encode/large",
             "value": 2435,
             "range": "± 43",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "jkindrix@gmail.com",
+            "name": "Justin",
+            "username": "jkindrix"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "37b8ac58e6409302c613bf9c3a683ed5001b7810",
+          "message": "fix: SQL Server 2008-2016 compatibility (TLS, version detection, TVP) (#28)\n\n* fix(protocol): correctly distinguish SQL Server version from TDS version\n\nPreLogin VERSION field from the server contains SQL Server product\nversion (e.g., 13.0 for SQL Server 2016), NOT TDS protocol version.\nThe old logging incorrectly displayed these as \"TDS 7.13\" or \"TDS 7.11\"\nwhich caused confusion (Issue #25).\n\nChanges:\n- Add SqlServerVersion type in version.rs to represent SQL Server\n  product versions with proper Display formatting\n- Add product_name() method mapping major versions to product names\n  (SQL Server 2000 through 2022)\n- Add max_tds_version() method to determine supported TDS version\n  from product version\n- Update PreLogin struct with server_version field (deprecate sub_build)\n- Fix client.rs logging to correctly show requested_tds_version,\n  server_product_version, server_product, and max_tds_version\n- Add warning when server's max TDS version is lower than requested\n\nFixes part of #25\n\n* feat(client): add DANGER_PLAINTEXT option for unencrypted connections\n\nAdd Tiberius-compatible option to completely disable TLS encryption.\nThis allows connecting to legacy SQL Server instances (2008 and earlier)\nthat only support TLS 1.0/1.1, which modern TLS libraries like rustls\ndon't support for security reasons.\n\nConnection string usage:\n  Encrypt=DANGER_PLAINTEXT\n\nBuilder API:\n  Config::new().danger_plaintext(true)\n\nWhen enabled:\n- Sends ENCRYPT_NOT_SUP in PreLogin packet\n- No TLS handshake occurs\n- All traffic including credentials is unencrypted\n- Logs a security warning at connection time\n\nThis should only be used for development/testing on trusted networks\nwith legacy SQL Server instances that cannot be upgraded.\n\nAddresses part of #25 (SQL Server 2012 TLS issue)\n\n* refactor(client): rename danger_plaintext to no_tls\n\nRename the unencrypted connection option from DANGER_PLAINTEXT to\nno_tls for cleaner connection string syntax.\n\nConnection string:\n  Encrypt=no_tls\n\nBuilder API:\n  Config::new().no_tls(true)\n\n* docs: document no_tls option and update encryption references\n\n- README.md: Add no_tls to Encrypt options table\n- ARCHITECTURE.md: Add no_tls to connection string keywords table\n- LIMITATIONS.md: Add TLS compatibility section explaining rustls TLS 1.2+\n  requirement and no_tls workaround for legacy SQL Server\n- CHANGELOG.md: Add unreleased changes for no_tls and SqlServerVersion\n\n* fix(tests): make version_compatibility tests work on SQL Server 2008-2016\n\nPreviously the version_compatibility tests only worked on SQL Server 2017+\ndue to incorrect assertions and use of ProductMajorVersion (which returns\nNULL in SQL Server 2014 RTM).\n\nFixed tests:\n- test_version_detection: Added 2008/2012/2014/2016 to known versions\n- test_product_version: Parse major version from ProductVersion string\n  instead of ProductMajorVersion; changed assertion from >= 14 to >= 10\n- test_sql_2017_features: Added version check to skip on < 2017\n- test_sql_2019_features: Parse from ProductVersion instead of\n  ProductMajorVersion\n- test_tds_version_negotiation: Same fix as above\n\nAlso fixed integration.rs to support MSSQL_PORT environment variable\nfor testing against SQL Server instances on non-default ports.\n\nAll 18 version_compatibility tests now pass on:\n- SQL Server 2012 SP4 (11.0.7001.0)\n- SQL Server 2014 RTM (12.0.2000.8)\n- SQL Server 2016 SP3 (13.0.6404.1)\n- SQL Server 2022 CU22 (16.0.4225.2)\n\nAdded docs/TEST_FAILURE_AUDIT.md documenting test analysis.\n\n* docs: add SQL Server version compatibility matrix\n\nDocuments supported SQL Server versions (2008-2022), TDS protocol versions,\nTLS requirements, and feature availability by version.\n\nKey information:\n- SQL Server 2008-2016 require Encrypt=no_tls due to TLS 1.2 requirement\n- ProductMajorVersion returns NULL in SQL Server 2014 RTM\n- Feature matrix showing STRING_AGG (2017+), APPROX_COUNT_DISTINCT (2019+)\n- Version detection mapping (major version to product name)\n\n* fix(tds-protocol): correctly declare TVP parameters with table type names\n\nTVP (Table-Valued Parameter) RPC calls were failing with \"Must declare\nthe table variable @p1\" because build_param_declarations() was generating\n\"@p1 sql_variant\" instead of \"@p1 dbo.IntIdList READONLY\".\n\nChanges:\n- Add tvp_type_name field to TypeInfo struct to carry the table type name\n- Add TypeInfo::tvp() constructor for TVP parameters\n- Update build_param_declarations() to handle type_id 0xF3 with proper\n  table type declaration format\n- Update encode_tvp_param() to pass full type name through TypeInfo::tvp()\n\nFixes table-valued parameter support on all SQL Server versions (2008-2022).\n\n* fix(tests): update integration tests for legacy SQL Server compatibility\n\n- Add should_skip_tls_tests() helper to detect legacy servers that don't\n  support TLS 1.2 (required by rustls)\n- Rewrite TVP tests to use inline queries instead of temporary stored\n  procedures (SQL Server limitation: temp procedures cannot reference\n  user-defined table types)\n- Update TLS encryption tests to skip on legacy servers\n\nTested on SQL Server 2008 R2, 2012, 2014, 2016, and 2022.\n\n* docs: update test audit and changelog for TVP and compatibility fixes\n\n- Update TEST_FAILURE_AUDIT.md with complete fix status for all test\n  failures found during SQL Server 2008-2016 compatibility testing\n- Add TVP parameter declaration fix to CHANGELOG.md\n\nAll 63 integration tests and 18 version compatibility tests now pass\non SQL Server 2008 R2, 2012, 2014, 2016, and 2022.",
+          "timestamp": "2026-01-04T22:01:56-06:00",
+          "tree_id": "5fd76cedf8b83d17efc2fbc4789b63203a18ff38",
+          "url": "https://github.com/praxiomlabs/rust-mssql-driver/commit/37b8ac58e6409302c613bf9c3a683ed5001b7810"
+        },
+        "date": 1767586392397,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "connection_string/simple",
+            "value": 404,
+            "range": "± 25",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "connection_string/with_port",
+            "value": 408,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "connection_string/with_instance",
+            "value": 486,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "connection_string/azure_full",
+            "value": 689,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/i32_from_int",
+            "value": 9,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/i64_from_bigint",
+            "value": 9,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/string_from_string",
+            "value": 23,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/option_i32_some",
+            "value": 5,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/option_i32_none",
+            "value": 2,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/f64_from_double",
+            "value": 9,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/bool_from_bool",
+            "value": 9,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arc_bytes/clone_small",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arc_bytes/clone_medium",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arc_bytes/clone_large",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arc_bytes/slice_medium",
+            "value": 6,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "config_builder/minimal",
+            "value": 89,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "config_builder/full",
+            "value": 127,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_int",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_bigint",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_string",
+            "value": 13,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_null",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/null_check_iter",
+            "value": 0,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/is_null_check",
+            "value": 0,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_encode/short",
+            "value": 75,
+            "range": "± 9",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_encode/medium",
+            "value": 492,
+            "range": "± 25",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_encode/long",
+            "value": 3591,
+            "range": "± 21",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_encode/unicode",
+            "value": 280,
+            "range": "± 9",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_decode/short",
+            "value": 43,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_decode/medium",
+            "value": 141,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_decode/long",
+            "value": 657,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/i32",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/i64",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/f64",
+            "value": 7,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/bool",
+            "value": 7,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/String",
+            "value": 40,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/str",
+            "value": 26,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/Option_i32_Some",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/Option_i32_None",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/i32",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/i64",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/f64",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/bool",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/String",
+            "value": 24,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/Option_i32_Some",
+            "value": 7,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/Option_i32_None",
+            "value": 5,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_int",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_string",
+            "value": 14,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_null",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/is_null_check",
+            "value": 0,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "packet_header_encode",
+            "value": 41,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "packet_header_decode",
+            "value": 11,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "prelogin_encode",
+            "value": 148,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "prelogin_decode",
+            "value": 68,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_batch_encode/simple",
+            "value": 93,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_batch_encode/medium",
+            "value": 856,
+            "range": "± 21",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_batch_encode/large",
+            "value": 2185,
+            "range": "± 125",
             "unit": "ns/iter"
           }
         ]
