@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - PreLogin VERSION field now correctly identified as SQL Server product version, not TDS protocol version
 - Logging now shows correct product names (e.g., "SQL Server 2012") instead of "Unknown SQL Server version"
+- TVP (Table-Valued Parameter) RPC declarations now correctly use table type names (e.g., `@p1 dbo.IntIdList READONLY`) instead of falling through to `sql_variant`
 
 ## [0.5.1] - 2026-01-03
 
