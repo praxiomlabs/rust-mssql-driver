@@ -924,7 +924,7 @@ impl Drop for PooledConnection {
         // This handles both normal returns and detached connections.
         self.pool.in_use_count.fetch_sub(1, Ordering::Relaxed);
 
-        if let Some(client) = self.client.take() {
+        if let Some(mut client) = self.client.take() {
             // Check if connection is in a transaction started via raw SQL.
             // If so, we cannot safely return it to the pool because:
             // 1. Drop is sync, so we can't execute ROLLBACK
@@ -943,6 +943,19 @@ impl Drop for PooledConnection {
                 connection_id = self.metadata.id,
                 "returning connection to pool"
             );
+
+            // Mark connection for reset on next use if sp_reset_connection is enabled.
+            // This sets the RESETCONNECTION flag on the first TDS packet of the next
+            // request, causing SQL Server to reset connection state (temp tables,
+            // SET options, isolation level, etc.) before executing.
+            if self.pool.config.sp_reset_connection {
+                client.mark_needs_reset();
+                self.pool.metrics.lock().resets_performed += 1;
+                tracing::trace!(
+                    connection_id = self.metadata.id,
+                    "marked connection for reset on next use"
+                );
+            }
 
             // Update metadata for checkin
             self.metadata.mark_checkin();

@@ -18,7 +18,6 @@
 )]
 
 use mssql_client::{Config, Error};
-use std::time::Duration;
 
 // =============================================================================
 // Configuration Helpers
@@ -397,54 +396,7 @@ async fn test_azure_transaction() {
     client.close().await.expect("Close failed");
 }
 
-#[tokio::test]
-#[ignore = "Requires Azure SQL Database"]
-async fn test_azure_pool() {
-    use mssql_driver_pool::{Pool, PoolConfig};
-    use std::sync::Arc;
-
-    let config = get_azure_config().expect("Azure SQL config required");
-
-    let pool_config = PoolConfig::new()
-        .min_connections(1)
-        .max_connections(5)
-        .connection_timeout(Duration::from_secs(30));
-
-    let pool = Arc::new(
-        Pool::new(pool_config, config)
-            .await
-            .expect("Pool creation failed"),
-    );
-
-    // Get multiple connections
-    let mut handles = Vec::new();
-    for i in 0..10 {
-        let pool = Arc::clone(&pool);
-        handles.push(tokio::spawn(async move {
-            let mut conn = match pool.get().await {
-                Ok(c) => c,
-                Err(_) => return Err(format!("Failed to get connection for task {}", i)),
-            };
-            let rows = match conn.query(&format!("SELECT {} AS num", i), &[]).await {
-                Ok(r) => r,
-                Err(e) => return Err(format!("Query failed for task {}: {}", i, e)),
-            };
-            for _ in rows {}
-            Ok::<_, String>(i)
-        }));
-    }
-
-    let mut successes = 0;
-    for handle in handles {
-        if handle.await.expect("Task panicked").is_ok() {
-            successes += 1;
-        }
-    }
-
-    assert_eq!(successes, 10, "All 10 queries should succeed");
-
-    pool.close().await;
-}
+// Note: test_azure_pool moved to mssql-testing to break circular dev-dependency
 
 // =============================================================================
 // Azure-Specific Feature Tests

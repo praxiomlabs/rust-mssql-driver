@@ -2,7 +2,7 @@
 
 Comprehensive guide for releasing new versions of rust-mssql-driver to crates.io.
 
-**Version:** 0.5.1 | **MSRV:** 1.85 | **Edition:** 2024 | **Workspace:** 9 crates
+**Version:** 0.5.2 | **MSRV:** 1.85 | **Edition:** 2024 | **Workspace:** 9 crates
 
 ---
 
@@ -18,7 +18,7 @@ Comprehensive guide for releasing new versions of rust-mssql-driver to crates.io
 
 4. **Publishing to crates.io is IRREVERSIBLE** — You can yank a version, but you cannot delete or re-upload it. A yanked version still counts as "used" forever.
 
-5. **ALWAYS run `just version-refs-check` before tagging** — Verify that ALL version references in documentation (RELEASING.md, ARCHITECTURE.md, etc.) are updated to the new version. The `just release-check` recipe includes this automatically.
+5. **ALWAYS run `just version-refs-check` before tagging** — Verify that ALL version references in documentation are updated to the new version. See [docs/VERSION_REFS.md](docs/VERSION_REFS.md) for a complete list of files to check. The `just release-check` recipe includes this automatically.
 
 6. **NEVER cancel a release workflow mid-publish** — If you cancel after some crates are published, you'll have a partial release requiring manual recovery. Either let it complete or don't start it.
 

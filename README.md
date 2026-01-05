@@ -231,13 +231,13 @@ mssql-auth = { version = "0.5", features = ["sspi-auth"] }
 | 2012 | ✅ | 7.4 | |
 | 2014 | ✅ | 7.4 | |
 | 2016 | ✅ | 7.4 | |
-| 2017 | ✅ | 7.4 | Recommended minimum |
+| 2017 | ✅ | 7.4 | Full TLS support |
 | 2019 | ✅ | 7.4 | |
 | 2022+ | ✅ | 8.0 | Strict TLS mode |
 | Azure SQL Database | ✅ | 7.4/8.0 | |
 | Azure SQL Managed Instance | ✅ | 7.4/8.0 | |
 
-**Legacy Support (SQL Server 2008/2008 R2):** Configure via connection string (`TDSVersion=7.3`) or builder pattern. See [LIMITATIONS.md](LIMITATIONS.md) for details.
+**Legacy Support (SQL Server 2008-2016):** Use `Encrypt=no_tls` for servers that don't support TLS 1.2. See [LIMITATIONS.md](LIMITATIONS.md) and [docs/SQL_SERVER_COMPATIBILITY.md](docs/SQL_SERVER_COMPATIBILITY.md) for details.
 
 ## API Stability
 
@@ -282,8 +282,7 @@ See the [`examples/`](crates/mssql-client/examples/) directory:
 
 - [STABILITY.md](STABILITY.md) - API stability guarantees and versioning policy
 - [SECURITY.md](SECURITY.md) - Security policy, threat model, and best practices
-- [LIMITATIONS.md](LIMITATIONS.md) - Known limitations and workarounds
-- [UNSUPPORTED.md](UNSUPPORTED.md) - Explicitly unsupported features with rationale
+- [LIMITATIONS.md](LIMITATIONS.md) - Known limitations and explicit non-goals
 - [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) - Production readiness checklist
 
 ### Operational Docs

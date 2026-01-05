@@ -37,13 +37,18 @@ TCP Connect → TLS Handshake → PreLogin (encrypted) → Login7 (encrypted)
 
 | SQL Server Version | Min TLS | Recommended | TDS 8.0 Support |
 |-------------------|---------|-------------|-----------------|
-| SQL Server 2016 | TLS 1.0 | TLS 1.2 | No |
+| SQL Server 2008/2008 R2 | TLS 1.0* | N/A | No |
+| SQL Server 2012 | TLS 1.0* | N/A | No |
+| SQL Server 2014 | TLS 1.0* | N/A | No |
+| SQL Server 2016 | TLS 1.0* | TLS 1.2 | No |
 | SQL Server 2017 | TLS 1.0 | TLS 1.2 | No |
 | SQL Server 2019 | TLS 1.0 | TLS 1.2 | No |
 | SQL Server 2022 | TLS 1.2 | TLS 1.3 | Yes |
 | Azure SQL | TLS 1.2 | TLS 1.2 | Varies |
 
-**Note:** SQL Server 2016-2019 support TLS 1.0 by default but can be configured to require TLS 1.2. Always use TLS 1.2 or higher in production.
+\* **Legacy servers (2008-2016):** These versions typically only support TLS 1.0/1.1, which rustls does not support. Use `Encrypt=no_tls` for unencrypted connections on trusted networks.
+
+**Note:** SQL Server 2016-2019 support TLS 1.0 by default but can be configured to require TLS 1.2. Always use TLS 1.2 or higher in production where possible.
 
 ## Configuration Options
 
@@ -92,6 +97,24 @@ No TLS encryption. All traffic including credentials is sent in plaintext.
 # Never use in production
 Encrypt=false
 ```
+
+### `Encrypt=no_tls` (Legacy Servers Only)
+
+Completely disables TLS for SQL Server 2008-2016 instances that don't support TLS 1.2+.
+
+**Security Risk:** Network sniffing, credential theft, data interception.
+
+```
+# For legacy SQL Server (2008-2016) on trusted networks only
+Server=legacy-server;User Id=sa;Password=pwd;Encrypt=no_tls
+```
+
+**When to use:**
+- SQL Server 2008-2016 that cannot be upgraded
+- Isolated, trusted network environments
+- Development/testing against legacy instances
+
+**⚠️ Warning:** This option transmits all data including credentials in plaintext. Only use on isolated networks where TLS 1.2+ is not available.
 
 ### `Encrypt=true` (Standard)
 
