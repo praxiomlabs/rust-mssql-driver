@@ -1103,6 +1103,15 @@ dependencies = [
 
 [[package]]
 name = "des"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffdd80ce8ce993de27e9f063a444a4d53ce8e8db4c1f00cc03af5ad5a9867a1e"
+dependencies = [
+ "cipher 0.4.4",
+]
+
+[[package]]
+name = "des"
 version = "0.9.0-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f51594a70805988feb1c85495ddec0c2052e4fbe59d9c0bb7f94bfc164f4f90"
@@ -2235,9 +2244,11 @@ dependencies = [
  "cbc 0.1.2",
  "hmac 0.12.1",
  "libgssapi",
+ "p12",
  "parking_lot",
  "rand 0.8.5",
  "rsa 0.9.10",
+ "rustls-pemfile",
  "sha2 0.10.9",
  "sspi",
  "thiserror",
@@ -2612,6 +2623,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "p12"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4873306de53fe82e7e484df31e1e947d61514b6ea2ed6cd7b45d63006fd9224"
+dependencies = [
+ "cbc 0.1.2",
+ "cipher 0.4.4",
+ "des 0.8.1",
+ "getrandom 0.2.17",
+ "hmac 0.12.1",
+ "lazy_static",
+ "rc2",
+ "sha1 0.10.6",
+ "yasna",
+]
+
+[[package]]
 name = "p256"
 version = "0.14.0-pre.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2715,7 +2743,7 @@ checksum = "ca3fc18bb4460ac250ba6b75dfa7cf9d0b2273e3e623f660bd6ce2c3e902342e"
 dependencies = [
  "digest 0.11.0-rc.3",
  "hmac 0.13.0-rc.2",
- "sha1",
+ "sha1 0.11.0-rc.2",
 ]
 
 [[package]]
@@ -2785,7 +2813,7 @@ dependencies = [
  "rsa 0.10.0-rc.9",
  "sec1",
  "serde",
- "sha1",
+ "sha1 0.11.0-rc.2",
  "sha2 0.11.0-rc.2",
  "sha3",
  "signature 3.0.0-rc.4",
@@ -2849,7 +2877,7 @@ dependencies = [
  "cipher 0.5.0-rc.1",
  "crypto-bigint",
  "crypto-common 0.2.0-rc.4",
- "des",
+ "des 0.9.0-rc.1",
  "digest 0.11.0-rc.3",
  "hmac 0.13.0-rc.2",
  "inout 0.2.0-rc.6",
@@ -2860,7 +2888,7 @@ dependencies = [
  "picky-asn1-x509",
  "rand 0.9.2",
  "serde",
- "sha1",
+ "sha1 0.11.0-rc.2",
  "thiserror",
  "uuid",
 ]
@@ -3233,6 +3261,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rc2"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62c64daa8e9438b84aaae55010a93f396f8e60e3911590fcba770d04643fc1dd"
+dependencies = [
+ "cipher 0.4.4",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3443,7 +3480,7 @@ dependencies = [
  "pkcs1 0.8.0-rc.4",
  "pkcs8 0.11.0-rc.7",
  "rand_core 0.9.4",
- "sha1",
+ "sha1 0.11.0-rc.2",
  "signature 3.0.0-rc.4",
  "spki 0.8.0-rc.4",
  "subtle",
@@ -3804,6 +3841,17 @@ dependencies = [
 
 [[package]]
 name = "sha1"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3bf829a2d51ab4a5ddf1352d8470c140cadc8301b2ae1789db023f01cedd6ba"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest 0.10.7",
+]
+
+[[package]]
+name = "sha1"
 version = "0.11.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5e046edf639aa2e7afb285589e5405de2ef7e61d4b0ac1e30256e3eab911af9"
@@ -4007,7 +4055,7 @@ dependencies = [
  "rsa 0.10.0-rc.9",
  "rustls",
  "serde",
- "sha1",
+ "sha1 0.11.0-rc.2",
  "sha2 0.11.0-rc.2",
  "signature 3.0.0-rc.4",
  "spki 0.8.0-rc.4",
@@ -5260,6 +5308,12 @@ dependencies = [
  "clap",
  "xshell",
 ]
+
+[[package]]
+name = "yasna"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e17bb3549cc1321ae1296b9cdc2698e2b6cb1992adfa19a8c72e5b7a738f44cd"
 
 [[package]]
 name = "yoke"

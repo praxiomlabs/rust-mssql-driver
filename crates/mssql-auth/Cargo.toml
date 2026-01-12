@@ -21,7 +21,8 @@ integrated-auth = ["dep:libgssapi"]
 sspi-auth = ["dep:sspi"]
 # Client certificate authentication (Azure AD Service Principal with X.509 certificate)
 # Note: This uses azure_identity's client_certificate feature which requires openssl
-cert-auth = ["dep:azure_identity", "dep:azure_core", "dep:time", "dep:base64", "azure_identity/client_certificate"]
+# Supports both PKCS#12 (.pfx/.p12) and PEM certificate formats
+cert-auth = ["dep:azure_identity", "dep:azure_core", "dep:time", "dep:base64", "dep:p12", "dep:rustls-pemfile", "azure_identity/client_certificate"]
 # Enable secure credential zeroization on drop
 zeroize = ["dep:zeroize"]
 # Always Encrypted client-side encryption support
@@ -53,6 +54,10 @@ sspi = { version = "0.18", optional = true }
 
 # Optional: Base64 encoding for certificate data
 base64 = { version = "0.22", optional = true }
+
+# Optional: PEM certificate parsing and PKCS#12 conversion
+p12 = { workspace = true, optional = true }
+rustls-pemfile = { workspace = true, optional = true }
 
 # Optional: Secure credential zeroization
 zeroize = { version = "1.8", features = ["derive"], optional = true }

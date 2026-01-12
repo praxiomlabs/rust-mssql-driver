@@ -21,10 +21,10 @@
 //!
 //! 1. Create an Azure AD App Registration
 //! 2. Generate or upload a certificate to the app registration
-//! 3. Export the certificate as PKCS#12 (.pfx) with the private key
+//! 3. Export the certificate (PKCS#12 or PEM format)
 //! 4. Grant the service principal access to your Azure SQL database
 //!
-//! ## Example
+//! ## Example (PKCS#12)
 //!
 //! ```rust,ignore
 //! use mssql_auth::CertificateAuth;
@@ -41,6 +41,29 @@
 //! )?;
 //!
 //! // Get access token for Azure SQL
+//! let token = auth.get_token().await?;
+//! ```
+//!
+//! ## Example (PEM)
+//!
+//! PEM certificates are common in Linux/Kubernetes environments:
+//!
+//! ```rust,ignore
+//! use mssql_auth::CertificateAuth;
+//! use std::fs;
+//!
+//! // Load PEM certificate and private key
+//! let cert_pem = fs::read("cert.pem")?;
+//! let key_pem = fs::read("key.pem")?;
+//!
+//! let auth = CertificateAuth::from_pem(
+//!     "your-tenant-id",
+//!     "your-client-id",
+//!     &cert_pem,
+//!     &key_pem,
+//!     None, // optional password
+//! )?;
+//!
 //! let token = auth.get_token().await?;
 //! ```
 //!
@@ -156,10 +179,89 @@ impl CertificateAuth {
         Ok(Self { credential })
     }
 
-    // Note: PEM support is not yet implemented.
-    // Azure Identity SDK expects PKCS#12 format. To use PEM certificates,
-    // convert them to PKCS#12 using openssl:
-    //   openssl pkcs12 -export -out cert.pfx -inkey key.pem -in cert.pem
+    /// Create a new certificate authentication provider from PEM-encoded files.
+    ///
+    /// This is a convenience method for users who have PEM-formatted certificates
+    /// (common in Linux/Kubernetes environments) rather than PKCS#12 format.
+    ///
+    /// # Arguments
+    ///
+    /// * `tenant_id` - The Azure AD tenant ID
+    /// * `client_id` - The application (client) ID of the service principal
+    /// * `cert_pem` - The PEM-encoded certificate (typically from a `.pem` or `.crt` file)
+    /// * `key_pem` - The PEM-encoded private key (typically from a `.key` or `.pem` file)
+    /// * `password` - Optional password for the PKCS#12 bundle (used during conversion)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The certificate PEM cannot be parsed
+    /// - The private key PEM cannot be parsed
+    /// - The PEM-to-PKCS#12 conversion fails
+    /// - The credential cannot be created
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use mssql_auth::CertificateAuth;
+    /// use std::fs;
+    ///
+    /// let cert_pem = fs::read("cert.pem")?;
+    /// let key_pem = fs::read("key.pem")?;
+    ///
+    /// let auth = CertificateAuth::from_pem(
+    ///     "tenant-id",
+    ///     "client-id",
+    ///     &cert_pem,
+    ///     &key_pem,
+    ///     None, // or Some("pkcs12-password")
+    /// )?;
+    /// ```
+    pub fn from_pem(
+        tenant_id: impl AsRef<str>,
+        client_id: impl Into<String>,
+        cert_pem: impl AsRef<[u8]>,
+        key_pem: impl AsRef<[u8]>,
+        password: Option<&str>,
+    ) -> Result<Self, AuthError> {
+        use std::io::BufReader;
+
+        // Parse certificate from PEM
+        let cert_pem_bytes = cert_pem.as_ref();
+        let mut cert_reader = BufReader::new(cert_pem_bytes);
+        let certs: Vec<_> = rustls_pemfile::certs(&mut cert_reader)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                AuthError::Certificate(format!("Failed to parse certificate PEM: {}", e))
+            })?;
+
+        let cert_der = certs
+            .first()
+            .ok_or_else(|| AuthError::Certificate("No certificate found in PEM data".into()))?;
+
+        // Parse private key from PEM
+        let key_pem_bytes = key_pem.as_ref();
+        let mut key_reader = BufReader::new(key_pem_bytes);
+        let key_der = rustls_pemfile::private_key(&mut key_reader)
+            .map_err(|e| AuthError::Certificate(format!("Failed to parse private key PEM: {}", e)))?
+            .ok_or_else(|| AuthError::Certificate("No private key found in PEM data".into()))?;
+
+        // Convert to PKCS#12 format
+        let pkcs12_password = password.unwrap_or("");
+        let pfx = p12::PFX::new(
+            cert_der.as_ref(),
+            key_der.secret_der(),
+            None, // No CA certificate
+            pkcs12_password,
+            "cert",
+        )
+        .ok_or_else(|| AuthError::Certificate("Failed to create PKCS#12 from PEM data".into()))?;
+
+        let pkcs12_bytes = pfx.to_der();
+
+        // Use existing constructor with the converted PKCS#12
+        Self::new(tenant_id, client_id, pkcs12_bytes, password)
+    }
 
     /// Get an access token for Azure SQL Database.
     ///
@@ -293,6 +395,88 @@ mod tests {
         let cert_bytes = std::fs::read(&cert_path).expect("Failed to read certificate");
         let auth = CertificateAuth::new(tenant_id, client_id, cert_bytes, cert_password.as_deref())
             .expect("Failed to create CertificateAuth");
+
+        let token = auth.get_token().await.expect("Failed to get token");
+        assert!(!token.is_empty());
+    }
+
+    #[test]
+    fn test_from_pem_invalid_certificate() {
+        let invalid_cert = b"not a valid PEM certificate";
+        let valid_key_format = b"-----BEGIN PRIVATE KEY-----\nMIIE=\n-----END PRIVATE KEY-----";
+
+        let result = CertificateAuth::from_pem(
+            "tenant-id",
+            "client-id",
+            invalid_cert,
+            valid_key_format,
+            None,
+        );
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("No certificate found"),
+            "Expected 'No certificate found' error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_from_pem_invalid_private_key() {
+        // Valid PEM structure but not actually a valid cert (will fail at PKCS#12 conversion)
+        let cert_pem =
+            b"-----BEGIN CERTIFICATE-----\nMIIBkTCB+wIJAKHBfpE=\n-----END CERTIFICATE-----";
+        let invalid_key = b"not a valid PEM private key";
+
+        let result =
+            CertificateAuth::from_pem("tenant-id", "client-id", cert_pem, invalid_key, None);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("No private key found"),
+            "Expected 'No private key found' error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_from_pem_empty_certificate() {
+        let empty_cert = b"";
+        let key_pem = b"-----BEGIN PRIVATE KEY-----\nMIIE=\n-----END PRIVATE KEY-----";
+
+        let result = CertificateAuth::from_pem("tenant-id", "client-id", empty_cert, key_pem, None);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_from_pem_empty_private_key() {
+        let cert_pem =
+            b"-----BEGIN CERTIFICATE-----\nMIIBkTCB+wIJAKHBfpE=\n-----END CERTIFICATE-----";
+        let empty_key = b"";
+
+        let result = CertificateAuth::from_pem("tenant-id", "client-id", cert_pem, empty_key, None);
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires Azure Service Principal with PEM certificate"]
+    async fn test_certificate_auth_from_pem() {
+        let tenant_id = std::env::var("AZURE_TENANT_ID").expect("AZURE_TENANT_ID not set");
+        let client_id = std::env::var("AZURE_CLIENT_ID").expect("AZURE_CLIENT_ID not set");
+        let cert_path = std::env::var("AZURE_CLIENT_CERTIFICATE_PEM")
+            .expect("AZURE_CLIENT_CERTIFICATE_PEM not set");
+        let key_path = std::env::var("AZURE_CLIENT_PRIVATE_KEY_PEM")
+            .expect("AZURE_CLIENT_PRIVATE_KEY_PEM not set");
+
+        let cert_pem = std::fs::read(&cert_path).expect("Failed to read certificate PEM");
+        let key_pem = std::fs::read(&key_path).expect("Failed to read private key PEM");
+
+        let auth = CertificateAuth::from_pem(tenant_id, client_id, &cert_pem, &key_pem, None)
+            .expect("Failed to create CertificateAuth from PEM");
 
         let token = auth.get_token().await.expect("Failed to get token");
         assert!(!token.is_empty());
