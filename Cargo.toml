@@ -44,6 +44,9 @@ rustls = { version = "0.23", default-features = false, features = ["std", "tls12
 rustls-pemfile = "2.2"
 webpki-roots = "1.0"
 
+# Certificate handling
+p12 = "0.6"
+
 # Error handling
 thiserror = "2.0"
 
