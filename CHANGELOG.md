@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-01-12
+
+### Added
+
+- **PEM certificate support**: `CertificateAuth::from_pem()` constructor for users with PEM-formatted certificates (common in Linux/Kubernetes environments)
+- **Decimal support for Money types**: Money, SmallMoney, and MoneyN columns now return `rust_decimal::Decimal` when the `decimal` feature is enabled, preventing precision loss in financial applications
+
+### Fixed
+
+- **VARCHAR decoding for non-UTF8 encodings**: Fixed incorrect decoding of VARCHAR columns with legacy encodings (GBK, Shift-JIS, etc.) where the UTF-8 fast-path would incorrectly accept valid UTF-8 byte sequences that were actually non-UTF8 encoded data
+- **Security vulnerabilities**: Updated dependencies to resolve RUSTSEC-2026-0001 (rkyv) and RUSTSEC-2026-0002 (lru)
+
+### Changed
+
+- Money type parsing consolidated into single `parse_money_value()` helper function
+
 ## [0.5.2] - 2026-01-04
 
 ### Added
