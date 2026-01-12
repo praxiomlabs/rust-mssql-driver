@@ -2298,13 +2298,7 @@ impl<S: ConnectionState> Client<S> {
     /// on the collation's LCID. Otherwise falls back to UTF-8 lossy conversion.
     #[allow(unused_variables)]
     fn decode_varchar_string(data: &[u8], collation: Option<&Collation>) -> String {
-        // Remove this initial UTF-8 check first. Some non-UTF8 encoding strings incorrectly return Ok(s) when calling std::str::from_utf8
-        //   for example, the GBK-encoded Chinese characters "肖英" would return Ok("Ф?")
-        // if let Ok(s) = std::str::from_utf8(data) {
-        //     return s.to_owned();
-        // }
-
-        // If UTF-8 fails, try collation-aware decoding
+        // Try collation-aware decoding first (handles GBK, Shift-JIS, etc.)
         #[cfg(feature = "encoding")]
         if let Some(coll) = collation {
             if let Some(encoding) = coll.encoding() {
