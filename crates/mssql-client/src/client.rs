@@ -9,9 +9,12 @@ use std::sync::Arc;
 
 use bytes::BytesMut;
 use mssql_codec::connection::Connection;
+#[cfg(feature = "tls")]
 use mssql_tls::{TlsConfig, TlsConnector, TlsNegotiationMode, TlsStream};
 use tds_protocol::login7::Login7;
-use tds_protocol::packet::{MAX_PACKET_SIZE, PacketType};
+#[cfg(feature = "tls")]
+use tds_protocol::packet::MAX_PACKET_SIZE;
+use tds_protocol::packet::PacketType;
 use tds_protocol::prelogin::{EncryptionLevel, PreLogin};
 use tds_protocol::rpc::{RpcParam, RpcRequest, TypeInfo as RpcTypeInfo};
 use tds_protocol::token::{
@@ -68,16 +71,18 @@ pub struct Client<S: ConnectionState> {
 /// Internal connection handle wrapping the actual connection.
 ///
 /// This is an enum to support different connection types:
-/// - TLS (TDS 8.0 strict mode)
-/// - TLS with PreLogin wrapping (TDS 7.x style)
-/// - Plain TCP (rare, for testing or internal networks)
+/// - TLS (TDS 8.0 strict mode) - requires `tls` feature
+/// - TLS with PreLogin wrapping (TDS 7.x style) - requires `tls` feature
+/// - Plain TCP (for internal networks or when `tls` feature is disabled)
 #[allow(dead_code)] // Connection will be used once query execution is implemented
 enum ConnectionHandle {
     /// TLS connection (TDS 8.0 strict mode - TLS before any TDS traffic)
+    #[cfg(feature = "tls")]
     Tls(Connection<TlsStream<TcpStream>>),
     /// TLS connection with PreLogin wrapping (TDS 7.x style)
+    #[cfg(feature = "tls")]
     TlsPrelogin(Connection<TlsStream<mssql_tls::TlsPreloginWrapper<TcpStream>>>),
-    /// Plain TCP connection (rare, for testing or internal networks)
+    /// Plain TCP connection (for internal networks or when `tls` feature is disabled)
     Plain(Connection<TcpStream>),
 }
 
@@ -147,21 +152,46 @@ impl Client<Disconnected> {
             .set_nodelay(true)
             .map_err(|e| Error::Io(Arc::new(e)))?;
 
-        // Determine TLS negotiation mode
-        let tls_mode = TlsNegotiationMode::from_encrypt_mode(config.strict_mode);
+        #[cfg(feature = "tls")]
+        {
+            // Determine TLS negotiation mode
+            let tls_mode = TlsNegotiationMode::from_encrypt_mode(config.strict_mode);
 
-        // Step 2: Handle TDS 8.0 strict mode (TLS before any TDS traffic)
-        if tls_mode.is_tls_first() {
-            return Self::connect_tds_8(config, tcp_stream).await;
+            // Step 2: Handle TDS 8.0 strict mode (TLS before any TDS traffic)
+            if tls_mode.is_tls_first() {
+                return Self::connect_tds_8(config, tcp_stream).await;
+            }
+
+            // Step 3: TDS 7.x flow - PreLogin first, then TLS, then Login7
+            Self::connect_tds_7x(config, tcp_stream).await
         }
 
-        // Step 3: TDS 7.x flow - PreLogin first, then TLS, then Login7
-        Self::connect_tds_7x(config, tcp_stream).await
+        #[cfg(not(feature = "tls"))]
+        {
+            // When TLS feature is disabled, only no_tls connections are supported
+            if config.strict_mode {
+                return Err(Error::Config(
+                    "TDS 8.0 strict mode requires TLS. Enable the 'tls' feature or use Encrypt=no_tls".into()
+                ));
+            }
+
+            if !config.no_tls {
+                return Err(Error::Config(
+                    "TLS encryption requires the 'tls' feature. Either enable the 'tls' feature \
+                     or use Encrypt=no_tls in your connection string for unencrypted connections."
+                        .into(),
+                ));
+            }
+
+            // Proceed with no-TLS connection
+            Self::connect_no_tls(config, tcp_stream).await
+        }
     }
 
     /// Connect using TDS 8.0 strict mode.
     ///
     /// Flow: TCP -> TLS -> PreLogin (encrypted) -> Login7 (encrypted)
+    #[cfg(feature = "tls")]
     async fn connect_tds_8(config: &Config, tcp_stream: TcpStream) -> Result<Client<Ready>> {
         tracing::debug!("using TDS 8.0 strict mode (TLS first)");
 
@@ -226,6 +256,7 @@ impl Client<Disconnected> {
     /// Note: For TDS 7.x, the PreLogin exchange happens over raw TCP before
     /// upgrading to TLS. We use low-level I/O for this initial exchange
     /// since the Connection struct splits the stream immediately.
+    #[cfg(feature = "tls")]
     async fn connect_tds_7x(config: &Config, mut tcp_stream: TcpStream) -> Result<Client<Ready>> {
         use bytes::BufMut;
         use tds_protocol::packet::{PACKET_HEADER_SIZE, PacketHeader, PacketStatus};
@@ -660,6 +691,197 @@ impl Client<Disconnected> {
         }
     }
 
+    /// Connect without TLS encryption (no_tls mode).
+    ///
+    /// This method is used when the `tls` feature is disabled and only supports
+    /// unencrypted connections via `Encrypt=no_tls`.
+    ///
+    /// # Security Warning
+    ///
+    /// This transmits all data including credentials in plaintext. Only use this
+    /// for development, testing, or on trusted internal networks where TLS is not
+    /// required.
+    #[cfg(not(feature = "tls"))]
+    async fn connect_no_tls(config: &Config, mut tcp_stream: TcpStream) -> Result<Client<Ready>> {
+        use bytes::BufMut;
+        use tds_protocol::packet::{PACKET_HEADER_SIZE, PacketHeader, PacketStatus};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        tracing::warn!(
+            "⚠️  Connecting without TLS (tls feature disabled). \
+             Credentials and data will be transmitted in plaintext."
+        );
+
+        // Build PreLogin packet with NotSupported encryption
+        let prelogin = Self::build_prelogin(config, EncryptionLevel::NotSupported);
+        let prelogin_bytes = prelogin.encode();
+
+        // Manually create and send the PreLogin packet over raw TCP
+        let header = PacketHeader::new(
+            PacketType::PreLogin,
+            PacketStatus::END_OF_MESSAGE,
+            (PACKET_HEADER_SIZE + prelogin_bytes.len()) as u16,
+        );
+
+        let mut packet_buf = BytesMut::with_capacity(PACKET_HEADER_SIZE + prelogin_bytes.len());
+        header.encode(&mut packet_buf);
+        packet_buf.put_slice(&prelogin_bytes);
+
+        tcp_stream
+            .write_all(&packet_buf)
+            .await
+            .map_err(|e| Error::Io(Arc::new(e)))?;
+
+        // Read PreLogin response
+        let mut header_buf = [0u8; PACKET_HEADER_SIZE];
+        tcp_stream
+            .read_exact(&mut header_buf)
+            .await
+            .map_err(|e| Error::Io(Arc::new(e)))?;
+
+        let response_length = u16::from_be_bytes([header_buf[2], header_buf[3]]) as usize;
+        let payload_length = response_length.saturating_sub(PACKET_HEADER_SIZE);
+
+        let mut response_buf = vec![0u8; payload_length];
+        tcp_stream
+            .read_exact(&mut response_buf)
+            .await
+            .map_err(|e| Error::Io(Arc::new(e)))?;
+
+        let prelogin_response =
+            PreLogin::decode(&response_buf[..]).map_err(|e| Error::Protocol(e.to_string()))?;
+
+        // Check server encryption response - must accept NotSupported
+        let server_encryption = prelogin_response.encryption;
+        if server_encryption != EncryptionLevel::NotSupported {
+            return Err(Error::Config(format!(
+                "Server requires encryption (level: {:?}) but TLS feature is disabled. \
+                     Either enable the 'tls' feature or configure the server to allow unencrypted connections.",
+                server_encryption
+            )));
+        }
+
+        tracing::debug!("Server accepted unencrypted connection");
+
+        // Build Login7 packet
+        let login = Self::build_login7(config);
+        let login_bytes = login.encode();
+
+        // Send Login7 over raw TCP
+        let login_header = PacketHeader::new(
+            PacketType::Tds7Login,
+            PacketStatus::END_OF_MESSAGE,
+            (PACKET_HEADER_SIZE + login_bytes.len()) as u16,
+        )
+        .with_packet_id(1);
+        let mut login_packet_buf = BytesMut::with_capacity(PACKET_HEADER_SIZE + login_bytes.len());
+        login_header.encode(&mut login_packet_buf);
+        login_packet_buf.put_slice(&login_bytes);
+
+        tcp_stream
+            .write_all(&login_packet_buf)
+            .await
+            .map_err(|e| Error::Io(Arc::new(e)))?;
+        tcp_stream
+            .flush()
+            .await
+            .map_err(|e| Error::Io(Arc::new(e)))?;
+
+        // Read login response header
+        let mut response_header_buf = [0u8; PACKET_HEADER_SIZE];
+        tcp_stream
+            .read_exact(&mut response_header_buf)
+            .await
+            .map_err(|e| Error::Io(Arc::new(e)))?;
+
+        let response_length =
+            u16::from_be_bytes([response_header_buf[2], response_header_buf[3]]) as usize;
+
+        // Read response payload
+        let payload_length = response_length.saturating_sub(PACKET_HEADER_SIZE);
+        let mut response_payload = vec![0u8; payload_length];
+        tcp_stream
+            .read_exact(&mut response_payload)
+            .await
+            .map_err(|e| Error::Io(Arc::new(e)))?;
+
+        // Create Connection for further communication
+        let connection = Connection::new(tcp_stream);
+
+        // Parse login response
+        let response_bytes = bytes::Bytes::from(response_payload);
+        let mut parser = TokenParser::new(response_bytes);
+        let mut server_version = None;
+        let mut current_database = None;
+
+        while let Some(token) = parser
+            .next_token()
+            .map_err(|e| Error::Protocol(e.to_string()))?
+        {
+            match token {
+                Token::LoginAck(ack) => {
+                    tracing::info!(
+                        version = ack.tds_version,
+                        interface = ack.interface,
+                        prog_name = %ack.prog_name,
+                        "login acknowledged"
+                    );
+                    server_version = Some(ack.tds_version);
+                }
+                Token::EnvChange(env) => {
+                    Self::process_env_change(&env, &mut current_database, &mut None);
+                }
+                Token::Error(err) => {
+                    return Err(Error::Server {
+                        number: err.number,
+                        state: err.state,
+                        class: err.class,
+                        message: err.message.clone(),
+                        server: if err.server.is_empty() {
+                            None
+                        } else {
+                            Some(err.server.clone())
+                        },
+                        procedure: if err.procedure.is_empty() {
+                            None
+                        } else {
+                            Some(err.procedure.clone())
+                        },
+                        line: err.line as u32,
+                    });
+                }
+                Token::Info(info) => {
+                    tracing::info!(
+                        number = info.number,
+                        message = %info.message,
+                        "server info message"
+                    );
+                }
+                Token::Done(done) => {
+                    if done.status.error {
+                        return Err(Error::Protocol("login failed".to_string()));
+                    }
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        Ok(Client {
+            config: config.clone(),
+            _state: PhantomData,
+            connection: Some(ConnectionHandle::Plain(connection)),
+            server_version,
+            current_database: current_database.clone(),
+            statement_cache: StatementCache::with_default_size(),
+            transaction_descriptor: 0,
+            needs_reset: false,
+            #[cfg(feature = "otel")]
+            instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
+                .with_database(current_database.unwrap_or_default()),
+        })
+    }
+
     /// Build a PreLogin packet.
     fn build_prelogin(config: &Config, encryption: EncryptionLevel) -> PreLogin {
         // Use the configured TDS version (strict_mode overrides to V8_0)
@@ -717,6 +939,7 @@ impl Client<Disconnected> {
     }
 
     /// Send a PreLogin packet (for use with Connection).
+    #[cfg(feature = "tls")]
     async fn send_prelogin<T>(connection: &mut Connection<T>, prelogin: &PreLogin) -> Result<()>
     where
         T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
@@ -731,6 +954,7 @@ impl Client<Disconnected> {
     }
 
     /// Receive a PreLogin response (for use with Connection).
+    #[cfg(feature = "tls")]
     async fn receive_prelogin<T>(connection: &mut Connection<T>) -> Result<PreLogin>
     where
         T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
@@ -745,6 +969,7 @@ impl Client<Disconnected> {
     }
 
     /// Send a Login7 packet.
+    #[cfg(feature = "tls")]
     async fn send_login7<T>(connection: &mut Connection<T>, login: &Login7) -> Result<()>
     where
         T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
@@ -761,6 +986,7 @@ impl Client<Disconnected> {
     /// Process the login response tokens.
     ///
     /// Returns: (server_version, database, routing_info)
+    #[cfg(feature = "tls")]
     async fn process_login_response<T>(
         connection: &mut Connection<T>,
     ) -> Result<(Option<u32>, Option<String>, Option<(String, u16)>)>
@@ -928,11 +1154,13 @@ impl<S: ConnectionState> Client<S> {
         let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         match connection {
+            #[cfg(feature = "tls")]
             ConnectionHandle::Tls(conn) => {
                 conn.send_message_with_reset(PacketType::SqlBatch, payload, max_packet, reset)
                     .await
                     .map_err(|e| Error::Protocol(e.to_string()))?;
             }
+            #[cfg(feature = "tls")]
             ConnectionHandle::TlsPrelogin(conn) => {
                 conn.send_message_with_reset(PacketType::SqlBatch, payload, max_packet, reset)
                     .await
@@ -968,11 +1196,13 @@ impl<S: ConnectionState> Client<S> {
         let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         match connection {
+            #[cfg(feature = "tls")]
             ConnectionHandle::Tls(conn) => {
                 conn.send_message_with_reset(PacketType::Rpc, payload, max_packet, reset)
                     .await
                     .map_err(|e| Error::Protocol(e.to_string()))?;
             }
+            #[cfg(feature = "tls")]
             ConnectionHandle::TlsPrelogin(conn) => {
                 conn.send_message_with_reset(PacketType::Rpc, payload, max_packet, reset)
                     .await
@@ -1328,10 +1558,12 @@ impl<S: ConnectionState> Client<S> {
         let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         let message = match connection {
+            #[cfg(feature = "tls")]
             ConnectionHandle::Tls(conn) => conn
                 .read_message()
                 .await
                 .map_err(|e| Error::Protocol(e.to_string()))?,
+            #[cfg(feature = "tls")]
             ConnectionHandle::TlsPrelogin(conn) => conn
                 .read_message()
                 .await
@@ -2760,10 +2992,12 @@ impl<S: ConnectionState> Client<S> {
         let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         let message = match connection {
+            #[cfg(feature = "tls")]
             ConnectionHandle::Tls(conn) => conn
                 .read_message()
                 .await
                 .map_err(|e| Error::Protocol(e.to_string()))?,
+            #[cfg(feature = "tls")]
             ConnectionHandle::TlsPrelogin(conn) => conn
                 .read_message()
                 .await
@@ -2870,10 +3104,12 @@ impl<S: ConnectionState> Client<S> {
         let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         let message = match connection {
+            #[cfg(feature = "tls")]
             ConnectionHandle::Tls(conn) => conn
                 .read_message()
                 .await
                 .map_err(|e| Error::Protocol(e.to_string()))?,
+            #[cfg(feature = "tls")]
             ConnectionHandle::TlsPrelogin(conn) => conn
                 .read_message()
                 .await
@@ -3142,10 +3378,12 @@ impl Client<Ready> {
         let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         let message = match connection {
+            #[cfg(feature = "tls")]
             ConnectionHandle::Tls(conn) => conn
                 .read_message()
                 .await
                 .map_err(|e| Error::Protocol(e.to_string()))?,
+            #[cfg(feature = "tls")]
             ConnectionHandle::TlsPrelogin(conn) => conn
                 .read_message()
                 .await
@@ -3598,9 +3836,11 @@ impl Client<Ready> {
             .as_ref()
             .expect("connection should be present");
         match connection {
+            #[cfg(feature = "tls")]
             ConnectionHandle::Tls(conn) => {
                 crate::cancel::CancelHandle::from_tls(conn.cancel_handle())
             }
+            #[cfg(feature = "tls")]
             ConnectionHandle::TlsPrelogin(conn) => {
                 crate::cancel::CancelHandle::from_tls_prelogin(conn.cancel_handle())
             }
@@ -3905,9 +4145,11 @@ impl Client<InTransaction> {
             .as_ref()
             .expect("connection should be present");
         match connection {
+            #[cfg(feature = "tls")]
             ConnectionHandle::Tls(conn) => {
                 crate::cancel::CancelHandle::from_tls(conn.cancel_handle())
             }
+            #[cfg(feature = "tls")]
             ConnectionHandle::TlsPrelogin(conn) => {
                 crate::cancel::CancelHandle::from_tls_prelogin(conn.cancel_handle())
             }

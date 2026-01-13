@@ -10,7 +10,7 @@ keywords = ["sql-server", "mssql", "database", "async", "tokio"]
 categories = ["database", "asynchronous"]
 
 [features]
-default = ["chrono", "uuid", "decimal", "encoding"]
+default = ["chrono", "uuid", "decimal", "encoding", "tls"]
 chrono = ["mssql-types/chrono", "dep:chrono"]
 uuid = ["mssql-types/uuid"]
 decimal = ["mssql-types/decimal", "dep:rust_decimal"]
@@ -28,10 +28,15 @@ always-encrypted = ["mssql-auth/always-encrypted"]
 # Enables proper handling of non-ASCII text in VARCHAR/CHAR columns with
 # locale-specific encodings (Japanese Shift_JIS, Chinese GB18030/Big5, Korean EUC-KR, etc.)
 encoding = ["tds-protocol/encoding", "mssql-types/encoding"]
+# TLS/SSL encryption support (enabled by default)
+# Disable this feature for environments where TLS is not needed (enterprise internal networks,
+# legacy SQL Server instances, or development environments) to reduce binary size and compile time.
+# When disabled, only `Encrypt=no_tls` connections are supported.
+tls = ["dep:mssql-tls"]
 
 [dependencies]
 tds-protocol = { workspace = true }
-mssql-tls = { workspace = true }
+mssql-tls = { workspace = true, optional = true }
 mssql-codec = { workspace = true }
 mssql-types = { workspace = true }
 mssql-auth = { workspace = true }
@@ -109,7 +114,8 @@ harness = false
 [package.metadata.cargo-machete]
 # tokio-test and mssql-derive are dev-dependencies for tests
 # opentelemetry_sdk and tracing-opentelemetry are behind the otel feature flag
-ignored = ["tokio-test", "mssql-derive", "opentelemetry_sdk", "tracing-opentelemetry"]
+# mssql-tls is behind the tls feature flag
+ignored = ["tokio-test", "mssql-derive", "opentelemetry_sdk", "tracing-opentelemetry", "mssql-tls"]
 
 [lints]
 workspace = true

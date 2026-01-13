@@ -42,6 +42,7 @@
 use std::sync::Arc;
 
 use mssql_codec::connection::CancelHandle as CodecCancelHandle;
+#[cfg(feature = "tls")]
 use mssql_tls::TlsStream;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
@@ -49,9 +50,11 @@ use tokio::sync::Mutex;
 use crate::error::{Error, Result};
 
 /// Type alias for the TLS cancel handle.
+#[cfg(feature = "tls")]
 type TlsCancelHandle = CodecCancelHandle<TlsStream<TcpStream>>;
 
 /// Type alias for the PreLogin wrapper cancel handle.
+#[cfg(feature = "tls")]
 type TlsPreloginCancelHandle =
     CodecCancelHandle<TlsStream<mssql_tls::TlsPreloginWrapper<TcpStream>>>;
 
@@ -74,8 +77,10 @@ pub struct CancelHandle {
 /// Inner cancel handle that holds the actual codec handle.
 enum CancelHandleInner {
     /// TLS connection (TDS 8.0 strict mode)
+    #[cfg(feature = "tls")]
     Tls(TlsCancelHandle),
     /// TLS connection with PreLogin wrapping (TDS 7.x style)
+    #[cfg(feature = "tls")]
     TlsPrelogin(TlsPreloginCancelHandle),
     /// Plain TCP connection
     Plain(PlainCancelHandle),
@@ -83,6 +88,7 @@ enum CancelHandleInner {
 
 impl CancelHandle {
     /// Create a new cancel handle for a TLS connection (TDS 8.0 strict mode).
+    #[cfg(feature = "tls")]
     pub(crate) fn from_tls(handle: TlsCancelHandle) -> Self {
         Self {
             inner: Arc::new(Mutex::new(CancelHandleInner::Tls(handle))),
@@ -90,6 +96,7 @@ impl CancelHandle {
     }
 
     /// Create a new cancel handle for a TLS PreLogin connection (TDS 7.x style).
+    #[cfg(feature = "tls")]
     pub(crate) fn from_tls_prelogin(handle: TlsPreloginCancelHandle) -> Self {
         Self {
             inner: Arc::new(Mutex::new(CancelHandleInner::TlsPrelogin(handle))),
@@ -125,7 +132,9 @@ impl CancelHandle {
     pub async fn cancel(&self) -> Result<()> {
         let inner = self.inner.lock().await;
         match &*inner {
+            #[cfg(feature = "tls")]
             CancelHandleInner::Tls(h) => h.cancel().await.map_err(|e| Error::Cancel(e.to_string())),
+            #[cfg(feature = "tls")]
             CancelHandleInner::TlsPrelogin(h) => {
                 h.cancel().await.map_err(|e| Error::Cancel(e.to_string()))
             }
@@ -145,7 +154,9 @@ impl CancelHandle {
     pub async fn wait_cancelled(&self) {
         let inner = self.inner.lock().await;
         match &*inner {
+            #[cfg(feature = "tls")]
             CancelHandleInner::Tls(h) => h.wait_cancelled().await,
+            #[cfg(feature = "tls")]
             CancelHandleInner::TlsPrelogin(h) => h.wait_cancelled().await,
             CancelHandleInner::Plain(h) => h.wait_cancelled().await,
         }
@@ -161,7 +172,9 @@ impl CancelHandle {
         self.inner
             .try_lock()
             .map(|inner| match &*inner {
+                #[cfg(feature = "tls")]
                 CancelHandleInner::Tls(h) => h.is_cancelling(),
+                #[cfg(feature = "tls")]
                 CancelHandleInner::TlsPrelogin(h) => h.is_cancelling(),
                 CancelHandleInner::Plain(h) => h.is_cancelling(),
             })

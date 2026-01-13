@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **PEM certificate support**: `CertificateAuth::from_pem()` constructor for users with PEM-formatted certificates (common in Linux/Kubernetes environments)
 - **Decimal support for Money types**: Money, SmallMoney, and MoneyN columns now return `rust_decimal::Decimal` when the `decimal` feature is enabled, preventing precision loss in financial applications
+- **Optional TLS feature**: TLS dependencies are now behind the `tls` feature flag (enabled by default). Disable for `Encrypt=no_tls` connections to reduce binary size (~2-3 MB) and speed up compilation. Useful for enterprise internal networks, Kubernetes clusters, and legacy SQL Server environments
 
 ### Fixed
 
