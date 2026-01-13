@@ -120,6 +120,7 @@ pub enum Error {
     Cancelled,
 }
 
+#[cfg(feature = "tls")]
 impl From<mssql_tls::TlsError> for Error {
     fn from(e: mssql_tls::TlsError) -> Self {
         Error::Tls(e.to_string())

@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use mssql_auth::Credentials;
+#[cfg(feature = "tls")]
 use mssql_tls::TlsConfig;
 use tds_protocol::version::TdsVersion;
 
@@ -289,7 +290,8 @@ pub struct Config {
     /// Authentication credentials.
     pub credentials: Credentials,
 
-    /// TLS configuration.
+    /// TLS configuration (only available when `tls` feature is enabled).
+    #[cfg(feature = "tls")]
     pub tls: TlsConfig,
 
     /// Application name (shown in SQL Server management tools).
@@ -373,6 +375,7 @@ impl Default for Config {
             port: 1433,
             database: None,
             credentials: Credentials::sql_server("", ""),
+            #[cfg(feature = "tls")]
             tls: TlsConfig::default(),
             application_name: "mssql-client".to_string(),
             connect_timeout: timeouts.connect_timeout,
@@ -586,7 +589,10 @@ impl Config {
     #[must_use]
     pub fn trust_server_certificate(mut self, trust: bool) -> Self {
         self.trust_server_certificate = trust;
-        self.tls = self.tls.trust_server_certificate(trust);
+        #[cfg(feature = "tls")]
+        {
+            self.tls = self.tls.trust_server_certificate(trust);
+        }
         self
     }
 
@@ -594,7 +600,10 @@ impl Config {
     #[must_use]
     pub fn strict_mode(mut self, enabled: bool) -> Self {
         self.strict_mode = enabled;
-        self.tls = self.tls.strict_mode(enabled);
+        #[cfg(feature = "tls")]
+        {
+            self.tls = self.tls.strict_mode(enabled);
+        }
         if enabled {
             self.tds_version = TdsVersion::V8_0;
         }
@@ -630,7 +639,10 @@ impl Config {
         // If TDS 8.0 is requested, automatically enable strict mode
         if version.is_tds_8() {
             self.strict_mode = true;
-            self.tls = self.tls.strict_mode(true);
+            #[cfg(feature = "tls")]
+            {
+                self.tls = self.tls.strict_mode(true);
+            }
         }
         self
     }
