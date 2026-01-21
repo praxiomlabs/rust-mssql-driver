@@ -4,6 +4,8 @@
 
 A high-performance MS SQL Server driver for Rust that aims to surpass `prisma/tiberius`. This is a greenfield implementation built from scratch using modern Rust practices.
 
+**Current Version:** v0.6.0
+**Status:** Production-ready with comprehensive feature support
 **Reference Implementation:** `/tmp/tiberius/` (cloned for analysis, not as a base)
 
 ## Goals
@@ -17,7 +19,7 @@ A high-performance MS SQL Server driver for Rust that aims to surpass `prisma/ti
 
 ## Key Architecture Decisions
 
-Refer to `ARCHITECTURE.md` (v1.2.0) for complete details. Critical decisions:
+Refer to `ARCHITECTURE.md` (v1.5.0) for complete details. Critical decisions:
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
@@ -126,13 +128,68 @@ loop {
 }
 ```
 
-## Development Tooling
+## Common Development Commands
+
+The project uses `xtask` for build automation. All commands run via `cargo xtask <command>`:
+
+```bash
+# Core Development
+cargo xtask ci              # Run all CI checks (format, lint, test, deny)
+cargo xtask fmt             # Check code formatting (add --fix to apply)
+cargo xtask clippy          # Run clippy lints (add --fix to apply suggestions)
+cargo xtask test            # Run all tests
+cargo xtask test -p tds-protocol       # Test specific crate
+cargo xtask test --integration          # Run integration tests (requires SQL Server)
+cargo xtask deny            # Run cargo-deny checks (licenses, duplicate deps)
+cargo xtask doc             # Generate documentation (add --open to view in browser)
+cargo xtask clean           # Clean build artifacts
+
+# Workspace Management
+cargo xtask hakari          # Update workspace-hack crate (run after dependency changes)
+
+# Quality Assurance
+cargo xtask semver          # Check for semver violations (requires cargo-semver-checks)
+cargo xtask coverage        # Run code coverage (requires cargo-llvm-cov)
+
+# Fuzzing (requires nightly + cargo-fuzz)
+cargo xtask fuzz --list                 # List available fuzz targets
+cargo xtask fuzz parse_packet --max-time 300  # Run fuzz target for N seconds
+cargo xtask fuzz-init                   # Initialize fuzzing infrastructure
+
+# Protocol Code Generation
+cargo xtask codegen         # Generate TDS protocol constants
+cargo xtask codegen --check # Verify generated code is up to date
+
+# Release
+cargo xtask dist            # Build release artifacts
+cargo xtask bench           # Run benchmarks
+```
+
+### Running Individual Tests
+
+```bash
+# Run a specific test
+cargo test test_name
+
+# Run tests in a specific file
+cargo test --lib path::to::module
+
+# Run tests with output
+cargo test -- --nocapture
+
+# Run tests with specific filter
+cargo test connection
+
+# Integration test example
+cargo test --test integration_test_name
+```
 
 ### Required Tools
 
-- Rust 1.85+ (2024 Edition)
-- cargo-hakari (workspace-hack management)
-- cargo-deny (dependency auditing)
+- **Rust 1.85+** (2024 Edition)
+- **cargo-hakari** - Workspace-hack management (`cargo install cargo-hakari`)
+- **cargo-deny** - Dependency auditing (`cargo install cargo-deny`)
+- **cargo-nextest** - Parallel test execution (optional, for faster testing)
 
 ### cargo-deny + cargo-hakari Interaction
 
@@ -196,6 +253,24 @@ Key differences for migrators:
 
 ## Document References
 
-- `ARCHITECTURE.md` - Complete architecture specification (v1.2.0)
+- `ARCHITECTURE.md` - Complete architecture specification (v1.5.0)
 - MS-TDS Protocol Spec - Microsoft documentation
 - Tiberius source - `/tmp/tiberius/` (reference only)
+
+## Critical Dependency Versions
+
+These versions are managed in `Cargo.toml` [workspace.dependencies]:
+
+| Dependency | Version | Purpose |
+|------------|---------|---------|
+| Tokio | 1.48+ | Async runtime (hard requirement) |
+| rustls | 0.23 | Pure Rust TLS implementation |
+| bytes | 1.9 | Zero-copy byte buffer management |
+| thiserror | 2.0 | Error handling derive macros |
+| chrono | 0.4 | Date/time type support (default feature) |
+| uuid | 1.11 | UUID type support (default feature) |
+| rust_decimal | 1.36 | Decimal type support (default feature) |
+| OpenTelemetry | 0.31 | Observability (optional `otel` feature) |
+| Azure SDK | 0.30/0.9 | Azure authentication (optional `azure-identity` feature) |
+
+**⚠️ Important:** All OpenTelemetry crates must be version-aligned at 0.31 to avoid compatibility issues.

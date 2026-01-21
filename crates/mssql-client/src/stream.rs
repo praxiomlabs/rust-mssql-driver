@@ -40,6 +40,7 @@ use crate::row::{Column, Row};
 ///     process_row(&row);
 /// }
 /// ```
+#[derive(Debug)]
 pub struct QueryStream<'a> {
     /// Column metadata for the result set.
     columns: Vec<Column>,
@@ -166,15 +167,17 @@ impl Iterator for QueryStream<'_> {
     }
 }
 
-/// Result of a non-query execution.
+/// Result of a stored procedure execution.
 ///
-/// Contains the number of affected rows and any output parameters.
-#[derive(Debug, Clone)]
-pub struct ExecuteResult {
+/// Contains output parameters, affected rows count, and optional result set.
+#[derive(Debug)]
+pub struct ExecuteResult<'a> {
+    /// Output parameters from the stored procedure.
+    pub output_params: Vec<OutputParam>,
     /// Number of rows affected by the statement.
     pub rows_affected: u64,
-    /// Output parameters from stored procedures.
-    pub output_params: Vec<OutputParam>,
+    /// Result set from SELECT statements in the procedure (if any).
+    pub result_set: Option<QueryStream<'a>>,
 }
 
 /// An output parameter from a stored procedure call.
@@ -186,20 +189,26 @@ pub struct OutputParam {
     pub value: mssql_types::SqlValue,
 }
 
-impl ExecuteResult {
-    /// Create a new execute result.
-    pub fn new(rows_affected: u64) -> Self {
+impl<'a> ExecuteResult<'a> {
+    /// Create a new execute result with all components.
+    pub(crate) fn new(
+        output_params: Vec<OutputParam>,
+        rows_affected: u64,
+        result_set: Option<QueryStream<'a>>,
+    ) -> Self {
         Self {
+            output_params,
             rows_affected,
-            output_params: Vec::new(),
+            result_set,
         }
     }
 
-    /// Create a result with output parameters.
-    pub fn with_outputs(rows_affected: u64, output_params: Vec<OutputParam>) -> Self {
+    /// Create a result with only output parameters (no result set).
+    pub fn with_outputs(output_params: Vec<OutputParam>, rows_affected: u64) -> Self {
         Self {
-            rows_affected,
             output_params,
+            rows_affected,
+            result_set: None,
         }
     }
 
@@ -209,6 +218,23 @@ impl ExecuteResult {
         self.output_params
             .iter()
             .find(|p| p.name.eq_ignore_ascii_case(name))
+    }
+
+    /// Check if there is a result set available.
+    #[must_use]
+    pub fn has_result_set(&self) -> bool {
+        self.result_set.is_some()
+    }
+
+    /// Get the result set if available.
+    #[must_use]
+    pub fn get_result_set(&self) -> Option<&QueryStream<'a>> {
+        self.result_set.as_ref()
+    }
+
+    /// Take the result set, leaving None in its place.
+    pub fn take_result_set(&mut self) -> Option<QueryStream<'a>> {
+        self.result_set.take()
     }
 }
 
@@ -393,9 +419,10 @@ mod tests {
 
     #[test]
     fn test_execute_result() {
-        let result = ExecuteResult::new(42);
+        let result = ExecuteResult::new(vec![], 42, None);
         assert_eq!(result.rows_affected, 42);
         assert!(result.output_params.is_empty());
+        assert!(!result.has_result_set());
     }
 
     #[test]
@@ -405,11 +432,12 @@ mod tests {
             value: mssql_types::SqlValue::Int(100),
         }];
 
-        let result = ExecuteResult::with_outputs(10, outputs);
+        let result = ExecuteResult::with_outputs(outputs, 10);
         assert_eq!(result.rows_affected, 10);
         assert!(result.get_output("ReturnValue").is_some());
         assert!(result.get_output("returnvalue").is_some()); // case-insensitive
         assert!(result.get_output("NotFound").is_none());
+        assert!(!result.has_result_set());
     }
 
     #[test]

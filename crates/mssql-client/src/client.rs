@@ -3095,6 +3095,198 @@ impl<S: ConnectionState> Client<S> {
         Ok(rows_affected)
     }
 
+    /// Read stored procedure execution result with output parameters.
+    ///
+    /// This method collects:
+    /// - Output parameter values from ReturnValue tokens
+    /// - Result set rows (if any)
+    /// - Row count from DoneProc tokens
+    async fn read_stored_proc_result(&mut self) -> Result<crate::stream::ExecuteResult<'_>> {
+        use mssql_types::decode::{decode_value, TypeInfo as DecodeTypeInfo};
+
+        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
+
+        let message = match connection {
+            #[cfg(feature = "tls")]
+            ConnectionHandle::Tls(conn) => conn
+                .read_message()
+                .await
+                .map_err(|e| Error::Protocol(e.to_string()))?,
+            #[cfg(feature = "tls")]
+            ConnectionHandle::TlsPrelogin(conn) => conn
+                .read_message()
+                .await
+                .map_err(|e| Error::Protocol(e.to_string()))?,
+            ConnectionHandle::Plain(conn) => conn
+                .read_message()
+                .await
+                .map_err(|e| Error::Protocol(e.to_string()))?,
+        }
+        .ok_or(Error::ConnectionClosed)?;
+
+        let mut parser = TokenParser::new(message.payload);
+        let mut output_params = Vec::new();
+        let mut result_set_columns: Vec<crate::row::Column> = Vec::new();
+        let mut result_set_rows: Vec<crate::row::Row> = Vec::new();
+        let mut current_metadata: Option<ColMetaData> = None;
+        let mut rows_affected: u64 = 0;
+
+        loop {
+            let token = parser
+                .next_token_with_metadata(current_metadata.as_ref())
+                .map_err(|e| Error::Protocol(e.to_string()))?;
+
+            let Some(token) = token else {
+                break;
+            };
+
+            match token {
+                Token::ReturnStatus(status) => {
+                    // ReturnStatus contains the RETURN statement value
+                    // Only include it if non-zero (explicit RETURN) or if there are no other output params
+                    // Many stored procedures don't have explicit RETURN statements, so we get status=0
+                    if status != 0 {
+                        output_params.push(crate::stream::OutputParam {
+                            name: String::new(), // Empty name indicates RETURN value
+                            value: mssql_types::SqlValue::Int(status),
+                        });
+                    }
+                }
+                Token::ReturnValue(ret_val) => {
+                    // Convert ReturnValue to SqlValue
+                    let sql_value = if ret_val.col_type == 0x00 {
+                        // NULL type (0x00) - value is always NULL
+                        mssql_types::SqlValue::Null
+                    } else {
+                        let mut value_bytes = ret_val.value;
+
+                        // Convert tds_protocol::TypeInfo to mssql_types::TypeInfo
+                        let decode_type_info = DecodeTypeInfo {
+                            type_id: ret_val.col_type, // Use col_type field for type_id
+                            length: ret_val.type_info.max_length,
+                            scale: ret_val.type_info.scale,
+                            precision: ret_val.type_info.precision,
+                            collation: ret_val.type_info.collation.map(|c| {
+                                mssql_types::decode::Collation {
+                                    lcid: c.lcid,
+                                    flags: c.sort_id,
+                                }
+                            }),
+                        };
+
+                        decode_value(&mut value_bytes, &decode_type_info)
+                            .map_err(|e| Error::Protocol(format!("failed to decode output parameter: {}", e)))?
+                    };
+
+                    output_params.push(crate::stream::OutputParam {
+                        name: ret_val.param_name,
+                        value: sql_value,
+                    });
+                }
+                Token::ColMetaData(meta) => {
+                    // Build columns for result set
+                    result_set_columns = meta
+                        .columns
+                        .iter()
+                        .enumerate()
+                        .map(|(i, col)| {
+                            let type_name = format!("{:?}", col.type_id);
+                            let mut column = crate::row::Column::new(&col.name, i, type_name)
+                                .with_nullable(col.flags & 0x01 != 0);
+
+                            if let Some(max_len) = col.type_info.max_length {
+                                column = column.with_max_length(max_len);
+                            }
+                            if let (Some(prec), Some(scale)) =
+                                (col.type_info.precision, col.type_info.scale)
+                            {
+                                column = column.with_precision_scale(prec, scale);
+                            }
+                            if let Some(collation) = col.type_info.collation {
+                                column = column.with_collation(collation);
+                            }
+                            column
+                        })
+                        .collect();
+
+                    current_metadata = Some(meta);
+                }
+                Token::Row(row) => {
+                    if !result_set_columns.is_empty() {
+                        let row_data = Self::convert_raw_row(&row, current_metadata.as_ref().unwrap(), &result_set_columns)?;
+                        result_set_rows.push(row_data);
+                    }
+                }
+                Token::NbcRow(row) => {
+                    if !result_set_columns.is_empty() {
+                        let row_data = Self::convert_nbc_row(&row, current_metadata.as_ref().unwrap(), &result_set_columns)?;
+                        result_set_rows.push(row_data);
+                    }
+                }
+                Token::DoneProc(done) => {
+                    if done.status.error {
+                        return Err(Error::Query("stored procedure execution failed".to_string()));
+                    }
+                    if done.status.count {
+                        rows_affected = done.row_count;
+                    }
+                    // DoneProc is the final token for stored procedures
+                    break;
+                }
+                Token::Done(done) => {
+                    if done.status.error {
+                        return Err(Error::Query("execution failed".to_string()));
+                    }
+                    if done.status.count {
+                        rows_affected = done.row_count;
+                    }
+                    if !done.status.more {
+                        break;
+                    }
+                }
+                Token::Error(err) => {
+                    return Err(Error::Server {
+                        number: err.number,
+                        state: err.state,
+                        class: err.class,
+                        message: err.message.clone(),
+                        server: if err.server.is_empty() {
+                            None
+                        } else {
+                            Some(err.server.clone())
+                        },
+                        procedure: if err.procedure.is_empty() {
+                            None
+                        } else {
+                            Some(err.procedure.clone())
+                        },
+                        line: err.line as u32,
+                    });
+                }
+                Token::Info(info) => {
+                    tracing::info!(
+                        number = info.number,
+                        message = %info.message,
+                        "server info message"
+                    );
+                }
+                Token::EnvChange(env) => {
+                    Self::process_transaction_env_change(&env, &mut self.transaction_descriptor);
+                }
+                _ => {}
+            }
+        }
+
+        // Create query stream if we have rows
+        let result_set = if !result_set_rows.is_empty() && !result_set_columns.is_empty() {
+            Some(QueryStream::new(result_set_columns, result_set_rows))
+        } else {
+            None
+        };
+
+        Ok(crate::stream::ExecuteResult::new(output_params, rows_affected, result_set))
+    }
+
     /// Read the response from BEGIN TRANSACTION and extract the transaction descriptor.
     ///
     /// Per MS-TDS spec, the server sends a BeginTransaction EnvChange token containing
@@ -3634,6 +3826,148 @@ impl Client<Ready> {
             .map_err(|_| Error::CommandTimeout)?
     }
 
+    /// Execute a stored procedure with output parameter support.
+    ///
+    /// This method provides comprehensive stored procedure execution with:
+    /// - Output parameter retrieval
+    /// - Optional result sets
+    /// - Optional affected row count
+    ///
+    /// # Arguments
+    ///
+    /// * `proc_name` - The stored procedure name (e.g., "dbo.CalculateSum" or "dbo.CalculateSum")
+    /// * `params` - Procedure parameters (mix of input and output)
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing:
+    /// * `Vec<OutputParam>` - All output parameters with their values
+    /// * `Option<QueryStream<'_>>` - Result set if the procedure returns one
+    /// * `Option<u64>` - Affected row count if applicable
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use mssql_client::Client;
+    /// use tds_protocol::rpc::{RpcParam, TypeInfo};
+    ///
+    /// // Define output parameter (NULL initial value, marked as output)
+    /// let result_param = RpcParam::null("@result", TypeInfo::int()).as_output();
+    ///
+    /// // Execute stored procedure
+    /// let result = client.execute_procedure(
+    ///     "dbo.CalculateSum",
+    ///     vec![
+    ///         RpcParam::int("@a", 10),
+    ///         RpcParam::int("@b", 20),
+    ///         result_param,
+    ///     ]
+    /// ).await?;
+    ///
+    /// // Get output parameter value
+    /// if let Some(output) = result.get_output("result") {
+    ///     let sum: i32 = output.value.as_i32().expect("expected i32");
+    ///     println!("Sum: {}", sum);
+    /// }
+    ///
+    /// println!("Rows affected: {}", result.rows_affected);
+    /// ```
+    ///
+    /// # Stored Procedure with Result Set and Output Parameters
+    ///
+    /// ```rust,ignore
+    /// // SQL:
+    /// // CREATE PROCEDURE dbo.GetUserStats
+    /// //     @userId INT,
+    /// //     @totalCount INT OUTPUT
+    /// // AS
+    /// // BEGIN
+    /// //     SELECT * FROM UserOrders WHERE UserId = @userId;
+    /// //     SET @totalCount = @@ROWCOUNT;
+    /// // END
+    ///
+    /// let result = client.execute_procedure(
+    ///     "dbo.GetUserStats",
+    ///     vec![
+    ///         RpcParam::int("@userId", 123),
+    ///         RpcParam::null("@totalCount", TypeInfo::int()).as_output(),
+    ///     ]
+    /// ).await?;
+    ///
+    /// // Process result set if available
+    /// if let Some(mut rows) = result.take_result_set() {
+    ///     while let Some(Ok(row)) = rows.next() {
+    ///         // Handle order data
+    ///     }
+    /// }
+    ///
+    /// // Get output parameter
+    /// let count: i32 = result.get_output("totalCount").unwrap().value.as_i32().unwrap();
+    /// println!("Total: {} rows affected", result.rows_affected);
+    /// ```
+    ///
+    /// # RETURN Statement Support
+    ///
+    /// ```rust,ignore
+    /// // SQL:
+    /// // CREATE PROCEDURE dbo.CheckStatus
+    /// //     @id INT
+    /// // AS
+    /// // BEGIN
+    /// //     IF EXISTS (SELECT 1 FROM Users WHERE Id = @id)
+    /// //         RETURN 1;
+    /// //     RETURN 0;
+    /// // END
+    /// ///
+    /// let result = client.execute_procedure(
+    ///     "dbo.CheckStatus",
+    ///     vec![RpcParam::int("@id", 123)]
+    /// ).await?;
+    ///
+    /// // RETURN value comes as first output param with empty name
+    /// let status: i32 = result.output_params[0].value.as_i32().expect("expected i32");
+    /// ```
+    pub async fn execute_procedure(
+        &mut self,
+        proc_name: &str,
+        params: Vec<RpcParam>,
+    ) -> Result<crate::stream::ExecuteResult<'_>> {
+        tracing::debug!(
+            proc_name = proc_name,
+            params_count = params.len(),
+            "executing stored procedure"
+        );
+
+        #[cfg(feature = "otel")]
+        let instrumentation = self.instrumentation.clone();
+        #[cfg(feature = "otel")]
+        let mut span = instrumentation.query_span(proc_name);
+
+        let result = async {
+            // Create RPC request for named procedure
+            let mut rpc = RpcRequest::named(proc_name);
+            for param in params {
+                rpc = rpc.param(param);
+            }
+            self.send_rpc(&rpc).await?;
+
+            // Read response with output parameters, result set, and row count
+            self.read_stored_proc_result().await
+        }
+        .await;
+
+        #[cfg(feature = "otel")]
+        match &result {
+            Ok(result) => InstrumentationContext::record_success(&mut span, result.rows_affected),
+            Err(e) => InstrumentationContext::record_error(&mut span, e),
+        }
+
+        #[cfg(feature = "otel")]
+        drop(span);
+
+        result
+    }
+
     /// Begin a transaction.
     ///
     /// This transitions the client from `Ready` to `InTransaction` state.
@@ -3975,6 +4309,71 @@ impl Client<InTransaction> {
         timeout(timeout_duration, self.execute(sql, params))
             .await
             .map_err(|_| Error::CommandTimeout)?
+    }
+
+    /// Execute a stored procedure within the transaction with output parameter support.
+    ///
+    /// This is the transaction-aware version of [`Client<Ready>::execute_procedure`].
+    /// See that method for full documentation and examples.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let mut tx = client.begin_transaction().await?;
+    ///
+    /// let result = tx.execute_procedure(
+    ///     "dbo.UpdateUser",
+    ///     vec![
+    ///         RpcParam::int("@userId", 123),
+    ///         RpcParam::nvarchar("@name", "John"),
+    ///         RpcParam::null("@newId", TypeInfo::int()).as_output(),
+    ///     ]
+    /// ).await?;
+    ///
+    /// let new_id: i32 = result.get_output("newId").unwrap().value.as_i32().unwrap();
+    /// println!("Rows affected: {}", result.rows_affected);
+    ///
+    /// tx.commit().await?;
+    /// ```
+    pub async fn execute_procedure(
+        &mut self,
+        proc_name: &str,
+        params: Vec<RpcParam>,
+    ) -> Result<crate::stream::ExecuteResult<'_>> {
+        tracing::debug!(
+            proc_name = proc_name,
+            params_count = params.len(),
+            "executing stored procedure in transaction"
+        );
+
+        #[cfg(feature = "otel")]
+        let instrumentation = self.instrumentation.clone();
+        #[cfg(feature = "otel")]
+        let mut span = instrumentation.query_span(proc_name);
+
+        let result = async {
+            // Create RPC request for named procedure
+            let mut rpc = RpcRequest::named(proc_name);
+            for param in params {
+                rpc = rpc.param(param);
+            }
+            self.send_rpc(&rpc).await?;
+
+            // Read response with output parameters, result set, and row count
+            self.read_stored_proc_result().await
+        }
+        .await;
+
+        #[cfg(feature = "otel")]
+        match &result {
+            Ok(result) => InstrumentationContext::record_success(&mut span, result.rows_affected),
+            Err(e) => InstrumentationContext::record_error(&mut span, e),
+        }
+
+        #[cfg(feature = "otel")]
+        drop(span);
+
+        result
     }
 
     /// Commit the transaction.

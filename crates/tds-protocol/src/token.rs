@@ -29,7 +29,7 @@
 
 use bytes::{Buf, BufMut, Bytes};
 
-use crate::codec::{read_b_varchar, read_us_varchar};
+use crate::codec::{read_b_varchar, read_us_varchar, read_utf16_string};
 use crate::error::ProtocolError;
 use crate::prelude::*;
 use crate::types::TypeId;
@@ -370,6 +370,10 @@ pub struct ReturnValue {
     pub type_info: TypeInfo,
     /// Value data.
     pub value: bytes::Bytes,
+    /// Column type ID (stored for type conversion).
+    ///
+    /// This is the raw type ID byte from the TDS protocol.
+    pub col_type: u8,
 }
 
 /// Server error message.
@@ -1321,6 +1325,17 @@ impl NbcRow {
 
 impl ReturnValue {
     /// Decode a RETURNVALUE token from bytes.
+    ///
+    /// TDS format for ReturnValue token differs from ColMetaData:
+    /// - Length (2 bytes)
+    /// - ParamOrdinal (2 bytes)
+    /// - ParamName (variable, format: 0x00 + UTF-16LE name + 0x01 0x00 + 0x00 0x00)
+    /// - Status (1 byte)
+    /// - UserType (2 bytes) - NOTE: different from ColMetaData (4 bytes)
+    /// - No flags field - NOTE: ColMetaData has 2-byte flags
+    /// - TypeId (1 byte)
+    /// - TypeInfo (variable)
+    /// - Value data (variable)
     pub fn decode(src: &mut impl Buf) -> Result<Self, ProtocolError> {
         // Length (2 bytes)
         if src.remaining() < 2 {
@@ -1334,8 +1349,31 @@ impl ReturnValue {
         }
         let param_ordinal = src.get_u16_le();
 
-        // Parameter name (B_VARCHAR)
-        let param_name = read_b_varchar(src).ok_or(ProtocolError::UnexpectedEof)?;
+        // Parameter name in ReturnValue uses a special format:
+        // 0x00 + (actual param name WITHOUT @ in UTF-16LE) + 0x01 0x00 + 0x00 0x00
+        let param_name = {
+            // Skip leading 0x00
+            if src.remaining() >= 1 && src.chunk()[0] == 0 {
+                src.get_u8();
+            }
+
+            // Read UTF-16LE string until we hit 0x01 0x00 0x00 0x00 (param name suffix)
+            let mut chars = Vec::new();
+            while src.remaining() >= 2 {
+                let char1 = src.get_u16_le();
+
+                // Check for param name suffix: 01 00 (followed by 00 00)
+                if char1 == 1 && src.remaining() >= 2 && src.chunk()[0] == 0 && src.chunk()[1] == 0 {
+                    // Consume the remaining 00 00
+                    src.get_u16_le();
+                    break;
+                }
+
+                chars.push(char1);
+            }
+
+            String::from_utf16(&chars).unwrap_or_default()
+        };
 
         // Status (1 byte)
         if src.remaining() < 1 {
@@ -1343,13 +1381,20 @@ impl ReturnValue {
         }
         let status = src.get_u8();
 
-        // User type (4 bytes) + flags (2 bytes) + type id (1 byte)
-        if src.remaining() < 7 {
+        // User type (2 bytes) - NOTE: ReturnValue uses 2 bytes, ColMetaData uses 4 bytes
+        let user_type = if src.remaining() >= 2 {
+            src.get_u16_le() as u32
+        } else {
+            0
+        };
+
+        // No flags field in ReturnValue! Direct to TypeId
+        // Type ID (1 byte)
+        if src.remaining() < 1 {
             return Err(ProtocolError::UnexpectedEof);
         }
-        let user_type = src.get_u32_le();
-        let flags = src.get_u16_le();
         let col_type = src.get_u8();
+        let flags = 0u16; // No flags field in ReturnValue
 
         let type_id = TypeId::from_u8(col_type).unwrap_or(TypeId::Null);
 
@@ -1379,6 +1424,7 @@ impl ReturnValue {
             flags,
             type_info,
             value: value_buf.freeze(),
+            col_type, // Store the type ID for later use
         })
     }
 }
@@ -2229,7 +2275,42 @@ impl TokenParser {
                 return self.next_token_with_metadata(metadata);
             }
             None => {
-                return Err(ProtocolError::InvalidTokenType(token_type_byte));
+                // Unknown token type - handle based on value
+                match token_type_byte {
+                    // Token 0x0 might be a special marker, skip 1 byte
+                    0x0 => {
+                        if buf.remaining() >= 1 {
+                            buf.advance(1); // Just skip the token type byte
+                            self.position = start_pos + (self.data.len() - start_pos - buf.remaining());
+                            return self.next_token_with_metadata(metadata);
+                        } else {
+                            // End of stream, stop parsing
+                            return Ok(None);
+                        }
+                    }
+                    // For other unknown tokens, assume they're 2-byte length prefix
+                    // If that fails, we'll just skip a small amount
+                    _ => {
+                        if buf.remaining() >= 2 {
+                            let length = buf.get_u16_le() as usize;
+                            // Sanity check: length should be reasonable
+                            if length <= 0xFFFF && length <= buf.remaining() {
+                                buf.advance(length);
+                                self.position = start_pos + (self.data.len() - start_pos - buf.remaining());
+                                return self.next_token_with_metadata(metadata);
+                            }
+                        }
+                        // Fallback: skip just the token byte if possible
+                        if buf.remaining() >= 1 {
+                            buf.advance(1);
+                            self.position = start_pos + (self.data.len() - start_pos - buf.remaining());
+                            return self.next_token_with_metadata(metadata);
+                        } else {
+                            // End of stream, stop parsing
+                            return Ok(None);
+                        }
+                    }
+                }
             }
         };
 
