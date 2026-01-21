@@ -23,6 +23,10 @@
 .classpath
 .settings/
 
+# AI Assistant Files
+.claude/
+tmpclaude-*
+
 # OS files
 .DS_Store
 .DS_Store?

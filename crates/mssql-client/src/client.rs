@@ -3102,7 +3102,7 @@ impl<S: ConnectionState> Client<S> {
     /// - Result set rows (if any)
     /// - Row count from DoneProc tokens
     async fn read_stored_proc_result(&mut self) -> Result<crate::stream::ExecuteResult<'_>> {
-        use mssql_types::decode::{decode_value, TypeInfo as DecodeTypeInfo};
+        use mssql_types::decode::{TypeInfo as DecodeTypeInfo, decode_value};
 
         let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
@@ -3174,8 +3174,9 @@ impl<S: ConnectionState> Client<S> {
                             }),
                         };
 
-                        decode_value(&mut value_bytes, &decode_type_info)
-                            .map_err(|e| Error::Protocol(format!("failed to decode output parameter: {}", e)))?
+                        decode_value(&mut value_bytes, &decode_type_info).map_err(|e| {
+                            Error::Protocol(format!("failed to decode output parameter: {}", e))
+                        })?
                     };
 
                     output_params.push(crate::stream::OutputParam {
@@ -3213,19 +3214,29 @@ impl<S: ConnectionState> Client<S> {
                 }
                 Token::Row(row) => {
                     if !result_set_columns.is_empty() {
-                        let row_data = Self::convert_raw_row(&row, current_metadata.as_ref().unwrap(), &result_set_columns)?;
+                        let row_data = Self::convert_raw_row(
+                            &row,
+                            current_metadata.as_ref().unwrap(),
+                            &result_set_columns,
+                        )?;
                         result_set_rows.push(row_data);
                     }
                 }
                 Token::NbcRow(row) => {
                     if !result_set_columns.is_empty() {
-                        let row_data = Self::convert_nbc_row(&row, current_metadata.as_ref().unwrap(), &result_set_columns)?;
+                        let row_data = Self::convert_nbc_row(
+                            &row,
+                            current_metadata.as_ref().unwrap(),
+                            &result_set_columns,
+                        )?;
                         result_set_rows.push(row_data);
                     }
                 }
                 Token::DoneProc(done) => {
                     if done.status.error {
-                        return Err(Error::Query("stored procedure execution failed".to_string()));
+                        return Err(Error::Query(
+                            "stored procedure execution failed".to_string(),
+                        ));
                     }
                     if done.status.count {
                         rows_affected = done.row_count;
@@ -3284,7 +3295,11 @@ impl<S: ConnectionState> Client<S> {
             None
         };
 
-        Ok(crate::stream::ExecuteResult::new(output_params, rows_affected, result_set))
+        Ok(crate::stream::ExecuteResult::new(
+            output_params,
+            rows_affected,
+            result_set,
+        ))
     }
 
     /// Read the response from BEGIN TRANSACTION and extract the transaction descriptor.

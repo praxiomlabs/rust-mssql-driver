@@ -29,7 +29,7 @@
 
 use bytes::{Buf, BufMut, Bytes};
 
-use crate::codec::{read_b_varchar, read_us_varchar, read_utf16_string};
+use crate::codec::{read_b_varchar, read_us_varchar};
 use crate::error::ProtocolError;
 use crate::prelude::*;
 use crate::types::TypeId;
@@ -1363,7 +1363,8 @@ impl ReturnValue {
                 let char1 = src.get_u16_le();
 
                 // Check for param name suffix: 01 00 (followed by 00 00)
-                if char1 == 1 && src.remaining() >= 2 && src.chunk()[0] == 0 && src.chunk()[1] == 0 {
+                if char1 == 1 && src.remaining() >= 2 && src.chunk()[0] == 0 && src.chunk()[1] == 0
+                {
                     // Consume the remaining 00 00
                     src.get_u16_le();
                     break;
@@ -2281,7 +2282,8 @@ impl TokenParser {
                     0x0 => {
                         if buf.remaining() >= 1 {
                             buf.advance(1); // Just skip the token type byte
-                            self.position = start_pos + (self.data.len() - start_pos - buf.remaining());
+                            self.position =
+                                start_pos + (self.data.len() - start_pos - buf.remaining());
                             return self.next_token_with_metadata(metadata);
                         } else {
                             // End of stream, stop parsing
@@ -2296,14 +2298,16 @@ impl TokenParser {
                             // Sanity check: length should be reasonable
                             if length <= 0xFFFF && length <= buf.remaining() {
                                 buf.advance(length);
-                                self.position = start_pos + (self.data.len() - start_pos - buf.remaining());
+                                self.position =
+                                    start_pos + (self.data.len() - start_pos - buf.remaining());
                                 return self.next_token_with_metadata(metadata);
                             }
                         }
                         // Fallback: skip just the token byte if possible
                         if buf.remaining() >= 1 {
                             buf.advance(1);
-                            self.position = start_pos + (self.data.len() - start_pos - buf.remaining());
+                            self.position =
+                                start_pos + (self.data.len() - start_pos - buf.remaining());
                             return self.next_token_with_metadata(metadata);
                         } else {
                             // End of stream, stop parsing

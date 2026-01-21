@@ -64,18 +64,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let result_param = RpcParam::null("@result", TypeInfo::int()).as_output();
 
-    let result = client.execute_procedure(
-        "dbo.CalculateSum",
-        vec![
-            RpcParam::int("@a", 10),
-            RpcParam::int("@b", 25),
-            result_param,
-        ],
-    ).await?;
+    let result = client
+        .execute_procedure(
+            "dbo.CalculateSum",
+            vec![
+                RpcParam::int("@a", 10),
+                RpcParam::int("@b", 25),
+                result_param,
+            ],
+        )
+        .await?;
 
     // Get the output parameter value
     if let Some(output) = result.get_output("result") {
-        let sum: i32 = output.value.as_i32().expect("expected i32");
+        let sum: i32 = output.value.as_i32().ok_or("expected i32 value")?;
         println!("✅ CalculateSum(10, 25) = {}", sum);
     }
 
@@ -88,13 +90,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let count_param = RpcParam::null("@totalCount", TypeInfo::int()).as_output();
 
-    let mut result = client.execute_procedure(
-        "dbo.GetUserOrders",
-        vec![
-            RpcParam::int("@userId", 123),
-            count_param,
-        ],
-    ).await?;
+    let mut result = client
+        .execute_procedure(
+            "dbo.GetUserOrders",
+            vec![RpcParam::int("@userId", 123), count_param],
+        )
+        .await?;
 
     let Some(mut rows) = result.take_result_set() else {
         return Err("Expected result set".into());
@@ -111,7 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Get the output parameter (should match the row count)
     if let Some(output) = result.get_output("totalCount") {
-        let total_count: i32 = output.value.as_i32().expect("expected i32");
+        let total_count: i32 = output.value.as_i32().ok_or("expected i32 value")?;
         println!("✅ Total orders (from output parameter): {}", total_count);
         assert_eq!(order_count, total_count);
     }
@@ -121,14 +122,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("📊 Example 3: RETURN Statement");
     println!("──────────────────────────────");
 
-    let result = client.execute_procedure(
-        "dbo.CheckUserExists",
-        vec![RpcParam::int("@userId", 123)],
-    ).await?;
+    let result = client
+        .execute_procedure("dbo.CheckUserExists", vec![RpcParam::int("@userId", 123)])
+        .await?;
 
     // RETURN value comes as an output parameter with empty name
-    let return_value = result.output_params.first().expect("expected return value");
-    let exists: i32 = return_value.value.as_i32().expect("expected i32");
+    let return_value = result
+        .output_params
+        .first()
+        .ok_or("expected return value")?;
+    let exists: i32 = return_value.value.as_i32().ok_or("expected i32 value")?;
     println!("✅ User exists (RETURN value): {}", exists == 1);
     println!();
 

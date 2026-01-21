@@ -79,19 +79,22 @@ async fn setup_test_procedures(client: &mut Client<Ready>) {
     // Note: CREATE PROCEDURE must be the first statement in a batch
 
     // Simple test procedure - just returns constant value
-    let _ = client.execute(
-        "CREATE PROCEDURE dbo.sp_SimpleOutput
+    let _ = client
+        .execute(
+            "CREATE PROCEDURE dbo.sp_SimpleOutput
             @result INT OUTPUT
         AS
         BEGIN
             SET @result = 42;
         END",
-        &[],
-    ).await;
+            &[],
+        )
+        .await;
 
     // Create test procedure: output parameters only
-    let _ = client.execute(
-        "CREATE PROCEDURE dbo.sp_TestOutputParams
+    let _ = client
+        .execute(
+            "CREATE PROCEDURE dbo.sp_TestOutputParams
             @a INT,
             @b INT,
             @sum INT OUTPUT,
@@ -101,12 +104,14 @@ async fn setup_test_procedures(client: &mut Client<Ready>) {
             SET @sum = @a + @b;
             SET @product = @a * @b;
         END",
-        &[],
-    ).await;
+            &[],
+        )
+        .await;
 
     // Create test procedure: result set + output parameters
-    let _ = client.execute(
-        "CREATE PROCEDURE dbo.sp_TestResultSetAndOutputs
+    let _ = client
+        .execute(
+            "CREATE PROCEDURE dbo.sp_TestResultSetAndOutputs
             @min_id INT,
             @row_count INT OUTPUT,
             @max_id INT OUTPUT
@@ -121,23 +126,27 @@ async fn setup_test_procedures(client: &mut Client<Ready>) {
             SET @row_count = @@ROWCOUNT;
             SET @max_id = 3;
         END",
-        &[],
-    ).await;
+            &[],
+        )
+        .await;
 
     // Create test procedure: RETURN statement
-    let _ = client.execute(
-        "CREATE PROCEDURE dbo.sp_TestReturnStatement
+    let _ = client
+        .execute(
+            "CREATE PROCEDURE dbo.sp_TestReturnStatement
             @value INT
         AS
         BEGIN
             RETURN @value;
         END",
-        &[],
-    ).await;
+            &[],
+        )
+        .await;
 
     // Create test procedure: multiple output parameters
-    let _ = client.execute(
-        "CREATE PROCEDURE dbo.sp_TestMultipleOutputs
+    let _ = client
+        .execute(
+            "CREATE PROCEDURE dbo.sp_TestMultipleOutputs
             @input INT,
             @doubled INT OUTPUT,
             @tripled INT OUTPUT,
@@ -148,12 +157,14 @@ async fn setup_test_procedures(client: &mut Client<Ready>) {
             SET @tripled = @input * 3;
             SET @squared = @input * @input;
         END",
-        &[],
-    ).await;
+            &[],
+        )
+        .await;
 
     // Create test procedure for transaction testing
-    let _ = client.execute(
-        "CREATE PROCEDURE dbo.sp_TestTransaction
+    let _ = client
+        .execute(
+            "CREATE PROCEDURE dbo.sp_TestTransaction
             @user_id INT,
             @new_balance INT OUTPUT
         AS
@@ -161,12 +172,14 @@ async fn setup_test_procedures(client: &mut Client<Ready>) {
             -- Simulate updating a balance
             SET @new_balance = 1000;
         END",
-        &[],
-    ).await;
+            &[],
+        )
+        .await;
 
     // Create test procedure with NULL output
-    let _ = client.execute(
-        "CREATE PROCEDURE dbo.sp_TestNullOutput
+    let _ = client
+        .execute(
+            "CREATE PROCEDURE dbo.sp_TestNullOutput
             @should_be_null BIT = 0,
             @result INT OUTPUT
         AS
@@ -176,20 +189,23 @@ async fn setup_test_procedures(client: &mut Client<Ready>) {
             ELSE
                 SET @result = 42;
         END",
-        &[],
-    ).await;
+            &[],
+        )
+        .await;
 
     // Create test procedure with string output
-    let _ = client.execute(
-        "CREATE PROCEDURE dbo.sp_TestStringOutput
+    let _ = client
+        .execute(
+            "CREATE PROCEDURE dbo.sp_TestStringOutput
             @name NVARCHAR(100),
             @result NVARCHAR(200) OUTPUT
         AS
         BEGIN
             SET @result = 'Hello, ' + @name + '!';
         END",
-        &[],
-    ).await;
+            &[],
+        )
+        .await;
 }
 
 #[tokio::test]
@@ -208,11 +224,15 @@ async fn test_stored_procedure_output_params() {
     println!("Found {} objects", check_proc);
 
     // Try calling stored procedure with direct SQL
-    let mut sql_result = client.query("EXEC dbo.sp_TestOutputParams @a=10, @b=5, @sum=NULL, @product=NULL", &[])
+    let mut sql_result = client
+        .query(
+            "EXEC dbo.sp_TestOutputParams @a=10, @b=5, @sum=NULL, @product=NULL",
+            &[],
+        )
         .await
         .expect("Failed to execute with SQL");
     println!("Direct SQL execution:");
-    while let Some(Ok(row)) = sql_result.next() {
+    while let Some(Ok(_row)) = sql_result.next() {
         println!("  Row returned (should be none for output params only)");
     }
     println!("End Direct SQL execution\n");
@@ -226,7 +246,10 @@ async fn test_stored_procedure_output_params() {
         )
         .await
         .expect("Failed to execute sp_SimpleOutput");
-    println!("  Received {} output parameters", simple_result.output_params.len());
+    println!(
+        "  Received {} output parameters",
+        simple_result.output_params.len()
+    );
     for (i, output) in simple_result.output_params.iter().enumerate() {
         println!("    [{}] value={:?}", i, output.value);
     }
@@ -259,14 +282,24 @@ async fn test_stored_procedure_output_params() {
     assert_eq!(result.rows_affected, 0, "Should not have affected rows");
 
     // Verify output parameters
-    assert_eq!(result.output_params.len(), 2, "Should have 2 output parameters");
+    assert_eq!(
+        result.output_params.len(),
+        2,
+        "Should have 2 output parameters"
+    );
 
     // Note: SQL Server may return empty parameter names, so we use index-based access
     // The outputs are returned in the same order as declared in the stored procedure
-    let sum_value: i32 = result.output_params[0].value.as_i32().expect("Should be i32");
+    let sum_value: i32 = result.output_params[0]
+        .value
+        .as_i32()
+        .expect("Should be i32");
     assert_eq!(sum_value, 15, "10 + 5 = 15");
 
-    let product_value: i32 = result.output_params[1].value.as_i32().expect("Should be i32");
+    let product_value: i32 = result.output_params[1]
+        .value
+        .as_i32()
+        .expect("Should be i32");
     assert_eq!(product_value, 50, "10 * 5 = 50");
 
     client.close().await.expect("Failed to close");
@@ -287,11 +320,7 @@ async fn test_stored_procedure_result_set_and_outputs() {
     let mut result = client
         .execute_procedure(
             "dbo.sp_TestResultSetAndOutputs",
-            vec![
-                RpcParam::int("@min_id", 1),
-                row_count_param,
-                max_id_param,
-            ],
+            vec![RpcParam::int("@min_id", 1), row_count_param, max_id_param],
         )
         .await
         .expect("Failed to execute procedure");
@@ -300,14 +329,17 @@ async fn test_stored_procedure_result_set_and_outputs() {
     assert!(result.has_result_set(), "Should have result set");
 
     // Verify no affected rows for SELECT
-    assert_eq!(result.rows_affected, 0, "SELECT should have 0 affected rows");
+    assert_eq!(
+        result.rows_affected, 0,
+        "SELECT should have 0 affected rows"
+    );
 
     // Process result set
     let mut count = 0;
     let mut max_id_in_result = 0;
 
     if let Some(mut rows) = result.take_result_set() {
-        while let Some(row_result) = rows.next() {
+        for row_result in rows.by_ref() {
             let row = row_result.expect("Row should be valid");
             let id: i32 = row.get(0).expect("Should get Id");
             let name: String = row.get(1).expect("Should get Name");
@@ -324,7 +356,11 @@ async fn test_stored_procedure_result_set_and_outputs() {
     assert_eq!(max_id_in_result, 3, "Max ID should be 3");
 
     // Verify output parameters
-    assert_eq!(result.output_params.len(), 2, "Should have 2 output parameters");
+    assert_eq!(
+        result.output_params.len(),
+        2,
+        "Should have 2 output parameters"
+    );
 
     let row_count_output = result
         .output_params
@@ -355,7 +391,10 @@ async fn test_stored_procedure_return_statement() {
 
     // Test RETURN statement
     let result = client
-        .execute_procedure("dbo.sp_TestReturnStatement", vec![RpcParam::int("@value", 42)])
+        .execute_procedure(
+            "dbo.sp_TestReturnStatement",
+            vec![RpcParam::int("@value", 42)],
+        )
         .await
         .expect("Failed to execute procedure");
 
@@ -364,11 +403,17 @@ async fn test_stored_procedure_return_statement() {
     assert_eq!(result.rows_affected, 0, "Should not have affected rows");
 
     // Verify RETURN value (comes as output with empty name)
-    assert_eq!(result.output_params.len(), 1, "Should have 1 output parameter (RETURN value)");
+    assert_eq!(
+        result.output_params.len(),
+        1,
+        "Should have 1 output parameter (RETURN value)"
+    );
 
     let return_output = &result.output_params[0];
-    assert!(return_output.name.is_empty() || return_output.name == "@RETURN_VALUE",
-        "RETURN value should have empty name or @RETURN_VALUE");
+    assert!(
+        return_output.name.is_empty() || return_output.name == "@RETURN_VALUE",
+        "RETURN value should have empty name or @RETURN_VALUE"
+    );
 
     let return_value: i32 = return_output.value.as_i32().expect("Should be i32");
     assert_eq!(return_value, 42, "RETURN value should be 42");
@@ -402,15 +447,28 @@ async fn test_stored_procedure_multiple_outputs() {
         .await
         .expect("Failed to execute procedure");
 
-    assert_eq!(result.output_params.len(), 3, "Should have 3 output parameters");
+    assert_eq!(
+        result.output_params.len(),
+        3,
+        "Should have 3 output parameters"
+    );
 
-    let doubled: i32 = result.output_params[0].value.as_i32().expect("Should be i32");
+    let doubled: i32 = result.output_params[0]
+        .value
+        .as_i32()
+        .expect("Should be i32");
     assert_eq!(doubled, 14, "7 * 2 = 14");
 
-    let tripled: i32 = result.output_params[1].value.as_i32().expect("Should be i32");
+    let tripled: i32 = result.output_params[1]
+        .value
+        .as_i32()
+        .expect("Should be i32");
     assert_eq!(tripled, 21, "7 * 3 = 21");
 
-    let squared: i32 = result.output_params[2].value.as_i32().expect("Should be i32");
+    let squared: i32 = result.output_params[2]
+        .value
+        .as_i32()
+        .expect("Should be i32");
     assert_eq!(squared, 49, "7 * 7 = 49");
 
     client.close().await.expect("Failed to close");
@@ -435,17 +493,21 @@ async fn test_stored_procedure_in_transaction() {
     let result = tx
         .execute_procedure(
             "dbo.sp_TestTransaction",
-            vec![
-                RpcParam::int("@user_id", 123),
-                balance_param,
-            ],
+            vec![RpcParam::int("@user_id", 123), balance_param],
         )
         .await
         .expect("Failed to execute procedure in transaction");
 
-    assert_eq!(result.output_params.len(), 1, "Should have 1 output parameter");
+    assert_eq!(
+        result.output_params.len(),
+        1,
+        "Should have 1 output parameter"
+    );
 
-    let balance: i32 = result.output_params[0].value.as_i32().expect("Should be i32");
+    let balance: i32 = result.output_params[0]
+        .value
+        .as_i32()
+        .expect("Should be i32");
     assert_eq!(balance, 1000, "New balance should be 1000");
 
     // Commit transaction
@@ -467,16 +529,20 @@ async fn test_stored_procedure_null_output_param() {
     let result = client
         .execute_procedure(
             "dbo.sp_TestNullOutput",
-            vec![
-                RpcParam::int("@should_be_null", 1),
-                output_param,
-            ],
+            vec![RpcParam::int("@should_be_null", 1), output_param],
         )
         .await
         .expect("Failed to execute procedure");
 
-    assert_eq!(result.output_params.len(), 1, "Should have 1 output parameter");
-    assert!(result.output_params[0].value.is_null(), "Output value should be NULL when @should_be_null=1");
+    assert_eq!(
+        result.output_params.len(),
+        1,
+        "Should have 1 output parameter"
+    );
+    assert!(
+        result.output_params[0].value.is_null(),
+        "Output value should be NULL when @should_be_null=1"
+    );
 
     // Test non-NULL output (pass 0 to indicate result should not be null)
     let output_param2 = RpcParam::null("@result", TypeInfo::int()).as_output();
@@ -484,17 +550,24 @@ async fn test_stored_procedure_null_output_param() {
     let result2 = client
         .execute_procedure(
             "dbo.sp_TestNullOutput",
-            vec![
-                RpcParam::int("@should_be_null", 0),
-                output_param2,
-            ],
+            vec![RpcParam::int("@should_be_null", 0), output_param2],
         )
         .await
         .expect("Failed to execute procedure");
 
-    assert_eq!(result2.output_params.len(), 1, "Should have 1 output parameter");
-    let value: i32 = result2.output_params[0].value.as_i32().expect("Should be i32");
-    assert_eq!(value, 42, "Output value should be 42 when @should_be_null=0");
+    assert_eq!(
+        result2.output_params.len(),
+        1,
+        "Should have 1 output parameter"
+    );
+    let value: i32 = result2.output_params[0]
+        .value
+        .as_i32()
+        .expect("Should be i32");
+    assert_eq!(
+        value, 42,
+        "Output value should be 42 when @should_be_null=0"
+    );
 
     client.close().await.expect("Failed to close");
 }
@@ -513,17 +586,21 @@ async fn test_stored_procedure_string_output_param() {
     let result = client
         .execute_procedure(
             "dbo.sp_TestStringOutput",
-            vec![
-                RpcParam::nvarchar("@name", "World"),
-                output_param,
-            ],
+            vec![RpcParam::nvarchar("@name", "World"), output_param],
         )
         .await
         .expect("Failed to execute procedure");
 
-    assert_eq!(result.output_params.len(), 1, "Should have 1 output parameter");
+    assert_eq!(
+        result.output_params.len(),
+        1,
+        "Should have 1 output parameter"
+    );
 
-    let greeting: &str = result.output_params[0].value.as_str().expect("Should be string");
+    let greeting: &str = result.output_params[0]
+        .value
+        .as_str()
+        .expect("Should be string");
     assert_eq!(greeting, "Hello, World!", "Greeting should match");
 
     client.close().await.expect("Failed to close");
