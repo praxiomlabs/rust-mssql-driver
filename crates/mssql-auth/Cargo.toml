@@ -80,7 +80,7 @@ url = { version = "2.5", optional = true }
 windows = { version = "0.62", features = ["Win32_Security_Cryptography", "Win32_Foundation"], optional = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true }
 tokio-test = { workspace = true }
 
 [package.metadata.cargo-machete]

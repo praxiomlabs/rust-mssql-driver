@@ -16,7 +16,7 @@ default = []
 mssql-client = { workspace = true }
 tds-protocol = { workspace = true }
 bytes = { workspace = true }
-tokio = { workspace = true, features = ["net", "io-util", "sync", "rt", "fs"] }
+tokio = { workspace = true, features = ["fs"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 testcontainers = { workspace = true }
