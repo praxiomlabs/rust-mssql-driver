@@ -151,6 +151,24 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// Check that a cargo subcommand is installed, providing install instructions if not.
+fn require_tool(tool: &str, install_cmd: &str) -> Result<()> {
+    let status = std::process::Command::new("cargo")
+        .args([tool, "--version"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        _ => bail!(
+            "`cargo {tool}` is not installed.\n\n\
+             Install it with:\n\n    \
+             {install_cmd}\n"
+        ),
+    }
+}
+
 fn workspace_root() -> Result<PathBuf> {
     let output = std::process::Command::new("cargo")
         .args(["locate-project", "--workspace", "--message-format=plain"])
@@ -226,6 +244,7 @@ fn test(sh: &Shell, package: Option<&str>, integration: bool) -> Result<()> {
 }
 
 fn deny(sh: &Shell) -> Result<()> {
+    require_tool("deny", "cargo install cargo-deny")?;
     println!("Running cargo-deny...");
     cmd!(sh, "cargo deny check").run()?;
     println!("✅ Cargo-deny check passed.");
@@ -261,6 +280,7 @@ fn clean(sh: &Shell) -> Result<()> {
 }
 
 fn fuzz(sh: &Shell, target: &str, max_time: u64, list: bool) -> Result<()> {
+    require_tool("fuzz", "cargo install cargo-fuzz && rustup install nightly")?;
     let fuzz_dir = sh.current_dir().join("fuzz");
 
     if list {
@@ -672,9 +692,8 @@ fn dist(sh: &Shell, target: Option<&str>, no_test: bool) -> Result<()> {
 }
 
 fn coverage(sh: &Shell, format: &str) -> Result<()> {
+    require_tool("llvm-cov", "cargo install cargo-llvm-cov")?;
     println!("Running code coverage...");
-
-    // Requires cargo-llvm-cov
     match format {
         "html" => {
             cmd!(sh, "cargo llvm-cov --all-features --html").run()?;
@@ -708,6 +727,7 @@ fn coverage(sh: &Shell, format: &str) -> Result<()> {
 }
 
 fn semver(sh: &Shell) -> Result<()> {
+    require_tool("semver-checks", "cargo install cargo-semver-checks")?;
     println!("Checking for semver violations...");
 
     let crates = [
