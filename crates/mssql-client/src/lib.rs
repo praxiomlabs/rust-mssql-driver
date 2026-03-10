@@ -75,6 +75,7 @@ pub mod bulk;
 pub mod cancel;
 pub mod change_tracking;
 pub mod client;
+pub(crate) mod column_parser;
 pub mod config;
 pub mod encryption;
 pub mod error;
