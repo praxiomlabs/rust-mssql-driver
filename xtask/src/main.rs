@@ -14,6 +14,7 @@
 //! - `clean`: Clean build artifacts
 //! - `fuzz`: Run fuzz tests (requires cargo-fuzz + nightly)
 //! - `codegen`: Generate protocol constants from TDS spec
+//! - `release`: Prepare a release (bump versions, update changelog)
 //! - `dist`: Build release artifacts for distribution
 
 use std::fs;
@@ -107,6 +108,14 @@ enum Command {
     },
     /// Check for semver violations (requires cargo-semver-checks)
     Semver,
+    /// Prepare a release: bump versions and update changelog
+    Release {
+        /// New version (e.g., 0.7.0)
+        version: String,
+        /// Skip changelog update
+        #[arg(long)]
+        no_changelog: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -146,6 +155,10 @@ fn main() -> Result<()> {
         Command::FuzzInit => fuzz_init(&sh)?,
         Command::Coverage { format } => coverage(&sh, &format)?,
         Command::Semver => semver(&sh)?,
+        Command::Release {
+            version,
+            no_changelog,
+        } => release(&sh, &version, no_changelog)?,
     }
 
     Ok(())
@@ -743,5 +756,211 @@ fn semver(sh: &Shell) -> Result<()> {
     }
 
     println!("✅ No semver violations detected.");
+    Ok(())
+}
+
+fn release(sh: &Shell, version: &str, no_changelog: bool) -> Result<()> {
+    let new_ver = parse_semver(version)
+        .with_context(|| format!("Invalid version: {version} (expected X.Y.Z)"))?;
+
+    let cargo_toml_path = sh.current_dir().join("Cargo.toml");
+    let cargo_toml = fs::read_to_string(&cargo_toml_path).context("Failed to read Cargo.toml")?;
+
+    let current = extract_workspace_version(&cargo_toml)
+        .context("Failed to find workspace.package version in Cargo.toml")?;
+    let cur_ver =
+        parse_semver(&current).context("Current version in Cargo.toml is not valid semver")?;
+
+    if new_ver <= cur_ver {
+        bail!("New version ({version}) must be greater than current version ({current})");
+    }
+
+    println!("Bumping version: {current} → {version}");
+
+    // Update root Cargo.toml
+    let updated_cargo = bump_cargo_versions(&cargo_toml, &current, version)?;
+    fs::write(&cargo_toml_path, &updated_cargo)?;
+    println!("  ✓ Cargo.toml workspace version");
+    println!("  ✓ Cargo.toml internal dependency versions (9 crates)");
+
+    // Update CHANGELOG.md
+    if !no_changelog {
+        let changelog_path = sh.current_dir().join("CHANGELOG.md");
+        if changelog_path.exists() {
+            let changelog = fs::read_to_string(&changelog_path)?;
+            let today = cmd!(sh, "date +%Y-%m-%d").read()?;
+            let updated = bump_changelog(&changelog, version, &current, today.trim())?;
+            fs::write(&changelog_path, &updated)?;
+            println!("  ✓ CHANGELOG.md");
+        } else {
+            println!("  ⚠ CHANGELOG.md not found, skipping");
+        }
+    } else {
+        println!("  ⊘ CHANGELOG.md (skipped)");
+    }
+
+    // Validate consistency
+    let final_toml = fs::read_to_string(&cargo_toml_path)?;
+    validate_version_consistency(&final_toml, version)?;
+
+    println!("\n✅ Version bumped to {version}");
+    println!("\nNext steps:");
+    println!("  1. Review changes:  git diff");
+    println!("  2. Commit:          git commit -am \"chore: release v{version}\"");
+    println!("  3. Push to main:    git push origin main");
+    println!("  4. Wait for CI to pass");
+    println!("  5. Tag:             git tag -a v{version} -m \"Release v{version}\"");
+    println!("  6. Push tag:        git push origin v{version}");
+
+    Ok(())
+}
+
+/// Parse a version string like "1.2.3" into a comparable tuple.
+fn parse_semver(s: &str) -> Option<(u32, u32, u32)> {
+    let parts: Vec<&str> = s.split('.').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    Some((
+        parts[0].parse().ok()?,
+        parts[1].parse().ok()?,
+        parts[2].parse().ok()?,
+    ))
+}
+
+/// Extract `version = "X.Y.Z"` from the `[workspace.package]` section.
+fn extract_workspace_version(cargo_toml: &str) -> Option<String> {
+    let mut in_workspace_package = false;
+    for line in cargo_toml.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_workspace_package = trimmed == "[workspace.package]";
+        }
+        if in_workspace_package && trimmed.starts_with("version") {
+            let value = trimmed.split('=').nth(1)?.trim();
+            return Some(value.trim_matches('"').to_string());
+        }
+    }
+    None
+}
+
+/// Replace version strings in root Cargo.toml:
+/// 1. `workspace.package.version`
+/// 2. All internal dependency entries (lines with both `version = "..."` and `path = "crates/..."`)
+fn bump_cargo_versions(content: &str, old: &str, new: &str) -> Result<String> {
+    let mut result = Vec::new();
+    let mut in_workspace_package = false;
+    let mut version_bumped = false;
+    let mut dep_count = 0u32;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_workspace_package = trimmed == "[workspace.package]";
+        }
+
+        if in_workspace_package
+            && trimmed.starts_with("version")
+            && trimmed.contains(&format!("\"{old}\""))
+        {
+            result.push(line.replace(old, new));
+            version_bumped = true;
+        } else if trimmed.contains(&format!("version = \"{old}\""))
+            && trimmed.contains("path = \"crates/")
+        {
+            result.push(line.replace(old, new));
+            dep_count += 1;
+        } else {
+            result.push(line.to_string());
+        }
+    }
+
+    if !version_bumped {
+        bail!("Could not find workspace.package version = \"{old}\" in Cargo.toml");
+    }
+    if dep_count == 0 {
+        bail!("No internal dependency versions found matching \"{old}\"");
+    }
+
+    let mut output = result.join("\n");
+    if content.ends_with('\n') {
+        output.push('\n');
+    }
+    Ok(output)
+}
+
+/// Update CHANGELOG.md for a new release:
+/// - If `## [Unreleased]` exists, rename it to `## [version] - date` and add new `## [Unreleased]`
+/// - If no `## [Unreleased]`, insert both before the first version entry
+/// - Update comparison links at the bottom
+fn bump_changelog(
+    content: &str,
+    new_version: &str,
+    old_version: &str,
+    today: &str,
+) -> Result<String> {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut result: Vec<String> = Vec::new();
+    let repo_url = "https://github.com/praxiomlabs/rust-mssql-driver";
+
+    let has_unreleased = lines.iter().any(|l| l.starts_with("## [Unreleased]"));
+
+    for line in &lines {
+        if has_unreleased && *line == "## [Unreleased]" {
+            // Keep [Unreleased] as new empty section, add versioned section below
+            result.push("## [Unreleased]".to_string());
+            result.push(String::new());
+            result.push(format!("## [{new_version}] - {today}"));
+        } else if !has_unreleased
+            && line.starts_with("## [")
+            && !result.iter().any(|r| r.starts_with("## [Unreleased]"))
+        {
+            // First version entry found — insert new sections before it
+            result.push("## [Unreleased]".to_string());
+            result.push(String::new());
+            result.push(format!("## [{new_version}] - {today}"));
+            result.push(String::new());
+            result.push(line.to_string());
+        } else if line.starts_with("[Unreleased]:") {
+            // Update unreleased comparison link and add new version link
+            result.push(format!(
+                "[Unreleased]: {repo_url}/compare/v{new_version}...HEAD"
+            ));
+            result.push(format!(
+                "[{new_version}]: {repo_url}/compare/v{old_version}...v{new_version}"
+            ));
+        } else {
+            result.push(line.to_string());
+        }
+    }
+
+    let mut output = result.join("\n");
+    if content.ends_with('\n') {
+        output.push('\n');
+    }
+    Ok(output)
+}
+
+/// Verify that all versions in Cargo.toml are consistent after bumping.
+fn validate_version_consistency(cargo_toml: &str, expected: &str) -> Result<()> {
+    let actual = extract_workspace_version(cargo_toml)
+        .context("Could not read workspace version after update")?;
+    if actual != expected {
+        bail!("Validation failed: workspace version is {actual}, expected {expected}");
+    }
+
+    let dep_count = cargo_toml
+        .lines()
+        .filter(|line| {
+            line.contains("path = \"crates/") && line.contains(&format!("version = \"{expected}\""))
+        })
+        .count();
+
+    if dep_count != 9 {
+        bail!(
+            "Validation failed: found {dep_count}/9 internal dependencies with version {expected}"
+        );
+    }
+
     Ok(())
 }
