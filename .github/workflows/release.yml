@@ -96,59 +96,87 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install Kerberos headers
+        run: sudo apt-get update && sudo apt-get install -y libkrb5-dev
 
-      # Publish in dependency order with waits for crates.io index propagation
-      # Tier 0: Independent crates (no internal dependencies)
-      - name: Publish tds-protocol
-        run: cargo publish -p tds-protocol --no-verify
-        continue-on-error: true  # May already be published
+      # Publish all crates in dependency order with retry logic.
+      # Each crate is published with retries to handle crates.io index
+      # propagation delays. "Already published" is treated as success.
+      - name: Publish all crates
+        run: |
+          set -euo pipefail
 
-      - name: Publish mssql-types
-        run: cargo publish -p mssql-types --no-verify
-        continue-on-error: true
+          publish_crate() {
+            local crate="$1"
+            local max_retries=5
+            local delay=15
 
-      # Wait for crates.io index to update
-      - name: Wait for index propagation (30s)
-        run: sleep 30
+            for attempt in $(seq 1 "$max_retries"); do
+              echo "::group::Publishing $crate (attempt $attempt/$max_retries)"
+              output=$(cargo publish -p "$crate" --no-verify 2>&1) && {
+                echo "$output"
+                echo "::endgroup::"
+                echo "✅ $crate published successfully"
+                return 0
+              }
+              echo "$output"
+              echo "::endgroup::"
 
-      # Tier 1: Crates depending only on tds-protocol
-      - name: Publish mssql-tls
-        run: cargo publish -p mssql-tls --no-verify
-        continue-on-error: true
+              # Already published — not an error
+              if echo "$output" | grep -qi "already uploaded\|already exists"; then
+                echo "ℹ️  $crate@$VERSION already published, skipping"
+                return 0
+              fi
 
-      - name: Publish mssql-codec
-        run: cargo publish -p mssql-codec --no-verify
-        continue-on-error: true
+              # Dependency not yet indexed — retry with backoff
+              if echo "$output" | grep -qi "failed to select a version\|no matching package"; then
+                echo "⏳ Dependency not yet indexed, retrying in ${delay}s..."
+                sleep "$delay"
+                delay=$((delay * 2))
+                continue
+              fi
 
-      - name: Publish mssql-auth
-        run: cargo publish -p mssql-auth --no-verify
-        continue-on-error: true
+              # Transient server error — retry
+              if echo "$output" | grep -qi "503\|429\|timed out\|connection refused"; then
+                echo "⏳ Transient error, retrying in ${delay}s..."
+                sleep "$delay"
+                delay=$((delay * 2))
+                continue
+              fi
 
-      # Tier 2: Proc-macro crate (no internal runtime deps)
-      - name: Publish mssql-derive
-        run: cargo publish -p mssql-derive --no-verify
-        continue-on-error: true
+              # Unknown error — fail immediately
+              echo "❌ Failed to publish $crate"
+              return 1
+            done
 
-      # Wait for index propagation
-      - name: Wait for index propagation (30s)
-        run: sleep 30
+            echo "❌ Failed to publish $crate after $max_retries attempts"
+            return 1
+          }
 
-      # Tier 3: Main client (depends on tds-protocol, mssql-tls, mssql-codec, mssql-types, mssql-auth)
-      - name: Publish mssql-client
-        run: cargo publish -p mssql-client --no-verify
-        continue-on-error: true
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Publishing version $VERSION"
 
-      - name: Wait for index propagation (30s)
-        run: sleep 30
+          # Tier 0: Independent crates (no internal dependencies)
+          publish_crate tds-protocol
+          publish_crate mssql-types
 
-      # Tier 4: Crates depending on mssql-client
-      - name: Publish mssql-driver-pool
-        run: cargo publish -p mssql-driver-pool --no-verify
-        continue-on-error: true
+          # Tier 1: Depend on tier 0
+          publish_crate mssql-tls
+          publish_crate mssql-codec
+          publish_crate mssql-auth
 
-      - name: Publish mssql-testing
-        run: cargo publish -p mssql-testing --no-verify
-        continue-on-error: true
+          # Tier 2: Proc-macro (no internal runtime deps)
+          publish_crate mssql-derive
+
+          # Tier 3: Main client
+          publish_crate mssql-client
+
+          # Tier 4: Depend on mssql-client
+          publish_crate mssql-driver-pool
+          publish_crate mssql-testing
+
+          echo ""
+          echo "🎉 All crates published successfully"
 
   # Dry run verification - tests all crates in dependency order
   dry-run:
@@ -160,14 +188,24 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install Kerberos headers
+        run: sudo apt-get update && sudo apt-get install -y libkrb5-dev
       - name: Verify all crates publishable
         run: |
-          # Test all crates in dependency tier order
+          set -euo pipefail
+          failed=0
           for crate in tds-protocol mssql-types mssql-tls mssql-codec mssql-auth mssql-derive mssql-client mssql-driver-pool mssql-testing; do
             echo "Checking $crate..."
-            cargo publish -p $crate --dry-run --no-verify
+            if ! cargo publish -p "$crate" --dry-run --no-verify; then
+              echo "❌ $crate failed dry-run"
+              failed=1
+            fi
           done
-          echo "All crates verified for publishing"
+          if [ "$failed" -ne 0 ]; then
+            echo "❌ Some crates failed dry-run verification"
+            exit 1
+          fi
+          echo "✅ All crates verified for publishing"
 
   # Create GitHub release
   github-release:
