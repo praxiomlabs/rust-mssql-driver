@@ -12,7 +12,6 @@
 //! - `doc`: Generate documentation
 //! - `bench`: Run benchmarks
 //! - `clean`: Clean build artifacts
-//! - `hakari`: Update workspace-hack crate
 //! - `fuzz`: Run fuzz tests (requires cargo-fuzz + nightly)
 //! - `codegen`: Generate protocol constants from TDS spec
 //! - `dist`: Build release artifacts for distribution
@@ -71,8 +70,6 @@ enum Command {
     },
     /// Clean build artifacts
     Clean,
-    /// Update workspace-hack crate (requires cargo-hakari)
-    Hakari,
     /// Run fuzz tests (requires cargo-fuzz + nightly)
     Fuzz {
         /// Fuzz target to run
@@ -139,7 +136,6 @@ fn main() -> Result<()> {
         Command::Doc { open } => doc(&sh, open)?,
         Command::Bench { filter } => bench(&sh, filter.as_deref())?,
         Command::Clean => clean(&sh)?,
-        Command::Hakari => hakari(&sh)?,
         Command::Fuzz {
             target,
             max_time,
@@ -261,14 +257,6 @@ fn clean(sh: &Shell) -> Result<()> {
     println!("Cleaning build artifacts...");
     cmd!(sh, "cargo clean").run()?;
     println!("✅ Clean complete.");
-    Ok(())
-}
-
-fn hakari(sh: &Shell) -> Result<()> {
-    println!("Updating workspace-hack...");
-    cmd!(sh, "cargo hakari generate").run()?;
-    cmd!(sh, "cargo hakari manage-deps").run()?;
-    println!("✅ Workspace-hack updated.");
     Ok(())
 }
 
