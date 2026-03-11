@@ -69,7 +69,7 @@ lru = "0.16"
 opentelemetry = "0.31"
 opentelemetry_sdk = "0.31"
 opentelemetry-otlp = "0.31"
-tracing-opentelemetry = "0.32"
+tracing-opentelemetry = "0.31"
 
 # Testing
 criterion = { version = "0.7", features = ["async_tokio"] }
