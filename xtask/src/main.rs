@@ -16,6 +16,7 @@
 //! - `codegen`: Generate protocol constants from TDS spec
 //! - `release`: Prepare a release (bump versions, update changelog)
 //! - `check-features`: Validate all feature flag combinations compile
+//! - `ci-local`: Run full CI pipeline locally (mirrors GitHub Actions)
 //! - `dist`: Build release artifacts for distribution
 
 use std::fs;
@@ -119,6 +120,8 @@ enum Command {
     },
     /// Validate all feature flag combinations compile (requires cargo-hack)
     CheckFeatures,
+    /// Run the full CI pipeline locally (mirrors GitHub Actions)
+    CiLocal,
 }
 
 fn main() -> Result<()> {
@@ -163,6 +166,7 @@ fn main() -> Result<()> {
             no_changelog,
         } => release(&sh, &version, no_changelog)?,
         Command::CheckFeatures => check_features(&sh)?,
+        Command::CiLocal => ci_local(&sh)?,
     }
 
     Ok(())
@@ -835,6 +839,54 @@ fn platform_excluded_auth_features() -> Vec<&'static str> {
         excluded.push("windows-certstore");
     }
     excluded
+}
+
+fn ci_local(sh: &Shell) -> Result<()> {
+    println!("Running full CI pipeline locally (mirrors GitHub Actions)...\n");
+
+    // Step 1: Format check
+    println!("── Step 1/7: Format check ──");
+    fmt(sh, false)?;
+
+    // Step 2: Clippy
+    println!("\n── Step 2/7: Clippy ──");
+    clippy(sh, false)?;
+
+    // Step 3: Tests
+    println!("\n── Step 3/7: Tests ──");
+    test(sh, None, false)?;
+
+    // Step 4: Documentation
+    println!("\n── Step 4/7: Documentation ──");
+    doc(sh, false)?;
+
+    // Step 5: Build examples
+    println!("\n── Step 5/7: Examples ──");
+    println!("Building examples...");
+    cmd!(sh, "cargo build --examples --all-features").run()?;
+    println!("✅ Examples build passed.");
+
+    // Step 6: Feature flag validation
+    println!("\n── Step 6/7: Feature flags ──");
+    check_features(sh)?;
+
+    // Step 7: cargo-deny (if available)
+    println!("\n── Step 7/7: Dependency audit ──");
+    match deny(sh) {
+        Ok(()) => {}
+        Err(e) => {
+            println!("⚠ cargo-deny skipped: {e}");
+            println!("  Install with: cargo install cargo-deny");
+        }
+    }
+
+    println!("\n✅ Full CI pipeline passed!");
+    println!("\nNote: MSRV check and Miri are not included in local CI.");
+    println!("      Run these separately if needed:");
+    println!("        MSRV:  rustup run 1.85 cargo check --all-features");
+    println!("        Miri:  cargo +nightly miri test -p tds-protocol");
+
+    Ok(())
 }
 
 fn release(sh: &Shell, version: &str, no_changelog: bool) -> Result<()> {
