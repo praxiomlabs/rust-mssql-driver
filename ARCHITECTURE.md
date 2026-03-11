@@ -2053,21 +2053,30 @@ msrv:
 
 ### 8.3 Feature Flag Matrix
 
-| Feature | Default | Dependencies Added | Status |
-|---------|---------|-------------------|--------|
-| `default` | ✅ | Core functionality | Stable |
-| `chrono` | ✅ | `chrono` for date/time types | Stable |
-| `uuid` | ✅ | `uuid` for UNIQUEIDENTIFIER | Stable |
-| `decimal` | ✅ | `rust_decimal` for DECIMAL/NUMERIC | Stable |
-| `json` | ❌ | `serde_json` for JSON parsing | Stable |
-| `azure-identity` | ❌ | `azure_identity` | Stable |
-| `integrated-auth` | ❌ | `gssapi` (Linux/macOS) | Stable |
-| `sspi-auth` | ❌ | `sspi-rs` (cross-platform) | Stable |
-| `cert-auth` | ❌ | None (uses rustls) | Stable |
-| `otel` | ❌ | `opentelemetry`, `tracing-opentelemetry` | Stable |
-| `zeroize` | ❌ | `zeroize` for credential cleanup | Stable |
-| `always-encrypted` | ❌ | Cryptography dependencies | Stable |
-| `encoding` | ❌ | `encoding_rs` | Stable |
+Features are defined on `mssql-client` and forwarded to internal crates as needed.
+
+| Feature | Default | Crate(s) Activated | Platform | Dependencies Added |
+|---------|---------|-------------------|----------|-------------------|
+| `chrono` | ✅ | mssql-types | All | `chrono` |
+| `uuid` | ✅ | mssql-types | All | `uuid` |
+| `decimal` | ✅ | mssql-types | All | `rust_decimal` |
+| `encoding` | ✅ | tds-protocol, mssql-types | All | `encoding_rs` |
+| `tls` | ✅ | mssql-tls | All | `rustls`, `tokio-rustls` |
+| `json` | ❌ | mssql-types | All | `serde_json` |
+| `otel` | ❌ | (local to mssql-client) | All | `opentelemetry`, `tracing-opentelemetry` |
+| `zeroize` | ❌ | mssql-auth | All | `zeroize` |
+| `always-encrypted` | ❌ | mssql-auth | All | `aes`, `cbc`, `hmac`, `sha2`, `rsa`, `rand` |
+| `azure-identity` | ❌ | mssql-auth | All | `azure_identity` (pulls OpenSSL transitively) |
+| `integrated-auth` | ❌ | mssql-auth | Linux/macOS | `gssapi`, `libkrb5-dev` |
+| `sspi-auth` | ❌ | mssql-auth | Windows | `sspi-rs` |
+| `cert-auth` | ❌ | mssql-auth | All | None (uses rustls) |
+
+Features on `mssql-auth` only (not exposed via `mssql-client`):
+
+| Feature | Dependencies | Notes |
+|---------|-------------|-------|
+| `azure-keyvault` | `azure_security_keyvault_keys` | Requires `always-encrypted` + `azure-identity` |
+| `windows-certstore` | Windows Crypto API (FFI) | Requires `always-encrypted`, Windows only |
 
 ### 8.4 Migration Guide from Tiberius
 

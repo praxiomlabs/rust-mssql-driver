@@ -232,6 +232,18 @@ just watch-check
 just watch-clippy
 ```
 
+### Build Automation (`cargo xtask`)
+
+The project includes custom build commands via `cargo xtask`:
+
+| Command | Purpose |
+|---------|---------|
+| `cargo xtask release <version>` | Bump version across all crates + update CHANGELOG |
+| `cargo xtask check-features` | Validate all feature flag combinations compile (uses cargo-hack) |
+| `cargo xtask fuzz` | Run fuzz tests on protocol parser |
+| `cargo xtask coverage` | Generate code coverage report |
+| `cargo xtask semver-check` | Check for semver-breaking API changes |
+
 ## Making Changes
 
 ### Commit Messages
@@ -417,6 +429,24 @@ In your PR that introduces a breaking change:
 - Integration tests: `tests/`
 - Property tests: Use `proptest`
 - Fuzz tests: `fuzz/` directory
+
+#### Integration Test Taxonomy (`crates/mssql-client/tests/`)
+
+Tests are organized by functional domain:
+
+| File | Domain |
+|------|--------|
+| `integration.rs` | End-to-end workflows (queries, transactions, streaming) |
+| `config.rs` | Configuration validation and connection string parsing |
+| `error_handling.rs` | Error scenarios and recovery paths |
+| `always_encrypted.rs` | Always Encrypted column encryption |
+| `azure_sql.rs` | Azure SQL Gateway redirect/failover |
+| `resilience.rs` | Connection resilience (retry, timeout, backoff) |
+| `stress.rs` | Load testing and concurrent operations |
+| `version_compatibility.rs` | TDS 7.3 through 8.0 support |
+| `protocol_conformance.rs` | MS-TDS specification compliance |
+| `collation_test.rs` | Character encoding and collation handling |
+| `edge_cases.rs` | Boundary conditions (empty results, large values, etc.) |
 
 ### Test Naming
 
