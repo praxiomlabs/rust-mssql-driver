@@ -14,6 +14,11 @@ categories = ["database"]
 
 [workspace.dependencies]
 # Internal crates (version required for crates.io publishing)
+#
+# Crate taxonomy:
+#   Primary (user-facing): mssql-client (main API), mssql-driver-pool (connection pooling)
+#   Internal (implementation): tds-protocol, mssql-types, mssql-tls, mssql-codec, mssql-auth, mssql-derive
+#   Dev-only (publish = false): mssql-testing
 tds-protocol = { version = "0.6.0", path = "crates/tds-protocol" }
 mssql-tls = { version = "0.6.0", path = "crates/mssql-tls" }
 mssql-codec = { version = "0.6.0", path = "crates/mssql-codec" }
@@ -84,7 +89,10 @@ azure_core = "0.30"
 azure_security_keyvault_keys = "0.9"
 
 # MSRV-constrained transitive dependencies
-# home 0.5.12+ requires Rust 1.88, we support 1.85
+# home 0.5.12+ requires Rust 1.88, but workspace MSRV is 1.85.
+# Pulled transitively via: testcontainers → etcetera → home.
+# Only affects mssql-testing (publish = false); no production crate depends on home.
+# Remove this pin when workspace MSRV is bumped to ≥1.88.
 home = ">=0.5.9, <0.5.12"
 
 [workspace.lints.rust]

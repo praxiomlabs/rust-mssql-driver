@@ -404,6 +404,12 @@ let config = Config::builder()
 
 Token acquisition uses `azure_identity` crate for HTTP calls to identity endpoints.
 
+> **Known trade-off:** The `azure-identity` feature pulls in `openssl` as a transitive
+> dependency via the Azure SDK. This contradicts the project's rustls-only philosophy
+> but is unavoidable — the Azure SDK for Rust does not provide rustls-only builds.
+> This only affects users who enable the `azure-identity` feature; the default build
+> remains pure-Rust with rustls.
+
 **Tier 3 (Enterprise/Legacy — `integrated-auth` Feature):**
 
 | Method | Platform | Implementation |

@@ -70,6 +70,20 @@
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
 
+// Module dependency graph (acyclic):
+//
+//   client ──→ config, state, error, stream, transaction, statement_cache
+//     ├── connect.rs ──→ config, state, instrumentation, mssql_tls, mssql_codec, tds_protocol
+//     ├── params.rs  ──→ mssql_types, tds_protocol
+//     └── response.rs ──→ error, mssql_codec, tds_protocol
+//   stream ──→ error, row
+//   row ──→ blob, error, mssql_types
+//   config ──→ mssql_auth, mssql_tls, tds_protocol
+//   bulk ──→ error, mssql_types, tds_protocol
+//   cancel ──→ error, mssql_codec, mssql_tls
+//   encryption ──→ mssql_auth, tds_protocol
+//   column_parser ──→ error, mssql_types, tds_protocol
+
 pub mod blob;
 pub mod bulk;
 pub mod cancel;

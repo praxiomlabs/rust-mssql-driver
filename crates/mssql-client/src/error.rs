@@ -171,6 +171,28 @@ impl Error {
     /// Check if a server error number is transient (may succeed on retry).
     ///
     /// This follows the error codes specified in ADR-009.
+    ///
+    /// # Extending with custom error codes
+    ///
+    /// Applications with domain-specific transient error codes can compose
+    /// this method with their own logic:
+    ///
+    /// ```rust
+    /// use mssql_client::Error;
+    ///
+    /// fn is_transient_for_my_app(err: &Error) -> bool {
+    ///     // Check built-in transient codes first
+    ///     if err.is_transient() {
+    ///         return true;
+    ///     }
+    ///     // Add application-specific transient server errors
+    ///     if let Error::Server { number, .. } = err {
+    ///         matches!(number, 50001 | 50002) // custom app error codes
+    ///     } else {
+    ///         false
+    ///     }
+    /// }
+    /// ```
     #[must_use]
     pub fn is_transient_server_error(number: i32) -> bool {
         matches!(
