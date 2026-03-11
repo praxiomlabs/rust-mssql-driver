@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 keywords = ["sql-server", "testing", "testcontainers", "mock"]
 categories = ["development-tools::testing"]
+publish = false
 
 [features]
 default = []

@@ -173,7 +173,6 @@ jobs:
 
           # Tier 4: Depend on mssql-client
           publish_crate mssql-driver-pool
-          publish_crate mssql-testing
 
           echo ""
           echo "🎉 All crates published successfully"
@@ -194,7 +193,7 @@ jobs:
         run: |
           set -euo pipefail
           failed=0
-          for crate in tds-protocol mssql-types mssql-tls mssql-codec mssql-auth mssql-derive mssql-client mssql-driver-pool mssql-testing; do
+          for crate in tds-protocol mssql-types mssql-tls mssql-codec mssql-auth mssql-derive mssql-client mssql-driver-pool; do
             echo "Checking $crate..."
             if ! cargo publish -p "$crate" --dry-run --no-verify; then
               echo "❌ $crate failed dry-run"
