@@ -39,9 +39,10 @@ use tds_protocol::{
     TokenType,
 };
 use thiserror::Error;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, broadcast};
+use tokio_rustls::TlsAcceptor;
 
 /// Error type for mock server operations.
 #[derive(Debug, Error)]
@@ -319,6 +320,8 @@ pub struct MockServerConfig {
     tds_version: u32,
     /// Default database name.
     database: String,
+    /// TLS acceptor for encrypted connections (None = plaintext only).
+    tls_acceptor: Option<TlsAcceptor>,
 }
 
 /// Builder for `MockTdsServer`.
@@ -336,6 +339,7 @@ impl MockServerBuilder {
                 server_name: "MockSQLServer".to_string(),
                 tds_version: 0x74000004, // TDS 7.4
                 database: "master".to_string(),
+                tls_acceptor: None,
             },
         }
     }
@@ -361,6 +365,22 @@ impl MockServerBuilder {
     /// Set the default database.
     pub fn with_database(mut self, db: impl Into<String>) -> Self {
         self.config.database = db.into();
+        self
+    }
+
+    /// Enable TLS with an auto-generated self-signed certificate.
+    ///
+    /// When enabled, the mock server will advertise `ENCRYPT_ON` in PreLogin
+    /// responses and perform a server-side TLS handshake for connecting clients.
+    pub fn with_tls(mut self) -> Self {
+        let cert_key = crate::tls::generate_test_certificate();
+        self.config.tls_acceptor = Some(crate::tls::create_tls_acceptor(&cert_key));
+        self
+    }
+
+    /// Enable TLS with a custom `TlsAcceptor`.
+    pub fn with_tls_acceptor(mut self, acceptor: TlsAcceptor) -> Self {
+        self.config.tls_acceptor = Some(acceptor);
         self
     }
 
@@ -469,6 +489,11 @@ impl MockTdsServer {
         self.addr.port()
     }
 
+    /// Check whether TLS is enabled on this server.
+    pub fn has_tls(&self) -> bool {
+        self.config.tls_acceptor.is_some()
+    }
+
     /// Get the current connection count.
     pub async fn connection_count(&self) -> usize {
         *self.connection_count.lock().await
@@ -488,7 +513,7 @@ impl Drop for MockTdsServer {
 
 /// Handle a single client connection.
 async fn handle_connection(mut stream: TcpStream, config: Arc<MockServerConfig>) -> Result<()> {
-    // Step 1: Handle PRELOGIN
+    // Step 1: Handle PRELOGIN over raw TCP
     let prelogin_request = read_packet(&mut stream).await?;
     if prelogin_request.packet_type != PacketType::PreLogin {
         return Err(MockServerError::Protocol(format!(
@@ -496,24 +521,61 @@ async fn handle_connection(mut stream: TcpStream, config: Arc<MockServerConfig>)
             prelogin_request.packet_type
         )));
     }
-    send_prelogin_response(&mut stream).await?;
 
-    // Step 2: Handle LOGIN7
-    let login_request = read_packet(&mut stream).await?;
+    // Parse client's requested encryption level
+    let client_encryption = parse_prelogin_encryption(&prelogin_request.payload);
+
+    // Determine server encryption response based on TLS configuration
+    let use_tls = config.tls_acceptor.is_some();
+    let server_encryption = match (use_tls, client_encryption) {
+        // TLS enabled: advertise On (or NotSupported if client says NotSupported)
+        (true, 0x02) => 0x02, // Client: NotSupported → Server: NotSupported
+        (true, _) => 0x01,    // Server: On
+        // TLS disabled: match client's level (Off or NotSupported)
+        (false, 0x02) => 0x02, // NotSupported
+        (false, _) => 0x00,    // Off
+    };
+
+    send_prelogin_response_with_encryption(&mut stream, server_encryption).await?;
+
+    // Step 2: If TLS is negotiated, perform TLS handshake
+    if use_tls && server_encryption != 0x02 {
+        let acceptor = config.tls_acceptor.as_ref().unwrap();
+        let mut tls_stream = crate::tls::accept_tls_prelogin(stream, acceptor)
+            .await
+            .map_err(|e| MockServerError::Protocol(format!("TLS handshake failed: {e}")))?;
+
+        // Continue login and query processing over TLS
+        handle_session(&mut tls_stream, &config).await
+    } else {
+        // Continue over plaintext TCP
+        handle_session(&mut stream, &config).await
+    }
+}
+
+/// Handle the login and query processing phase of a connection.
+///
+/// This is generic over the stream type so it works with both plaintext
+/// `TcpStream` and encrypted `TlsStream`.
+async fn handle_session<S>(stream: &mut S, config: &MockServerConfig) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    // Handle LOGIN7
+    let login_request = read_packet(stream).await?;
     if login_request.packet_type != PacketType::Tds7Login {
         return Err(MockServerError::Protocol(format!(
             "Expected Tds7Login, got {:?}",
             login_request.packet_type
         )));
     }
-    send_login_response(&mut stream, &config).await?;
+    send_login_response(stream, config).await?;
 
-    // Step 3: Handle SQL batches and RPC requests
+    // Handle SQL batches and RPC requests
     loop {
-        let packet = match read_packet(&mut stream).await {
+        let packet = match read_packet(stream).await {
             Ok(p) => p,
             Err(MockServerError::Io(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                // Client disconnected
                 break;
             }
             Err(e) => return Err(e),
@@ -522,21 +584,18 @@ async fn handle_connection(mut stream: TcpStream, config: Arc<MockServerConfig>)
         match packet.packet_type {
             PacketType::SqlBatch => {
                 let sql = decode_sql_batch(&packet.payload)?;
-                let response = find_response(&sql, &config);
-                send_query_response(&mut stream, response).await?;
+                let response = find_response(&sql, config);
+                send_query_response(stream, response).await?;
             }
             PacketType::Rpc => {
-                // For RPC requests (sp_executesql, sp_prepare, etc.)
-                // Extract the SQL from the RPC payload and handle similarly
                 let response = config
                     .default_response
                     .clone()
                     .unwrap_or(MockResponse::empty());
-                send_query_response(&mut stream, response).await?;
+                send_query_response(stream, response).await?;
             }
             PacketType::Attention => {
-                // Client sent attention/cancel signal
-                send_attention_ack(&mut stream).await?;
+                send_attention_ack(stream).await?;
             }
             _ => {
                 tracing::debug!("Unexpected packet type: {:?}", packet.packet_type);
@@ -547,6 +606,28 @@ async fn handle_connection(mut stream: TcpStream, config: Arc<MockServerConfig>)
     Ok(())
 }
 
+/// Parse the ENCRYPTION option from a PreLogin payload.
+///
+/// Returns the raw encryption byte (0x00=Off, 0x01=On, 0x02=NotSupported, 0x03=Required).
+fn parse_prelogin_encryption(payload: &[u8]) -> u8 {
+    // Walk the option tokens to find ENCRYPTION (type 0x01)
+    let mut pos = 0;
+    while pos + 4 < payload.len() {
+        let option_type = payload[pos];
+        if option_type == 0xFF {
+            break; // Terminator
+        }
+        let offset = u16::from_be_bytes([payload[pos + 1], payload[pos + 2]]) as usize;
+        let length = u16::from_be_bytes([payload[pos + 3], payload[pos + 4]]) as usize;
+
+        if option_type == 0x01 && length >= 1 && offset < payload.len() {
+            return payload[offset];
+        }
+        pos += 5;
+    }
+    0x00 // Default: Off
+}
+
 /// Parsed TDS packet.
 struct Packet {
     packet_type: PacketType,
@@ -554,7 +635,7 @@ struct Packet {
 }
 
 /// Read a complete TDS packet from the stream.
-async fn read_packet(stream: &mut TcpStream) -> Result<Packet> {
+async fn read_packet<S: AsyncRead + Unpin>(stream: &mut S) -> Result<Packet> {
     let mut header_buf = [0u8; PACKET_HEADER_SIZE];
     stream.read_exact(&mut header_buf).await?;
 
@@ -601,8 +682,8 @@ async fn read_packet(stream: &mut TcpStream) -> Result<Packet> {
 }
 
 /// Write a TDS packet to the stream.
-async fn write_packet(
-    stream: &mut TcpStream,
+async fn write_packet<S: AsyncWrite + Unpin>(
+    stream: &mut S,
     packet_type: PacketType,
     payload: &[u8],
 ) -> Result<()> {
@@ -625,8 +706,13 @@ async fn write_packet(
     Ok(())
 }
 
-/// Send PRELOGIN response.
-async fn send_prelogin_response(stream: &mut TcpStream) -> Result<()> {
+/// Send PRELOGIN response with specified encryption level.
+///
+/// Encryption byte values: 0x00=Off, 0x01=On, 0x02=NotSupported, 0x03=Required.
+async fn send_prelogin_response_with_encryption(
+    stream: &mut TcpStream,
+    encryption: u8,
+) -> Result<()> {
     // PRELOGIN response format:
     // Option tokens (5 bytes each: type + offset + length) followed by data
     // VERSION (0x00), ENCRYPTION (0x01)
@@ -664,13 +750,16 @@ async fn send_prelogin_response(stream: &mut TcpStream) -> Result<()> {
     response.put_u16_le(0); // sub-build number
 
     // ENCRYPTION data (at offset 17)
-    response.put_u8(0x00); // ENCRYPT_OFF (no encryption)
+    response.put_u8(encryption);
 
     write_packet(stream, PacketType::PreLogin, &response).await
 }
 
 /// Send LOGIN7 response (LoginAck + EnvChange + Done).
-async fn send_login_response(stream: &mut TcpStream, config: &MockServerConfig) -> Result<()> {
+async fn send_login_response<S: AsyncWrite + Unpin>(
+    stream: &mut S,
+    config: &MockServerConfig,
+) -> Result<()> {
     let mut response = BytesMut::new();
 
     // EnvChange: Database
@@ -809,7 +898,10 @@ fn find_response(sql: &str, config: &MockServerConfig) -> MockResponse {
 }
 
 /// Send a query response based on the MockResponse.
-async fn send_query_response(stream: &mut TcpStream, response: MockResponse) -> Result<()> {
+async fn send_query_response<S: AsyncWrite + Unpin>(
+    stream: &mut S,
+    response: MockResponse,
+) -> Result<()> {
     let mut buf = BytesMut::new();
 
     match response {
@@ -936,7 +1028,7 @@ fn encode_error(dst: &mut BytesMut, number: i32, message: &str, severity: u8) {
 }
 
 /// Send attention acknowledgment.
-async fn send_attention_ack(stream: &mut TcpStream) -> Result<()> {
+async fn send_attention_ack<S: AsyncWrite + Unpin>(stream: &mut S) -> Result<()> {
     let mut buf = BytesMut::new();
 
     // DONE with ATTN flag
