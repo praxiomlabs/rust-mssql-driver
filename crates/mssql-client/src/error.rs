@@ -59,10 +59,6 @@ pub enum Error {
         line: u32,
     },
 
-    /// Transaction error.
-    #[error("transaction error: {0}")]
-    Transaction(String),
-
     /// Configuration error.
     #[error("configuration error: {0}")]
     Config(String),
@@ -163,6 +159,7 @@ impl Error {
             | Self::ConnectionTimeout
             | Self::CommandTimeout
             | Self::ConnectionClosed
+            | Self::Connection(_)
             | Self::Routing { .. }
             | Self::PoolExhausted
             | Self::Io(_) => true,
@@ -208,7 +205,12 @@ impl Error {
     #[must_use]
     pub fn is_terminal(&self) -> bool {
         match self {
-            Self::Config(_) | Self::InvalidIdentifier(_) => true,
+            Self::Config(_)
+            | Self::InvalidIdentifier(_)
+            | Self::Protocol(_)
+            | Self::Tls(_)
+            | Self::Authentication(_)
+            | Self::Cancel(_) => true,
             Self::Server { number, .. } => Self::is_terminal_server_error(*number),
             _ => false,
         }
@@ -233,10 +235,34 @@ impl Error {
     /// Check if this error indicates a protocol/driver bug.
     ///
     /// Protocol errors typically indicate a bug in the driver implementation
-    /// rather than a user error or server issue.
+    /// rather than a user error or server issue. These are always terminal.
     #[must_use]
     pub fn is_protocol_error(&self) -> bool {
         matches!(self, Self::Protocol(_))
+    }
+
+    /// Check if this is a TLS/encryption error.
+    ///
+    /// TLS errors indicate certificate, handshake, or encryption failures.
+    /// These are terminal — TLS timeouts are reported as [`Error::TlsTimeout`] instead.
+    #[must_use]
+    pub fn is_tls_error(&self) -> bool {
+        matches!(self, Self::Tls(_) | Self::TlsTimeout)
+    }
+
+    /// Check if this is an authentication error.
+    #[must_use]
+    pub fn is_authentication_error(&self) -> bool {
+        matches!(self, Self::Authentication(_))
+    }
+
+    /// Check if this is a configuration error.
+    ///
+    /// Configuration errors are always terminal — they indicate invalid
+    /// settings that cannot be resolved by retrying.
+    #[must_use]
+    pub fn is_config_error(&self) -> bool {
+        matches!(self, Self::Config(_))
     }
 
     /// Check if this is a server error with a specific number.

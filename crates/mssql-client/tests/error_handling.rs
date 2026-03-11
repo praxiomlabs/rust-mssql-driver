@@ -87,14 +87,6 @@ fn test_server_error_without_optional_fields() {
 }
 
 #[test]
-fn test_transaction_error_display() {
-    let err = Error::Transaction("already rolled back".into());
-    let msg = err.to_string();
-    assert!(msg.contains("transaction error"));
-    assert!(msg.contains("already rolled back"));
-}
-
-#[test]
 fn test_config_error_display() {
     let err = Error::Config("invalid port number".into());
     let msg = err.to_string();
@@ -493,7 +485,6 @@ fn test_all_error_variants_are_debug() {
             procedure: None,
             line: 1,
         },
-        Error::Transaction("test".into()),
         Error::Config("test".into()),
         Error::ConnectTimeout,
         Error::TlsTimeout,
@@ -534,4 +525,111 @@ fn test_io_error_source() {
     // The error should have a source
     // Note: thiserror may or may not expose the source depending on definition
     let _ = err.source();
+}
+
+// =============================================================================
+// Error Classification Completeness Tests
+// =============================================================================
+
+#[test]
+fn test_protocol_errors_are_terminal() {
+    let err = Error::Protocol("unexpected EOF".into());
+    assert!(err.is_terminal());
+    assert!(!err.is_transient());
+}
+
+#[test]
+fn test_tls_errors_are_terminal() {
+    let err = Error::Tls("certificate expired".into());
+    assert!(err.is_terminal());
+    assert!(!err.is_transient());
+}
+
+#[test]
+fn test_cancel_errors_are_terminal() {
+    let err = Error::Cancel("connection not found".into());
+    assert!(err.is_terminal());
+    assert!(!err.is_transient());
+}
+
+#[test]
+fn test_connection_errors_are_transient() {
+    let err = Error::Connection("network unreachable".into());
+    assert!(err.is_transient());
+    assert!(!err.is_terminal());
+}
+
+// =============================================================================
+// Convenience Method Tests
+// =============================================================================
+
+#[test]
+fn test_is_tls_error() {
+    assert!(Error::Tls("cert expired".into()).is_tls_error());
+    assert!(Error::TlsTimeout.is_tls_error());
+    assert!(!Error::ConnectionTimeout.is_tls_error());
+    assert!(!Error::Protocol("test".into()).is_tls_error());
+}
+
+#[test]
+fn test_is_authentication_error() {
+    // Cannot easily construct AuthError from outside, so test negative cases
+    assert!(!Error::ConnectionTimeout.is_authentication_error());
+    assert!(!Error::Config("test".into()).is_authentication_error());
+}
+
+#[test]
+fn test_is_config_error() {
+    assert!(Error::Config("bad port".into()).is_config_error());
+    assert!(!Error::ConnectionTimeout.is_config_error());
+    assert!(!Error::Protocol("test".into()).is_config_error());
+}
+
+#[test]
+fn test_every_variant_classified() {
+    // Every error variant should be either transient, terminal, or
+    // explicitly uncategorized (Query, Cancelled). This test ensures
+    // we don't have variants falling into the unknown bucket silently.
+    let classified_variants: Vec<(Error, &str)> = vec![
+        (Error::Connection("test".into()), "transient"),
+        (Error::ConnectionClosed, "transient"),
+        (Error::Tls("test".into()), "terminal"),
+        (Error::Protocol("test".into()), "terminal"),
+        (Error::Config("test".into()), "terminal"),
+        (Error::ConnectTimeout, "transient"),
+        (Error::TlsTimeout, "transient"),
+        (Error::ConnectionTimeout, "transient"),
+        (Error::CommandTimeout, "transient"),
+        (
+            Error::Routing {
+                host: "h".into(),
+                port: 1,
+            },
+            "transient",
+        ),
+        (Error::PoolExhausted, "transient"),
+        (
+            Error::Io(Arc::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "test",
+            ))),
+            "transient",
+        ),
+        (Error::InvalidIdentifier("test".into()), "terminal"),
+        (Error::Cancel("test".into()), "terminal"),
+    ];
+
+    for (err, expected) in classified_variants {
+        match expected {
+            "transient" => {
+                assert!(err.is_transient(), "{:?} should be transient", err);
+                assert!(!err.is_terminal(), "{:?} should not be terminal", err);
+            }
+            "terminal" => {
+                assert!(err.is_terminal(), "{:?} should be terminal", err);
+                assert!(!err.is_transient(), "{:?} should not be transient", err);
+            }
+            _ => unreachable!(),
+        }
+    }
 }

@@ -43,9 +43,6 @@ pub enum Error {
         line: u32,
     },
 
-    // Transactions
-    Transaction(String),
-
     // Configuration
     Config(String),
 
