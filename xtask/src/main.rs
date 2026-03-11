@@ -15,6 +15,7 @@
 //! - `fuzz`: Run fuzz tests (requires cargo-fuzz + nightly)
 //! - `codegen`: Generate protocol constants from TDS spec
 //! - `release`: Prepare a release (bump versions, update changelog)
+//! - `check-features`: Validate all feature flag combinations compile
 //! - `dist`: Build release artifacts for distribution
 
 use std::fs;
@@ -116,6 +117,8 @@ enum Command {
         #[arg(long)]
         no_changelog: bool,
     },
+    /// Validate all feature flag combinations compile (requires cargo-hack)
+    CheckFeatures,
 }
 
 fn main() -> Result<()> {
@@ -159,6 +162,7 @@ fn main() -> Result<()> {
             version,
             no_changelog,
         } => release(&sh, &version, no_changelog)?,
+        Command::CheckFeatures => check_features(&sh)?,
     }
 
     Ok(())
@@ -757,6 +761,80 @@ fn semver(sh: &Shell) -> Result<()> {
 
     println!("✅ No semver violations detected.");
     Ok(())
+}
+
+fn check_features(sh: &Shell) -> Result<()> {
+    require_tool("hack", "cargo install cargo-hack")?;
+    println!("Checking feature flag combinations...");
+
+    // tds-protocol: requires std or alloc; encoding also needs one of them.
+    // Exclude both bare --no-default-features and encoding from the sweep,
+    // then test encoding + alloc (no_std) separately.
+    println!("\n  tds-protocol...");
+    cmd!(
+        sh,
+        "cargo hack check -p tds-protocol --each-feature --no-dev-deps --exclude-no-default-features --exclude-features encoding"
+    )
+    .run()?;
+    // Verify no_std + alloc works
+    cmd!(
+        sh,
+        "cargo check -p tds-protocol --no-default-features --features alloc"
+    )
+    .run()?;
+    // Verify encoding works in no_std context
+    cmd!(
+        sh,
+        "cargo check -p tds-protocol --no-default-features --features alloc,encoding"
+    )
+    .run()?;
+
+    // mssql-types: all features are independent
+    println!("\n  mssql-types...");
+    cmd!(
+        sh,
+        "cargo hack check -p mssql-types --each-feature --no-dev-deps"
+    )
+    .run()?;
+
+    // mssql-client: all features are independent
+    println!("\n  mssql-client...");
+    cmd!(
+        sh,
+        "cargo hack check -p mssql-client --each-feature --no-dev-deps"
+    )
+    .run()?;
+
+    // mssql-auth: platform-specific features need exclusion
+    println!("\n  mssql-auth...");
+    let excluded = platform_excluded_auth_features();
+    if excluded.is_empty() {
+        cmd!(
+            sh,
+            "cargo hack check -p mssql-auth --each-feature --no-dev-deps"
+        )
+        .run()?;
+    } else {
+        let excluded_str = excluded.join(",");
+        cmd!(
+            sh,
+            "cargo hack check -p mssql-auth --each-feature --no-dev-deps --exclude-features {excluded_str}"
+        )
+        .run()?;
+    }
+
+    println!("\n✅ All feature flag combinations compile.");
+    Ok(())
+}
+
+/// Returns auth features that cannot compile on the current platform.
+fn platform_excluded_auth_features() -> Vec<&'static str> {
+    let mut excluded = Vec::new();
+    if !cfg!(target_os = "windows") {
+        excluded.push("sspi-auth");
+        excluded.push("windows-certstore");
+    }
+    excluded
 }
 
 fn release(sh: &Shell, version: &str, no_changelog: bool) -> Result<()> {
