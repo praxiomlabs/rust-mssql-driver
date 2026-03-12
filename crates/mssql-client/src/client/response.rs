@@ -19,19 +19,10 @@ impl<S: ConnectionState> Client<S> {
 
         let message = match connection {
             #[cfg(feature = "tls")]
-            ConnectionHandle::Tls(conn) => conn
-                .read_message()
-                .await
-                .map_err(|e| Error::Protocol(e.to_string()))?,
+            ConnectionHandle::Tls(conn) => conn.read_message().await?,
             #[cfg(feature = "tls")]
-            ConnectionHandle::TlsPrelogin(conn) => conn
-                .read_message()
-                .await
-                .map_err(|e| Error::Protocol(e.to_string()))?,
-            ConnectionHandle::Plain(conn) => conn
-                .read_message()
-                .await
-                .map_err(|e| Error::Protocol(e.to_string()))?,
+            ConnectionHandle::TlsPrelogin(conn) => conn.read_message().await?,
+            ConnectionHandle::Plain(conn) => conn.read_message().await?,
         }
         .ok_or(Error::ConnectionClosed)?;
 
@@ -42,9 +33,7 @@ impl<S: ConnectionState> Client<S> {
 
         loop {
             // Use next_token_with_metadata to properly parse Row/NbcRow tokens
-            let token = parser
-                .next_token_with_metadata(protocol_metadata.as_ref())
-                .map_err(|e| Error::Protocol(e.to_string()))?;
+            let token = parser.next_token_with_metadata(protocol_metadata.as_ref())?;
 
             let Some(token) = token else {
                 break;
@@ -172,19 +161,10 @@ impl<S: ConnectionState> Client<S> {
 
         let message = match connection {
             #[cfg(feature = "tls")]
-            ConnectionHandle::Tls(conn) => conn
-                .read_message()
-                .await
-                .map_err(|e| Error::Protocol(e.to_string()))?,
+            ConnectionHandle::Tls(conn) => conn.read_message().await?,
             #[cfg(feature = "tls")]
-            ConnectionHandle::TlsPrelogin(conn) => conn
-                .read_message()
-                .await
-                .map_err(|e| Error::Protocol(e.to_string()))?,
-            ConnectionHandle::Plain(conn) => conn
-                .read_message()
-                .await
-                .map_err(|e| Error::Protocol(e.to_string()))?,
+            ConnectionHandle::TlsPrelogin(conn) => conn.read_message().await?,
+            ConnectionHandle::Plain(conn) => conn.read_message().await?,
         }
         .ok_or(Error::ConnectionClosed)?;
 
@@ -194,9 +174,7 @@ impl<S: ConnectionState> Client<S> {
 
         loop {
             // Use metadata-aware parsing to handle Row tokens from SELECT statements
-            let token = parser
-                .next_token_with_metadata(current_metadata.as_ref())
-                .map_err(|e| Error::Protocol(e.to_string()))?;
+            let token = parser.next_token_with_metadata(current_metadata.as_ref())?;
 
             let Some(token) = token else {
                 break;
@@ -284,19 +262,10 @@ impl<S: ConnectionState> Client<S> {
 
         let message = match connection {
             #[cfg(feature = "tls")]
-            ConnectionHandle::Tls(conn) => conn
-                .read_message()
-                .await
-                .map_err(|e| Error::Protocol(e.to_string()))?,
+            ConnectionHandle::Tls(conn) => conn.read_message().await?,
             #[cfg(feature = "tls")]
-            ConnectionHandle::TlsPrelogin(conn) => conn
-                .read_message()
-                .await
-                .map_err(|e| Error::Protocol(e.to_string()))?,
-            ConnectionHandle::Plain(conn) => conn
-                .read_message()
-                .await
-                .map_err(|e| Error::Protocol(e.to_string()))?,
+            ConnectionHandle::TlsPrelogin(conn) => conn.read_message().await?,
+            ConnectionHandle::Plain(conn) => conn.read_message().await?,
         }
         .ok_or(Error::ConnectionClosed)?;
 
@@ -304,9 +273,7 @@ impl<S: ConnectionState> Client<S> {
         let mut transaction_descriptor: u64 = 0;
 
         loop {
-            let token = parser
-                .next_token()
-                .map_err(|e| Error::Protocol(e.to_string()))?;
+            let token = parser.next_token()?;
 
             let Some(token) = token else {
                 break;
@@ -385,19 +352,10 @@ impl Client<Ready> {
 
         let message = match connection {
             #[cfg(feature = "tls")]
-            ConnectionHandle::Tls(conn) => conn
-                .read_message()
-                .await
-                .map_err(|e| Error::Protocol(e.to_string()))?,
+            ConnectionHandle::Tls(conn) => conn.read_message().await?,
             #[cfg(feature = "tls")]
-            ConnectionHandle::TlsPrelogin(conn) => conn
-                .read_message()
-                .await
-                .map_err(|e| Error::Protocol(e.to_string()))?,
-            ConnectionHandle::Plain(conn) => conn
-                .read_message()
-                .await
-                .map_err(|e| Error::Protocol(e.to_string()))?,
+            ConnectionHandle::TlsPrelogin(conn) => conn.read_message().await?,
+            ConnectionHandle::Plain(conn) => conn.read_message().await?,
         }
         .ok_or(Error::ConnectionClosed)?;
 
@@ -408,9 +366,7 @@ impl Client<Ready> {
         let mut protocol_metadata: Option<ColMetaData> = None;
 
         loop {
-            let token = parser
-                .next_token_with_metadata(protocol_metadata.as_ref())
-                .map_err(|e| Error::Protocol(e.to_string()))?;
+            let token = parser.next_token_with_metadata(protocol_metadata.as_ref())?;
 
             let Some(token) = token else {
                 break;

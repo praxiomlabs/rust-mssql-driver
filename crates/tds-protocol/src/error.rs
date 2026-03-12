@@ -81,3 +81,24 @@ pub enum ProtocolError {
         value: u32,
     },
 }
+
+impl ProtocolError {
+    /// Check if this error is transient and may succeed on retry.
+    ///
+    /// Protocol errors are almost always terminal — they indicate malformed data
+    /// or driver bugs. The only transient case is `UnexpectedEof`, which may
+    /// occur during connection loss.
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        matches!(self, Self::UnexpectedEof)
+    }
+
+    /// Check if this error is terminal and will never succeed on retry.
+    ///
+    /// Most protocol errors indicate a fundamental mismatch between client
+    /// and server, a driver bug, or corrupted data.
+    #[must_use]
+    pub fn is_terminal(&self) -> bool {
+        !self.is_transient()
+    }
+}

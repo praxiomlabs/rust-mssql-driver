@@ -136,19 +136,16 @@ impl<S: ConnectionState> Client<S> {
             #[cfg(feature = "tls")]
             ConnectionHandle::Tls(conn) => {
                 conn.send_message_with_reset(PacketType::SqlBatch, payload, max_packet, reset)
-                    .await
-                    .map_err(|e| Error::Protocol(e.to_string()))?;
+                    .await?;
             }
             #[cfg(feature = "tls")]
             ConnectionHandle::TlsPrelogin(conn) => {
                 conn.send_message_with_reset(PacketType::SqlBatch, payload, max_packet, reset)
-                    .await
-                    .map_err(|e| Error::Protocol(e.to_string()))?;
+                    .await?;
             }
             ConnectionHandle::Plain(conn) => {
                 conn.send_message_with_reset(PacketType::SqlBatch, payload, max_packet, reset)
-                    .await
-                    .map_err(|e| Error::Protocol(e.to_string()))?;
+                    .await?;
             }
         }
 
@@ -178,19 +175,16 @@ impl<S: ConnectionState> Client<S> {
             #[cfg(feature = "tls")]
             ConnectionHandle::Tls(conn) => {
                 conn.send_message_with_reset(PacketType::Rpc, payload, max_packet, reset)
-                    .await
-                    .map_err(|e| Error::Protocol(e.to_string()))?;
+                    .await?;
             }
             #[cfg(feature = "tls")]
             ConnectionHandle::TlsPrelogin(conn) => {
                 conn.send_message_with_reset(PacketType::Rpc, payload, max_packet, reset)
-                    .await
-                    .map_err(|e| Error::Protocol(e.to_string()))?;
+                    .await?;
             }
             ConnectionHandle::Plain(conn) => {
                 conn.send_message_with_reset(PacketType::Rpc, payload, max_packet, reset)
-                    .await
-                    .map_err(|e| Error::Protocol(e.to_string()))?;
+                    .await?;
             }
         }
 
@@ -679,6 +673,36 @@ impl Client<Ready> {
     }
 }
 
+/// # Drop Behavior
+///
+/// **`Client<InTransaction>` has no automatic rollback on drop.** If the client is
+/// dropped without calling [`commit()`](Client::commit) or [`rollback()`](Client::rollback),
+/// the transaction remains open on the server until the TCP connection closes
+/// (at which point SQL Server automatically rolls back).
+///
+/// This is because `Drop` is synchronous and cannot perform the async I/O needed
+/// to send a `ROLLBACK TRANSACTION` command.
+///
+/// ## Consequences of dropping without commit/rollback
+///
+/// - **Direct connections:** The transaction leaks until the OS TCP timeout
+///   (potentially 30+ minutes), holding locks on any modified rows.
+/// - **Pooled connections:** The pool detects the active transaction descriptor
+///   and discards the connection rather than returning it to the idle pool
+///   (see `PooledConnection::drop` in `mssql-driver-pool`).
+///
+/// ## Best practice
+///
+/// Always ensure `commit()` or `rollback()` is called. Use helper patterns
+/// for error paths:
+///
+/// ```rust,ignore
+/// let tx = client.begin_transaction().await?;
+/// match do_work(&tx).await {
+///     Ok(_) => { tx.commit().await?; }
+///     Err(e) => { tx.rollback().await?; return Err(e); }
+/// }
+/// ```
 impl Client<InTransaction> {
     /// Execute a query within the transaction and return a streaming result set.
     ///

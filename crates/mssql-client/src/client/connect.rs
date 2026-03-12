@@ -142,7 +142,7 @@ impl Client<Disconnected> {
             .strict_mode(true)
             .trust_server_certificate(config.trust_server_certificate);
 
-        let tls_connector = TlsConnector::new(tls_config).map_err(|e| Error::Tls(e.to_string()))?;
+        let tls_connector = TlsConnector::new(tls_config)?;
 
         // Perform TLS handshake before any TDS traffic
         let tls_stream = timeout(
@@ -150,8 +150,7 @@ impl Client<Disconnected> {
             tls_connector.connect(tcp_stream, &config.host),
         )
         .await
-        .map_err(|_| Error::TlsTimeout)?
-        .map_err(|e| Error::Tls(e.to_string()))?;
+        .map_err(|_| Error::TlsTimeout)??;
 
         tracing::debug!("TLS handshake completed (strict mode)");
 
@@ -167,9 +166,13 @@ impl Client<Disconnected> {
         let login = Self::build_login7(config);
         Self::send_login7(&mut connection, &login).await?;
 
-        // Process login response
-        let (server_version, current_database, routing) =
-            Self::process_login_response(&mut connection).await?;
+        // Process login response (with timeout to prevent hangs during redirect)
+        let (server_version, current_database, routing) = timeout(
+            config.timeouts.login_timeout,
+            Self::process_login_response(&mut connection),
+        )
+        .await
+        .map_err(|_| Error::ConnectionTimeout)??;
 
         // Handle routing redirect
         if let Some((host, port)) = routing {
@@ -257,8 +260,7 @@ impl Client<Disconnected> {
             .await
             .map_err(|e| Error::Io(Arc::new(e)))?;
 
-        let prelogin_response =
-            PreLogin::decode(&response_buf[..]).map_err(|e| Error::Protocol(e.to_string()))?;
+        let prelogin_response = PreLogin::decode(&response_buf[..])?;
 
         // Log PreLogin response
         // Note: The server sends its SQL Server product version in PreLogin,
@@ -335,8 +337,7 @@ impl Client<Disconnected> {
             let tls_config =
                 TlsConfig::new().trust_server_certificate(config.trust_server_certificate);
 
-            let tls_connector =
-                TlsConnector::new(tls_config).map_err(|e| Error::Tls(e.to_string()))?;
+            let tls_connector = TlsConnector::new(tls_config)?;
 
             // Use PreLogin-wrapped TLS connection for TDS 7.x
             let mut tls_stream = timeout(
@@ -344,8 +345,7 @@ impl Client<Disconnected> {
                 tls_connector.connect_with_prelogin(tcp_stream, &config.host),
             )
             .await
-            .map_err(|_| Error::TlsTimeout)?
-            .map_err(|e| Error::Tls(e.to_string()))?;
+            .map_err(|_| Error::TlsTimeout)??;
 
             tracing::debug!("TLS handshake completed (PreLogin wrapped)");
 
@@ -413,9 +413,13 @@ impl Client<Disconnected> {
                 // Create Connection from plain TCP for reading response
                 let mut connection = Connection::new(tcp_stream);
 
-                // Process login response (comes in plaintext)
-                let (server_version, current_database, routing) =
-                    Self::process_login_response(&mut connection).await?;
+                // Process login response (comes in plaintext, with timeout)
+                let (server_version, current_database, routing) = timeout(
+                    config.timeouts.login_timeout,
+                    Self::process_login_response(&mut connection),
+                )
+                .await
+                .map_err(|_| Error::ConnectionTimeout)??;
 
                 // Handle routing redirect
                 if let Some((host, port)) = routing {
@@ -445,9 +449,13 @@ impl Client<Disconnected> {
                 let login = Self::build_login7(config);
                 Self::send_login7(&mut connection, &login).await?;
 
-                // Process login response
-                let (server_version, current_database, routing) =
-                    Self::process_login_response(&mut connection).await?;
+                // Process login response (with timeout)
+                let (server_version, current_database, routing) = timeout(
+                    config.timeouts.login_timeout,
+                    Self::process_login_response(&mut connection),
+                )
+                .await
+                .map_err(|_| Error::ConnectionTimeout)??;
 
                 // Handle routing redirect
                 if let Some((host, port)) = routing {
@@ -559,10 +567,7 @@ impl Client<Disconnected> {
             let mut current_database = None;
             let routing = None;
 
-            while let Some(token) = parser
-                .next_token()
-                .map_err(|e| Error::Protocol(e.to_string()))?
-            {
+            while let Some(token) = parser.next_token()? {
                 match token {
                     Token::LoginAck(ack) => {
                         tracing::info!(
@@ -690,8 +695,7 @@ impl Client<Disconnected> {
             .await
             .map_err(|e| Error::Io(Arc::new(e)))?;
 
-        let prelogin_response =
-            PreLogin::decode(&response_buf[..]).map_err(|e| Error::Protocol(e.to_string()))?;
+        let prelogin_response = PreLogin::decode(&response_buf[..])?;
 
         // Check server encryption response - must accept NotSupported
         let server_encryption = prelogin_response.encryption;
@@ -756,10 +760,7 @@ impl Client<Disconnected> {
         let mut server_version = None;
         let mut current_database = None;
 
-        while let Some(token) = parser
-            .next_token()
-            .map_err(|e| Error::Protocol(e.to_string()))?
-        {
+        while let Some(token) = parser.next_token()? {
             match token {
                 Token::LoginAck(ack) => {
                     tracing::info!(
@@ -891,8 +892,8 @@ impl Client<Disconnected> {
 
         connection
             .send_message(PacketType::PreLogin, payload, max_packet)
-            .await
-            .map_err(|e| Error::Protocol(e.to_string()))
+            .await?;
+        Ok(())
     }
 
     /// Receive a PreLogin response (for use with Connection).
@@ -903,11 +904,10 @@ impl Client<Disconnected> {
     {
         let message = connection
             .read_message()
-            .await
-            .map_err(|e| Error::Protocol(e.to_string()))?
+            .await?
             .ok_or(Error::ConnectionClosed)?;
 
-        PreLogin::decode(&message.payload[..]).map_err(|e| Error::Protocol(e.to_string()))
+        Ok(PreLogin::decode(&message.payload[..])?)
     }
 
     /// Send a Login7 packet.
@@ -921,8 +921,8 @@ impl Client<Disconnected> {
 
         connection
             .send_message(PacketType::Tds7Login, payload, max_packet)
-            .await
-            .map_err(|e| Error::Protocol(e.to_string()))
+            .await?;
+        Ok(())
     }
 
     /// Process the login response tokens.
@@ -937,8 +937,7 @@ impl Client<Disconnected> {
     {
         let message = connection
             .read_message()
-            .await
-            .map_err(|e| Error::Protocol(e.to_string()))?
+            .await?
             .ok_or(Error::ConnectionClosed)?;
 
         let response_bytes = message.payload;
@@ -948,10 +947,7 @@ impl Client<Disconnected> {
         let mut database = None;
         let mut routing = None;
 
-        while let Some(token) = parser
-            .next_token()
-            .map_err(|e| Error::Protocol(e.to_string()))?
-        {
+        while let Some(token) = parser.next_token()? {
             match token {
                 Token::LoginAck(ack) => {
                     tracing::info!(

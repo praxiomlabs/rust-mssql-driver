@@ -46,3 +46,33 @@ pub enum AuthError {
     #[error("Azure identity error: {0}")]
     AzureIdentity(String),
 }
+
+impl AuthError {
+    /// Check if this error is transient and may succeed on retry.
+    ///
+    /// Network errors, token acquisition failures (may be temporary service
+    /// issues), and Azure identity errors are potentially transient. Invalid
+    /// credentials and unsupported methods are terminal.
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        matches!(
+            self,
+            Self::Network(_) | Self::TokenAcquisition(_) | Self::AzureIdentity(_)
+        )
+    }
+
+    /// Check if this error is terminal and will never succeed on retry.
+    ///
+    /// Invalid credentials, unsupported methods, certificate errors, and
+    /// configuration errors are permanent.
+    #[must_use]
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::InvalidCredentials(_)
+                | Self::UnsupportedMethod(_)
+                | Self::Certificate(_)
+                | Self::Configuration(_)
+        )
+    }
+}

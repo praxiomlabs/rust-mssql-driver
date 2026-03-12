@@ -68,3 +68,23 @@ pub enum TypeError {
         available: usize,
     },
 }
+
+impl TypeError {
+    /// Check if this error is transient and may succeed on retry.
+    ///
+    /// Type conversion errors are always terminal — they indicate
+    /// a mismatch between the SQL type and the Rust type, which
+    /// won't resolve itself on retry.
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        false
+    }
+
+    /// Check if this error is terminal and will never succeed on retry.
+    ///
+    /// All type errors are terminal.
+    #[must_use]
+    pub fn is_terminal(&self) -> bool {
+        true
+    }
+}

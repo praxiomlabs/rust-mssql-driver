@@ -446,7 +446,7 @@ async fn test_pool_connection_timeout() {
     // Try to get another connection - should timeout
     let result = pool.get().await;
     assert!(
-        matches!(result, Err(PoolError::Timeout)),
+        matches!(result, Err(PoolError::Timeout { .. })),
         "Should timeout waiting for connection"
     );
 
@@ -825,7 +825,7 @@ async fn test_pool_no_deadlock_nested_acquisition() {
     // Trying to get another should timeout, not deadlock
     let result = pool.get().await;
     assert!(
-        matches!(result, Err(PoolError::Timeout)),
+        matches!(result, Err(PoolError::Timeout { .. })),
         "Should timeout, not deadlock"
     );
 

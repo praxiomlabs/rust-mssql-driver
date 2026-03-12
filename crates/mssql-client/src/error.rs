@@ -20,11 +20,21 @@ pub enum Error {
     #[error("authentication failed: {0}")]
     Authentication(#[from] mssql_auth::AuthError),
 
-    /// TLS error (string for flexibility in connection code).
+    /// TLS error.
+    #[cfg(feature = "tls")]
+    #[error("TLS error: {0}")]
+    Tls(#[from] mssql_tls::TlsError),
+
+    /// TLS error (when TLS feature is disabled, stores the message).
+    #[cfg(not(feature = "tls"))]
     #[error("TLS error: {0}")]
     Tls(String),
 
-    /// Protocol error (string for flexibility in connection code).
+    /// Protocol error from the TDS layer (preserves the source error chain).
+    #[error("protocol error: {0}")]
+    ProtocolError(#[from] tds_protocol::ProtocolError),
+
+    /// Protocol violation with a descriptive message.
     #[error("protocol error: {0}")]
     Protocol(String),
 
@@ -116,18 +126,8 @@ pub enum Error {
     Cancelled,
 }
 
-#[cfg(feature = "tls")]
-impl From<mssql_tls::TlsError> for Error {
-    fn from(e: mssql_tls::TlsError) -> Self {
-        Error::Tls(e.to_string())
-    }
-}
-
-impl From<tds_protocol::ProtocolError> for Error {
-    fn from(e: tds_protocol::ProtocolError) -> Self {
-        Error::Protocol(e.to_string())
-    }
-}
+// Note: From<mssql_tls::TlsError> and From<tds_protocol::ProtocolError> are
+// derived via #[from] on the enum variants above, preserving the full error chain.
 
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
@@ -230,6 +230,7 @@ impl Error {
             Self::Config(_)
             | Self::InvalidIdentifier(_)
             | Self::Protocol(_)
+            | Self::ProtocolError(_)
             | Self::Tls(_)
             | Self::Authentication(_)
             | Self::Cancel(_) => true,
@@ -260,7 +261,7 @@ impl Error {
     /// rather than a user error or server issue. These are always terminal.
     #[must_use]
     pub fn is_protocol_error(&self) -> bool {
-        matches!(self, Self::Protocol(_))
+        matches!(self, Self::Protocol(_) | Self::ProtocolError(_))
     }
 
     /// Check if this is a TLS/encryption error.

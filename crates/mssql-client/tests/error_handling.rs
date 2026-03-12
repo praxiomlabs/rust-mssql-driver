@@ -12,6 +12,11 @@
 use mssql_client::Error;
 use std::sync::Arc;
 
+/// Helper to create a TLS error for testing.
+fn make_tls_error(msg: &str) -> Error {
+    Error::Tls(mssql_tls::TlsError::Configuration(msg.to_string()))
+}
+
 // =============================================================================
 // Error Display Tests
 // =============================================================================
@@ -32,7 +37,7 @@ fn test_connection_closed_display() {
 
 #[test]
 fn test_tls_error_display() {
-    let err = Error::Tls("certificate expired".into());
+    let err = make_tls_error("certificate expired");
     let msg = err.to_string();
     assert!(msg.contains("TLS error"));
     assert!(msg.contains("certificate expired"));
@@ -473,7 +478,7 @@ fn test_all_error_variants_are_debug() {
     let errors: Vec<Error> = vec![
         Error::Connection("test".into()),
         Error::ConnectionClosed,
-        Error::Tls("test".into()),
+        make_tls_error("test"),
         Error::Protocol("test".into()),
         Error::Query("test".into()),
         Error::Server {
@@ -540,7 +545,7 @@ fn test_protocol_errors_are_terminal() {
 
 #[test]
 fn test_tls_errors_are_terminal() {
-    let err = Error::Tls("certificate expired".into());
+    let err = make_tls_error("certificate expired");
     assert!(err.is_terminal());
     assert!(!err.is_transient());
 }
@@ -565,7 +570,7 @@ fn test_connection_errors_are_transient() {
 
 #[test]
 fn test_is_tls_error() {
-    assert!(Error::Tls("cert expired".into()).is_tls_error());
+    assert!(make_tls_error("cert expired").is_tls_error());
     assert!(Error::TlsTimeout.is_tls_error());
     assert!(!Error::ConnectionTimeout.is_tls_error());
     assert!(!Error::Protocol("test".into()).is_tls_error());
@@ -593,7 +598,7 @@ fn test_every_variant_classified() {
     let classified_variants: Vec<(Error, &str)> = vec![
         (Error::Connection("test".into()), "transient"),
         (Error::ConnectionClosed, "transient"),
-        (Error::Tls("test".into()), "terminal"),
+        (make_tls_error("test"), "terminal"),
         (Error::Protocol("test".into()), "terminal"),
         (Error::Config("test".into()), "terminal"),
         (Error::ConnectTimeout, "transient"),

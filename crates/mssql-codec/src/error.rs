@@ -46,3 +46,24 @@ pub enum CodecError {
     #[error("decoding error: {0}")]
     Decoding(String),
 }
+
+impl CodecError {
+    /// Check if this error is transient and may succeed on retry.
+    ///
+    /// IO errors and connection closures are typically transient.
+    /// Protocol, encoding, and header errors are terminal.
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::Io(_) | Self::ConnectionClosed => true,
+            Self::Protocol(e) => e.is_transient(),
+            _ => false,
+        }
+    }
+
+    /// Check if this error is terminal and will never succeed on retry.
+    #[must_use]
+    pub fn is_terminal(&self) -> bool {
+        !self.is_transient()
+    }
+}
