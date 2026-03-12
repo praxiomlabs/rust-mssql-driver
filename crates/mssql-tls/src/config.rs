@@ -164,6 +164,37 @@ impl TlsConfig {
     pub fn has_client_auth(&self) -> bool {
         self.client_auth.is_some()
     }
+
+    /// Add a root certificate from DER-encoded bytes.
+    ///
+    /// This is a convenience method that avoids requiring a direct
+    /// dependency on the `rustls` crate. For PEM-encoded certificates,
+    /// parse them first using the `rustls-pemfile` crate.
+    #[must_use]
+    pub fn add_root_certificate_der(self, der_bytes: Vec<u8>) -> Self {
+        self.add_root_certificate(CertificateDer::from(der_bytes))
+    }
+
+    /// Set client certificate and key from DER-encoded bytes.
+    ///
+    /// This is a convenience method that avoids requiring a direct
+    /// dependency on the `rustls` crate.
+    ///
+    /// * `cert_chain_der` - DER-encoded certificate chain
+    /// * `private_key_der` - DER-encoded private key (PKCS#8 format)
+    #[must_use]
+    pub fn with_client_auth_der(
+        self,
+        cert_chain_der: Vec<Vec<u8>>,
+        private_key_der: Vec<u8>,
+    ) -> Self {
+        let certs = cert_chain_der
+            .into_iter()
+            .map(CertificateDer::from)
+            .collect();
+        let key = PrivateKeyDer::Pkcs8(private_key_der.into());
+        self.with_client_auth(certs, key)
+    }
 }
 
 /// TLS protocol version.
