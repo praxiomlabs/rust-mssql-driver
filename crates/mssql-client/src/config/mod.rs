@@ -360,7 +360,7 @@ impl Config {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```no_run
     /// use mssql_client::Config;
     /// use tds_protocol::version::TdsVersion;
     ///

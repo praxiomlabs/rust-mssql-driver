@@ -524,8 +524,12 @@ fn get_padding_info(algorithm: &str) -> Result<(PaddingInfo, NCRYPT_FLAGS), Encr
     match algorithm.to_uppercase().as_str() {
         "RSA_OAEP" | "RSA-OAEP" | "RSA_OAEP_256" | "RSA-OAEP-256" => {
             let hash_alg: Vec<u16> = SHA256_ALG.encode_utf16().collect();
-            // Leak the UTF-16 buffer so PCWSTR remains valid for the lifetime of the PaddingInfo.
-            // This is bounded to at most 2 allocations (one per algorithm variant) per decrypt_cek call.
+            // SAFETY: Box::leak is used intentionally to produce a 'static PCWSTR pointer.
+            // BCRYPT_OAEP_PADDING_INFO requires a valid PCWSTR for its lifetime, but the
+            // PaddingInfo is returned to the caller and may outlive any local borrow.
+            // The leak is bounded: at most 2 allocations (one per algorithm branch) per
+            // decrypt_cek call. This is acceptable because decrypt_cek is called infrequently
+            // (only during CEK decryption for Always Encrypted column access).
             let hash_alg_ptr = Box::leak(hash_alg.into_boxed_slice());
 
             let info = BCRYPT_OAEP_PADDING_INFO {
@@ -540,8 +544,10 @@ fn get_padding_info(algorithm: &str) -> Result<(PaddingInfo, NCRYPT_FLAGS), Encr
         }
         "RSA1_5" | "RSA-1_5" | "RSA_PKCS1" | "RSA-PKCS1" => {
             let hash_alg: Vec<u16> = SHA256_ALG.encode_utf16().collect();
-            // Leak the UTF-16 buffer so PCWSTR remains valid for the lifetime of the PaddingInfo.
-            // This is bounded to at most 2 allocations (one per algorithm variant) per decrypt_cek call.
+            // SAFETY: Box::leak is used intentionally to produce a 'static PCWSTR pointer.
+            // BCRYPT_PKCS1_PADDING_INFO requires a valid PCWSTR for its lifetime. See the
+            // RSA_OAEP branch above for the full rationale. The leak is bounded to at most
+            // 2 allocations per decrypt_cek call.
             let hash_alg_ptr = Box::leak(hash_alg.into_boxed_slice());
 
             let info = BCRYPT_PKCS1_PADDING_INFO {

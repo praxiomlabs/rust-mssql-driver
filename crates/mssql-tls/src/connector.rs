@@ -98,10 +98,13 @@ impl ServerCertVerifier for DangerousServerCertVerifier {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use mssql_tls::default_tls_config;
 ///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let config = default_tls_config()?;
+/// # Ok(())
+/// # }
 /// ```
 pub fn default_tls_config() -> Result<ClientConfig, TlsError> {
     // Ensure the crypto provider is installed before using rustls
