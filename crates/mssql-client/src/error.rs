@@ -51,7 +51,7 @@ pub enum Error {
     Query(String),
 
     /// Server returned an error.
-    #[error("server error {number}: {message}")]
+    #[error("server error {number} (severity {class}, state {state}): {message}{}", format_server_location(.server, .procedure, .line))]
     Server {
         /// Error number.
         number: i32,
@@ -107,7 +107,7 @@ pub enum Error {
 
     /// IO error (wrapped in Arc for Clone support).
     #[error("IO error: {0}")]
-    Io(Arc<std::io::Error>),
+    Io(#[source] SharedIoError),
 
     /// Invalid identifier (potential SQL injection attempt).
     #[error("invalid identifier: {0}")]
@@ -129,9 +129,29 @@ pub enum Error {
 // Note: From<mssql_tls::TlsError> and From<tds_protocol::ProtocolError> are
 // derived via #[from] on the enum variants above, preserving the full error chain.
 
+/// A cloneable wrapper around `std::io::Error` that preserves the error source chain.
+///
+/// `Arc<io::Error>` does not implement `std::error::Error`, which breaks
+/// `source()` chain traversal used by libraries like `anyhow` and `eyre`.
+/// This newtype bridges the gap.
+#[derive(Debug, Clone)]
+pub struct SharedIoError(Arc<std::io::Error>);
+
+impl std::fmt::Display for SharedIoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::error::Error for SharedIoError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.source()
+    }
+}
+
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
-        Error::Io(Arc::new(e))
+        Error::Io(SharedIoError(Arc::new(e)))
     }
 }
 
@@ -316,6 +336,33 @@ impl Error {
     }
 }
 
+/// Format the server/procedure/line suffix for server error Display.
+fn format_server_location(
+    server: &Option<String>,
+    procedure: &Option<String>,
+    line: &u32,
+) -> String {
+    let mut parts = Vec::new();
+    if let Some(srv) = server {
+        if !srv.is_empty() {
+            parts.push(format!("server: {srv}"));
+        }
+    }
+    if let Some(proc) = procedure {
+        if !proc.is_empty() {
+            parts.push(format!("procedure: {proc}"));
+        }
+    }
+    if *line > 0 {
+        parts.push(format!("line: {line}"));
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", parts.join(", "))
+    }
+}
+
 /// Result type for client operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -355,7 +402,7 @@ mod tests {
     #[test]
     fn test_is_transient_io_error() {
         let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "reset");
-        assert!(Error::Io(Arc::new(io_err)).is_transient());
+        assert!(Error::Io(SharedIoError(Arc::new(io_err))).is_transient());
     }
 
     #[test]

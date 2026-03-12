@@ -109,7 +109,7 @@ pub use bulk::{BulkColumn, BulkInsert, BulkInsertBuilder, BulkInsertResult, Bulk
 pub use cancel::CancelHandle;
 pub use client::Client;
 pub use config::{Config, RedirectConfig, RetryPolicy, TimeoutConfig};
-pub use error::Error;
+pub use error::{Error, SharedIoError};
 
 // Re-export TDS version for configuration
 pub use from_row::{FromRow, MapRows, RowIteratorExt};

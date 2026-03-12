@@ -10,7 +10,6 @@
 )]
 
 use mssql_client::Error;
-use std::sync::Arc;
 
 /// Helper to create a TLS error for testing.
 fn make_tls_error(msg: &str) -> Error {
@@ -130,7 +129,7 @@ fn test_too_many_redirects_display() {
 #[test]
 fn test_io_error_display() {
     let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
-    let err = Error::Io(Arc::new(io_err));
+    let err = Error::from(io_err);
     let msg = err.to_string();
     assert!(msg.contains("IO error"));
     assert!(msg.contains("refused"));
@@ -174,9 +173,10 @@ fn test_io_error_conversion() {
     let io_err = std::io::Error::new(std::io::ErrorKind::NotConnected, "not connected");
     let err: Error = io_err.into();
 
-    match err {
-        Error::Io(arc_err) => {
-            assert_eq!(arc_err.kind(), std::io::ErrorKind::NotConnected);
+    match &err {
+        Error::Io(shared_err) => {
+            let msg = shared_err.to_string();
+            assert!(msg.contains("not connected"));
         }
         _ => panic!("Expected IO error"),
     }
@@ -187,10 +187,12 @@ fn test_io_error_is_clone() {
     let io_err = std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out");
     let err: Error = io_err.into();
 
-    // Error should be cloneable via Arc
-    if let Error::Io(arc1) = &err {
-        let arc2 = Arc::clone(arc1);
-        assert_eq!(arc1.kind(), arc2.kind());
+    // SharedIoError should be cloneable (backed by Arc)
+    if let Error::Io(shared) = &err {
+        let cloned = shared.clone();
+        assert_eq!(shared.to_string(), cloned.to_string());
+    } else {
+        panic!("Expected IO error");
     }
 }
 
@@ -500,10 +502,7 @@ fn test_all_error_variants_are_debug() {
             port: 1,
         },
         Error::TooManyRedirects { max: 1 },
-        Error::Io(Arc::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "test",
-        ))),
+        Error::from(std::io::Error::new(std::io::ErrorKind::Other, "test")),
         Error::InvalidIdentifier("test".into()),
         Error::PoolExhausted,
         Error::Cancel("test".into()),
@@ -525,7 +524,7 @@ fn test_io_error_source() {
     use std::error::Error as StdError;
 
     let io_err = std::io::Error::new(std::io::ErrorKind::Other, "inner error");
-    let err = Error::Io(Arc::new(io_err));
+    let err = Error::from(io_err);
 
     // The error should have a source
     // Note: thiserror may or may not expose the source depending on definition
@@ -614,10 +613,7 @@ fn test_every_variant_classified() {
         ),
         (Error::PoolExhausted, "transient"),
         (
-            Error::Io(Arc::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "test",
-            ))),
+            Error::from(std::io::Error::new(std::io::ErrorKind::Other, "test")),
             "transient",
         ),
         (Error::InvalidIdentifier("test".into()), "terminal"),
