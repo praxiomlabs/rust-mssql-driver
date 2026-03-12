@@ -379,8 +379,16 @@ impl BulkInsertBuilder {
             let cols: Vec<String> = self
                 .columns
                 .iter()
-                .map(|c| format!("{} {}", c.name, c.sql_type))
-                .collect();
+                .map(|c| {
+                    // Validate sql_type to prevent SQL injection: only allow
+                    // alphanumerics, parentheses (for length/precision), commas,
+                    // spaces, and the MAX keyword — which covers all valid T-SQL
+                    // type specifiers like "NVARCHAR(100)", "DECIMAL(18, 2)",
+                    // "VARBINARY(MAX)", etc.
+                    validate_sql_type(&c.sql_type)?;
+                    Ok(format!("{} {}", c.name, c.sql_type))
+                })
+                .collect::<Result<Vec<_>, Error>>()?;
             sql.push_str(&cols.join(", "));
             sql.push(')');
         }
@@ -420,6 +428,30 @@ impl BulkInsertBuilder {
 
         Ok(sql)
     }
+}
+
+/// Validate a SQL type specifier to prevent SQL injection.
+///
+/// Allows only characters that can appear in valid T-SQL type declarations:
+/// letters, digits, parentheses, commas, spaces, and periods.
+/// Examples: "INT", "NVARCHAR(100)", "DECIMAL(18, 2)", "VARBINARY(MAX)".
+fn validate_sql_type(type_str: &str) -> Result<(), Error> {
+    #[allow(clippy::expect_used)] // Static regex compilation with known-valid pattern
+    static SQL_TYPE_RE: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"^[a-zA-Z][a-zA-Z0-9_ ()\.,]{0,127}$").expect("valid regex"));
+
+    if type_str.is_empty() {
+        return Err(Error::Config("SQL type cannot be empty".into()));
+    }
+
+    if !SQL_TYPE_RE.is_match(type_str) {
+        return Err(Error::Config(format!(
+            "invalid SQL type '{}': contains disallowed characters",
+            type_str
+        )));
+    }
+
+    Ok(())
 }
 
 /// Validate a single SQL identifier to prevent SQL injection.
@@ -959,14 +991,7 @@ impl BulkInsert {
         buf.put_u8(TokenType::Done as u8);
 
         // Status: FINAL (0x00) | COUNT (0x10)
-        let status = DoneStatus {
-            more: false,
-            error: false,
-            in_xact: false,
-            count: true,
-            attn: false,
-            srverror: false,
-        };
+        let status = DoneStatus::from_bits(0x0010); // DONE_COUNT
         buf.put_u16_le(status.to_bits());
 
         // Current command (0 for bulk load)

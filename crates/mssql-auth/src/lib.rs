@@ -65,6 +65,8 @@
 //! ```
 
 #![warn(missing_docs)]
+// Unsafe code is denied globally but allowed in the Windows CNG FFI module.
+// See windows_certstore.rs for detailed SAFETY comments on each unsafe block.
 #![deny(unsafe_code)]
 
 pub mod azure_ad;
@@ -94,6 +96,7 @@ pub mod key_unwrap;
 #[cfg(feature = "azure-keyvault")]
 pub mod azure_keyvault;
 #[cfg(all(windows, feature = "windows-certstore"))]
+#[allow(unsafe_code)] // Windows CNG FFI; see SAFETY comments in each unsafe block
 pub mod windows_certstore;
 
 // Core types

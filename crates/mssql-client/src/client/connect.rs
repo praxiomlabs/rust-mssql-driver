@@ -4,7 +4,6 @@
 //! TCP connection, TLS negotiation, PreLogin exchange, and Login7 authentication.
 
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use bytes::BytesMut;
 use mssql_codec::connection::Connection;
@@ -87,12 +86,10 @@ impl Client<Disconnected> {
         let tcp_stream = timeout(config.timeouts.connect_timeout, TcpStream::connect(&addr))
             .await
             .map_err(|_| Error::ConnectTimeout)?
-            .map_err(|e| Error::Io(Arc::new(e)))?;
+            .map_err(Error::from)?;
 
         // Enable TCP nodelay for better latency
-        tcp_stream
-            .set_nodelay(true)
-            .map_err(|e| Error::Io(Arc::new(e)))?;
+        tcp_stream.set_nodelay(true).map_err(Error::from)?;
 
         #[cfg(feature = "tls")]
         {
@@ -242,14 +239,14 @@ impl Client<Disconnected> {
         tcp_stream
             .write_all(&packet_buf)
             .await
-            .map_err(|e| Error::Io(Arc::new(e)))?;
+            .map_err(Error::from)?;
 
         // Read PreLogin response
         let mut header_buf = [0u8; PACKET_HEADER_SIZE];
         tcp_stream
             .read_exact(&mut header_buf)
             .await
-            .map_err(|e| Error::Io(Arc::new(e)))?;
+            .map_err(Error::from)?;
 
         let response_length = u16::from_be_bytes([header_buf[2], header_buf[3]]) as usize;
         let payload_length = response_length.saturating_sub(PACKET_HEADER_SIZE);
@@ -258,7 +255,7 @@ impl Client<Disconnected> {
         tcp_stream
             .read_exact(&mut response_buf)
             .await
-            .map_err(|e| Error::Io(Arc::new(e)))?;
+            .map_err(Error::from)?;
 
         let prelogin_response = PreLogin::decode(&response_buf[..])?;
 
@@ -393,14 +390,11 @@ impl Client<Disconnected> {
                     tls_stream
                         .write_all(&packet_buf)
                         .await
-                        .map_err(|e| Error::Io(Arc::new(e)))?;
+                        .map_err(Error::from)?;
                 }
 
                 // Flush TLS to ensure all data is sent
-                tls_stream
-                    .flush()
-                    .await
-                    .map_err(|e| Error::Io(Arc::new(e)))?;
+                tls_stream.flush().await.map_err(Error::from)?;
 
                 tracing::debug!("Login7 sent through TLS, switching to plaintext for response");
 
@@ -487,19 +481,9 @@ impl Client<Disconnected> {
             let login = Self::build_login7(config);
             let login_bytes = login.encode();
             tracing::debug!("Login7 packet built: {} bytes", login_bytes.len(),);
-            // Dump the fixed header (94 bytes)
-            tracing::debug!(
-                "Login7 fixed header (94 bytes): {:02X?}",
-                &login_bytes[..login_bytes.len().min(94)]
-            );
-            // Dump variable data
-            if login_bytes.len() > 94 {
-                tracing::debug!(
-                    "Login7 variable data ({} bytes): {:02X?}",
-                    login_bytes.len() - 94,
-                    &login_bytes[94..]
-                );
-            }
+            // Note: Login7 packet hex dump intentionally omitted to prevent
+            // credential leakage — the variable-data section contains the
+            // obfuscated (trivially reversible) password.
 
             // Send Login7 over raw TCP (like PreLogin)
             let login_header = PacketHeader::new(
@@ -521,11 +505,8 @@ impl Client<Disconnected> {
             tcp_stream
                 .write_all(&login_packet_buf)
                 .await
-                .map_err(|e| Error::Io(Arc::new(e)))?;
-            tcp_stream
-                .flush()
-                .await
-                .map_err(|e| Error::Io(Arc::new(e)))?;
+                .map_err(Error::from)?;
+            tcp_stream.flush().await.map_err(Error::from)?;
             tracing::debug!("Login7 sent and flushed over raw TCP");
 
             // Read login response header
@@ -533,7 +514,7 @@ impl Client<Disconnected> {
             tcp_stream
                 .read_exact(&mut response_header_buf)
                 .await
-                .map_err(|e| Error::Io(Arc::new(e)))?;
+                .map_err(Error::from)?;
 
             let response_type = response_header_buf[0];
             let response_length =
@@ -550,7 +531,7 @@ impl Client<Disconnected> {
             tcp_stream
                 .read_exact(&mut response_payload)
                 .await
-                .map_err(|e| Error::Io(Arc::new(e)))?;
+                .map_err(Error::from)?;
             tracing::debug!(
                 "Response payload: {} bytes, first 32: {:02X?}",
                 response_payload.len(),
@@ -677,14 +658,14 @@ impl Client<Disconnected> {
         tcp_stream
             .write_all(&packet_buf)
             .await
-            .map_err(|e| Error::Io(Arc::new(e)))?;
+            .map_err(Error::from)?;
 
         // Read PreLogin response
         let mut header_buf = [0u8; PACKET_HEADER_SIZE];
         tcp_stream
             .read_exact(&mut header_buf)
             .await
-            .map_err(|e| Error::Io(Arc::new(e)))?;
+            .map_err(Error::from)?;
 
         let response_length = u16::from_be_bytes([header_buf[2], header_buf[3]]) as usize;
         let payload_length = response_length.saturating_sub(PACKET_HEADER_SIZE);
@@ -693,7 +674,7 @@ impl Client<Disconnected> {
         tcp_stream
             .read_exact(&mut response_buf)
             .await
-            .map_err(|e| Error::Io(Arc::new(e)))?;
+            .map_err(Error::from)?;
 
         let prelogin_response = PreLogin::decode(&response_buf[..])?;
 
@@ -727,18 +708,15 @@ impl Client<Disconnected> {
         tcp_stream
             .write_all(&login_packet_buf)
             .await
-            .map_err(|e| Error::Io(Arc::new(e)))?;
-        tcp_stream
-            .flush()
-            .await
-            .map_err(|e| Error::Io(Arc::new(e)))?;
+            .map_err(Error::from)?;
+        tcp_stream.flush().await.map_err(Error::from)?;
 
         // Read login response header
         let mut response_header_buf = [0u8; PACKET_HEADER_SIZE];
         tcp_stream
             .read_exact(&mut response_header_buf)
             .await
-            .map_err(|e| Error::Io(Arc::new(e)))?;
+            .map_err(Error::from)?;
 
         let response_length =
             u16::from_be_bytes([response_header_buf[2], response_header_buf[3]]) as usize;
@@ -749,7 +727,7 @@ impl Client<Disconnected> {
         tcp_stream
             .read_exact(&mut response_payload)
             .await
-            .map_err(|e| Error::Io(Arc::new(e)))?;
+            .map_err(Error::from)?;
 
         // Create Connection for further communication
         let connection = Connection::new(tcp_stream);
