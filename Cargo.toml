@@ -71,10 +71,11 @@ regex = "1.11"
 lru = "0.16"
 
 # Observability (used with `otel` feature in individual crates)
+# All otel crates aligned at 0.31; tracing-opentelemetry 0.32 uses otel 0.31
 opentelemetry = "0.31"
 opentelemetry_sdk = "0.31"
 opentelemetry-otlp = "0.31"
-tracing-opentelemetry = "0.31"
+tracing-opentelemetry = "0.32"
 
 # Testing
 criterion = { version = "0.7", features = ["async_tokio"] }
