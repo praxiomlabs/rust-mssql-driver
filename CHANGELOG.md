@@ -283,7 +283,8 @@ Initial release of the rust-mssql-driver project.
 - `mssql-derive` - Procedural macros
 - `mssql-testing` - Test infrastructure
 
-[Unreleased]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.4.0...v0.5.0
