@@ -79,6 +79,8 @@ pub mod encryption;
 pub mod error;
 #[cfg(feature = "integrated-auth")]
 pub mod integrated_auth;
+#[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+pub mod negotiator;
 pub mod provider;
 pub mod sql_auth;
 #[cfg(feature = "sspi-auth")]
@@ -127,6 +129,10 @@ pub use cert_auth::CertificateAuth;
 // Windows SSPI authentication (with sspi-auth feature)
 #[cfg(feature = "sspi-auth")]
 pub use sspi_auth::SspiAuth;
+
+// SSPI/GSSAPI negotiator trait (with integrated-auth or sspi-auth feature)
+#[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+pub use negotiator::SspiNegotiator;
 
 // Always Encrypted infrastructure
 pub use encryption::{

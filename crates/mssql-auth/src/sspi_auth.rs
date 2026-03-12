@@ -421,6 +421,20 @@ impl std::fmt::Debug for SspiAuth {
     }
 }
 
+impl crate::negotiator::SspiNegotiator for SspiAuth {
+    fn initialize(&self) -> Result<Vec<u8>, AuthError> {
+        SspiAuth::initialize(self)
+    }
+
+    fn step(&self, server_token: &[u8]) -> Result<Option<Vec<u8>>, AuthError> {
+        SspiAuth::step(self, server_token)
+    }
+
+    fn is_complete(&self) -> bool {
+        SspiAuth::is_complete(self)
+    }
+}
+
 impl AuthProvider for SspiAuth {
     fn method(&self) -> AuthMethod {
         AuthMethod::Integrated

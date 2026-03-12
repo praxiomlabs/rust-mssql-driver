@@ -30,6 +30,10 @@ always-encrypted = ["mssql-auth/always-encrypted"]
 # Forwarded to both tds-protocol (wire-level) and mssql-types (type-level).
 # Both use encoding_rs for codec support.
 encoding = ["tds-protocol/encoding", "mssql-types/encoding"]
+# Integrated authentication (Kerberos/SPNEGO) - Linux/macOS
+integrated-auth = ["mssql-auth/integrated-auth"]
+# Windows SSPI integrated authentication
+sspi-auth = ["mssql-auth/sspi-auth"]
 # TLS/SSL encryption support (enabled by default)
 # Disable this feature for environments where TLS is not needed (enterprise internal networks,
 # legacy SQL Server instances, or development environments) to reduce binary size and compile time.

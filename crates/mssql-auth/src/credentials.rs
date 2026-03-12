@@ -49,7 +49,7 @@ pub enum Credentials {
     },
 
     /// Integrated Windows Authentication (Kerberos/NTLM).
-    #[cfg(feature = "integrated-auth")]
+    #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
     Integrated,
 
     /// Client certificate authentication.
@@ -109,7 +109,7 @@ impl Credentials {
             Self::AzureManagedIdentity { .. } => "Azure Managed Identity",
             #[cfg(feature = "azure-identity")]
             Self::AzureServicePrincipal { .. } => "Azure Service Principal",
-            #[cfg(feature = "integrated-auth")]
+            #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
             Self::Integrated => "Integrated Authentication",
             #[cfg(feature = "cert-auth")]
             Self::Certificate { .. } => "Certificate Authentication",
@@ -146,7 +146,7 @@ impl std::fmt::Debug for Credentials {
                 .field("client_id", client_id)
                 .field("client_secret", &"[REDACTED]")
                 .finish(),
-            #[cfg(feature = "integrated-auth")]
+            #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
             Self::Integrated => f.debug_struct("Integrated").finish(),
             #[cfg(feature = "cert-auth")]
             Self::Certificate { cert_path, .. } => f
@@ -251,7 +251,7 @@ enum SecureCredentialKind {
         client_id: String,
         client_secret: SecretString,
     },
-    #[cfg(feature = "integrated-auth")]
+    #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
     Integrated,
     #[cfg(feature = "cert-auth")]
     Certificate {
@@ -310,7 +310,7 @@ impl SecureCredentials {
             SecureCredentialKind::AzureManagedIdentity { .. } => "Azure Managed Identity",
             #[cfg(feature = "azure-identity")]
             SecureCredentialKind::AzureServicePrincipal { .. } => "Azure Service Principal",
-            #[cfg(feature = "integrated-auth")]
+            #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
             SecureCredentialKind::Integrated => "Integrated Authentication",
             #[cfg(feature = "cert-auth")]
             SecureCredentialKind::Certificate { .. } => "Certificate Authentication",
@@ -390,7 +390,7 @@ impl std::fmt::Debug for SecureCredentials {
                 .field("client_id", client_id)
                 .field("client_secret", &"[REDACTED]")
                 .finish(),
-            #[cfg(feature = "integrated-auth")]
+            #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
             SecureCredentialKind::Integrated => {
                 f.debug_struct("SecureCredentials::Integrated").finish()
             }
@@ -433,7 +433,7 @@ impl From<Credentials> for SecureCredentials {
                     client_secret: SecretString::new(client_secret.into_owned()),
                 },
             },
-            #[cfg(feature = "integrated-auth")]
+            #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
             Credentials::Integrated => SecureCredentials {
                 kind: SecureCredentialKind::Integrated,
             },

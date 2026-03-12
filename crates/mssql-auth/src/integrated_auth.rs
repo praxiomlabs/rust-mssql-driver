@@ -242,6 +242,20 @@ impl std::fmt::Debug for IntegratedAuth {
     }
 }
 
+impl crate::negotiator::SspiNegotiator for IntegratedAuth {
+    fn initialize(&self) -> Result<Vec<u8>, AuthError> {
+        IntegratedAuth::initialize(self)
+    }
+
+    fn step(&self, server_token: &[u8]) -> Result<Option<Vec<u8>>, AuthError> {
+        IntegratedAuth::step(self, server_token)
+    }
+
+    fn is_complete(&self) -> bool {
+        IntegratedAuth::is_complete(self)
+    }
+}
+
 impl AuthProvider for IntegratedAuth {
     fn method(&self) -> AuthMethod {
         AuthMethod::Integrated

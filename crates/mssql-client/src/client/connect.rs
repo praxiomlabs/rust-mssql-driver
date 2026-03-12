@@ -10,7 +10,6 @@ use mssql_codec::connection::Connection;
 #[cfg(feature = "tls")]
 use mssql_tls::{TlsConfig, TlsConnector, TlsNegotiationMode};
 use tds_protocol::login7::Login7;
-#[cfg(feature = "tls")]
 use tds_protocol::packet::MAX_PACKET_SIZE;
 use tds_protocol::packet::PacketType;
 use tds_protocol::prelogin::{EncryptionLevel, PreLogin};
@@ -186,14 +185,29 @@ impl Client<Disconnected> {
         Self::send_prelogin(&mut connection, &prelogin).await?;
         let _prelogin_response = Self::receive_prelogin(&mut connection).await?;
 
+        // Create SSPI negotiator if integrated auth
+        #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+        let negotiator = Self::create_negotiator(config)?;
+        #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+        let sspi_token = match negotiator {
+            Some(ref neg) => Some(neg.initialize()?),
+            None => None,
+        };
+        #[cfg(not(any(feature = "integrated-auth", feature = "sspi-auth")))]
+        let sspi_token: Option<Vec<u8>> = None;
+
         // Send Login7
-        let login = Self::build_login7(config);
+        let login = Self::build_login7(config, sspi_token);
         Self::send_login7(&mut connection, &login).await?;
 
         // Process login response (with timeout to prevent hangs during redirect)
         let (server_version, current_database, routing) = timeout(
             config.timeouts.login_timeout,
-            Self::process_login_response(&mut connection),
+            Self::process_login_response(
+                &mut connection,
+                #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+                negotiator.as_deref(),
+            ),
         )
         .await
         .map_err(|_| Error::LoginTimeout {
@@ -392,8 +406,22 @@ impl Client<Disconnected> {
                 // the stream and we need to extract the underlying TCP afterward.
                 use tokio::io::AsyncWriteExt;
 
+                // Create SSPI negotiator if integrated auth
+                // Note: SSPI handshake over login-only encryption is limited —
+                // the server response comes in plaintext, so multi-step SSPI
+                // may not work. We include the initial token but don't loop.
+                #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+                let negotiator = Self::create_negotiator(config)?;
+                #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+                let sspi_token = match negotiator {
+                    Some(ref neg) => Some(neg.initialize()?),
+                    None => None,
+                };
+                #[cfg(not(any(feature = "integrated-auth", feature = "sspi-auth")))]
+                let sspi_token: Option<Vec<u8>> = None;
+
                 // Build and send Login7 directly through TLS
-                let login = Self::build_login7(config);
+                let login = Self::build_login7(config, sspi_token);
                 let login_payload = login.encode();
 
                 // Create TDS packet manually for Login7
@@ -443,7 +471,11 @@ impl Client<Disconnected> {
                 // Process login response (comes in plaintext, with timeout)
                 let (server_version, current_database, routing) = timeout(
                     config.timeouts.login_timeout,
-                    Self::process_login_response(&mut connection),
+                    Self::process_login_response(
+                        &mut connection,
+                        #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+                        negotiator.as_deref(),
+                    ),
                 )
                 .await
                 .map_err(|_| Error::LoginTimeout {
@@ -475,14 +507,29 @@ impl Client<Disconnected> {
                 // - All communication after TLS handshake goes through TLS
                 let mut connection = Connection::new(tls_stream);
 
+                // Create SSPI negotiator if integrated auth
+                #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+                let negotiator = Self::create_negotiator(config)?;
+                #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+                let sspi_token = match negotiator {
+                    Some(ref neg) => Some(neg.initialize()?),
+                    None => None,
+                };
+                #[cfg(not(any(feature = "integrated-auth", feature = "sspi-auth")))]
+                let sspi_token: Option<Vec<u8>> = None;
+
                 // Send Login7
-                let login = Self::build_login7(config);
+                let login = Self::build_login7(config, sspi_token);
                 Self::send_login7(&mut connection, &login).await?;
 
                 // Process login response (with timeout)
                 let (server_version, current_database, routing) = timeout(
                     config.timeouts.login_timeout,
-                    Self::process_login_response(&mut connection),
+                    Self::process_login_response(
+                        &mut connection,
+                        #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+                        negotiator.as_deref(),
+                    ),
                 )
                 .await
                 .map_err(|_| Error::LoginTimeout {
@@ -516,134 +563,37 @@ impl Client<Disconnected> {
                  used for development/testing on trusted networks."
             );
 
-            // Build Login7 packet
-            let login = Self::build_login7(config);
-            let login_bytes = login.encode();
-            tracing::debug!("Login7 packet built: {} bytes", login_bytes.len(),);
-            // Note: Login7 packet hex dump intentionally omitted to prevent
-            // credential leakage — the variable-data section contains the
-            // obfuscated (trivially reversible) password.
+            let mut connection = Connection::new(tcp_stream);
 
-            // Send Login7 over raw TCP (like PreLogin)
-            let login_header = PacketHeader::new(
-                PacketType::Tds7Login,
-                PacketStatus::END_OF_MESSAGE,
-                (PACKET_HEADER_SIZE + login_bytes.len()) as u16,
+            // Create SSPI negotiator if integrated auth
+            #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+            let negotiator = Self::create_negotiator(config)?;
+            #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+            let sspi_token = match negotiator {
+                Some(ref neg) => Some(neg.initialize()?),
+                None => None,
+            };
+            #[cfg(not(any(feature = "integrated-auth", feature = "sspi-auth")))]
+            let sspi_token: Option<Vec<u8>> = None;
+
+            // Build and send Login7
+            let login = Self::build_login7(config, sspi_token);
+            Self::send_login7(&mut connection, &login).await?;
+
+            // Process login response (with timeout)
+            let (server_version, current_database, routing) = timeout(
+                config.timeouts.login_timeout,
+                Self::process_login_response(
+                    &mut connection,
+                    #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+                    negotiator.as_deref(),
+                ),
             )
-            .with_packet_id(1);
-            let mut login_packet_buf =
-                BytesMut::with_capacity(PACKET_HEADER_SIZE + login_bytes.len());
-            login_header.encode(&mut login_packet_buf);
-            login_packet_buf.put_slice(&login_bytes);
-
-            tracing::debug!(
-                "Sending Login7 packet: {} bytes total, header: {:02X?}",
-                login_packet_buf.len(),
-                &login_packet_buf[..PACKET_HEADER_SIZE]
-            );
-            tcp_stream
-                .write_all(&login_packet_buf)
-                .await
-                .map_err(Error::from)?;
-            tcp_stream.flush().await.map_err(Error::from)?;
-            tracing::debug!("Login7 sent and flushed over raw TCP");
-
-            // Read login response with timeout (plaintext path)
-            let (response_payload, tcp_stream) = timeout(config.timeouts.login_timeout, async {
-                let mut response_header_buf = [0u8; PACKET_HEADER_SIZE];
-                tcp_stream
-                    .read_exact(&mut response_header_buf)
-                    .await
-                    .map_err(Error::from)?;
-
-                let response_type = response_header_buf[0];
-                let response_length =
-                    u16::from_be_bytes([response_header_buf[2], response_header_buf[3]]) as usize;
-                tracing::debug!(
-                    "Response header: type={:#04X}, length={}",
-                    response_type,
-                    response_length
-                );
-
-                let payload_length = response_length.saturating_sub(PACKET_HEADER_SIZE);
-                let mut response_payload = vec![0u8; payload_length];
-                tcp_stream
-                    .read_exact(&mut response_payload)
-                    .await
-                    .map_err(Error::from)?;
-                tracing::debug!(
-                    "Response payload: {} bytes, first 32: {:02X?}",
-                    response_payload.len(),
-                    &response_payload[..response_payload.len().min(32)]
-                );
-
-                Ok::<_, Error>((response_payload, tcp_stream))
-            })
             .await
             .map_err(|_| Error::LoginTimeout {
                 host: config.host.clone(),
                 port: config.port,
             })??;
-
-            // Now create Connection for further communication
-            let connection = Connection::new(tcp_stream);
-
-            // Parse login response
-            let response_bytes = bytes::Bytes::from(response_payload);
-            let mut parser = TokenParser::new(response_bytes);
-            let mut server_version = None;
-            let mut current_database = None;
-            let routing = None;
-
-            while let Some(token) = parser.next_token()? {
-                match token {
-                    Token::LoginAck(ack) => {
-                        tracing::info!(
-                            version = ack.tds_version,
-                            interface = ack.interface,
-                            prog_name = %ack.prog_name,
-                            "login acknowledged"
-                        );
-                        server_version = Some(ack.tds_version);
-                    }
-                    Token::EnvChange(env) => {
-                        Self::process_env_change(&env, &mut current_database, &mut None);
-                    }
-                    Token::Error(err) => {
-                        return Err(Error::Server {
-                            number: err.number,
-                            state: err.state,
-                            class: err.class,
-                            message: err.message.clone(),
-                            server: if err.server.is_empty() {
-                                None
-                            } else {
-                                Some(err.server.clone())
-                            },
-                            procedure: if err.procedure.is_empty() {
-                                None
-                            } else {
-                                Some(err.procedure.clone())
-                            },
-                            line: err.line as u32,
-                        });
-                    }
-                    Token::Info(info) => {
-                        tracing::info!(
-                            number = info.number,
-                            message = %info.message,
-                            "server info message"
-                        );
-                    }
-                    Token::Done(done) => {
-                        if done.status.error {
-                            return Err(Error::Protocol("login failed".to_string()));
-                        }
-                        break;
-                    }
-                    _ => {}
-                }
-            }
 
             // Handle routing redirect
             if let Some((host, port)) = routing {
@@ -737,102 +687,41 @@ impl Client<Disconnected> {
 
         tracing::debug!("Server accepted unencrypted connection");
 
-        // Build Login7 packet
-        let login = Self::build_login7(config);
-        let login_bytes = login.encode();
+        let mut connection = Connection::new(tcp_stream);
 
-        // Send Login7 over raw TCP
-        let login_header = PacketHeader::new(
-            PacketType::Tds7Login,
-            PacketStatus::END_OF_MESSAGE,
-            (PACKET_HEADER_SIZE + login_bytes.len()) as u16,
+        // Create SSPI negotiator if integrated auth
+        #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+        let negotiator = Self::create_negotiator(config)?;
+        #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+        let sspi_token = match negotiator {
+            Some(ref neg) => Some(neg.initialize()?),
+            None => None,
+        };
+        #[cfg(not(any(feature = "integrated-auth", feature = "sspi-auth")))]
+        let sspi_token: Option<Vec<u8>> = None;
+
+        // Build and send Login7
+        let login = Self::build_login7(config, sspi_token);
+        Self::send_login7(&mut connection, &login).await?;
+
+        // Process login response (with timeout)
+        let (server_version, current_database, routing) = timeout(
+            config.timeouts.login_timeout,
+            Self::process_login_response(
+                &mut connection,
+                #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+                negotiator.as_deref(),
+            ),
         )
-        .with_packet_id(1);
-        let mut login_packet_buf = BytesMut::with_capacity(PACKET_HEADER_SIZE + login_bytes.len());
-        login_header.encode(&mut login_packet_buf);
-        login_packet_buf.put_slice(&login_bytes);
+        .await
+        .map_err(|_| Error::LoginTimeout {
+            host: config.host.clone(),
+            port: config.port,
+        })??;
 
-        tcp_stream
-            .write_all(&login_packet_buf)
-            .await
-            .map_err(Error::from)?;
-        tcp_stream.flush().await.map_err(Error::from)?;
-
-        // Read login response header
-        let mut response_header_buf = [0u8; PACKET_HEADER_SIZE];
-        tcp_stream
-            .read_exact(&mut response_header_buf)
-            .await
-            .map_err(Error::from)?;
-
-        let response_length =
-            u16::from_be_bytes([response_header_buf[2], response_header_buf[3]]) as usize;
-
-        // Read response payload
-        let payload_length = response_length.saturating_sub(PACKET_HEADER_SIZE);
-        let mut response_payload = vec![0u8; payload_length];
-        tcp_stream
-            .read_exact(&mut response_payload)
-            .await
-            .map_err(Error::from)?;
-
-        // Create Connection for further communication
-        let connection = Connection::new(tcp_stream);
-
-        // Parse login response
-        let response_bytes = bytes::Bytes::from(response_payload);
-        let mut parser = TokenParser::new(response_bytes);
-        let mut server_version = None;
-        let mut current_database = None;
-
-        while let Some(token) = parser.next_token()? {
-            match token {
-                Token::LoginAck(ack) => {
-                    tracing::info!(
-                        version = ack.tds_version,
-                        interface = ack.interface,
-                        prog_name = %ack.prog_name,
-                        "login acknowledged"
-                    );
-                    server_version = Some(ack.tds_version);
-                }
-                Token::EnvChange(env) => {
-                    Self::process_env_change(&env, &mut current_database, &mut None);
-                }
-                Token::Error(err) => {
-                    return Err(Error::Server {
-                        number: err.number,
-                        state: err.state,
-                        class: err.class,
-                        message: err.message.clone(),
-                        server: if err.server.is_empty() {
-                            None
-                        } else {
-                            Some(err.server.clone())
-                        },
-                        procedure: if err.procedure.is_empty() {
-                            None
-                        } else {
-                            Some(err.procedure.clone())
-                        },
-                        line: err.line as u32,
-                    });
-                }
-                Token::Info(info) => {
-                    tracing::info!(
-                        number = info.number,
-                        message = %info.message,
-                        "server info message"
-                    );
-                }
-                Token::Done(done) => {
-                    if done.status.error {
-                        return Err(Error::Protocol("login failed".to_string()));
-                    }
-                    break;
-                }
-                _ => {}
-            }
+        // Handle routing redirect
+        if let Some((host, port)) = routing {
+            return Err(Error::Routing { host, port });
         }
 
         Ok(Client {
@@ -875,7 +764,10 @@ impl Client<Disconnected> {
     }
 
     /// Build a Login7 packet.
-    fn build_login7(config: &Config) -> Login7 {
+    ///
+    /// When `sspi_token` is provided (integrated auth), the Login7 packet is
+    /// built with the integrated security flag and the initial SSPI blob.
+    fn build_login7(config: &Config, sspi_token: Option<Vec<u8>>) -> Login7 {
         // Use the configured TDS version (strict_mode overrides to V8_0)
         let version = if config.strict_mode {
             tds_protocol::version::TdsVersion::V8_0
@@ -895,15 +787,44 @@ impl Client<Disconnected> {
         }
 
         // Set credentials
-        match &config.credentials {
-            mssql_auth::Credentials::SqlServer { username, password } => {
-                login = login.with_sql_auth(username.as_ref(), password.as_ref());
-            }
-            // Other credential types would be handled here
-            _ => {}
+        if let Some(token) = sspi_token {
+            // Integrated auth: set SSPI data and integrated security flag
+            login = login.with_integrated_auth(token);
+        } else if let mssql_auth::Credentials::SqlServer { username, password } =
+            &config.credentials
+        {
+            login = login.with_sql_auth(username.as_ref(), password.as_ref());
         }
 
         login
+    }
+
+    /// Create an SSPI/GSSAPI negotiator if integrated auth is configured.
+    ///
+    /// Returns `None` for non-integrated credential types.
+    /// Prefers `sspi-auth` over `integrated-auth` when both features are enabled.
+    #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+    fn create_negotiator(config: &Config) -> Result<Option<Box<dyn mssql_auth::SspiNegotiator>>> {
+        #[allow(clippy::match_like_matches_macro)]
+        let is_integrated = match &config.credentials {
+            mssql_auth::Credentials::Integrated => true,
+            _ => false,
+        };
+
+        if !is_integrated {
+            return Ok(None);
+        }
+
+        // Prefer SSPI (Windows-native / sspi-rs) when available
+        #[cfg(feature = "sspi-auth")]
+        let negotiator: Box<dyn mssql_auth::SspiNegotiator> =
+            Box::new(mssql_auth::SspiAuth::new(&config.host, config.port)?);
+
+        #[cfg(all(feature = "integrated-auth", not(feature = "sspi-auth")))]
+        let negotiator: Box<dyn mssql_auth::SspiNegotiator> =
+            Box::new(mssql_auth::IntegratedAuth::new(&config.host, config.port));
+
+        Ok(Some(negotiator))
     }
 
     /// Send a PreLogin packet (for use with Connection).
@@ -936,7 +857,6 @@ impl Client<Disconnected> {
     }
 
     /// Send a Login7 packet.
-    #[cfg(feature = "tls")]
     async fn send_login7<T>(connection: &mut Connection<T>, login: &Login7) -> Result<()>
     where
         T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
@@ -950,76 +870,118 @@ impl Client<Disconnected> {
         Ok(())
     }
 
-    /// Process the login response tokens.
+    /// Process the login response tokens, handling SSPI challenge/response if needed.
+    ///
+    /// When a `negotiator` is provided and the server sends an SSPI challenge token,
+    /// this method will automatically perform the multi-step SSPI handshake by:
+    /// 1. Calling `negotiator.step(challenge)` to generate a response
+    /// 2. Sending the response via an SSPI packet
+    /// 3. Reading the next server message and continuing
     ///
     /// Returns: (server_version, database, routing_info)
-    #[cfg(feature = "tls")]
+    #[allow(clippy::never_loop)] // Loop is used when integrated-auth/sspi-auth features are enabled
     async fn process_login_response<T>(
         connection: &mut Connection<T>,
+        #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))] negotiator: Option<
+            &dyn mssql_auth::SspiNegotiator,
+        >,
     ) -> Result<(Option<u32>, Option<String>, Option<(String, u16)>)>
     where
         T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     {
-        let message = connection
-            .read_message()
-            .await?
-            .ok_or(Error::ConnectionClosed)?;
-
-        let response_bytes = message.payload;
-
-        let mut parser = TokenParser::new(response_bytes);
         let mut server_version = None;
         let mut database = None;
         let mut routing = None;
 
-        while let Some(token) = parser.next_token()? {
-            match token {
-                Token::LoginAck(ack) => {
-                    tracing::info!(
-                        version = ack.tds_version,
-                        interface = ack.interface,
-                        prog_name = %ack.prog_name,
-                        "login acknowledged"
-                    );
-                    server_version = Some(ack.tds_version);
-                }
-                Token::EnvChange(env) => {
-                    Self::process_env_change(&env, &mut database, &mut routing);
-                }
-                Token::Error(err) => {
-                    return Err(Error::Server {
-                        number: err.number,
-                        state: err.state,
-                        class: err.class,
-                        message: err.message.clone(),
-                        server: if err.server.is_empty() {
-                            None
-                        } else {
-                            Some(err.server.clone())
-                        },
-                        procedure: if err.procedure.is_empty() {
-                            None
-                        } else {
-                            Some(err.procedure.clone())
-                        },
-                        line: err.line as u32,
-                    });
-                }
-                Token::Info(info) => {
-                    tracing::info!(
-                        number = info.number,
-                        message = %info.message,
-                        "server info message"
-                    );
-                }
-                Token::Done(done) => {
-                    if done.status.error {
-                        return Err(Error::Protocol("login failed".to_string()));
+        'outer: loop {
+            let message = connection
+                .read_message()
+                .await?
+                .ok_or(Error::ConnectionClosed)?;
+
+            let response_bytes = message.payload;
+            let mut parser = TokenParser::new(response_bytes);
+
+            while let Some(token) = parser.next_token()? {
+                match token {
+                    Token::LoginAck(ack) => {
+                        tracing::info!(
+                            version = ack.tds_version,
+                            interface = ack.interface,
+                            prog_name = %ack.prog_name,
+                            "login acknowledged"
+                        );
+                        server_version = Some(ack.tds_version);
                     }
-                    break;
+                    Token::EnvChange(env) => {
+                        Self::process_env_change(&env, &mut database, &mut routing);
+                    }
+                    #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+                    Token::Sspi(sspi_token) => {
+                        let neg = negotiator.ok_or_else(|| {
+                            Error::Protocol(
+                                "server sent SSPI challenge but no negotiator is configured"
+                                    .to_string(),
+                            )
+                        })?;
+
+                        tracing::debug!(
+                            challenge_len = sspi_token.data.len(),
+                            "received SSPI challenge from server"
+                        );
+
+                        if let Some(response) = neg.step(&sspi_token.data)? {
+                            tracing::debug!(response_len = response.len(), "sending SSPI response");
+                            connection
+                                .send_message(
+                                    PacketType::Sspi,
+                                    bytes::Bytes::from(response),
+                                    tds_protocol::packet::MAX_PACKET_SIZE,
+                                )
+                                .await?;
+                        }
+
+                        // After sending the SSPI response, read the next server message
+                        continue 'outer;
+                    }
+                    Token::Error(err) => {
+                        return Err(Error::Server {
+                            number: err.number,
+                            state: err.state,
+                            class: err.class,
+                            message: err.message.clone(),
+                            server: if err.server.is_empty() {
+                                None
+                            } else {
+                                Some(err.server.clone())
+                            },
+                            procedure: if err.procedure.is_empty() {
+                                None
+                            } else {
+                                Some(err.procedure.clone())
+                            },
+                            line: err.line as u32,
+                        });
+                    }
+                    Token::Info(info) => {
+                        tracing::info!(
+                            number = info.number,
+                            message = %info.message,
+                            "server info message"
+                        );
+                    }
+                    Token::Done(done) => {
+                        if done.status.error {
+                            return Err(Error::Protocol("login failed".to_string()));
+                        }
+                        break 'outer;
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
+
+            // If we consumed all tokens without a Done or SSPI, break
+            break;
         }
 
         Ok((server_version, database, routing))

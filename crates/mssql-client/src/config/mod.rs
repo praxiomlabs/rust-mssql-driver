@@ -272,6 +272,26 @@ impl Config {
                         config.strict_mode = true;
                     }
                 }
+                "integrated security" | "trusted_connection" => {
+                    if value.eq_ignore_ascii_case("true")
+                        || value.eq_ignore_ascii_case("yes")
+                        || value.eq_ignore_ascii_case("sspi")
+                        || value == "1"
+                    {
+                        #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+                        {
+                            config.credentials = Credentials::Integrated;
+                        }
+                        #[cfg(not(any(feature = "integrated-auth", feature = "sspi-auth")))]
+                        {
+                            return Err(crate::error::Error::Config(
+                                "Integrated Security requires the 'integrated-auth' (Linux/macOS) \
+                                 or 'sspi-auth' (Windows) feature to be enabled"
+                                    .into(),
+                            ));
+                        }
+                    }
+                }
                 _ => {
                     // Ignore unknown options for forward compatibility
                     tracing::debug!(
