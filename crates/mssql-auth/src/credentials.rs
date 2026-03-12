@@ -81,6 +81,15 @@ impl Credentials {
         }
     }
 
+    /// Create integrated authentication credentials (Windows SSPI or Kerberos/GSSAPI).
+    ///
+    /// Requires the `sspi-auth` (Windows) or `integrated-auth` (Linux/macOS) feature.
+    #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+    #[must_use]
+    pub fn integrated() -> Self {
+        Self::Integrated
+    }
+
     /// Check if these credentials use SQL authentication.
     #[must_use]
     pub fn is_sql_auth(&self) -> bool {

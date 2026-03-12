@@ -826,4 +826,58 @@ mod tests {
         let config = Config::new().no_tls(true).no_tls(false);
         assert!(!config.no_tls);
     }
+
+    #[test]
+    #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+    fn test_connection_string_integrated_security() {
+        // "Integrated Security=true" should set Credentials::Integrated
+        let config =
+            Config::from_connection_string("Server=localhost;Integrated Security=true;").unwrap();
+        assert_eq!(
+            config.credentials.method_name(),
+            "Integrated Authentication"
+        );
+
+        // "yes" variant
+        let config =
+            Config::from_connection_string("Server=localhost;Integrated Security=yes;").unwrap();
+        assert_eq!(
+            config.credentials.method_name(),
+            "Integrated Authentication"
+        );
+
+        // "sspi" variant
+        let config =
+            Config::from_connection_string("Server=localhost;Integrated Security=sspi;").unwrap();
+        assert_eq!(
+            config.credentials.method_name(),
+            "Integrated Authentication"
+        );
+
+        // "1" variant
+        let config =
+            Config::from_connection_string("Server=localhost;Integrated Security=1;").unwrap();
+        assert_eq!(
+            config.credentials.method_name(),
+            "Integrated Authentication"
+        );
+
+        // Trusted_Connection synonym
+        let config =
+            Config::from_connection_string("Server=localhost;Trusted_Connection=true;").unwrap();
+        assert_eq!(
+            config.credentials.method_name(),
+            "Integrated Authentication"
+        );
+    }
+
+    #[test]
+    #[cfg(not(any(feature = "integrated-auth", feature = "sspi-auth")))]
+    fn test_connection_string_integrated_security_without_feature() {
+        // Should return an error when the feature is not enabled
+        let result = Config::from_connection_string("Server=localhost;Integrated Security=true;");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("integrated-auth"));
+    }
 }
