@@ -105,10 +105,6 @@ pub use provider::{AsyncAuthProvider, AuthData, AuthMethod, AuthProvider};
 pub use azure_ad::{AzureAdAuth, FedAuthLibrary};
 pub use sql_auth::SqlServerAuth;
 
-// Legacy API (deprecated)
-#[allow(deprecated)]
-pub use sql_auth::SqlAuthenticator;
-
 // Secure credential types (with zeroize feature)
 #[cfg(feature = "zeroize")]
 pub use credentials::{SecretString, SecureCredentials};
