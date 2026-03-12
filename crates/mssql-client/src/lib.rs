@@ -147,3 +147,133 @@ pub use instrumentation::{
 pub use change_tracking::{
     ChangeMetadata, ChangeOperation, ChangeTracking, ChangeTrackingQuery, SyncVersionStatus,
 };
+
+#[cfg(test)]
+mod auto_trait_tests {
+    //! Compile-time assertions that key async types are Send + Sync.
+    //!
+    //! These tests catch regressions where a type accidentally becomes
+    //! !Send or !Sync due to interior changes (e.g., adding an Rc, Cell,
+    //! or non-Send future). They cost nothing at runtime.
+
+    use super::*;
+
+    fn assert_send<T: Send>() {}
+    fn assert_sync<T: Sync>() {}
+
+    // --- Type-state Client variants ---
+    #[test]
+    fn client_ready_is_send_sync() {
+        assert_send::<Client<Ready>>();
+        assert_sync::<Client<Ready>>();
+    }
+
+    #[test]
+    fn client_in_transaction_is_send_sync() {
+        assert_send::<Client<InTransaction>>();
+        assert_sync::<Client<InTransaction>>();
+    }
+
+    #[test]
+    fn client_disconnected_is_send_sync() {
+        assert_send::<Client<Disconnected>>();
+        assert_sync::<Client<Disconnected>>();
+    }
+
+    #[test]
+    fn client_connected_is_send_sync() {
+        assert_send::<Client<Connected>>();
+        assert_sync::<Client<Connected>>();
+    }
+
+    #[test]
+    fn client_streaming_is_send_sync() {
+        assert_send::<Client<Streaming>>();
+        assert_sync::<Client<Streaming>>();
+    }
+
+    // --- Configuration ---
+    #[test]
+    fn config_is_send_sync() {
+        assert_send::<Config>();
+        assert_sync::<Config>();
+    }
+
+    // --- Streaming types ---
+    #[test]
+    fn query_stream_is_send_sync() {
+        assert_send::<QueryStream<'_>>();
+        assert_sync::<QueryStream<'_>>();
+    }
+
+    #[test]
+    fn multi_result_stream_is_send_sync() {
+        assert_send::<MultiResultStream<'_>>();
+        assert_sync::<MultiResultStream<'_>>();
+    }
+
+    #[test]
+    fn result_set_is_send_sync() {
+        assert_send::<ResultSet>();
+        assert_sync::<ResultSet>();
+    }
+
+    #[test]
+    fn execute_result_is_send_sync() {
+        assert_send::<ExecuteResult>();
+        assert_sync::<ExecuteResult>();
+    }
+
+    // --- Bulk insert types ---
+    #[test]
+    fn bulk_insert_is_send_sync() {
+        assert_send::<BulkInsert>();
+        assert_sync::<BulkInsert>();
+    }
+
+    #[test]
+    fn bulk_insert_builder_is_send_sync() {
+        assert_send::<BulkInsertBuilder>();
+        assert_sync::<BulkInsertBuilder>();
+    }
+
+    #[test]
+    fn bulk_options_is_send_sync() {
+        assert_send::<BulkOptions>();
+        assert_sync::<BulkOptions>();
+    }
+
+    // --- Cancel handle ---
+    #[test]
+    fn cancel_handle_is_send_sync() {
+        assert_send::<CancelHandle>();
+        assert_sync::<CancelHandle>();
+    }
+
+    // --- Row and column types ---
+    #[test]
+    fn row_is_send_sync() {
+        assert_send::<Row>();
+        assert_sync::<Row>();
+    }
+
+    #[test]
+    fn column_is_send_sync() {
+        assert_send::<Column>();
+        assert_sync::<Column>();
+    }
+
+    // --- Statement cache ---
+    #[test]
+    fn statement_cache_is_send_sync() {
+        assert_send::<StatementCache>();
+        assert_sync::<StatementCache>();
+    }
+
+    // --- Error type ---
+    #[test]
+    fn error_is_send_sync() {
+        assert_send::<Error>();
+        assert_sync::<Error>();
+    }
+}
