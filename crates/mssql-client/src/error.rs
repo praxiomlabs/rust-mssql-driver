@@ -74,16 +74,31 @@ pub enum Error {
     Config(String),
 
     /// TCP connection timeout occurred.
-    #[error("connection timed out")]
-    ConnectTimeout,
+    #[error("TCP connection timed out connecting to {host}:{port}")]
+    ConnectTimeout {
+        /// Target host.
+        host: String,
+        /// Target port.
+        port: u16,
+    },
 
     /// TLS handshake timeout occurred.
-    #[error("TLS handshake timed out")]
-    TlsTimeout,
+    #[error("TLS handshake timed out with {host}:{port}")]
+    TlsTimeout {
+        /// Target host.
+        host: String,
+        /// Target port.
+        port: u16,
+    },
 
-    /// Connection timeout occurred (alias for backwards compatibility).
-    #[error("connection timed out")]
-    ConnectionTimeout,
+    /// Login/authentication response timeout occurred.
+    #[error("login timed out for {host}:{port}")]
+    LoginTimeout {
+        /// Target host.
+        host: String,
+        /// Target port.
+        port: u16,
+    },
 
     /// Command execution timeout occurred.
     #[error("command timed out")]
@@ -174,9 +189,9 @@ impl Error {
     #[must_use]
     pub fn is_transient(&self) -> bool {
         match self {
-            Self::ConnectTimeout
-            | Self::TlsTimeout
-            | Self::ConnectionTimeout
+            Self::ConnectTimeout { .. }
+            | Self::TlsTimeout { .. }
+            | Self::LoginTimeout { .. }
             | Self::CommandTimeout
             | Self::ConnectionClosed
             | Self::Connection(_)
@@ -290,7 +305,7 @@ impl Error {
     /// These are terminal — TLS timeouts are reported as [`Error::TlsTimeout`] instead.
     #[must_use]
     pub fn is_tls_error(&self) -> bool {
-        matches!(self, Self::Tls(_) | Self::TlsTimeout)
+        matches!(self, Self::Tls(_) | Self::TlsTimeout { .. })
     }
 
     /// Check if this is an authentication error.
@@ -386,7 +401,27 @@ mod tests {
 
     #[test]
     fn test_is_transient_connection_errors() {
-        assert!(Error::ConnectionTimeout.is_transient());
+        assert!(
+            Error::ConnectTimeout {
+                host: "test".into(),
+                port: 1433
+            }
+            .is_transient()
+        );
+        assert!(
+            Error::TlsTimeout {
+                host: "test".into(),
+                port: 1433
+            }
+            .is_transient()
+        );
+        assert!(
+            Error::LoginTimeout {
+                host: "test".into(),
+                port: 1433
+            }
+            .is_transient()
+        );
         assert!(Error::CommandTimeout.is_transient());
         assert!(Error::ConnectionClosed.is_transient());
         assert!(Error::PoolExhausted.is_transient());
@@ -466,7 +501,13 @@ mod tests {
     #[test]
     fn test_is_not_terminal() {
         // Non-terminal errors (may be transient or other)
-        assert!(!Error::ConnectionTimeout.is_terminal());
+        assert!(
+            !Error::ConnectTimeout {
+                host: "test".into(),
+                port: 1433
+            }
+            .is_terminal()
+        );
         assert!(!make_server_error(1205).is_terminal()); // Deadlock - transient, not terminal
         assert!(!make_server_error(40501).is_terminal()); // Service busy - transient
     }
@@ -493,7 +534,14 @@ mod tests {
         assert_eq!(err.class(), Some(16));
         assert_eq!(err.severity(), Some(16));
 
-        assert_eq!(Error::ConnectionTimeout.class(), None);
+        assert_eq!(
+            Error::ConnectTimeout {
+                host: "test".into(),
+                port: 1433
+            }
+            .class(),
+            None
+        );
     }
 
     #[test]
@@ -502,6 +550,12 @@ mod tests {
         assert!(err.is_server_error(102));
         assert!(!err.is_server_error(103));
 
-        assert!(!Error::ConnectionTimeout.is_server_error(102));
+        assert!(
+            !Error::ConnectTimeout {
+                host: "test".into(),
+                port: 1433
+            }
+            .is_server_error(102)
+        );
     }
 }

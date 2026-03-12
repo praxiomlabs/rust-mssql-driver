@@ -116,8 +116,6 @@ pub enum ProtocolState {
     ProcessingTokens,
     /// Draining remaining tokens after cancellation.
     Draining,
-    /// Connection is in a broken state due to protocol error.
-    Poisoned,
 }
 
 impl Default for ProtocolState {
@@ -128,9 +126,16 @@ impl Default for ProtocolState {
 
 impl ProtocolState {
     /// Check if the connection is in a usable state.
+    ///
+    /// Currently all protocol states are usable. This method exists for
+    /// forward compatibility if a broken/poisoned state is added later.
     #[must_use]
     pub fn is_usable(&self) -> bool {
-        !matches!(self, Self::Poisoned)
+        // All current states are usable
+        matches!(
+            self,
+            Self::AwaitingResponse | Self::ProcessingTokens | Self::Draining
+        )
     }
 
     /// Check if the connection is actively processing.

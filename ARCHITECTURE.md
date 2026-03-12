@@ -1168,9 +1168,15 @@ pub enum Error {
     #[error("Configuration error: {0}")]
     Config(#[from] ConfigError),
     
-    #[error("Connection timeout")]
-    ConnectionTimeout,
-    
+    #[error("TCP connect timeout to {host}:{port}")]
+    ConnectTimeout { host: String, port: u16 },
+
+    #[error("TLS handshake timeout to {host}:{port}")]
+    TlsTimeout { host: String, port: u16 },
+
+    #[error("Login timeout to {host}:{port}")]
+    LoginTimeout { host: String, port: u16 },
+
     #[error("Command timeout")]
     CommandTimeout,
     
@@ -1217,7 +1223,9 @@ impl Error {
                 std::io::ErrorKind::TimedOut
             ),
             Error::Server(e) => e.is_transient(),
-            Error::ConnectionTimeout => true,
+            Error::ConnectTimeout { .. } => true,
+            Error::TlsTimeout { .. } => true,
+            Error::LoginTimeout { .. } => true,
             Error::CommandTimeout => true,
             Error::PoolExhausted => true,
             _ => false,

@@ -41,33 +41,53 @@ impl Client<Disconnected> {
     pub async fn connect(config: Config) -> Result<Client<Ready>> {
         let max_redirects = config.redirect.max_redirects;
         let follow_redirects = config.redirect.follow_redirects;
+        // Overall timeout: sum of per-attempt timeouts × max attempts, capped at 5 minutes.
+        // Each attempt can take up to connect_timeout + tls_timeout + login_timeout.
+        let per_attempt = config.timeouts.connect_timeout
+            + config.timeouts.tls_timeout
+            + config.timeouts.login_timeout;
+        let overall = per_attempt * (max_redirects as u32 + 1);
+        let overall = overall.min(std::time::Duration::from_secs(300));
         let mut attempts = 0;
+        let initial_host = config.host.clone();
+        let initial_port = config.port;
         let mut current_config = config;
 
-        loop {
-            attempts += 1;
-            if attempts > max_redirects + 1 {
-                return Err(Error::TooManyRedirects { max: max_redirects });
-            }
-
-            match Self::try_connect(&current_config).await {
-                Ok(client) => return Ok(client),
-                Err(Error::Routing { host, port }) => {
-                    if !follow_redirects {
-                        return Err(Error::Routing { host, port });
-                    }
-                    tracing::info!(
-                        host = %host,
-                        port = port,
-                        attempt = attempts,
-                        max_redirects = max_redirects,
-                        "following Azure SQL routing redirect"
-                    );
-                    current_config = current_config.with_host(&host).with_port(port);
-                    continue;
+        let result = timeout(overall, async {
+            loop {
+                attempts += 1;
+                if attempts > max_redirects + 1 {
+                    return Err(Error::TooManyRedirects { max: max_redirects });
                 }
-                Err(e) => return Err(e),
+
+                match Self::try_connect(&current_config).await {
+                    Ok(client) => return Ok(client),
+                    Err(Error::Routing { host, port }) => {
+                        if !follow_redirects {
+                            return Err(Error::Routing { host, port });
+                        }
+                        tracing::info!(
+                            host = %host,
+                            port = port,
+                            attempt = attempts,
+                            max_redirects = max_redirects,
+                            "following Azure SQL routing redirect"
+                        );
+                        current_config = current_config.with_host(&host).with_port(port);
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                }
             }
+        })
+        .await;
+
+        match result {
+            Ok(inner) => inner,
+            Err(_elapsed) => Err(Error::ConnectTimeout {
+                host: initial_host,
+                port: initial_port,
+            }),
         }
     }
 
@@ -85,7 +105,10 @@ impl Client<Disconnected> {
         tracing::debug!("establishing TCP connection to {}", addr);
         let tcp_stream = timeout(config.timeouts.connect_timeout, TcpStream::connect(&addr))
             .await
-            .map_err(|_| Error::ConnectTimeout)?
+            .map_err(|_| Error::ConnectTimeout {
+                host: config.host.clone(),
+                port: config.port,
+            })?
             .map_err(Error::from)?;
 
         // Enable TCP nodelay for better latency
@@ -134,10 +157,11 @@ impl Client<Disconnected> {
     async fn connect_tds_8(config: &Config, tcp_stream: TcpStream) -> Result<Client<Ready>> {
         tracing::debug!("using TDS 8.0 strict mode (TLS first)");
 
-        // Build TLS configuration
+        // Build TLS configuration with TDS 8.0 ALPN protocol
         let tls_config = TlsConfig::new()
             .strict_mode(true)
-            .trust_server_certificate(config.trust_server_certificate);
+            .trust_server_certificate(config.trust_server_certificate)
+            .with_alpn_protocols(vec![b"tds/8.0".to_vec()]);
 
         let tls_connector = TlsConnector::new(tls_config)?;
 
@@ -147,7 +171,10 @@ impl Client<Disconnected> {
             tls_connector.connect(tcp_stream, &config.host),
         )
         .await
-        .map_err(|_| Error::TlsTimeout)??;
+        .map_err(|_| Error::TlsTimeout {
+            host: config.host.clone(),
+            port: config.port,
+        })??;
 
         tracing::debug!("TLS handshake completed (strict mode)");
 
@@ -169,7 +196,10 @@ impl Client<Disconnected> {
             Self::process_login_response(&mut connection),
         )
         .await
-        .map_err(|_| Error::ConnectionTimeout)??;
+        .map_err(|_| Error::LoginTimeout {
+            host: config.host.clone(),
+            port: config.port,
+        })??;
 
         // Handle routing redirect
         if let Some((host, port)) = routing {
@@ -342,7 +372,10 @@ impl Client<Disconnected> {
                 tls_connector.connect_with_prelogin(tcp_stream, &config.host),
             )
             .await
-            .map_err(|_| Error::TlsTimeout)??;
+            .map_err(|_| Error::TlsTimeout {
+                host: config.host.clone(),
+                port: config.port,
+            })??;
 
             tracing::debug!("TLS handshake completed (PreLogin wrapped)");
 
@@ -413,7 +446,10 @@ impl Client<Disconnected> {
                     Self::process_login_response(&mut connection),
                 )
                 .await
-                .map_err(|_| Error::ConnectionTimeout)??;
+                .map_err(|_| Error::LoginTimeout {
+                    host: config.host.clone(),
+                    port: config.port,
+                })??;
 
                 // Handle routing redirect
                 if let Some((host, port)) = routing {
@@ -449,7 +485,10 @@ impl Client<Disconnected> {
                     Self::process_login_response(&mut connection),
                 )
                 .await
-                .map_err(|_| Error::ConnectionTimeout)??;
+                .map_err(|_| Error::LoginTimeout {
+                    host: config.host.clone(),
+                    port: config.port,
+                })??;
 
                 // Handle routing redirect
                 if let Some((host, port)) = routing {
@@ -509,34 +548,42 @@ impl Client<Disconnected> {
             tcp_stream.flush().await.map_err(Error::from)?;
             tracing::debug!("Login7 sent and flushed over raw TCP");
 
-            // Read login response header
-            let mut response_header_buf = [0u8; PACKET_HEADER_SIZE];
-            tcp_stream
-                .read_exact(&mut response_header_buf)
-                .await
-                .map_err(Error::from)?;
+            // Read login response with timeout (plaintext path)
+            let (response_payload, tcp_stream) = timeout(config.timeouts.login_timeout, async {
+                let mut response_header_buf = [0u8; PACKET_HEADER_SIZE];
+                tcp_stream
+                    .read_exact(&mut response_header_buf)
+                    .await
+                    .map_err(Error::from)?;
 
-            let response_type = response_header_buf[0];
-            let response_length =
-                u16::from_be_bytes([response_header_buf[2], response_header_buf[3]]) as usize;
-            tracing::debug!(
-                "Response header: type={:#04X}, length={}",
-                response_type,
-                response_length
-            );
+                let response_type = response_header_buf[0];
+                let response_length =
+                    u16::from_be_bytes([response_header_buf[2], response_header_buf[3]]) as usize;
+                tracing::debug!(
+                    "Response header: type={:#04X}, length={}",
+                    response_type,
+                    response_length
+                );
 
-            // Read response payload
-            let payload_length = response_length.saturating_sub(PACKET_HEADER_SIZE);
-            let mut response_payload = vec![0u8; payload_length];
-            tcp_stream
-                .read_exact(&mut response_payload)
-                .await
-                .map_err(Error::from)?;
-            tracing::debug!(
-                "Response payload: {} bytes, first 32: {:02X?}",
-                response_payload.len(),
-                &response_payload[..response_payload.len().min(32)]
-            );
+                let payload_length = response_length.saturating_sub(PACKET_HEADER_SIZE);
+                let mut response_payload = vec![0u8; payload_length];
+                tcp_stream
+                    .read_exact(&mut response_payload)
+                    .await
+                    .map_err(Error::from)?;
+                tracing::debug!(
+                    "Response payload: {} bytes, first 32: {:02X?}",
+                    response_payload.len(),
+                    &response_payload[..response_payload.len().min(32)]
+                );
+
+                Ok::<_, Error>((response_payload, tcp_stream))
+            })
+            .await
+            .map_err(|_| Error::LoginTimeout {
+                host: config.host.clone(),
+                port: config.port,
+            })??;
 
             // Now create Connection for further communication
             let connection = Connection::new(tcp_stream);

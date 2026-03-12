@@ -254,9 +254,19 @@ match client.query(sql, params).await {
         tracing::warn!("Query timeout: {}", msg);
         return Err(AppError::QueryTimeout);
     }
-    Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::TimedOut => {
-        // Connection-level timeout
-        tracing::error!("Connection timeout: {}", e);
+    Err(Error::ConnectTimeout { ref host, port }) => {
+        // TCP connection timed out
+        tracing::error!("TCP connect timeout to {}:{}", host, port);
+        return Err(AppError::ConnectionTimeout);
+    }
+    Err(Error::TlsTimeout { ref host, port }) => {
+        // TLS handshake timed out
+        tracing::error!("TLS handshake timeout to {}:{}", host, port);
+        return Err(AppError::ConnectionTimeout);
+    }
+    Err(Error::LoginTimeout { ref host, port }) => {
+        // Login/authentication phase timed out
+        tracing::error!("Login timeout to {}:{}", host, port);
         return Err(AppError::ConnectionTimeout);
     }
     Err(e) => {

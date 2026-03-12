@@ -100,9 +100,26 @@ fn test_config_error_display() {
 
 #[test]
 fn test_timeout_errors_display() {
-    assert_eq!(Error::ConnectTimeout.to_string(), "connection timed out");
-    assert_eq!(Error::TlsTimeout.to_string(), "TLS handshake timed out");
-    assert_eq!(Error::ConnectionTimeout.to_string(), "connection timed out");
+    let connect = Error::ConnectTimeout {
+        host: "localhost".into(),
+        port: 1433,
+    };
+    assert!(connect.to_string().contains("timed out"));
+    assert!(connect.to_string().contains("localhost"));
+    assert!(connect.to_string().contains("1433"));
+
+    let tls = Error::TlsTimeout {
+        host: "localhost".into(),
+        port: 1433,
+    };
+    assert!(tls.to_string().contains("timed out"));
+
+    let login = Error::LoginTimeout {
+        host: "localhost".into(),
+        port: 1433,
+    };
+    assert!(login.to_string().contains("timed out"));
+
     assert_eq!(Error::CommandTimeout.to_string(), "command timed out");
 }
 
@@ -291,7 +308,14 @@ fn test_error_severity_ranges() {
 
 #[test]
 fn test_non_server_error_has_no_class() {
-    assert!(Error::ConnectionTimeout.class().is_none());
+    assert!(
+        Error::LoginTimeout {
+            host: "test".into(),
+            port: 1433
+        }
+        .class()
+        .is_none()
+    );
     assert!(Error::Query("test".into()).class().is_none());
     assert!(Error::Config("test".into()).class().is_none());
     assert!(Error::PoolExhausted.class().is_none());
@@ -306,7 +330,10 @@ fn test_mutually_exclusive_transient_terminal() {
     // An error should generally not be both transient AND terminal
     // (though this isn't strictly enforced by the type system)
 
-    let transient_err = Error::ConnectionTimeout;
+    let transient_err = Error::LoginTimeout {
+        host: "test".into(),
+        port: 1433,
+    };
     assert!(transient_err.is_transient());
     assert!(!transient_err.is_terminal());
 
@@ -318,9 +345,18 @@ fn test_mutually_exclusive_transient_terminal() {
 #[test]
 fn test_all_timeout_types_are_transient() {
     let timeout_errors = [
-        Error::ConnectTimeout,
-        Error::TlsTimeout,
-        Error::ConnectionTimeout,
+        Error::ConnectTimeout {
+            host: "test".into(),
+            port: 1433,
+        },
+        Error::TlsTimeout {
+            host: "test".into(),
+            port: 1433,
+        },
+        Error::LoginTimeout {
+            host: "test".into(),
+            port: 1433,
+        },
         Error::CommandTimeout,
     ];
 
@@ -493,9 +529,18 @@ fn test_all_error_variants_are_debug() {
             line: 1,
         },
         Error::Config("test".into()),
-        Error::ConnectTimeout,
-        Error::TlsTimeout,
-        Error::ConnectionTimeout,
+        Error::ConnectTimeout {
+            host: "test".into(),
+            port: 1433,
+        },
+        Error::TlsTimeout {
+            host: "test".into(),
+            port: 1433,
+        },
+        Error::LoginTimeout {
+            host: "test".into(),
+            port: 1433,
+        },
         Error::CommandTimeout,
         Error::Routing {
             host: "h".into(),
@@ -570,22 +615,46 @@ fn test_connection_errors_are_transient() {
 #[test]
 fn test_is_tls_error() {
     assert!(make_tls_error("cert expired").is_tls_error());
-    assert!(Error::TlsTimeout.is_tls_error());
-    assert!(!Error::ConnectionTimeout.is_tls_error());
+    assert!(
+        Error::TlsTimeout {
+            host: "test".into(),
+            port: 1433
+        }
+        .is_tls_error()
+    );
+    assert!(
+        !Error::LoginTimeout {
+            host: "test".into(),
+            port: 1433
+        }
+        .is_tls_error()
+    );
     assert!(!Error::Protocol("test".into()).is_tls_error());
 }
 
 #[test]
 fn test_is_authentication_error() {
     // Cannot easily construct AuthError from outside, so test negative cases
-    assert!(!Error::ConnectionTimeout.is_authentication_error());
+    assert!(
+        !Error::LoginTimeout {
+            host: "test".into(),
+            port: 1433
+        }
+        .is_authentication_error()
+    );
     assert!(!Error::Config("test".into()).is_authentication_error());
 }
 
 #[test]
 fn test_is_config_error() {
     assert!(Error::Config("bad port".into()).is_config_error());
-    assert!(!Error::ConnectionTimeout.is_config_error());
+    assert!(
+        !Error::LoginTimeout {
+            host: "test".into(),
+            port: 1433
+        }
+        .is_config_error()
+    );
     assert!(!Error::Protocol("test".into()).is_config_error());
 }
 
@@ -600,9 +669,27 @@ fn test_every_variant_classified() {
         (make_tls_error("test"), "terminal"),
         (Error::Protocol("test".into()), "terminal"),
         (Error::Config("test".into()), "terminal"),
-        (Error::ConnectTimeout, "transient"),
-        (Error::TlsTimeout, "transient"),
-        (Error::ConnectionTimeout, "transient"),
+        (
+            Error::ConnectTimeout {
+                host: "test".into(),
+                port: 1433,
+            },
+            "transient",
+        ),
+        (
+            Error::TlsTimeout {
+                host: "test".into(),
+                port: 1433,
+            },
+            "transient",
+        ),
+        (
+            Error::LoginTimeout {
+                host: "test".into(),
+                port: 1433,
+            },
+            "transient",
+        ),
         (Error::CommandTimeout, "transient"),
         (
             Error::Routing {

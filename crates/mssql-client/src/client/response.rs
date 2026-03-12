@@ -107,7 +107,9 @@ impl<S: ConnectionState> Client<S> {
                 }
                 Token::Done(done) => {
                     if done.status.error {
-                        return Err(Error::Query("query failed".to_string()));
+                        return Err(Error::Query(
+                            "query failed (server set error flag in DONE token)".to_string(),
+                        ));
                     }
                     tracing::debug!(
                         row_count = done.row_count,
@@ -122,12 +124,18 @@ impl<S: ConnectionState> Client<S> {
                 }
                 Token::DoneProc(done) => {
                     if done.status.error {
-                        return Err(Error::Query("query failed".to_string()));
+                        return Err(Error::Query(
+                            "stored procedure failed (server set error flag in DONEPROC token)"
+                                .to_string(),
+                        ));
                     }
                 }
                 Token::DoneInProc(done) => {
                     if done.status.error {
-                        return Err(Error::Query("query failed".to_string()));
+                        return Err(Error::Query(
+                            "statement within procedure failed (error flag in DONEINPROC token)"
+                                .to_string(),
+                        ));
                     }
                 }
                 Token::Info(info) => {
@@ -191,7 +199,9 @@ impl<S: ConnectionState> Client<S> {
                 }
                 Token::Done(done) => {
                     if done.status.error {
-                        return Err(Error::Query("execution failed".to_string()));
+                        return Err(Error::Query(
+                            "execute failed (server set error flag in DONE token)".to_string(),
+                        ));
                     }
                     if done.status.count {
                         // Accumulate row counts from all statements in a batch
@@ -457,7 +467,10 @@ impl Client<Ready> {
                 }
                 Token::Done(done) => {
                     if done.status.error {
-                        return Err(Error::Query("query failed".to_string()));
+                        return Err(Error::Query(
+                            "multi-result query failed (server set error flag in DONE token)"
+                                .to_string(),
+                        ));
                     }
 
                     // Save the current result set if we have columns
@@ -477,7 +490,10 @@ impl Client<Ready> {
                 }
                 Token::DoneInProc(done) => {
                     if done.status.error {
-                        return Err(Error::Query("query failed".to_string()));
+                        return Err(Error::Query(
+                            "statement within procedure failed (error flag in DONEINPROC token)"
+                                .to_string(),
+                        ));
                     }
 
                     // Save the current result set if we have columns (within stored proc)
@@ -496,7 +512,10 @@ impl Client<Ready> {
                 }
                 Token::DoneProc(done) => {
                     if done.status.error {
-                        return Err(Error::Query("query failed".to_string()));
+                        return Err(Error::Query(
+                            "stored procedure failed (server set error flag in DONEPROC token)"
+                                .to_string(),
+                        ));
                     }
                     // DoneProc marks end of stored procedure, not necessarily end of results
                 }

@@ -199,7 +199,13 @@ async fn main() -> Result<(), Error> {
 fn demonstrate_error_categorization() {
     // Create sample errors to demonstrate categorization
     let errors: Vec<(&str, Error)> = vec![
-        ("Connection timeout", Error::ConnectTimeout),
+        (
+            "Connection timeout",
+            Error::ConnectTimeout {
+                host: "localhost".into(),
+                port: 1433,
+            },
+        ),
         ("Invalid config", Error::Config("Bad value".into())),
         (
             "Deadlock",
