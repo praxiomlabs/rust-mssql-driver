@@ -166,6 +166,9 @@ impl WindowsCertStoreProvider {
             .chain(std::iter::once(0))
             .collect();
 
+        // SAFETY: CertOpenStore is called with a valid null-terminated UTF-16 store name
+        // (store_name_wide, created above). The returned handle is checked for errors and
+        // wrapped in CertStoreGuard for RAII cleanup via CertCloseStore.
         let store = unsafe {
             CertOpenStore(
                 CERT_STORE_PROV_SYSTEM_W,
@@ -192,6 +195,9 @@ impl WindowsCertStoreProvider {
         };
 
         // Find the certificate by thumbprint
+        // SAFETY: store_guard.0 is a valid store handle (from CertOpenStore above).
+        // hash_blob points to the stack-allocated thumbprint slice which outlives this call.
+        // The returned pointer is checked for null before use and wrapped in CertContextGuard.
         let cert_context = unsafe {
             CertFindCertificateInStore(
                 store_guard.0,
@@ -218,6 +224,10 @@ impl WindowsCertStoreProvider {
         let mut key_spec = 0u32;
         let mut caller_free = BOOL::from(false);
 
+        // SAFETY: cert_guard.0 is a valid certificate context (from CertFindCertificateInStore).
+        // Output parameters (key_handle, key_spec, caller_free) are stack-allocated mutable
+        // references. The result is checked before using key_handle, which is then wrapped
+        // in CngKeyHandle for RAII cleanup via NCryptFreeObject.
         let result = unsafe {
             CryptAcquireCertificatePrivateKey(
                 cert_guard.0,
@@ -272,6 +282,10 @@ impl KeyStoreProvider for WindowsCertStoreProvider {
 
         // First call to get required output size
         let mut result_size = 0u32;
+        // SAFETY: key_handle.handle is valid (from CryptAcquireCertificatePrivateKey).
+        // ciphertext is a valid &[u8] slice. padding_info.as_ptr() points to the stack-
+        // allocated PaddingInfo enum. Output buffer is None (size query only). The result
+        // is checked before using result_size.
         let decrypt_result = unsafe {
             NCryptDecrypt(
                 key_handle.handle,
@@ -292,6 +306,9 @@ impl KeyStoreProvider for WindowsCertStoreProvider {
 
         // Allocate buffer and perform actual decryption
         let mut output = vec![0u8; result_size as usize];
+        // SAFETY: Same preconditions as the size query above. output is a freshly allocated
+        // Vec with capacity from the size query. result_size is updated with actual bytes
+        // written, and output is truncated to this size to prevent reading uninitialized memory.
         let decrypt_result = unsafe {
             NCryptDecrypt(
                 key_handle.handle,
@@ -333,6 +350,10 @@ impl KeyStoreProvider for WindowsCertStoreProvider {
 
         // First call to get required signature size
         let mut sig_size = 0u32;
+        // SAFETY: key_handle.handle is valid. padding_info is a stack-allocated
+        // BCRYPT_PKCS1_PADDING_INFO with pszAlgId pointing to hash_algorithm (valid for
+        // the duration of this call). data is a valid &[u8]. Output buffer is None
+        // (size query). Result is checked before using sig_size.
         let sign_result = unsafe {
             NCryptSignHash(
                 key_handle.handle,
@@ -353,6 +374,9 @@ impl KeyStoreProvider for WindowsCertStoreProvider {
 
         // Allocate buffer and perform actual signing
         let mut signature = vec![0u8; sig_size as usize];
+        // SAFETY: Same preconditions as the size query above. signature is a freshly
+        // allocated Vec with capacity from the size query. sig_size is updated with actual
+        // bytes written, and signature is truncated to this size.
         let sign_result = unsafe {
             NCryptSignHash(
                 key_handle.handle,
@@ -398,6 +422,9 @@ impl KeyStoreProvider for WindowsCertStoreProvider {
         };
 
         // Perform verification
+        // SAFETY: key_handle.handle is valid. padding_info is a stack-allocated
+        // BCRYPT_PKCS1_PADDING_INFO. data and signature are valid &[u8] slices.
+        // This is a read-only verification operation with no output buffers.
         let verify_result = unsafe {
             NCryptVerifySignature(
                 key_handle.handle,
@@ -436,6 +463,9 @@ struct CertStoreGuard(windows::Win32::Security::Cryptography::HCERTSTORE);
 
 impl Drop for CertStoreGuard {
     fn drop(&mut self) {
+        // SAFETY: self.0 was obtained from a successful CertOpenStore call. Drop is
+        // called at most once (guaranteed by the type system). The return value is
+        // intentionally ignored as cleanup errors during drop should not panic.
         let _ = unsafe { CertCloseStore(self.0, CERT_CLOSE_STORE_CHECK_FLAG) };
     }
 }
@@ -446,6 +476,8 @@ struct CertContextGuard(*const windows::Win32::Security::Cryptography::CERT_CONT
 impl Drop for CertContextGuard {
     fn drop(&mut self) {
         if !self.0.is_null() {
+            // SAFETY: self.0 is checked for null before freeing. If non-null, it was
+            // obtained from CertFindCertificateInStore. Drop is called at most once.
             unsafe { CertFreeCertificateContext(Some(self.0)) };
         }
     }
@@ -460,6 +492,9 @@ struct CngKeyHandle {
 impl Drop for CngKeyHandle {
     fn drop(&mut self) {
         if self.should_free && !self.handle.is_invalid() {
+            // SAFETY: Freeing is guarded by should_free (set by CryptAcquireCertificatePrivateKey's
+            // caller_free output) and is_invalid() (checks handle validity). Drop is called at
+            // most once. The return value is intentionally ignored during cleanup.
             let _ = unsafe { NCryptFreeObject(self.handle.0 as _) };
         }
     }
@@ -489,7 +524,8 @@ fn get_padding_info(algorithm: &str) -> Result<(PaddingInfo, NCRYPT_FLAGS), Encr
     match algorithm.to_uppercase().as_str() {
         "RSA_OAEP" | "RSA-OAEP" | "RSA_OAEP_256" | "RSA-OAEP-256" => {
             let hash_alg: Vec<u16> = SHA256_ALG.encode_utf16().collect();
-            // Note: We need to leak this to keep the pointer valid
+            // Leak the UTF-16 buffer so PCWSTR remains valid for the lifetime of the PaddingInfo.
+            // This is bounded to at most 2 allocations (one per algorithm variant) per decrypt_cek call.
             let hash_alg_ptr = Box::leak(hash_alg.into_boxed_slice());
 
             let info = BCRYPT_OAEP_PADDING_INFO {
@@ -504,6 +540,8 @@ fn get_padding_info(algorithm: &str) -> Result<(PaddingInfo, NCRYPT_FLAGS), Encr
         }
         "RSA1_5" | "RSA-1_5" | "RSA_PKCS1" | "RSA-PKCS1" => {
             let hash_alg: Vec<u16> = SHA256_ALG.encode_utf16().collect();
+            // Leak the UTF-16 buffer so PCWSTR remains valid for the lifetime of the PaddingInfo.
+            // This is bounded to at most 2 allocations (one per algorithm variant) per decrypt_cek call.
             let hash_alg_ptr = Box::leak(hash_alg.into_boxed_slice());
 
             let info = BCRYPT_PKCS1_PADDING_INFO {
