@@ -89,6 +89,7 @@ impl HealthCheckResult {
 
 /// Connection state tracked by the pool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ConnectionState {
     /// Connection is idle and available for use.
     Idle,

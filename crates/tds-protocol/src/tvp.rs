@@ -55,6 +55,7 @@ pub const DEFAULT_COLLATION: [u8; 5] = [0x09, 0x04, 0xD0, 0x00, 0x34];
 
 /// TVP column type for wire encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TvpWireType {
     /// BIT type.
     Bit,

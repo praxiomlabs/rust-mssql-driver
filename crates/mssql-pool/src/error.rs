@@ -4,6 +4,7 @@ use thiserror::Error;
 
 /// Errors that can occur during pool operations.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum PoolError {
     /// Failed to acquire a connection within the timeout.
     #[error("connection acquisition timeout after {0:?}")]

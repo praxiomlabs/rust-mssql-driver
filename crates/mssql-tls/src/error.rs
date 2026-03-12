@@ -4,6 +4,7 @@ use thiserror::Error;
 
 /// Errors that can occur during TLS operations.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum TlsError {
     /// TLS handshake failed.
     #[error("TLS handshake failed: {0}")]

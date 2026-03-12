@@ -192,6 +192,7 @@ impl OptionFlags3 {
 /// Feature extension types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum FeatureId {
     /// Session recovery.
     SessionRecovery = 0x01,

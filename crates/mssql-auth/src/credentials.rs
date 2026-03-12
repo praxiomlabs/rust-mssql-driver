@@ -14,6 +14,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 /// This enum represents the various authentication methods supported.
 /// Credentials are designed to minimize copying of sensitive data.
 #[derive(Clone)]
+#[non_exhaustive]
 pub enum Credentials {
     /// SQL Server authentication with username and password.
     SqlServer {

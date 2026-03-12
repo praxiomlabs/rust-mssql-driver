@@ -7,6 +7,7 @@
 /// These correspond to the type bytes sent in column metadata and parameter definitions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum TypeId {
     // Fixed-length types (no length prefix)
     /// Null type.
@@ -281,6 +282,7 @@ pub struct ColumnFlags {
 
 /// Update mode for a column.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Updateable {
     /// Column is read-only.
     #[default]

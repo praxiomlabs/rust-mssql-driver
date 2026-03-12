@@ -72,6 +72,7 @@ use std::fmt;
 ///
 /// Determines how data is encrypted and what operations are supported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EncryptionType {
     /// Deterministic encryption: same plaintext → same ciphertext.
     ///
@@ -192,6 +193,7 @@ impl ColumnEncryptionInfo {
 
 /// Error types for Always Encrypted operations.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum EncryptionError {
     /// The requested key store provider is not registered.
     KeyStoreNotFound(String),

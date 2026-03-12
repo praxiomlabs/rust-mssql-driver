@@ -211,6 +211,7 @@ impl<S: ConnectionState> Client<S> {
                 TvpWireType::DateTimeOffset { scale: *scale }
             }
             mssql_types::TvpColumnType::Xml => TvpWireType::Xml,
+            _ => unreachable!("unknown TvpColumnType variant"),
         }
     }
 

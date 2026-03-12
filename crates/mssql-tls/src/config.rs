@@ -168,6 +168,7 @@ impl TlsConfig {
 
 /// TLS protocol version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[non_exhaustive]
 pub enum TlsVersion {
     /// TLS 1.2
     #[default]

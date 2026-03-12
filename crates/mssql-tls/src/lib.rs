@@ -63,6 +63,7 @@ pub use tokio_rustls::client::TlsStream;
 ///
 /// This determines when TLS handshake occurs relative to TDS protocol messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum TlsNegotiationMode {
     /// TDS 7.x style: TLS handshake occurs after PreLogin exchange.
     ///

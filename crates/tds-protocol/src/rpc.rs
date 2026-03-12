@@ -34,6 +34,7 @@ use crate::prelude::*;
 /// without requiring the procedure name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
+#[non_exhaustive]
 pub enum ProcId {
     /// sp_cursor (0x0001)
     Cursor = 0x0001,

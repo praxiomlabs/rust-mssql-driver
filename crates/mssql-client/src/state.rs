@@ -108,6 +108,7 @@ impl<S: ConnectionState> Copy for StateMarker<S> {}
 /// While connection states are tracked at compile-time via type-state,
 /// the protocol layer has runtime state that must be managed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ProtocolState {
     /// Awaiting response from server.
     AwaitingResponse,

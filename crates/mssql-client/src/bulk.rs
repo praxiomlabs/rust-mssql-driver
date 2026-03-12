@@ -50,6 +50,8 @@
 //! (same as SELECT results) rather than storage format.
 
 use bytes::{BufMut, BytesMut};
+use once_cell::sync::Lazy;
+use regex::Regex;
 use std::sync::Arc;
 
 use mssql_types::{SqlValue, ToSql, TypeError};
@@ -355,7 +357,20 @@ impl BulkInsertBuilder {
     }
 
     /// Build the INSERT BULK SQL statement.
-    pub fn build_insert_bulk_statement(&self) -> String {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the table name or any column name fails identifier
+    /// validation, preventing SQL injection.
+    pub fn build_insert_bulk_statement(&self) -> Result<String, Error> {
+        // Validate table name (may be schema-qualified: dbo.Users, catalog.schema.table)
+        validate_qualified_identifier(&self.table_name)?;
+
+        // Validate column names
+        for col in &self.columns {
+            validate_identifier(&col.name)?;
+        }
+
         let mut sql = format!("INSERT BULK {}", self.table_name);
 
         // Add column definitions
@@ -390,6 +405,10 @@ impl BulkInsertBuilder {
         }
 
         if let Some(ref order) = self.options.order_hint {
+            // Validate order hint column names
+            for col_name in order {
+                validate_identifier(col_name)?;
+            }
             hints.push(format!("ORDER({})", order.join(", ")));
         }
 
@@ -399,8 +418,57 @@ impl BulkInsertBuilder {
             sql.push(')');
         }
 
-        sql
+        Ok(sql)
     }
+}
+
+/// Validate a single SQL identifier to prevent SQL injection.
+fn validate_identifier(name: &str) -> Result<(), Error> {
+    #[allow(clippy::expect_used)] // Static regex compilation with known-valid pattern
+    static IDENTIFIER_RE: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_@#$]{0,127}$").expect("valid regex"));
+
+    if name.is_empty() {
+        return Err(Error::InvalidIdentifier(
+            "identifier cannot be empty".into(),
+        ));
+    }
+
+    if !IDENTIFIER_RE.is_match(name) {
+        return Err(Error::InvalidIdentifier(format!(
+            "invalid identifier '{}': must start with letter/underscore, \
+             contain only alphanumerics/_/@/#/$, and be 1-128 characters",
+            name
+        )));
+    }
+
+    Ok(())
+}
+
+/// Validate a potentially schema-qualified identifier (e.g., `dbo.Users`, `catalog.schema.table`).
+///
+/// Splits on `.` and validates each part. SQL Server allows up to 4 parts:
+/// `server.catalog.schema.object`.
+fn validate_qualified_identifier(name: &str) -> Result<(), Error> {
+    if name.is_empty() {
+        return Err(Error::InvalidIdentifier(
+            "identifier cannot be empty".into(),
+        ));
+    }
+
+    let parts: Vec<&str> = name.split('.').collect();
+    if parts.len() > 4 {
+        return Err(Error::InvalidIdentifier(format!(
+            "invalid qualified identifier '{}': too many parts (max 4: server.catalog.schema.object)",
+            name
+        )));
+    }
+
+    for part in &parts {
+        validate_identifier(part)?;
+    }
+
+    Ok(())
 }
 
 /// Active bulk insert operation.
@@ -1072,9 +1140,36 @@ mod tests {
             ])
             .table_lock(true);
 
-        let sql = builder.build_insert_bulk_statement();
+        let sql = builder.build_insert_bulk_statement().unwrap();
         assert!(sql.contains("INSERT BULK dbo.Users"));
         assert!(sql.contains("TABLOCK"));
+    }
+
+    #[test]
+    fn test_bulk_insert_rejects_injection() {
+        let builder = BulkInsertBuilder::new("table;DROP TABLE users")
+            .with_typed_columns(vec![BulkColumn::new("id", "INT", 0)]);
+
+        assert!(builder.build_insert_bulk_statement().is_err());
+    }
+
+    #[test]
+    fn test_bulk_insert_validates_column_names() {
+        let builder = BulkInsertBuilder::new("Users").with_typed_columns(vec![BulkColumn::new(
+            "col;DROP TABLE x",
+            "INT",
+            0,
+        )]);
+
+        assert!(builder.build_insert_bulk_statement().is_err());
+    }
+
+    #[test]
+    fn test_bulk_insert_accepts_qualified_names() {
+        let builder = BulkInsertBuilder::new("catalog.dbo.Users")
+            .with_typed_columns(vec![BulkColumn::new("id", "INT", 0)]);
+
+        assert!(builder.build_insert_bulk_statement().is_ok());
     }
 
     #[test]

@@ -4,6 +4,7 @@ use thiserror::Error;
 
 /// Errors that can occur during authentication.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum AuthError {
     /// Invalid credentials provided.
     #[error("invalid credentials: {0}")]

@@ -4,6 +4,7 @@ use thiserror::Error;
 
 /// Errors that can occur during packet encoding/decoding.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum CodecError {
     /// IO error during read/write operations.
     #[error("IO error: {0}")]

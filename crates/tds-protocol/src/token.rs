@@ -37,6 +37,7 @@ use crate::types::TypeId;
 /// Token type identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum TokenType {
     /// Column metadata (COLMETADATA).
     ColMetaData = 0x81,
@@ -114,6 +115,7 @@ impl TokenType {
 /// This enum represents all possible tokens that can be received from SQL Server.
 /// Each variant contains the parsed token data.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum Token {
     /// Column metadata describing result set structure.
     ColMetaData(ColMetaData),
@@ -437,6 +439,7 @@ pub struct EnvChange {
 /// Environment change type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum EnvChangeType {
     /// Database changed.
     Database = 1,
@@ -480,6 +483,7 @@ pub enum EnvChangeType {
 
 /// Environment change value.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum EnvChangeValue {
     /// String value.
     String(String),

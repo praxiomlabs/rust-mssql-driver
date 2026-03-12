@@ -7,6 +7,7 @@
 ///
 /// SQL Server supports these isolation levels for transaction management.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum IsolationLevel {
     /// Read uncommitted (dirty reads allowed).
     ///

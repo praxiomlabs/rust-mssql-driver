@@ -17,6 +17,7 @@ pub const DEFAULT_PACKET_SIZE: usize = 4096;
 /// TDS packet type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum PacketType {
     /// SQL batch request.
     SqlBatch = 0x01,

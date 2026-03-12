@@ -4,6 +4,7 @@ use thiserror::Error;
 
 /// Errors that can occur during type conversion.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum TypeError {
     /// Value is null when non-null was expected.
     #[error("unexpected null value")]

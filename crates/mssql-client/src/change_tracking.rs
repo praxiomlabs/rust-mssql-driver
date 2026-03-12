@@ -573,6 +573,7 @@ impl ChangeTracking {
 
 /// Result of checking if a sync version is still valid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SyncVersionStatus {
     /// The sync version is valid and incremental sync can proceed.
     Valid,
