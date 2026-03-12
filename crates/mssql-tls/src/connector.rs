@@ -152,6 +152,17 @@ impl TlsConnector {
         let versions: Vec<&'static rustls::SupportedProtocolVersion> =
             Self::select_versions(config);
 
+        // Reject TrustServerCertificate in strict mode — TDS 8.0 mandates
+        // certificate validation to provide its security guarantees.
+        if config.strict_mode && config.trust_server_certificate {
+            return Err(TlsError::Configuration(
+                "TrustServerCertificate=true is not allowed in TDS 8.0 strict mode. \
+                 Strict mode requires server certificate validation to prevent \
+                 man-in-the-middle attacks."
+                    .into(),
+            ));
+        }
+
         // Handle TrustServerCertificate mode (dangerous - development only)
         if config.trust_server_certificate {
             tracing::warn!(
@@ -160,10 +171,14 @@ impl TlsConnector {
                  Connections are vulnerable to man-in-the-middle attacks."
             );
 
-            let client_config = ClientConfig::builder_with_protocol_versions(&versions)
+            let mut client_config = ClientConfig::builder_with_protocol_versions(&versions)
                 .dangerous()
                 .with_custom_certificate_verifier(Arc::new(DangerousServerCertVerifier))
                 .with_no_client_auth();
+
+            if !config.alpn_protocols.is_empty() {
+                client_config.alpn_protocols = config.alpn_protocols.clone();
+            }
 
             return Ok(client_config);
         }
@@ -175,7 +190,7 @@ impl TlsConnector {
         let builder = ClientConfig::builder_with_protocol_versions(&versions)
             .with_root_certificates(root_store);
 
-        let client_config = if let Some(client_auth) = &config.client_auth {
+        let mut client_config = if let Some(client_auth) = &config.client_auth {
             // Clone the key by matching on the Arc contents
             let key = match client_auth.key.as_ref() {
                 rustls::pki_types::PrivateKeyDer::Pkcs1(key) => {
@@ -200,6 +215,11 @@ impl TlsConnector {
         } else {
             builder.with_no_client_auth()
         };
+
+        // Apply ALPN protocols (required for TDS 8.0 strict mode: "tds/8.0")
+        if !config.alpn_protocols.is_empty() {
+            client_config.alpn_protocols = config.alpn_protocols.clone();
+        }
 
         Ok(client_config)
     }
