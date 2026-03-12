@@ -74,7 +74,7 @@ async fn main() -> Result<(), Error> {
         .with_options(options.clone())
         .with_typed_columns(columns.clone());
 
-    let insert_bulk_sql = builder.build_insert_bulk_statement();
+    let insert_bulk_sql = builder.build_insert_bulk_statement()?;
     println!("INSERT BULK statement: {}", insert_bulk_sql);
 
     println!("Starting bulk insert...");
