@@ -832,6 +832,10 @@ pub struct PoolMetrics {
     /// Connection resets performed.
     pub resets_performed: u64,
     /// Connection resets that failed.
+    ///
+    /// Currently always 0 because the RESETCONNECTION flag is set on the TDS
+    /// packet header and cannot fail independently. Reserved for future use
+    /// if an explicit `sp_reset_connection` path is added.
     pub resets_failed: u64,
     /// Connections closed due to idle timeout expiration.
     pub connections_idle_expired: u64,

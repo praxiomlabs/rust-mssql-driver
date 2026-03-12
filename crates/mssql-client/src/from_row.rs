@@ -37,7 +37,7 @@ use crate::row::Row;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
 /// use mssql_client::{FromRow, Row, Error};
 ///
 /// struct User {

@@ -145,6 +145,7 @@ impl fmt::Display for ChangeOperation {
 ///
 /// Contains the system columns returned by `CHANGETABLE(CHANGES ...)`.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ChangeMetadata {
     /// The version when the row was last changed.
     pub version: i64,

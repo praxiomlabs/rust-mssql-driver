@@ -827,6 +827,10 @@ fn check_features(sh: &Shell) -> Result<()> {
         .run()?;
     }
 
+    // mssql-driver-pool: no features, but verify it compiles
+    println!("\n  mssql-driver-pool...");
+    cmd!(sh, "cargo check -p mssql-driver-pool --no-dev-deps").run()?;
+
     println!("\n✅ All feature flag combinations compile.");
     Ok(())
 }
@@ -837,6 +841,10 @@ fn platform_excluded_auth_features() -> Vec<&'static str> {
     if !cfg!(target_os = "windows") {
         excluded.push("sspi-auth");
         excluded.push("windows-certstore");
+    }
+    if cfg!(target_os = "windows") {
+        // libgssapi requires GSSAPI/Kerberos libraries (Linux/macOS)
+        excluded.push("integrated-auth");
     }
     excluded
 }

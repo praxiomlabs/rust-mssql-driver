@@ -72,9 +72,9 @@ impl NamedParam {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
 /// use mssql_client::{ToParams, NamedParam};
-/// use mssql_types::{ToSql, TypeError};
+/// use mssql_types::TypeError;
 ///
 /// struct NewUser {
 ///     name: String,
