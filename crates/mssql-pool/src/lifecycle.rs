@@ -58,6 +58,7 @@ pub trait DynConnectionLifecycle: Send + Sync {
 
 /// Health check result with timing information.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct HealthCheckResult {
     /// Whether the health check passed.
     pub healthy: bool,
@@ -129,6 +130,7 @@ impl ConnectionState {
 
 /// Metadata about a pooled connection.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ConnectionMetadata {
     /// Unique identifier for this connection.
     pub id: u64,

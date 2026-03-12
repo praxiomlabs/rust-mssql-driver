@@ -318,6 +318,7 @@ pub struct Done {
 
 /// Done status flags.
 #[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
 pub struct DoneStatus {
     /// More results follow.
     pub more: bool,

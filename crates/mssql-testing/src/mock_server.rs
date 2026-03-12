@@ -827,11 +827,14 @@ fn encode_login_ack(dst: &mut BytesMut, server_name: &str, tds_version: u32) {
 fn encode_done(dst: &mut BytesMut, row_count: u64, more: bool) {
     dst.put_u8(TokenType::Done as u8);
 
-    let status = DoneStatus {
-        count: row_count > 0,
-        more,
-        ..Default::default()
-    };
+    let mut bits = 0u16;
+    if row_count > 0 {
+        bits |= 0x0010; // DONE_COUNT
+    }
+    if more {
+        bits |= 0x0001; // DONE_MORE
+    }
+    let status = DoneStatus::from_bits(bits);
 
     dst.put_u16_le(status.to_bits());
     dst.put_u16_le(0xC1); // cur_cmd: SELECT
@@ -1033,10 +1036,7 @@ async fn send_attention_ack<S: AsyncWrite + Unpin>(stream: &mut S) -> Result<()>
 
     // DONE with ATTN flag
     buf.put_u8(TokenType::Done as u8);
-    let status = DoneStatus {
-        attn: true,
-        ..Default::default()
-    };
+    let status = DoneStatus::from_bits(0x0020); // DONE_ATTN
     buf.put_u16_le(status.to_bits());
     buf.put_u16_le(0);
     buf.put_u64_le(0);

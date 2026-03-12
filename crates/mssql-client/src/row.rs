@@ -26,6 +26,7 @@ use crate::blob::BlobReader;
 /// This is the internal representation that enables zero-copy access
 /// to column data within the shared buffer.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct ColumnSlice {
     /// Offset into the buffer where this column's data begins.
     pub offset: u32,

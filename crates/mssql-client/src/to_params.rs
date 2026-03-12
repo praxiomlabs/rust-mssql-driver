@@ -39,6 +39,7 @@ use mssql_types::{SqlValue, ToSql, TypeError};
 
 /// A named query parameter.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct NamedParam {
     /// Parameter name (without @ prefix).
     pub name: String,

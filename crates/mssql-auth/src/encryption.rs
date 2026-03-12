@@ -122,6 +122,7 @@ impl EncryptionType {
 /// This metadata is retrieved from SQL Server's `sys.column_encryption_keys`
 /// and related system views.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct CekMetadata {
     /// Database-level identifier for this CEK.
     pub database_id: u32,
@@ -143,6 +144,7 @@ pub struct CekMetadata {
 
 /// Encryption information for a specific database column.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ColumnEncryptionInfo {
     /// The column name.
     pub column_name: String,
@@ -427,6 +429,7 @@ impl fmt::Debug for ColumnEncryptionConfig {
 ///
 /// This is used internally to track encrypted parameter values.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct EncryptedValue {
     /// The ciphertext bytes.
     pub ciphertext: Vec<u8>,

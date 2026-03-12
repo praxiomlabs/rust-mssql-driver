@@ -255,6 +255,7 @@ impl TypeId {
 
 /// Column flags from COLMETADATA.
 #[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
 pub struct ColumnFlags {
     /// Column is nullable.
     pub nullable: bool,

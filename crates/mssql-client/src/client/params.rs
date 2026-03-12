@@ -8,8 +8,8 @@ use tds_protocol::rpc::{RpcParam, TypeInfo as RpcTypeInfo};
 #[cfg(feature = "decimal")]
 use tds_protocol::tvp::encode_tvp_decimal;
 use tds_protocol::tvp::{
-    TvpColumnDef as TvpWireColumnDef, TvpColumnFlags, TvpEncoder, TvpWireType, encode_tvp_bit,
-    encode_tvp_float, encode_tvp_int, encode_tvp_null, encode_tvp_nvarchar, encode_tvp_varbinary,
+    TvpColumnDef as TvpWireColumnDef, TvpEncoder, TvpWireType, encode_tvp_bit, encode_tvp_float,
+    encode_tvp_int, encode_tvp_null, encode_tvp_nvarchar, encode_tvp_varbinary,
 };
 
 use crate::error::{Error, Result};
@@ -128,11 +128,10 @@ impl<S: ConnectionState> Client<S> {
             .iter()
             .map(|col| {
                 let wire_type = Self::convert_tvp_column_type(&col.column_type);
-                TvpWireColumnDef {
-                    wire_type,
-                    flags: TvpColumnFlags {
-                        nullable: col.nullable,
-                    },
+                if col.nullable {
+                    TvpWireColumnDef::nullable(wire_type)
+                } else {
+                    TvpWireColumnDef::new(wire_type)
                 }
             })
             .collect();
@@ -180,6 +179,9 @@ impl<S: ConnectionState> Client<S> {
 
     /// Convert mssql-types TvpColumnType to wire TvpWireType.
     fn convert_tvp_column_type(col_type: &mssql_types::TvpColumnType) -> TvpWireType {
+        // TvpColumnType is #[non_exhaustive], so the wildcard arm is required
+        // for forward compatibility even though all current variants are covered.
+        #[allow(unreachable_patterns)]
         match col_type {
             mssql_types::TvpColumnType::Bit => TvpWireType::Bit,
             mssql_types::TvpColumnType::TinyInt => TvpWireType::Int { size: 1 },
