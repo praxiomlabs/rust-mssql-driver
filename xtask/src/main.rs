@@ -826,7 +826,7 @@ fn check_features(sh: &Shell) -> Result<()> {
 
     // mssql-driver-pool: no features, but verify it compiles
     println!("\n  mssql-driver-pool...");
-    cmd!(sh, "cargo check -p mssql-driver-pool --no-dev-deps").run()?;
+    cmd!(sh, "cargo hack check -p mssql-driver-pool --no-dev-deps").run()?;
 
     println!("\n✅ All feature flag combinations compile.");
     Ok(())
