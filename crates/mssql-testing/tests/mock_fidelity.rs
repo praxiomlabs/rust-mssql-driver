@@ -374,12 +374,12 @@ async fn test_mock_server_plaintext_prelogin() {
 ///
 /// **Platform gate**: Currently Linux-only. The test fails on macOS and Windows
 /// with `peer closed connection without sending TLS close_notify` — a known
-/// robustness gap in the mock server's TLS shutdown path when the PreLogin
-/// wrapper transitions from handshake to pass-through mode. The mock server
+/// robustness gap in the mock server's TLS shutdown path. The mock server
 /// needs to explicitly `shutdown()` the TLS stream before dropping it so
-/// rustls on stricter platforms receives the close_notify alert. Tracking
-/// this as a follow-up — the mock server is test-only infrastructure and
-/// this does not affect production code.
+/// rustls on stricter platforms receives the close_notify alert. This is
+/// test-only infrastructure and does not affect production code.
+///
+/// Tracking: see issue #70 for the proper fix.
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn test_mock_server_tls_full_connection() {
