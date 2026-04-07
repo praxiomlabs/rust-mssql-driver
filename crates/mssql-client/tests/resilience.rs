@@ -29,8 +29,7 @@ fn get_test_config() -> Option<Config> {
     let encrypt = std::env::var("MSSQL_ENCRYPT").unwrap_or_else(|_| "false".into());
 
     let conn_str = format!(
-        "Server={};Database={};User Id={};Password={};TrustServerCertificate=true;Encrypt={}",
-        host, database, user, password, encrypt
+        "Server={host};Database={database};User Id={user};Password={password};TrustServerCertificate=true;Encrypt={encrypt}"
     );
 
     Config::from_connection_string(&conn_str).ok()
@@ -70,7 +69,7 @@ async fn test_detect_killed_connection() {
 
     // Kill the first session
     admin_client
-        .execute(&format!("KILL {}", spid), &[])
+        .execute(&format!("KILL {spid}"), &[])
         .await
         .expect("Failed to kill session");
 
@@ -98,7 +97,7 @@ async fn test_connection_with_timeout() {
             client.close().await.expect("Failed to close");
         }
         Ok(Err(e)) => {
-            panic!("Connection failed with error: {:?}", e);
+            panic!("Connection failed with error: {e:?}");
         }
         Err(_) => {
             panic!("Connection timed out after 30 seconds");
@@ -171,7 +170,7 @@ async fn test_multiple_consecutive_errors() {
     // Multiple error-producing queries
     for i in 0..5 {
         let result = client
-            .query(&format!("RAISERROR('Test error {}', 16, 1)", i), &[])
+            .query(&format!("RAISERROR('Test error {i}', 16, 1)"), &[])
             .await;
         assert!(result.is_err(), "RAISERROR should produce an error");
     }
@@ -360,7 +359,7 @@ async fn test_multiple_concurrent_connections() {
 
             // Execute a query to verify connection is working
             let rows = client
-                .query(&format!("SELECT {} AS conn_id", i), &[])
+                .query(&format!("SELECT {i} AS conn_id"), &[])
                 .await
                 .expect("Query failed");
 
@@ -393,12 +392,12 @@ async fn test_rapid_connect_disconnect() {
     for i in 0..10 {
         let client = Client::connect(config.clone())
             .await
-            .expect(&format!("Failed to connect on iteration {}", i));
+            .expect(&format!("Failed to connect on iteration {i}"));
 
         client
             .close()
             .await
-            .expect(&format!("Failed to close on iteration {}", i));
+            .expect(&format!("Failed to close on iteration {i}"));
     }
 }
 

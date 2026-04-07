@@ -10,7 +10,11 @@
 )]
 
 use mssql_client::Error;
-use std::sync::Arc;
+
+/// Helper to create a TLS error for testing.
+fn make_tls_error(msg: &str) -> Error {
+    Error::Tls(mssql_tls::TlsError::Configuration(msg.to_string()))
+}
 
 // =============================================================================
 // Error Display Tests
@@ -32,7 +36,7 @@ fn test_connection_closed_display() {
 
 #[test]
 fn test_tls_error_display() {
-    let err = Error::Tls("certificate expired".into());
+    let err = make_tls_error("certificate expired");
     let msg = err.to_string();
     assert!(msg.contains("TLS error"));
     assert!(msg.contains("certificate expired"));
@@ -87,14 +91,6 @@ fn test_server_error_without_optional_fields() {
 }
 
 #[test]
-fn test_transaction_error_display() {
-    let err = Error::Transaction("already rolled back".into());
-    let msg = err.to_string();
-    assert!(msg.contains("transaction error"));
-    assert!(msg.contains("already rolled back"));
-}
-
-#[test]
 fn test_config_error_display() {
     let err = Error::Config("invalid port number".into());
     let msg = err.to_string();
@@ -104,9 +100,26 @@ fn test_config_error_display() {
 
 #[test]
 fn test_timeout_errors_display() {
-    assert_eq!(Error::ConnectTimeout.to_string(), "connection timed out");
-    assert_eq!(Error::TlsTimeout.to_string(), "TLS handshake timed out");
-    assert_eq!(Error::ConnectionTimeout.to_string(), "connection timed out");
+    let connect = Error::ConnectTimeout {
+        host: "localhost".into(),
+        port: 1433,
+    };
+    assert!(connect.to_string().contains("timed out"));
+    assert!(connect.to_string().contains("localhost"));
+    assert!(connect.to_string().contains("1433"));
+
+    let tls = Error::TlsTimeout {
+        host: "localhost".into(),
+        port: 1433,
+    };
+    assert!(tls.to_string().contains("timed out"));
+
+    let login = Error::LoginTimeout {
+        host: "localhost".into(),
+        port: 1433,
+    };
+    assert!(login.to_string().contains("timed out"));
+
     assert_eq!(Error::CommandTimeout.to_string(), "command timed out");
 }
 
@@ -133,7 +146,7 @@ fn test_too_many_redirects_display() {
 #[test]
 fn test_io_error_display() {
     let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
-    let err = Error::Io(Arc::new(io_err));
+    let err = Error::from(io_err);
     let msg = err.to_string();
     assert!(msg.contains("IO error"));
     assert!(msg.contains("refused"));
@@ -177,9 +190,10 @@ fn test_io_error_conversion() {
     let io_err = std::io::Error::new(std::io::ErrorKind::NotConnected, "not connected");
     let err: Error = io_err.into();
 
-    match err {
-        Error::Io(arc_err) => {
-            assert_eq!(arc_err.kind(), std::io::ErrorKind::NotConnected);
+    match &err {
+        Error::Io(shared_err) => {
+            let msg = shared_err.to_string();
+            assert!(msg.contains("not connected"));
         }
         _ => panic!("Expected IO error"),
     }
@@ -190,10 +204,12 @@ fn test_io_error_is_clone() {
     let io_err = std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out");
     let err: Error = io_err.into();
 
-    // Error should be cloneable via Arc
-    if let Error::Io(arc1) = &err {
-        let arc2 = Arc::clone(arc1);
-        assert_eq!(arc1.kind(), arc2.kind());
+    // SharedIoError should be cloneable (backed by Arc)
+    if let Error::Io(shared) = &err {
+        let cloned = shared.clone();
+        assert_eq!(shared.to_string(), cloned.to_string());
+    } else {
+        panic!("Expected IO error");
     }
 }
 
@@ -292,7 +308,14 @@ fn test_error_severity_ranges() {
 
 #[test]
 fn test_non_server_error_has_no_class() {
-    assert!(Error::ConnectionTimeout.class().is_none());
+    assert!(
+        Error::LoginTimeout {
+            host: "test".into(),
+            port: 1433
+        }
+        .class()
+        .is_none()
+    );
     assert!(Error::Query("test".into()).class().is_none());
     assert!(Error::Config("test".into()).class().is_none());
     assert!(Error::PoolExhausted.class().is_none());
@@ -307,7 +330,10 @@ fn test_mutually_exclusive_transient_terminal() {
     // An error should generally not be both transient AND terminal
     // (though this isn't strictly enforced by the type system)
 
-    let transient_err = Error::ConnectionTimeout;
+    let transient_err = Error::LoginTimeout {
+        host: "test".into(),
+        port: 1433,
+    };
     assert!(transient_err.is_transient());
     assert!(!transient_err.is_terminal());
 
@@ -319,14 +345,23 @@ fn test_mutually_exclusive_transient_terminal() {
 #[test]
 fn test_all_timeout_types_are_transient() {
     let timeout_errors = [
-        Error::ConnectTimeout,
-        Error::TlsTimeout,
-        Error::ConnectionTimeout,
+        Error::ConnectTimeout {
+            host: "test".into(),
+            port: 1433,
+        },
+        Error::TlsTimeout {
+            host: "test".into(),
+            port: 1433,
+        },
+        Error::LoginTimeout {
+            host: "test".into(),
+            port: 1433,
+        },
         Error::CommandTimeout,
     ];
 
     for err in timeout_errors {
-        assert!(err.is_transient(), "{:?} should be transient", err);
+        assert!(err.is_transient(), "{err:?} should be transient");
     }
 }
 
@@ -388,7 +423,7 @@ fn test_azure_cannot_process_errors() {
     // 49918, 49919, 49920: Cannot process request
     for number in [49918, 49919, 49920] {
         let err = make_azure_error(number, "Cannot process request");
-        assert!(err.is_transient(), "Error {} should be transient", number);
+        assert!(err.is_transient(), "Error {number} should be transient");
     }
 }
 
@@ -469,7 +504,7 @@ fn test_error_debug_format() {
         line: 42,
     };
 
-    let debug = format!("{:?}", err);
+    let debug = format!("{err:?}");
     assert!(debug.contains("Server"));
     assert!(debug.contains("102"));
     assert!(debug.contains("Syntax error"));
@@ -481,7 +516,7 @@ fn test_all_error_variants_are_debug() {
     let errors: Vec<Error> = vec![
         Error::Connection("test".into()),
         Error::ConnectionClosed,
-        Error::Tls("test".into()),
+        make_tls_error("test"),
         Error::Protocol("test".into()),
         Error::Query("test".into()),
         Error::Server {
@@ -493,21 +528,26 @@ fn test_all_error_variants_are_debug() {
             procedure: None,
             line: 1,
         },
-        Error::Transaction("test".into()),
         Error::Config("test".into()),
-        Error::ConnectTimeout,
-        Error::TlsTimeout,
-        Error::ConnectionTimeout,
+        Error::ConnectTimeout {
+            host: "test".into(),
+            port: 1433,
+        },
+        Error::TlsTimeout {
+            host: "test".into(),
+            port: 1433,
+        },
+        Error::LoginTimeout {
+            host: "test".into(),
+            port: 1433,
+        },
         Error::CommandTimeout,
         Error::Routing {
             host: "h".into(),
             port: 1,
         },
         Error::TooManyRedirects { max: 1 },
-        Error::Io(Arc::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "test",
-        ))),
+        Error::from(std::io::Error::other("test")),
         Error::InvalidIdentifier("test".into()),
         Error::PoolExhausted,
         Error::Cancel("test".into()),
@@ -515,8 +555,8 @@ fn test_all_error_variants_are_debug() {
     ];
 
     for err in errors {
-        let _ = format!("{:?}", err);
-        let _ = format!("{}", err);
+        let _ = format!("{err:?}");
+        let _ = format!("{err}");
     }
 }
 
@@ -528,10 +568,153 @@ fn test_all_error_variants_are_debug() {
 fn test_io_error_source() {
     use std::error::Error as StdError;
 
-    let io_err = std::io::Error::new(std::io::ErrorKind::Other, "inner error");
-    let err = Error::Io(Arc::new(io_err));
+    let io_err = std::io::Error::other("inner error");
+    let err = Error::from(io_err);
 
     // The error should have a source
     // Note: thiserror may or may not expose the source depending on definition
     let _ = err.source();
+}
+
+// =============================================================================
+// Error Classification Completeness Tests
+// =============================================================================
+
+#[test]
+fn test_protocol_errors_are_terminal() {
+    let err = Error::Protocol("unexpected EOF".into());
+    assert!(err.is_terminal());
+    assert!(!err.is_transient());
+}
+
+#[test]
+fn test_tls_errors_are_terminal() {
+    let err = make_tls_error("certificate expired");
+    assert!(err.is_terminal());
+    assert!(!err.is_transient());
+}
+
+#[test]
+fn test_cancel_errors_are_terminal() {
+    let err = Error::Cancel("connection not found".into());
+    assert!(err.is_terminal());
+    assert!(!err.is_transient());
+}
+
+#[test]
+fn test_connection_errors_are_transient() {
+    let err = Error::Connection("network unreachable".into());
+    assert!(err.is_transient());
+    assert!(!err.is_terminal());
+}
+
+// =============================================================================
+// Convenience Method Tests
+// =============================================================================
+
+#[test]
+fn test_is_tls_error() {
+    assert!(make_tls_error("cert expired").is_tls_error());
+    assert!(
+        Error::TlsTimeout {
+            host: "test".into(),
+            port: 1433
+        }
+        .is_tls_error()
+    );
+    assert!(
+        !Error::LoginTimeout {
+            host: "test".into(),
+            port: 1433
+        }
+        .is_tls_error()
+    );
+    assert!(!Error::Protocol("test".into()).is_tls_error());
+}
+
+#[test]
+fn test_is_authentication_error() {
+    // Cannot easily construct AuthError from outside, so test negative cases
+    assert!(
+        !Error::LoginTimeout {
+            host: "test".into(),
+            port: 1433
+        }
+        .is_authentication_error()
+    );
+    assert!(!Error::Config("test".into()).is_authentication_error());
+}
+
+#[test]
+fn test_is_config_error() {
+    assert!(Error::Config("bad port".into()).is_config_error());
+    assert!(
+        !Error::LoginTimeout {
+            host: "test".into(),
+            port: 1433
+        }
+        .is_config_error()
+    );
+    assert!(!Error::Protocol("test".into()).is_config_error());
+}
+
+#[test]
+fn test_every_variant_classified() {
+    // Every error variant should be either transient, terminal, or
+    // explicitly uncategorized (Query, Cancelled). This test ensures
+    // we don't have variants falling into the unknown bucket silently.
+    let classified_variants: Vec<(Error, &str)> = vec![
+        (Error::Connection("test".into()), "transient"),
+        (Error::ConnectionClosed, "transient"),
+        (make_tls_error("test"), "terminal"),
+        (Error::Protocol("test".into()), "terminal"),
+        (Error::Config("test".into()), "terminal"),
+        (
+            Error::ConnectTimeout {
+                host: "test".into(),
+                port: 1433,
+            },
+            "transient",
+        ),
+        (
+            Error::TlsTimeout {
+                host: "test".into(),
+                port: 1433,
+            },
+            "transient",
+        ),
+        (
+            Error::LoginTimeout {
+                host: "test".into(),
+                port: 1433,
+            },
+            "transient",
+        ),
+        (Error::CommandTimeout, "transient"),
+        (
+            Error::Routing {
+                host: "h".into(),
+                port: 1,
+            },
+            "transient",
+        ),
+        (Error::PoolExhausted, "transient"),
+        (Error::from(std::io::Error::other("test")), "transient"),
+        (Error::InvalidIdentifier("test".into()), "terminal"),
+        (Error::Cancel("test".into()), "terminal"),
+    ];
+
+    for (err, expected) in classified_variants {
+        match expected {
+            "transient" => {
+                assert!(err.is_transient(), "{err:?} should be transient");
+                assert!(!err.is_terminal(), "{err:?} should not be terminal");
+            }
+            "terminal" => {
+                assert!(err.is_terminal(), "{err:?} should be terminal");
+                assert!(!err.is_transient(), "{err:?} should not be transient");
+            }
+            _ => unreachable!(),
+        }
+    }
 }

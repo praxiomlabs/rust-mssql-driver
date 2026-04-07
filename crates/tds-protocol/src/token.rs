@@ -37,6 +37,7 @@ use crate::types::TypeId;
 /// Token type identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum TokenType {
     /// Column metadata (COLMETADATA).
     ColMetaData = 0x81,
@@ -114,6 +115,7 @@ impl TokenType {
 /// This enum represents all possible tokens that can be received from SQL Server.
 /// Each variant contains the parsed token data.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum Token {
     /// Column metadata describing result set structure.
     ColMetaData(ColMetaData),
@@ -316,6 +318,7 @@ pub struct Done {
 
 /// Done status flags.
 #[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
 pub struct DoneStatus {
     /// More results follow.
     pub more: bool,
@@ -437,6 +440,7 @@ pub struct EnvChange {
 /// Environment change type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum EnvChangeType {
     /// Database changed.
     Database = 1,
@@ -480,6 +484,7 @@ pub enum EnvChangeType {
 
 /// Environment change value.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum EnvChangeValue {
     /// String value.
     String(String),
@@ -1269,7 +1274,7 @@ impl NbcRow {
     /// columns are NULL, followed by only the non-NULL values.
     pub fn decode(src: &mut impl Buf, metadata: &ColMetaData) -> Result<Self, ProtocolError> {
         let col_count = metadata.columns.len();
-        let bitmap_len = (col_count + 7) / 8;
+        let bitmap_len = col_count.div_ceil(8);
 
         if src.remaining() < bitmap_len {
             return Err(ProtocolError::UnexpectedEof);

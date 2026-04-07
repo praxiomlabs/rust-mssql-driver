@@ -7,6 +7,7 @@
 ///
 /// SQL Server supports these isolation levels for transaction management.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum IsolationLevel {
     /// Read uncommitted (dirty reads allowed).
     ///
@@ -88,6 +89,7 @@ impl IsolationLevel {
 /// tx.commit().await?;
 /// ```
 #[derive(Debug, Clone)]
+#[must_use = "a savepoint should be used to rollback or it has no effect"]
 pub struct SavePoint {
     /// The validated savepoint name.
     pub(crate) name: String,
@@ -112,6 +114,7 @@ impl SavePoint {
 ///
 /// This is a higher-level transaction wrapper that can be used
 /// with closure-based APIs or as a standalone type.
+#[must_use = "a transaction must be committed or rolled back"]
 pub struct Transaction<'a> {
     isolation_level: IsolationLevel,
     _marker: std::marker::PhantomData<&'a ()>,

@@ -11,6 +11,7 @@ use crate::error::AuthError;
 ///
 /// This indicates which authentication flow to use during connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum AuthMethod {
     /// SQL Server authentication (username/password in Login7).
     SqlServer,
@@ -50,6 +51,7 @@ impl AuthMethod {
 /// Sensitive fields (password bytes, tokens, SSPI blobs) are securely zeroized
 /// on drop when the `zeroize` feature is enabled.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum AuthData {
     /// SQL Server credentials for Login7 packet.
     SqlServer {

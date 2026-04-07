@@ -55,7 +55,7 @@ just ci          # CI with default features
 
 | Tool | Version | Required | Notes |
 |------|---------|----------|-------|
-| Rust | 1.85+ | Yes | 2024 Edition |
+| Rust | 1.88+ | Yes | 2024 Edition |
 | Just | 1.23+ | Yes | Command runner |
 | jq | any | Yes | JSON parsing |
 | Docker | any | No | For integration tests |
@@ -76,7 +76,7 @@ This shows what's installed and what's missing.
 just setup-tools
 ```
 
-Installs version-pinned tools compatible with Rust 1.85:
+Installs version-pinned tools compatible with Rust 1.88:
 - `cargo-nextest` - Fast test runner
 - `cargo-llvm-cov` - Code coverage
 - `cargo-audit` - Security auditing
@@ -232,6 +232,18 @@ just watch-check
 just watch-clippy
 ```
 
+### Build Automation (`cargo xtask`)
+
+The project includes custom build commands via `cargo xtask`:
+
+| Command | Purpose |
+|---------|---------|
+| `cargo xtask release <version>` | Bump version across all crates + update CHANGELOG |
+| `cargo xtask check-features` | Validate all feature flag combinations compile (uses cargo-hack) |
+| `cargo xtask fuzz` | Run fuzz tests on protocol parser |
+| `cargo xtask coverage` | Generate code coverage report |
+| `cargo xtask semver-check` | Check for semver-breaking API changes |
+
 ## Making Changes
 
 ### Commit Messages
@@ -294,7 +306,6 @@ Breaking changes are changes that may require users to modify their code when up
 - Removing enum variants
 - Changing trait definitions
 - Removing or renaming feature flags
-- Increasing MSRV
 
 **Usually Breaking:**
 - Adding required fields to public structs (without `#[non_exhaustive]`)
@@ -308,6 +319,7 @@ Breaking changes are changes that may require users to modify their code when up
 - Bug fixes (even if code depended on buggy behavior)
 - Performance improvements
 - Documentation changes
+- **MSRV increases** — see [STABILITY.md § MSRV Increase Policy](STABILITY.md#minimum-supported-rust-version-msrv). MSRV bumps are allowed in minor releases when necessary for security fixes, critical bug fixes, or features requiring new language/stdlib capabilities. This aligns with the broader Rust ecosystem (Tokio, serde, etc.) and is consistent with our rolling 6-month MSRV window.
 
 ### Breaking Change Policy
 
@@ -417,6 +429,24 @@ In your PR that introduces a breaking change:
 - Integration tests: `tests/`
 - Property tests: Use `proptest`
 - Fuzz tests: `fuzz/` directory
+
+#### Integration Test Taxonomy (`crates/mssql-client/tests/`)
+
+Tests are organized by functional domain:
+
+| File | Domain |
+|------|--------|
+| `integration.rs` | End-to-end workflows (queries, transactions, streaming) |
+| `config.rs` | Configuration validation and connection string parsing |
+| `error_handling.rs` | Error scenarios and recovery paths |
+| `always_encrypted.rs` | Always Encrypted column encryption |
+| `azure_sql.rs` | Azure SQL Gateway redirect/failover |
+| `resilience.rs` | Connection resilience (retry, timeout, backoff) |
+| `stress.rs` | Load testing and concurrent operations |
+| `version_compatibility.rs` | TDS 7.3 through 8.0 support |
+| `protocol_conformance.rs` | MS-TDS specification compliance |
+| `collation_test.rs` | Character encoding and collation handling |
+| `edge_cases.rs` | Boundary conditions (empty results, large values, etc.) |
 
 ### Test Naming
 

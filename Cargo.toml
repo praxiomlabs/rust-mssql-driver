@@ -4,9 +4,9 @@ members = ["crates/*", "xtask"]
 exclude = ["fuzz"]  # Fuzz tests have their own workspace (required by cargo-fuzz)
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/praxiomlabs/rust-mssql-driver"
 keywords = ["sql-server", "mssql", "tds", "database", "async"]
@@ -14,18 +14,23 @@ categories = ["database"]
 
 [workspace.dependencies]
 # Internal crates (version required for crates.io publishing)
-tds-protocol = { version = "0.6.0", path = "crates/tds-protocol" }
-mssql-tls = { version = "0.6.0", path = "crates/mssql-tls" }
-mssql-codec = { version = "0.6.0", path = "crates/mssql-codec" }
-mssql-types = { version = "0.6.0", path = "crates/mssql-types" }
-mssql-auth = { version = "0.6.0", path = "crates/mssql-auth" }
-mssql-driver-pool = { version = "0.6.0", path = "crates/mssql-pool" }
-mssql-client = { version = "0.6.0", path = "crates/mssql-client" }
-mssql-derive = { version = "0.6.0", path = "crates/mssql-derive" }
-mssql-testing = { version = "0.6.0", path = "crates/mssql-testing" }
+#
+# Crate taxonomy:
+#   Primary (user-facing): mssql-client (main API), mssql-driver-pool (connection pooling)
+#   Internal (implementation): tds-protocol, mssql-types, mssql-tls, mssql-codec, mssql-auth, mssql-derive
+#   Dev-only (publish = false): mssql-testing
+tds-protocol = { version = "0.7.0", path = "crates/tds-protocol" }
+mssql-tls = { version = "0.7.0", path = "crates/mssql-tls" }
+mssql-codec = { version = "0.7.0", path = "crates/mssql-codec" }
+mssql-types = { version = "0.7.0", path = "crates/mssql-types" }
+mssql-auth = { version = "0.7.0", path = "crates/mssql-auth" }
+mssql-driver-pool = { version = "0.7.0", path = "crates/mssql-pool" }
+mssql-client = { version = "0.7.0", path = "crates/mssql-client" }
+mssql-derive = { version = "0.7.0", path = "crates/mssql-derive" }
+mssql-testing = { version = "0.7.0", path = "crates/mssql-testing" }
 
 # Async runtime
-tokio = { version = "1.48", features = ["full"] }
+tokio = { version = "1.48", features = ["net", "io-util", "sync", "time", "macros", "rt", "rt-multi-thread"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 tokio-rustls = "0.26"
 
@@ -66,6 +71,7 @@ regex = "1.11"
 lru = "0.16"
 
 # Observability (used with `otel` feature in individual crates)
+# All otel crates aligned at 0.31; tracing-opentelemetry 0.32 uses otel 0.31
 opentelemetry = "0.31"
 opentelemetry_sdk = "0.31"
 opentelemetry-otlp = "0.31"
@@ -82,10 +88,6 @@ tokio-test = "0.4"
 azure_identity = "0.30"
 azure_core = "0.30"
 azure_security_keyvault_keys = "0.9"
-
-# MSRV-constrained transitive dependencies
-# home 0.5.12+ requires Rust 1.88, we support 1.85
-home = ">=0.5.9, <0.5.12"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

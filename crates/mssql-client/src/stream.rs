@@ -40,6 +40,7 @@ use crate::row::{Column, Row};
 ///     process_row(&row);
 /// }
 /// ```
+#[must_use = "streams must be consumed; dropping a stream discards remaining rows"]
 pub struct QueryStream<'a> {
     /// Column metadata for the result set.
     columns: Vec<Column>,
@@ -170,6 +171,8 @@ impl Iterator for QueryStream<'_> {
 ///
 /// Contains the number of affected rows and any output parameters.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
+#[must_use]
 pub struct ExecuteResult {
     /// Number of rows affected by the statement.
     pub rows_affected: u64,
@@ -179,6 +182,7 @@ pub struct ExecuteResult {
 
 /// An output parameter from a stored procedure call.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct OutputParam {
     /// Parameter name.
     pub name: String,
@@ -214,6 +218,7 @@ impl ExecuteResult {
 
 /// A single result set within a multi-result batch.
 #[derive(Debug)]
+#[must_use]
 pub struct ResultSet {
     /// Column metadata for this result set.
     columns: Vec<Column>,
@@ -282,6 +287,7 @@ impl ResultSet {
 ///     }
 /// }
 /// ```
+#[must_use = "streams must be consumed; dropping a stream discards remaining results"]
 pub struct MultiResultStream<'a> {
     /// All result sets from the batch.
     result_sets: Vec<ResultSet>,

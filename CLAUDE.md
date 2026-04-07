@@ -13,7 +13,7 @@ A high-performance MS SQL Server driver for Rust that aims to surpass `prisma/ti
 3. **Type-state pattern** - Compile-time connection state enforcement
 4. **Tokio-native** - No runtime agnosticism; Tokio 1.48+ hard dependency
 5. **Zero-copy where possible** - `Arc<Bytes>` pattern for row data
-6. **Modern Rust** - 2024 Edition, MSRV 1.85
+6. **Modern Rust** - 2024 Edition, MSRV 1.88
 
 ## Key Architecture Decisions
 
@@ -25,7 +25,7 @@ Refer to `ARCHITECTURE.md` (v1.2.0) for complete details. Critical decisions:
 | Async Runtime | Tokio 1.48+ | Dominant ecosystem, hard dependency simplifies design |
 | Error Handling | thiserror 2.0 | Derive macros, stable API |
 | Observability | OpenTelemetry 0.31 | Industry standard, version-aligned crates |
-| Edition | Rust 2024 | Latest language features, MSRV 1.85 |
+| Edition | Rust 2024 | Latest language features, MSRV 1.88 |
 
 ## Security-Critical Guidelines
 
@@ -130,7 +130,7 @@ loop {
 
 ### Required Tools
 
-- Rust 1.85+ (2024 Edition)
+- Rust 1.88+ (2024 Edition)
 - cargo-hakari (workspace-hack management)
 - cargo-deny (dependency auditing)
 

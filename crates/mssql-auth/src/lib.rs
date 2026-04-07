@@ -65,6 +65,8 @@
 //! ```
 
 #![warn(missing_docs)]
+// Unsafe code is denied globally but allowed in the Windows CNG FFI module.
+// See windows_certstore.rs for detailed SAFETY comments on each unsafe block.
 #![deny(unsafe_code)]
 
 pub mod azure_ad;
@@ -77,6 +79,8 @@ pub mod encryption;
 pub mod error;
 #[cfg(feature = "integrated-auth")]
 pub mod integrated_auth;
+#[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+pub mod negotiator;
 pub mod provider;
 pub mod sql_auth;
 #[cfg(feature = "sspi-auth")]
@@ -94,6 +98,7 @@ pub mod key_unwrap;
 #[cfg(feature = "azure-keyvault")]
 pub mod azure_keyvault;
 #[cfg(all(windows, feature = "windows-certstore"))]
+#[allow(unsafe_code)] // Windows CNG FFI; see SAFETY comments in each unsafe block
 pub mod windows_certstore;
 
 // Core types
@@ -104,10 +109,6 @@ pub use provider::{AsyncAuthProvider, AuthData, AuthMethod, AuthProvider};
 // Authentication providers
 pub use azure_ad::{AzureAdAuth, FedAuthLibrary};
 pub use sql_auth::SqlServerAuth;
-
-// Legacy API (deprecated)
-#[allow(deprecated)]
-pub use sql_auth::SqlAuthenticator;
 
 // Secure credential types (with zeroize feature)
 #[cfg(feature = "zeroize")]
@@ -128,6 +129,10 @@ pub use cert_auth::CertificateAuth;
 // Windows SSPI authentication (with sspi-auth feature)
 #[cfg(feature = "sspi-auth")]
 pub use sspi_auth::SspiAuth;
+
+// SSPI/GSSAPI negotiator trait (with integrated-auth or sspi-auth feature)
+#[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+pub use negotiator::SspiNegotiator;
 
 // Always Encrypted infrastructure
 pub use encryption::{

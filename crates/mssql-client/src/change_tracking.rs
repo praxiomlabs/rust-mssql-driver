@@ -145,6 +145,7 @@ impl fmt::Display for ChangeOperation {
 ///
 /// Contains the system columns returned by `CHANGETABLE(CHANGES ...)`.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ChangeMetadata {
     /// The version when the row was last changed.
     pub version: i64,
@@ -573,6 +574,7 @@ impl ChangeTracking {
 
 /// Result of checking if a sync version is still valid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SyncVersionStatus {
     /// The sync version is valid and incremental sync can proceed.
     Valid,

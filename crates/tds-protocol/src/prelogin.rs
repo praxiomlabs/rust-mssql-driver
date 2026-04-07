@@ -16,6 +16,7 @@ use crate::version::{SqlServerVersion, TdsVersion};
 /// Pre-login option types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum PreLoginOption {
     /// Version information.
     Version = 0x00,
@@ -58,6 +59,7 @@ impl PreLoginOption {
 /// Encryption level for connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum EncryptionLevel {
     /// Encryption is off.
     Off = 0x00,
@@ -117,10 +119,6 @@ pub struct PreLogin {
     /// in the LOGINACK token after login.
     pub server_version: Option<SqlServerVersion>,
 
-    /// Sub-build version (legacy, now part of server_version).
-    #[deprecated(since = "0.5.2", note = "Use server_version.sub_build instead")]
-    pub sub_build: u16,
-
     /// Encryption level.
     pub encryption: EncryptionLevel,
     /// Instance name (for named instances).
@@ -149,12 +147,10 @@ pub struct TraceId {
 impl PreLogin {
     /// Create a new pre-login message with default values.
     #[must_use]
-    #[allow(deprecated)] // sub_build is deprecated but we need to initialize it
     pub fn new() -> Self {
         Self {
             version: TdsVersion::V7_4,
             server_version: None,
-            sub_build: 0,
             encryption: EncryptionLevel::Required,
             instance: None,
             thread_id: None,
@@ -195,7 +191,6 @@ impl PreLogin {
 
     /// Encode the pre-login message to bytes.
     #[must_use]
-    #[allow(deprecated)] // sub_build is deprecated but we still encode it
     pub fn encode(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(256);
 
@@ -232,7 +227,9 @@ impl PreLogin {
         data_buf.put_u8((version_raw >> 16) as u8);
         data_buf.put_u8((version_raw >> 8) as u8);
         data_buf.put_u8(version_raw as u8);
-        data_buf.put_u16_le(self.sub_build);
+        // Sub-build is always 0 for client-sent PreLogin; server sub-build
+        // lives in server_version after decode.
+        data_buf.put_u16_le(0);
         data_offset += 6;
 
         // ENCRYPTION option (1 byte)
@@ -364,7 +361,6 @@ impl PreLogin {
                 continue;
             }
 
-            #[allow(deprecated)] // We still populate sub_build for backward compatibility
             match option {
                 PreLoginOption::Version if length >= 4 => {
                     // Per MS-TDS 2.2.6.4: The server sends its SQL Server product version
@@ -394,9 +390,8 @@ impl PreLogin {
                     prelogin.server_version =
                         Some(SqlServerVersion::from_raw(version_raw, sub_build));
 
-                    // Also set deprecated fields for backward compatibility
+                    // Also set version for backward compatibility
                     prelogin.version = TdsVersion::new(version_raw);
-                    prelogin.sub_build = sub_build;
                 }
                 PreLoginOption::Encryption if length >= 1 => {
                     prelogin.encryption = EncryptionLevel::from_u8(data[data_offset]);

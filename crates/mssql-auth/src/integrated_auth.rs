@@ -90,7 +90,7 @@ impl IntegratedAuth {
     #[must_use]
     pub fn new(hostname: &str, port: u16) -> Self {
         // SQL Server service principal format: MSSQLSvc/hostname:port
-        let spn = format!("MSSQLSvc/{}:{}", hostname, port);
+        let spn = format!("MSSQLSvc/{hostname}:{port}");
 
         Self {
             spn,
@@ -119,7 +119,7 @@ impl IntegratedAuth {
     /// Create a GSSAPI Name from the stored SPN.
     fn create_service_name(&self) -> Result<Name, AuthError> {
         Name::new(self.spn.as_bytes(), Some(&GSS_NT_HOSTBASED_SERVICE))
-            .map_err(|e| AuthError::Sspi(format!("Failed to create service name: {}", e)))
+            .map_err(|e| AuthError::Sspi(format!("Failed to create service name: {e}")))
     }
 
     /// Initialize the GSSAPI context and get the initial token.
@@ -135,21 +135,21 @@ impl IntegratedAuth {
         let service_name = self.create_service_name()?;
 
         // Acquire default credentials from the Kerberos ticket cache
-        let mut mechs = OidSet::new()
-            .map_err(|e| AuthError::Sspi(format!("Failed to create OID set: {}", e)))?;
+        let mut mechs =
+            OidSet::new().map_err(|e| AuthError::Sspi(format!("Failed to create OID set: {e}")))?;
 
         // Add SPNEGO mechanism for negotiation
         mechs
             .add(&GSS_MECH_SPNEGO)
-            .map_err(|e| AuthError::Sspi(format!("Failed to add SPNEGO mechanism: {}", e)))?;
+            .map_err(|e| AuthError::Sspi(format!("Failed to add SPNEGO mechanism: {e}")))?;
 
         // Also add Kerberos as fallback
         mechs
             .add(&GSS_MECH_KRB5)
-            .map_err(|e| AuthError::Sspi(format!("Failed to add Kerberos mechanism: {}", e)))?;
+            .map_err(|e| AuthError::Sspi(format!("Failed to add Kerberos mechanism: {e}")))?;
 
         let cred = Cred::acquire(None, None, CredUsage::Initiate, Some(&mechs))
-            .map_err(|e| AuthError::Sspi(format!("Failed to acquire credentials: {}", e)))?;
+            .map_err(|e| AuthError::Sspi(format!("Failed to acquire credentials: {e}")))?;
 
         // Create client context with mutual authentication flag
         let mut ctx = ClientCtx::new(
@@ -162,7 +162,7 @@ impl IntegratedAuth {
         // Get initial token
         let token = ctx
             .step(None, None)
-            .map_err(|e| AuthError::Sspi(format!("Failed to initialize context: {}", e)))?
+            .map_err(|e| AuthError::Sspi(format!("Failed to initialize context: {e}")))?
             .ok_or_else(|| {
                 AuthError::Sspi("No initial token generated (context already complete?)".into())
             })?;
@@ -211,7 +211,7 @@ impl IntegratedAuth {
                 *complete_guard = true;
                 Ok(None)
             }
-            Err(e) => Err(AuthError::Sspi(format!("GSSAPI step failed: {}", e))),
+            Err(e) => Err(AuthError::Sspi(format!("GSSAPI step failed: {e}"))),
         }
     }
 
@@ -239,6 +239,20 @@ impl std::fmt::Debug for IntegratedAuth {
         f.debug_struct("IntegratedAuth")
             .field("complete", &self.is_complete())
             .finish_non_exhaustive()
+    }
+}
+
+impl crate::negotiator::SspiNegotiator for IntegratedAuth {
+    fn initialize(&self) -> Result<Vec<u8>, AuthError> {
+        IntegratedAuth::initialize(self)
+    }
+
+    fn step(&self, server_token: &[u8]) -> Result<Option<Vec<u8>>, AuthError> {
+        IntegratedAuth::step(self, server_token)
+    }
+
+    fn is_complete(&self) -> bool {
+        IntegratedAuth::is_complete(self)
     }
 }
 
@@ -277,7 +291,7 @@ mod tests {
     #[test]
     fn test_debug_output() {
         let auth = IntegratedAuth::new("test.example.com", 1433);
-        let debug = format!("{:?}", auth);
+        let debug = format!("{auth:?}");
         assert!(debug.contains("IntegratedAuth"));
     }
 

@@ -34,13 +34,12 @@ async fn main() -> Result<(), Error> {
     let encrypt = std::env::var("MSSQL_ENCRYPT").unwrap_or_else(|_| "true".into());
 
     let conn_str = format!(
-        "Server={};Database={};User Id={};Password={};TrustServerCertificate=true;Encrypt={}",
-        host, database, user, password, encrypt
+        "Server={host};Database={database};User Id={user};Password={password};TrustServerCertificate=true;Encrypt={encrypt}"
     );
 
     let config = Config::from_connection_string(&conn_str)?;
 
-    println!("Connecting to SQL Server at {}...", host);
+    println!("Connecting to SQL Server at {host}...");
 
     // Connect to the database
     let mut client = Client::connect(config).await?;
@@ -54,7 +53,7 @@ async fn main() -> Result<(), Error> {
     for result in rows {
         let row = result?;
         let version: String = row.get(0)?;
-        println!("SQL Server Version: {}", version);
+        println!("SQL Server Version: {version}");
     }
 
     // Execute a statement (returns row count directly as u64)
@@ -68,7 +67,7 @@ async fn main() -> Result<(), Error> {
         )
         .await?;
 
-    println!("Rows affected: {}", rows_affected);
+    println!("Rows affected: {rows_affected}");
 
     // Query with multiple parameters
     let name = "test";
@@ -82,7 +81,7 @@ async fn main() -> Result<(), Error> {
         let row = result?;
         let n: String = row.get(0)?;
         let c: i32 = row.get(1)?;
-        println!("Name: {}, Count: {}", n, c);
+        println!("Name: {n}, Count: {c}");
     }
 
     // Close the connection gracefully

@@ -11,6 +11,10 @@ categories = ["database", "asynchronous"]
 
 [features]
 default = []
+# Integrated authentication (Kerberos/SPNEGO) - Linux/macOS
+integrated-auth = ["mssql-client/integrated-auth"]
+# Windows SSPI integrated authentication
+sspi-auth = ["mssql-client/sspi-auth"]
 
 [dependencies]
 mssql-client = { workspace = true }

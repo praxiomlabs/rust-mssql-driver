@@ -25,8 +25,7 @@ async fn main() -> Result<(), Error> {
     let password = std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "Password123!".into());
 
     let conn_str = format!(
-        "Server={};Database={};User Id={};Password={};TrustServerCertificate=true",
-        host, database, user, password
+        "Server={host};Database={database};User Id={user};Password={password};TrustServerCertificate=true"
     );
 
     let config = Config::from_connection_string(&conn_str)?;
@@ -69,7 +68,7 @@ async fn streaming_example(client: &mut Client<Ready>) -> Result<(), Error> {
     let rows = client.query(query, &[]).await?;
 
     let elapsed = start.elapsed();
-    println!("Query executed in {:?}", elapsed);
+    println!("Query executed in {elapsed:?}");
 
     // Process rows one at a time - QueryStream yields Result<Row, Error>
     let mut count = 0;
@@ -89,7 +88,7 @@ async fn streaming_example(client: &mut Client<Ready>) -> Result<(), Error> {
     }
 
     println!();
-    println!("Processed {} rows, sum = {}", count, sum);
+    println!("Processed {count} rows, sum = {sum}");
     println!("Expected sum: {}", (10000 * 10001) / 2);
 
     Ok(())
@@ -112,13 +111,13 @@ async fn memory_efficient_access_example(client: &mut Client<Ready>) -> Result<(
 
         // Zero-copy byte access - borrows directly from the packet buffer
         if let Some(bytes) = row.get_bytes(0) {
-            println!("Binary data (borrowed slice): {:02X?}", bytes);
+            println!("Binary data (borrowed slice): {bytes:02X?}");
             println!("  Length: {} bytes", bytes.len());
         }
 
         // String access with Cow - borrowed when possible
         if let Some(text) = row.get_str(1) {
-            println!("Text data: '{}'", text);
+            println!("Text data: '{text}'");
             println!(
                 "  Is borrowed: {}",
                 matches!(text, std::borrow::Cow::Borrowed(_))
@@ -127,10 +126,10 @@ async fn memory_efficient_access_example(client: &mut Client<Ready>) -> Result<(
 
         // Raw bytes access
         if let Some(raw) = row.get_bytes(2) {
-            println!("Raw bytes: {:02X?}", raw);
+            println!("Raw bytes: {raw:02X?}");
             // Convert to string if it's ASCII
             if let Ok(s) = std::str::from_utf8(raw) {
-                println!("  As string: '{}'", s);
+                println!("  As string: '{s}'");
             }
         }
     }
@@ -185,7 +184,7 @@ async fn aggregation_example(client: &mut Client<Ready>) -> Result<(), Error> {
     for group_id in group_ids {
         let (sum, count) = groups[group_id];
         let avg = sum as f64 / count as f64;
-        println!("{:>8} {:>10} {:>8} {:>10.2}", group_id, sum, count, avg);
+        println!("{group_id:>8} {sum:>10} {count:>8} {avg:>10.2}");
     }
 
     Ok(())

@@ -65,10 +65,6 @@ criterion/
 /fuzz/corpus/
 /fuzz/artifacts/
 
-# cargo-hakari workspace hack (if not committed)
-# Uncomment if workspace-hack should not be tracked:
-# /crates/workspace-hack/
-
 # Local development overrides
 .cargo/config.toml.local
 rustfmt.toml.local

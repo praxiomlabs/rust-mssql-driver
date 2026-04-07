@@ -15,7 +15,7 @@ proc-macro = true
 [dependencies]
 proc-macro2 = "1.0"
 quote = "1.0"
-syn = { version = "2.0", features = ["full", "parsing", "extra-traits"] }
+syn = { version = "2.0", features = ["derive", "parsing"] }
 
 # Note: Integration tests for derive macros are in mssql-client's test suite
 # to avoid circular dev-dependency (mssql-derive <-> mssql-client)

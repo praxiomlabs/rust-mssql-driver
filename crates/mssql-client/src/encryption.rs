@@ -223,6 +223,11 @@ impl EncryptionContext {
         let enc_type = match encryption_type {
             EncryptionTypeWire::Deterministic => mssql_auth::EncryptionType::Deterministic,
             EncryptionTypeWire::Randomized => mssql_auth::EncryptionType::Randomized,
+            _ => {
+                return Err(EncryptionError::UnsupportedOperation(format!(
+                    "unsupported encryption type: {encryption_type:?}"
+                )));
+            }
         };
 
         encryptor.encrypt(plaintext, enc_type)

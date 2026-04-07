@@ -128,7 +128,7 @@ impl DerivedKeys {
         cek_length: &[u8],
     ) -> Result<[u8; AES_KEY_SIZE], EncryptionError> {
         let mut mac = HmacSha256::new_from_slice(cek)
-            .map_err(|e| EncryptionError::EncryptionFailed(format!("HMAC init failed: {}", e)))?;
+            .map_err(|e| EncryptionError::EncryptionFailed(format!("HMAC init failed: {e}")))?;
 
         mac.update(label);
         mac.update(ALGORITHM_NAME);
@@ -158,7 +158,7 @@ impl DerivedKeys {
             EncryptionType::Deterministic => {
                 // IV = HMAC-SHA256(iv_key, plaintext) truncated to 128 bits
                 let mut mac = HmacSha256::new_from_slice(&self.iv_key).map_err(|e| {
-                    EncryptionError::EncryptionFailed(format!("HMAC init failed: {}", e))
+                    EncryptionError::EncryptionFailed(format!("HMAC init failed: {e}"))
                 })?;
                 mac.update(plaintext);
                 let result = mac.finalize().into_bytes();
@@ -235,12 +235,12 @@ impl AeadEncryptor {
 
         // Encrypt with AES-256-CBC
         let cipher = Aes256CbcEnc::new_from_slices(&self.keys.enc_key, &iv)
-            .map_err(|e| EncryptionError::EncryptionFailed(format!("AES init failed: {}", e)))?;
+            .map_err(|e| EncryptionError::EncryptionFailed(format!("AES init failed: {e}")))?;
 
         let ciphertext = cipher
             .encrypt_padded_mut::<Pkcs7>(&mut cipher_buf, plaintext.len())
             .map_err(|e| {
-                EncryptionError::EncryptionFailed(format!("AES encryption failed: {}", e))
+                EncryptionError::EncryptionFailed(format!("AES encryption failed: {e}"))
             })?;
 
         // Compute MAC: HMAC-SHA256(mac_key, version + IV + ciphertext + version_length)
@@ -306,11 +306,11 @@ impl AeadEncryptor {
 
         // Decrypt with AES-256-CBC
         let cipher = Aes256CbcDec::new_from_slices(&self.keys.enc_key, iv)
-            .map_err(|e| EncryptionError::DecryptionFailed(format!("AES init failed: {}", e)))?;
+            .map_err(|e| EncryptionError::DecryptionFailed(format!("AES init failed: {e}")))?;
 
         let mut buf = encrypted_data.to_vec();
         let plaintext = cipher.decrypt_padded_mut::<Pkcs7>(&mut buf).map_err(|e| {
-            EncryptionError::DecryptionFailed(format!("AES decryption failed: {}", e))
+            EncryptionError::DecryptionFailed(format!("AES decryption failed: {e}"))
         })?;
 
         Ok(plaintext.to_vec())
@@ -321,7 +321,7 @@ impl AeadEncryptor {
     /// MAC = HMAC-SHA256(mac_key, version + IV + ciphertext + version_length)
     fn compute_mac(&self, iv: &[u8], ciphertext: &[u8]) -> Result<[u8; MAC_SIZE], EncryptionError> {
         let mut mac = HmacSha256::new_from_slice(&self.keys.mac_key)
-            .map_err(|e| EncryptionError::EncryptionFailed(format!("HMAC init failed: {}", e)))?;
+            .map_err(|e| EncryptionError::EncryptionFailed(format!("HMAC init failed: {e}")))?;
 
         mac.update(&[VERSION_BYTE]);
         mac.update(iv);

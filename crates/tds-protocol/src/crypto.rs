@@ -121,6 +121,7 @@ pub struct CryptoMetadata {
 
 /// Wire-level encryption type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EncryptionTypeWire {
     /// Deterministic encryption (value 1).
     Deterministic,

@@ -12,9 +12,11 @@
 //! - `doc`: Generate documentation
 //! - `bench`: Run benchmarks
 //! - `clean`: Clean build artifacts
-//! - `hakari`: Update workspace-hack crate
 //! - `fuzz`: Run fuzz tests (requires cargo-fuzz + nightly)
 //! - `codegen`: Generate protocol constants from TDS spec
+//! - `release`: Prepare a release (bump versions, update changelog)
+//! - `check-features`: Validate all feature flag combinations compile
+//! - `ci-local`: Run full CI pipeline locally (mirrors GitHub Actions)
 //! - `dist`: Build release artifacts for distribution
 
 use std::fs;
@@ -71,8 +73,6 @@ enum Command {
     },
     /// Clean build artifacts
     Clean,
-    /// Update workspace-hack crate (requires cargo-hakari)
-    Hakari,
     /// Run fuzz tests (requires cargo-fuzz + nightly)
     Fuzz {
         /// Fuzz target to run
@@ -110,6 +110,18 @@ enum Command {
     },
     /// Check for semver violations (requires cargo-semver-checks)
     Semver,
+    /// Prepare a release: bump versions and update changelog
+    Release {
+        /// New version (e.g., 0.7.0)
+        version: String,
+        /// Skip changelog update
+        #[arg(long)]
+        no_changelog: bool,
+    },
+    /// Validate all feature flag combinations compile (requires cargo-hack)
+    CheckFeatures,
+    /// Run the full CI pipeline locally (mirrors GitHub Actions)
+    CiLocal,
 }
 
 fn main() -> Result<()> {
@@ -139,7 +151,6 @@ fn main() -> Result<()> {
         Command::Doc { open } => doc(&sh, open)?,
         Command::Bench { filter } => bench(&sh, filter.as_deref())?,
         Command::Clean => clean(&sh)?,
-        Command::Hakari => hakari(&sh)?,
         Command::Fuzz {
             target,
             max_time,
@@ -150,9 +161,33 @@ fn main() -> Result<()> {
         Command::FuzzInit => fuzz_init(&sh)?,
         Command::Coverage { format } => coverage(&sh, &format)?,
         Command::Semver => semver(&sh)?,
+        Command::Release {
+            version,
+            no_changelog,
+        } => release(&sh, &version, no_changelog)?,
+        Command::CheckFeatures => check_features(&sh)?,
+        Command::CiLocal => ci_local(&sh)?,
     }
 
     Ok(())
+}
+
+/// Check that a cargo subcommand is installed, providing install instructions if not.
+fn require_tool(tool: &str, install_cmd: &str) -> Result<()> {
+    let status = std::process::Command::new("cargo")
+        .args([tool, "--version"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        _ => bail!(
+            "`cargo {tool}` is not installed.\n\n\
+             Install it with:\n\n    \
+             {install_cmd}\n"
+        ),
+    }
 }
 
 fn workspace_root() -> Result<PathBuf> {
@@ -230,6 +265,7 @@ fn test(sh: &Shell, package: Option<&str>, integration: bool) -> Result<()> {
 }
 
 fn deny(sh: &Shell) -> Result<()> {
+    require_tool("deny", "cargo install cargo-deny")?;
     println!("Running cargo-deny...");
     cmd!(sh, "cargo deny check").run()?;
     println!("✅ Cargo-deny check passed.");
@@ -264,15 +300,8 @@ fn clean(sh: &Shell) -> Result<()> {
     Ok(())
 }
 
-fn hakari(sh: &Shell) -> Result<()> {
-    println!("Updating workspace-hack...");
-    cmd!(sh, "cargo hakari generate").run()?;
-    cmd!(sh, "cargo hakari manage-deps").run()?;
-    println!("✅ Workspace-hack updated.");
-    Ok(())
-}
-
 fn fuzz(sh: &Shell, target: &str, max_time: u64, list: bool) -> Result<()> {
+    require_tool("fuzz", "cargo install cargo-fuzz && rustup install nightly")?;
     let fuzz_dir = sh.current_dir().join("fuzz");
 
     if list {
@@ -684,9 +713,8 @@ fn dist(sh: &Shell, target: Option<&str>, no_test: bool) -> Result<()> {
 }
 
 fn coverage(sh: &Shell, format: &str) -> Result<()> {
+    require_tool("llvm-cov", "cargo install cargo-llvm-cov")?;
     println!("Running code coverage...");
-
-    // Requires cargo-llvm-cov
     match format {
         "html" => {
             cmd!(sh, "cargo llvm-cov --all-features --html").run()?;
@@ -709,10 +737,7 @@ fn coverage(sh: &Shell, format: &str) -> Result<()> {
             println!("✅ Coverage report: target/coverage.json");
         }
         _ => {
-            bail!(
-                "Unknown coverage format: {}. Use html, lcov, or json.",
-                format
-            );
+            bail!("Unknown coverage format: {format}. Use html, lcov, or json.");
         }
     }
 
@@ -720,6 +745,7 @@ fn coverage(sh: &Shell, format: &str) -> Result<()> {
 }
 
 fn semver(sh: &Shell) -> Result<()> {
+    require_tool("semver-checks", "cargo install cargo-semver-checks")?;
     println!("Checking for semver violations...");
 
     let crates = [
@@ -735,5 +761,341 @@ fn semver(sh: &Shell) -> Result<()> {
     }
 
     println!("✅ No semver violations detected.");
+    Ok(())
+}
+
+fn check_features(sh: &Shell) -> Result<()> {
+    require_tool("hack", "cargo install cargo-hack")?;
+    println!("Checking feature flag combinations...");
+
+    // tds-protocol: requires std or alloc; encoding also needs one of them.
+    // Exclude both bare --no-default-features and encoding from the sweep,
+    // then test encoding + alloc (no_std) separately.
+    println!("\n  tds-protocol...");
+    cmd!(
+        sh,
+        "cargo hack check -p tds-protocol --each-feature --no-dev-deps --exclude-no-default-features --exclude-features encoding"
+    )
+    .run()?;
+    // Verify no_std + alloc works
+    cmd!(
+        sh,
+        "cargo check -p tds-protocol --no-default-features --features alloc"
+    )
+    .run()?;
+    // Verify encoding works in no_std context
+    cmd!(
+        sh,
+        "cargo check -p tds-protocol --no-default-features --features alloc,encoding"
+    )
+    .run()?;
+
+    // mssql-types: all features are independent
+    println!("\n  mssql-types...");
+    cmd!(
+        sh,
+        "cargo hack check -p mssql-types --each-feature --no-dev-deps"
+    )
+    .run()?;
+
+    // mssql-client: all features are independent
+    println!("\n  mssql-client...");
+    cmd!(
+        sh,
+        "cargo hack check -p mssql-client --each-feature --no-dev-deps"
+    )
+    .run()?;
+
+    // mssql-auth: platform-specific features need exclusion
+    println!("\n  mssql-auth...");
+    let excluded = platform_excluded_auth_features();
+    if excluded.is_empty() {
+        cmd!(
+            sh,
+            "cargo hack check -p mssql-auth --each-feature --no-dev-deps"
+        )
+        .run()?;
+    } else {
+        let excluded_str = excluded.join(",");
+        cmd!(
+            sh,
+            "cargo hack check -p mssql-auth --each-feature --no-dev-deps --exclude-features {excluded_str}"
+        )
+        .run()?;
+    }
+
+    // mssql-driver-pool: no features, but verify it compiles
+    println!("\n  mssql-driver-pool...");
+    cmd!(sh, "cargo hack check -p mssql-driver-pool --no-dev-deps").run()?;
+
+    println!("\n✅ All feature flag combinations compile.");
+    Ok(())
+}
+
+/// Returns auth features that cannot compile on the current platform.
+fn platform_excluded_auth_features() -> Vec<&'static str> {
+    let mut excluded = Vec::new();
+    if !cfg!(target_os = "windows") {
+        excluded.push("sspi-auth");
+        excluded.push("windows-certstore");
+    }
+    if cfg!(target_os = "windows") {
+        // libgssapi requires GSSAPI/Kerberos libraries (Linux/macOS)
+        excluded.push("integrated-auth");
+    }
+    excluded
+}
+
+fn ci_local(sh: &Shell) -> Result<()> {
+    println!("Running full CI pipeline locally (mirrors GitHub Actions)...\n");
+
+    // Step 1: Format check
+    println!("── Step 1/7: Format check ──");
+    fmt(sh, false)?;
+
+    // Step 2: Clippy
+    println!("\n── Step 2/7: Clippy ──");
+    clippy(sh, false)?;
+
+    // Step 3: Tests
+    println!("\n── Step 3/7: Tests ──");
+    test(sh, None, false)?;
+
+    // Step 4: Documentation
+    println!("\n── Step 4/7: Documentation ──");
+    doc(sh, false)?;
+
+    // Step 5: Build examples
+    println!("\n── Step 5/7: Examples ──");
+    println!("Building examples...");
+    cmd!(sh, "cargo build --examples --all-features").run()?;
+    println!("✅ Examples build passed.");
+
+    // Step 6: Feature flag validation
+    println!("\n── Step 6/7: Feature flags ──");
+    check_features(sh)?;
+
+    // Step 7: cargo-deny (if available)
+    println!("\n── Step 7/7: Dependency audit ──");
+    match deny(sh) {
+        Ok(()) => {}
+        Err(e) => {
+            println!("⚠ cargo-deny skipped: {e}");
+            println!("  Install with: cargo install cargo-deny");
+        }
+    }
+
+    println!("\n✅ Full CI pipeline passed!");
+    println!("\nNote: MSRV check and Miri are not included in local CI.");
+    println!("      Run these separately if needed:");
+    println!("        MSRV:  rustup run 1.88 cargo check --all-features");
+    println!("        Miri:  cargo +nightly miri test -p tds-protocol");
+
+    Ok(())
+}
+
+fn release(sh: &Shell, version: &str, no_changelog: bool) -> Result<()> {
+    let new_ver = parse_semver(version)
+        .with_context(|| format!("Invalid version: {version} (expected X.Y.Z)"))?;
+
+    let cargo_toml_path = sh.current_dir().join("Cargo.toml");
+    let cargo_toml = fs::read_to_string(&cargo_toml_path).context("Failed to read Cargo.toml")?;
+
+    let current = extract_workspace_version(&cargo_toml)
+        .context("Failed to find workspace.package version in Cargo.toml")?;
+    let cur_ver =
+        parse_semver(&current).context("Current version in Cargo.toml is not valid semver")?;
+
+    if new_ver <= cur_ver {
+        bail!("New version ({version}) must be greater than current version ({current})");
+    }
+
+    println!("Bumping version: {current} → {version}");
+
+    // Update root Cargo.toml
+    let updated_cargo = bump_cargo_versions(&cargo_toml, &current, version)?;
+    fs::write(&cargo_toml_path, &updated_cargo)?;
+    println!("  ✓ Cargo.toml workspace version");
+    println!("  ✓ Cargo.toml internal dependency versions (9 crates)");
+
+    // Update CHANGELOG.md
+    if !no_changelog {
+        let changelog_path = sh.current_dir().join("CHANGELOG.md");
+        if changelog_path.exists() {
+            let changelog = fs::read_to_string(&changelog_path)?;
+            let today = cmd!(sh, "date +%Y-%m-%d").read()?;
+            let updated = bump_changelog(&changelog, version, &current, today.trim())?;
+            fs::write(&changelog_path, &updated)?;
+            println!("  ✓ CHANGELOG.md");
+        } else {
+            println!("  ⚠ CHANGELOG.md not found, skipping");
+        }
+    } else {
+        println!("  ⊘ CHANGELOG.md (skipped)");
+    }
+
+    // Validate consistency
+    let final_toml = fs::read_to_string(&cargo_toml_path)?;
+    validate_version_consistency(&final_toml, version)?;
+
+    println!("\n✅ Version bumped to {version}");
+    println!("\nNext steps:");
+    println!("  1. Review changes:  git diff");
+    println!("  2. Commit:          git commit -am \"chore: release v{version}\"");
+    println!("  3. Push to main:    git push origin main");
+    println!("  4. Wait for CI to pass");
+    println!("  5. Tag:             git tag -a v{version} -m \"Release v{version}\"");
+    println!("  6. Push tag:        git push origin v{version}");
+
+    Ok(())
+}
+
+/// Parse a version string like "1.2.3" into a comparable tuple.
+fn parse_semver(s: &str) -> Option<(u32, u32, u32)> {
+    let parts: Vec<&str> = s.split('.').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    Some((
+        parts[0].parse().ok()?,
+        parts[1].parse().ok()?,
+        parts[2].parse().ok()?,
+    ))
+}
+
+/// Extract `version = "X.Y.Z"` from the `[workspace.package]` section.
+fn extract_workspace_version(cargo_toml: &str) -> Option<String> {
+    let mut in_workspace_package = false;
+    for line in cargo_toml.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_workspace_package = trimmed == "[workspace.package]";
+        }
+        if in_workspace_package && trimmed.starts_with("version") {
+            let value = trimmed.split('=').nth(1)?.trim();
+            return Some(value.trim_matches('"').to_string());
+        }
+    }
+    None
+}
+
+/// Replace version strings in root Cargo.toml:
+/// 1. `workspace.package.version`
+/// 2. All internal dependency entries (lines with both `version = "..."` and `path = "crates/..."`)
+fn bump_cargo_versions(content: &str, old: &str, new: &str) -> Result<String> {
+    let mut result = Vec::new();
+    let mut in_workspace_package = false;
+    let mut version_bumped = false;
+    let mut dep_count = 0u32;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_workspace_package = trimmed == "[workspace.package]";
+        }
+
+        if in_workspace_package
+            && trimmed.starts_with("version")
+            && trimmed.contains(&format!("\"{old}\""))
+        {
+            result.push(line.replace(old, new));
+            version_bumped = true;
+        } else if trimmed.contains(&format!("version = \"{old}\""))
+            && trimmed.contains("path = \"crates/")
+        {
+            result.push(line.replace(old, new));
+            dep_count += 1;
+        } else {
+            result.push(line.to_string());
+        }
+    }
+
+    if !version_bumped {
+        bail!("Could not find workspace.package version = \"{old}\" in Cargo.toml");
+    }
+    if dep_count == 0 {
+        bail!("No internal dependency versions found matching \"{old}\"");
+    }
+
+    let mut output = result.join("\n");
+    if content.ends_with('\n') {
+        output.push('\n');
+    }
+    Ok(output)
+}
+
+/// Update CHANGELOG.md for a new release:
+/// - If `## [Unreleased]` exists, rename it to `## [version] - date` and add new `## [Unreleased]`
+/// - If no `## [Unreleased]`, insert both before the first version entry
+/// - Update comparison links at the bottom
+fn bump_changelog(
+    content: &str,
+    new_version: &str,
+    old_version: &str,
+    today: &str,
+) -> Result<String> {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut result: Vec<String> = Vec::new();
+    let repo_url = "https://github.com/praxiomlabs/rust-mssql-driver";
+
+    let has_unreleased = lines.iter().any(|l| l.starts_with("## [Unreleased]"));
+
+    for line in &lines {
+        if has_unreleased && *line == "## [Unreleased]" {
+            // Keep [Unreleased] as new empty section, add versioned section below
+            result.push("## [Unreleased]".to_string());
+            result.push(String::new());
+            result.push(format!("## [{new_version}] - {today}"));
+        } else if !has_unreleased
+            && line.starts_with("## [")
+            && !result.iter().any(|r| r.starts_with("## [Unreleased]"))
+        {
+            // First version entry found — insert new sections before it
+            result.push("## [Unreleased]".to_string());
+            result.push(String::new());
+            result.push(format!("## [{new_version}] - {today}"));
+            result.push(String::new());
+            result.push(line.to_string());
+        } else if line.starts_with("[Unreleased]:") {
+            // Update unreleased comparison link and add new version link
+            result.push(format!(
+                "[Unreleased]: {repo_url}/compare/v{new_version}...HEAD"
+            ));
+            result.push(format!(
+                "[{new_version}]: {repo_url}/compare/v{old_version}...v{new_version}"
+            ));
+        } else {
+            result.push(line.to_string());
+        }
+    }
+
+    let mut output = result.join("\n");
+    if content.ends_with('\n') {
+        output.push('\n');
+    }
+    Ok(output)
+}
+
+/// Verify that all versions in Cargo.toml are consistent after bumping.
+fn validate_version_consistency(cargo_toml: &str, expected: &str) -> Result<()> {
+    let actual = extract_workspace_version(cargo_toml)
+        .context("Could not read workspace version after update")?;
+    if actual != expected {
+        bail!("Validation failed: workspace version is {actual}, expected {expected}");
+    }
+
+    let dep_count = cargo_toml
+        .lines()
+        .filter(|line| {
+            line.contains("path = \"crates/") && line.contains(&format!("version = \"{expected}\""))
+        })
+        .count();
+
+    if dep_count != 9 {
+        bail!(
+            "Validation failed: found {dep_count}/9 internal dependencies with version {expected}"
+        );
+    }
+
     Ok(())
 }

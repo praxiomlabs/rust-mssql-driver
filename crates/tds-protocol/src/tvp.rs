@@ -55,6 +55,7 @@ pub const DEFAULT_COLLATION: [u8; 5] = [0x09, 0x04, 0xD0, 0x00, 0x34];
 
 /// TVP column type for wire encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TvpWireType {
     /// BIT type.
     Bit,
@@ -180,12 +181,19 @@ impl TvpWireType {
 
 /// Column flags for TVP columns.
 #[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
 pub struct TvpColumnFlags {
     /// Column is nullable.
     pub nullable: bool,
 }
 
 impl TvpColumnFlags {
+    /// Create a new set of column flags.
+    #[must_use]
+    pub const fn new(nullable: bool) -> Self {
+        Self { nullable }
+    }
+
     /// Encode flags to 2-byte value.
     #[must_use]
     pub const fn to_bits(&self) -> u16 {
@@ -199,6 +207,7 @@ impl TvpColumnFlags {
 
 /// TVP column definition for wire encoding.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct TvpColumnDef {
     /// Column type.
     pub wire_type: TvpWireType,

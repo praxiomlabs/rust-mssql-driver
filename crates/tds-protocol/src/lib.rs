@@ -65,7 +65,7 @@
 //!
 //! ## Example
 //!
-//! ```rust,ignore
+//! ```no_run
 //! use tds_protocol::{PacketHeader, PacketType, PacketStatus};
 //!
 //! let header = PacketHeader {

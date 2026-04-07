@@ -4,6 +4,7 @@ use thiserror::Error;
 
 /// Errors that can occur during TLS operations.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum TlsError {
     /// TLS handshake failed.
     #[error("TLS handshake failed: {0}")]
@@ -57,4 +58,24 @@ pub enum TlsError {
     /// Connection closed during TLS negotiation.
     #[error("connection closed during TLS negotiation")]
     ConnectionClosed,
+}
+
+impl TlsError {
+    /// Check if this error is transient and may succeed on retry.
+    ///
+    /// IO errors and connection closures are transient. Certificate and
+    /// configuration errors are terminal.
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        matches!(self, Self::Io(_) | Self::ConnectionClosed)
+    }
+
+    /// Check if this error is terminal and will never succeed on retry.
+    ///
+    /// Certificate validation failures, configuration errors, and encryption
+    /// mode mismatches are permanent.
+    #[must_use]
+    pub fn is_terminal(&self) -> bool {
+        !self.is_transient()
+    }
 }

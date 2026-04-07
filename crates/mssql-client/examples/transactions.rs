@@ -27,8 +27,7 @@ async fn main() -> Result<(), Error> {
     let password = std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "Password123!".into());
 
     let conn_str = format!(
-        "Server={};Database={};User Id={};Password={};TrustServerCertificate=true",
-        host, database, user, password
+        "Server={host};Database={database};User Id={user};Password={password};TrustServerCertificate=true"
     );
 
     let config = Config::from_connection_string(&conn_str)?;
@@ -97,7 +96,7 @@ async fn basic_transaction_example(client: Client<Ready>) -> Result<(), Error> {
         let row = result?;
         let id: i32 = row.get(0)?;
         let name: String = row.get(1)?;
-        println!("  {} - {}", id, name);
+        println!("  {id} - {name}");
     }
 
     // Commit the transaction
@@ -116,7 +115,7 @@ async fn basic_transaction_example(client: Client<Ready>) -> Result<(), Error> {
 async fn isolation_level_example(mut client: Client<Ready>) -> Result<(), Error> {
     // You can specify isolation level when beginning a transaction
     let isolation = IsolationLevel::ReadCommitted;
-    println!("Using isolation level: {:?}", isolation);
+    println!("Using isolation level: {isolation:?}");
 
     // Begin transaction with specific isolation level
     // Use as_sql() which returns the full SET TRANSACTION ISOLATION LEVEL statement
@@ -124,7 +123,7 @@ async fn isolation_level_example(mut client: Client<Ready>) -> Result<(), Error>
     client.simple_query(isolation.as_sql()).await?;
 
     let tx = client.begin_transaction().await?;
-    println!("Transaction started with {:?}", isolation);
+    println!("Transaction started with {isolation:?}");
 
     // ... perform operations ...
 

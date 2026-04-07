@@ -56,13 +56,20 @@
 
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
+// Test infrastructure crate — panicking on programmer errors is acceptable
+#![allow(clippy::expect_used, clippy::unwrap_used)]
 
 pub mod container;
 pub mod fixtures;
 pub mod mock_server;
+pub mod tls;
 
 pub use container::SqlServerContainer;
 pub use mock_server::{
     MockColumn, MockResponse, MockServerBuilder, MockServerConfig, MockServerError, MockTdsServer,
     PacketRecorder, RecordedPacket, ScalarValue,
+};
+pub use tls::{
+    TlsPreloginWrapper, accept_tls_direct, accept_tls_prelogin, create_tls_acceptor,
+    generate_test_certificate,
 };

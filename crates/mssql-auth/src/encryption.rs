@@ -72,6 +72,7 @@ use std::fmt;
 ///
 /// Determines how data is encrypted and what operations are supported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EncryptionType {
     /// Deterministic encryption: same plaintext → same ciphertext.
     ///
@@ -121,6 +122,7 @@ impl EncryptionType {
 /// This metadata is retrieved from SQL Server's `sys.column_encryption_keys`
 /// and related system views.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct CekMetadata {
     /// Database-level identifier for this CEK.
     pub database_id: u32,
@@ -142,6 +144,7 @@ pub struct CekMetadata {
 
 /// Encryption information for a specific database column.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ColumnEncryptionInfo {
     /// The column name.
     pub column_name: String,
@@ -192,6 +195,7 @@ impl ColumnEncryptionInfo {
 
 /// Error types for Always Encrypted operations.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum EncryptionError {
     /// The requested key store provider is not registered.
     KeyStoreNotFound(String),
@@ -217,28 +221,28 @@ impl fmt::Display for EncryptionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             EncryptionError::KeyStoreNotFound(name) => {
-                write!(f, "Key store provider not found: {}", name)
+                write!(f, "Key store provider not found: {name}")
             }
             EncryptionError::CmkError(msg) => {
-                write!(f, "Column Master Key error: {}", msg)
+                write!(f, "Column Master Key error: {msg}")
             }
             EncryptionError::CekDecryptionFailed(msg) => {
-                write!(f, "Failed to decrypt Column Encryption Key: {}", msg)
+                write!(f, "Failed to decrypt Column Encryption Key: {msg}")
             }
             EncryptionError::EncryptionFailed(msg) => {
-                write!(f, "Encryption failed: {}", msg)
+                write!(f, "Encryption failed: {msg}")
             }
             EncryptionError::DecryptionFailed(msg) => {
-                write!(f, "Decryption failed: {}", msg)
+                write!(f, "Decryption failed: {msg}")
             }
             EncryptionError::MetadataNotAvailable(msg) => {
-                write!(f, "Encryption metadata not available: {}", msg)
+                write!(f, "Encryption metadata not available: {msg}")
             }
             EncryptionError::UnsupportedOperation(msg) => {
-                write!(f, "Unsupported operation with encryption: {}", msg)
+                write!(f, "Unsupported operation with encryption: {msg}")
             }
             EncryptionError::ConfigurationError(msg) => {
-                write!(f, "Encryption configuration error: {}", msg)
+                write!(f, "Encryption configuration error: {msg}")
             }
         }
     }
@@ -425,6 +429,7 @@ impl fmt::Debug for ColumnEncryptionConfig {
 ///
 /// This is used internally to track encrypted parameter values.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct EncryptedValue {
     /// The ciphertext bytes.
     pub ciphertext: Vec<u8>,
@@ -476,7 +481,7 @@ mod tests {
     #[test]
     fn test_column_encryption_config_debug() {
         let config = ColumnEncryptionConfig::new();
-        let debug = format!("{:?}", config);
+        let debug = format!("{config:?}");
         assert!(debug.contains("ColumnEncryptionConfig"));
         assert!(debug.contains("enabled: true"));
     }

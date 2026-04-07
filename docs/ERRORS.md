@@ -11,9 +11,9 @@ pub enum Error {
     // Connection errors
     Connection(String),
     ConnectionClosed,
-    ConnectTimeout,
-    TlsTimeout,
-    ConnectionTimeout,
+    ConnectTimeout { host: String, port: u16 },
+    TlsTimeout { host: String, port: u16 },
+    LoginTimeout { host: String, port: u16 },
     CommandTimeout,
 
     // Authentication
@@ -42,9 +42,6 @@ pub enum Error {
         procedure: Option<String>,
         line: u32,
     },
-
-    // Transactions
-    Transaction(String),
 
     // Configuration
     Config(String),
@@ -95,9 +92,9 @@ These errors may succeed if retried:
 
 | Error | Description |
 |-------|-------------|
-| `ConnectTimeout` | TCP connection timed out |
-| `TlsTimeout` | TLS handshake timed out |
-| `ConnectionTimeout` | Connection timeout (general) |
+| `ConnectTimeout { host, port }` | TCP connection timed out |
+| `TlsTimeout { host, port }` | TLS handshake timed out |
+| `LoginTimeout { host, port }` | Login/authentication phase timed out |
 | `CommandTimeout` | Query execution timed out |
 | `ConnectionClosed` | Connection unexpectedly closed |
 | `Routing` | Azure SQL redirect required |
@@ -351,7 +348,10 @@ match result {
     }
 
     // Connection issues
-    Err(Error::ConnectionClosed | Error::ConnectionTimeout) => {
+    Err(Error::ConnectionClosed
+        | Error::ConnectTimeout { .. }
+        | Error::TlsTimeout { .. }
+        | Error::LoginTimeout { .. }) => {
         reconnect_and_retry();
     }
 
@@ -432,13 +432,17 @@ impl IntoResponse for AppError {
 ```rust
 match client.connect(config).await {
     Ok(client) => client,
-    Err(Error::ConnectTimeout) => {
+    Err(Error::ConnectTimeout { host, port }) => {
         // Network unreachable or firewall blocking
-        panic!("Cannot reach database - check network/firewall");
+        panic!("Cannot reach {}:{} - check network/firewall", host, port);
     }
-    Err(Error::TlsTimeout) => {
-        // TLS handshake failed
-        panic!("TLS handshake failed - check certificates");
+    Err(Error::TlsTimeout { host, port }) => {
+        // TLS handshake timed out
+        panic!("TLS handshake timed out for {}:{} - check certificates", host, port);
+    }
+    Err(Error::LoginTimeout { host, port }) => {
+        // Login/authentication phase timed out
+        panic!("Login timed out for {}:{} - check server load", host, port);
     }
     Err(Error::Authentication(e)) => {
         // Wrong credentials

@@ -53,7 +53,7 @@ impl RsaKeyUnwrapper {
         let private_key = RsaPrivateKey::from_pkcs8_pem(pem)
             .or_else(|_| RsaPrivateKey::from_pkcs1_pem(pem))
             .map_err(|e| {
-                EncryptionError::CmkError(format!("Failed to parse RSA private key: {}", e))
+                EncryptionError::CmkError(format!("Failed to parse RSA private key: {e}"))
             })?;
 
         Ok(Self { private_key })
@@ -72,7 +72,7 @@ impl RsaKeyUnwrapper {
         let private_key = RsaPrivateKey::from_pkcs8_der(der)
             .or_else(|_| RsaPrivateKey::from_pkcs1_der(der))
             .map_err(|e| {
-                EncryptionError::CmkError(format!("Failed to parse RSA private key: {}", e))
+                EncryptionError::CmkError(format!("Failed to parse RSA private key: {e}"))
             })?;
 
         Ok(Self { private_key })
@@ -105,7 +105,7 @@ impl RsaKeyUnwrapper {
         // Decrypt using RSA-OAEP with SHA-256
         let padding = Oaep::new::<Sha256>();
         let decrypted = self.private_key.decrypt(padding, ciphertext).map_err(|e| {
-            EncryptionError::CekDecryptionFailed(format!("RSA-OAEP decryption failed: {}", e))
+            EncryptionError::CekDecryptionFailed(format!("RSA-OAEP decryption failed: {e}"))
         })?;
 
         Ok(decrypted)
@@ -117,7 +117,7 @@ impl RsaKeyUnwrapper {
     pub fn decrypt_raw(&self, ciphertext: &[u8]) -> Result<Vec<u8>, EncryptionError> {
         let padding = Oaep::new::<Sha256>();
         self.private_key.decrypt(padding, ciphertext).map_err(|e| {
-            EncryptionError::CekDecryptionFailed(format!("RSA-OAEP decryption failed: {}", e))
+            EncryptionError::CekDecryptionFailed(format!("RSA-OAEP decryption failed: {e}"))
         })
     }
 

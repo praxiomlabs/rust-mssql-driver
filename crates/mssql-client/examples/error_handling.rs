@@ -39,10 +39,7 @@ where
             let base_delay = Duration::from_millis(100 * 2u64.pow(attempts - 1));
             let jitter = Duration::from_millis(rand_jitter(50));
             let delay = base_delay + jitter;
-            println!(
-                "  Retry attempt {}/{} after {:?}",
-                attempts, max_retries, delay
-            );
+            println!("  Retry attempt {attempts}/{max_retries} after {delay:?}");
             tokio::time::sleep(delay).await;
         }
 
@@ -59,7 +56,7 @@ where
                 return Err(Error::Query("No rows returned".into()));
             }
             Err(e) if e.is_transient() => {
-                println!("  Transient error: {:?}", e);
+                println!("  Transient error: {e:?}");
                 last_error = Some(e);
                 attempts += 1;
             }
@@ -91,8 +88,7 @@ async fn main() -> Result<(), Error> {
     let password = std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "Password123!".into());
 
     let conn_str = format!(
-        "Server={};Database=master;User Id={};Password={};TrustServerCertificate=true",
-        host, user, password
+        "Server={host};Database=master;User Id={user};Password={password};TrustServerCertificate=true"
     );
 
     let config = Config::from_connection_string(&conn_str)?;
@@ -107,8 +103,8 @@ async fn main() -> Result<(), Error> {
         Ok(rows) => {
             for result in rows {
                 match result {
-                    Ok(row) => println!("  Result: {:?}", row),
-                    Err(e) => println!("  Row error: {:?}", e),
+                    Ok(row) => println!("  Result: {row:?}"),
+                    Err(e) => println!("  Row error: {e:?}"),
                 }
             }
         }
@@ -118,29 +114,25 @@ async fn main() -> Result<(), Error> {
             class,
             ..
         }) => {
-            println!(
-                "  SQL Server Error #{}: {} (severity: {})",
-                number, message, class
-            );
+            println!("  SQL Server Error #{number}: {message} (severity: {class})");
         }
-        Err(e) => println!("  Other error: {:?}", e),
+        Err(e) => println!("  Other error: {e:?}"),
     }
 
     // Example 2: Handling authentication errors
     println!("\n2. Authentication error (expected to fail):");
     let bad_conn_str = format!(
-        "Server={};Database=master;User Id=invalid;Password=wrong;TrustServerCertificate=true;Connect Timeout=5",
-        host
+        "Server={host};Database=master;User Id=invalid;Password=wrong;TrustServerCertificate=true;Connect Timeout=5"
     );
     let bad_config = Config::from_connection_string(&bad_conn_str)?;
 
     match Client::connect(bad_config).await {
         Ok(_) => println!("  Unexpectedly connected!"),
         Err(Error::Authentication(auth_err)) => {
-            println!("  Authentication failed: {:?}", auth_err);
+            println!("  Authentication failed: {auth_err:?}");
             println!("  This is expected - do not retry auth failures");
         }
-        Err(e) => println!("  Other error: {:?}", e),
+        Err(e) => println!("  Other error: {e:?}"),
     }
 
     // Example 3: Query with retry for transient errors
@@ -178,12 +170,12 @@ async fn main() -> Result<(), Error> {
                 ..
             },
         ) if number == 2627 => {
-            println!("  Primary key violation (error {}): {}", number, message);
+            println!("  Primary key violation (error {number}): {message}");
             println!("  is_transient: {}", e.is_transient());
             println!("  is_terminal: {}", e.is_terminal());
             println!("  This is NOT transient - fix your data, don't retry");
         }
-        Err(e) => println!("  Other error: {:?}", e),
+        Err(e) => println!("  Other error: {e:?}"),
     }
 
     // Example 5: Using built-in error categorization
@@ -199,7 +191,13 @@ async fn main() -> Result<(), Error> {
 fn demonstrate_error_categorization() {
     // Create sample errors to demonstrate categorization
     let errors: Vec<(&str, Error)> = vec![
-        ("Connection timeout", Error::ConnectTimeout),
+        (
+            "Connection timeout",
+            Error::ConnectTimeout {
+                host: "localhost".into(),
+                port: 1433,
+            },
+        ),
         ("Invalid config", Error::Config("Bad value".into())),
         (
             "Deadlock",
@@ -237,9 +235,6 @@ fn demonstrate_error_categorization() {
         } else {
             "Investigate"
         };
-        println!(
-            "  {} -> transient: {}, terminal: {} -> {}",
-            name, transient, terminal, action
-        );
+        println!("  {name} -> transient: {transient}, terminal: {terminal} -> {action}");
     }
 }

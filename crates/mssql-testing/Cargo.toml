@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 keywords = ["sql-server", "testing", "testcontainers", "mock"]
 categories = ["development-tools::testing"]
+publish = false
 
 [features]
 default = []
@@ -16,10 +17,16 @@ default = []
 mssql-client = { workspace = true }
 tds-protocol = { workspace = true }
 bytes = { workspace = true }
-tokio = { workspace = true, features = ["net", "io-util", "sync", "rt", "fs"] }
+tokio = { workspace = true, features = ["fs"] }
+tokio-rustls = { workspace = true }
+rustls = { workspace = true }
+rcgen = "0.14"
 thiserror = { workspace = true }
 tracing = { workspace = true }
 testcontainers = { workspace = true }
+
+[dev-dependencies]
+mssql-tls = { workspace = true }
 
 [package.metadata.cargo-machete]
 # mssql-client is a peer dependency for test consumers

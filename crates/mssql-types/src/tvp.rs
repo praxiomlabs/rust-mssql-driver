@@ -23,6 +23,7 @@ use crate::SqlValue;
 /// This enum maps Rust/SQL types to their TDS type identifiers for encoding
 /// within TVP column metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum TvpColumnType {
     /// BIT type (boolean).
     Bit,
@@ -358,6 +359,7 @@ impl TvpData {
 
 /// Errors that can occur when working with TVPs.
 #[derive(Debug, Clone, thiserror::Error)]
+#[non_exhaustive]
 pub enum TvpError {
     /// Column count mismatch between definition and row data.
     #[error("column count mismatch: expected {expected}, got {actual}")]

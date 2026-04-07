@@ -131,7 +131,7 @@ pub fn Config::new() -> Config { ... }
 
 ## Minimum Supported Rust Version (MSRV)
 
-- **Current MSRV**: 1.85 (Rust 2024 Edition)
+- **Current MSRV**: 1.88 (Rust 2024 Edition)
 - **MSRV Policy**: We support the latest stable Rust and may increase MSRV in minor releases
 
 ### MSRV Increase Policy

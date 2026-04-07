@@ -30,8 +30,7 @@ fn get_azure_config() -> Option<Config> {
     let password = std::env::var("AZURE_SQL_PASSWORD").ok()?;
 
     let conn_str = format!(
-        "Server={};Database={};User Id={};Password={};Encrypt=true;TrustServerCertificate=false",
-        host, database, user, password
+        "Server={host};Database={database};User Id={user};Password={password};Encrypt=true;TrustServerCertificate=false"
     );
 
     Config::from_connection_string(&conn_str).ok()
@@ -44,8 +43,7 @@ fn get_azure_config_strict() -> Option<Config> {
     let password = std::env::var("AZURE_SQL_PASSWORD").ok()?;
 
     let conn_str = format!(
-        "Server={};Database={};User Id={};Password={};Encrypt=strict",
-        host, database, user, password
+        "Server={host};Database={database};User Id={user};Password={password};Encrypt=strict"
     );
 
     Config::from_connection_string(&conn_str).ok()
@@ -245,10 +243,7 @@ async fn test_azure_strict_mode_connection() {
         }
         Err(e) => {
             // Strict mode might not be supported yet
-            println!(
-                "Strict mode connection failed (may not be supported): {}",
-                e
-            );
+            println!("Strict mode connection failed (may not be supported): {e}");
         }
     }
 }
@@ -271,7 +266,7 @@ async fn test_azure_query_execution() {
     for row_result in rows {
         let row = row_result.expect("Row error");
         let version: String = row.get(0).expect("Get version failed");
-        println!("Azure SQL Version: {}", version);
+        println!("Azure SQL Version: {version}");
         assert!(
             version.contains("Azure") || version.contains("SQL"),
             "Version should mention Azure or SQL"
@@ -308,10 +303,7 @@ async fn test_azure_database_properties() {
         let edition: Option<String> = row.get(1).ok();
         let tier: Option<String> = row.get(2).ok();
 
-        println!(
-            "Database: {}, Edition: {:?}, Tier: {:?}",
-            db_name, edition, tier
-        );
+        println!("Database: {db_name}, Edition: {edition:?}, Tier: {tier:?}");
     }
 
     client.close().await.expect("Close failed");
@@ -329,9 +321,8 @@ async fn test_azure_connection_with_timeout() {
     let password = std::env::var("AZURE_SQL_PASSWORD").expect("AZURE_SQL_PASSWORD required");
 
     let conn_str = format!(
-        "Server={};Database={};User Id={};Password={};Encrypt=true;\
-         TrustServerCertificate=false;Connect Timeout=30;Command Timeout=60",
-        host, database, user, password
+        "Server={host};Database={database};User Id={user};Password={password};Encrypt=true;\
+         TrustServerCertificate=false;Connect Timeout=30;Command Timeout=60"
     );
 
     let config = Config::from_connection_string(&conn_str).expect("Valid connection string");
@@ -425,14 +416,14 @@ async fn test_azure_unicode_support() {
 
     for (name, value) in test_strings {
         let rows = client
-            .query(&format!("SELECT N'{}'", value), &[])
+            .query(&format!("SELECT N'{value}'"), &[])
             .await
-            .unwrap_or_else(|_| panic!("Query for {} failed", name));
+            .unwrap_or_else(|_| panic!("Query for {name} failed"));
 
         for row_result in rows {
             let row = row_result.expect("Row error");
             let result: String = row.get(0).expect("Get failed");
-            assert_eq!(result, value, "{} string should roundtrip correctly", name);
+            assert_eq!(result, value, "{name} string should roundtrip correctly");
         }
     }
 

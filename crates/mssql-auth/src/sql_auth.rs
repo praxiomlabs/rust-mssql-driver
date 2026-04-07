@@ -123,35 +123,6 @@ impl std::fmt::Debug for SqlServerAuth {
     }
 }
 
-// Keep the old SqlAuthenticator for backward compatibility
-/// SQL Server authenticator (legacy API).
-///
-/// This is kept for backward compatibility. Prefer using [`SqlServerAuth`] instead.
-#[deprecated(since = "0.2.0", note = "Use SqlServerAuth instead")]
-pub struct SqlAuthenticator;
-
-#[allow(deprecated)]
-impl SqlAuthenticator {
-    /// Create a new SQL authenticator.
-    #[must_use]
-    pub fn new() -> Self {
-        Self
-    }
-
-    /// Encode a password for SQL Server Login7 packet.
-    #[must_use]
-    pub fn encode_password(password: &str) -> Vec<u8> {
-        SqlServerAuth::encode_password(password)
-    }
-}
-
-#[allow(deprecated)]
-impl Default for SqlAuthenticator {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
@@ -212,7 +183,7 @@ mod tests {
     #[test]
     fn test_debug_redacts_password() {
         let auth = SqlServerAuth::new("sa", "secret");
-        let debug = format!("{:?}", auth);
+        let debug = format!("{auth:?}");
         assert!(debug.contains("sa"));
         assert!(!debug.contains("secret"));
         assert!(debug.contains("[REDACTED]"));

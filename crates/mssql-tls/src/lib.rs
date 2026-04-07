@@ -59,10 +59,16 @@ pub use prelogin_wrapper::TlsPreloginWrapper;
 // Re-export tokio-rustls stream type for convenience
 pub use tokio_rustls::client::TlsStream;
 
+// Re-export rustls PKI types so users can construct TLS configs without adding
+// a direct dependency on the `rustls` crate. Changing these re-exports is a
+// semver-breaking change (this crate is coupled to rustls 0.23.x).
+pub use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+
 /// TDS TLS negotiation mode.
 ///
 /// This determines when TLS handshake occurs relative to TDS protocol messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum TlsNegotiationMode {
     /// TDS 7.x style: TLS handshake occurs after PreLogin exchange.
     ///

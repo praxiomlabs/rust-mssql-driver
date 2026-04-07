@@ -14,6 +14,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 /// This enum represents the various authentication methods supported.
 /// Credentials are designed to minimize copying of sensitive data.
 #[derive(Clone)]
+#[non_exhaustive]
 pub enum Credentials {
     /// SQL Server authentication with username and password.
     SqlServer {
@@ -48,7 +49,7 @@ pub enum Credentials {
     },
 
     /// Integrated Windows Authentication (Kerberos/NTLM).
-    #[cfg(feature = "integrated-auth")]
+    #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
     Integrated,
 
     /// Client certificate authentication.
@@ -80,6 +81,15 @@ impl Credentials {
         }
     }
 
+    /// Create integrated authentication credentials (Windows SSPI or Kerberos/GSSAPI).
+    ///
+    /// Requires the `sspi-auth` (Windows) or `integrated-auth` (Linux/macOS) feature.
+    #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+    #[must_use]
+    pub fn integrated() -> Self {
+        Self::Integrated
+    }
+
     /// Check if these credentials use SQL authentication.
     #[must_use]
     pub fn is_sql_auth(&self) -> bool {
@@ -108,7 +118,7 @@ impl Credentials {
             Self::AzureManagedIdentity { .. } => "Azure Managed Identity",
             #[cfg(feature = "azure-identity")]
             Self::AzureServicePrincipal { .. } => "Azure Service Principal",
-            #[cfg(feature = "integrated-auth")]
+            #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
             Self::Integrated => "Integrated Authentication",
             #[cfg(feature = "cert-auth")]
             Self::Certificate { .. } => "Certificate Authentication",
@@ -145,7 +155,7 @@ impl std::fmt::Debug for Credentials {
                 .field("client_id", client_id)
                 .field("client_secret", &"[REDACTED]")
                 .finish(),
-            #[cfg(feature = "integrated-auth")]
+            #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
             Self::Integrated => f.debug_struct("Integrated").finish(),
             #[cfg(feature = "cert-auth")]
             Self::Certificate { cert_path, .. } => f
@@ -250,7 +260,7 @@ enum SecureCredentialKind {
         client_id: String,
         client_secret: SecretString,
     },
-    #[cfg(feature = "integrated-auth")]
+    #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
     Integrated,
     #[cfg(feature = "cert-auth")]
     Certificate {
@@ -309,7 +319,7 @@ impl SecureCredentials {
             SecureCredentialKind::AzureManagedIdentity { .. } => "Azure Managed Identity",
             #[cfg(feature = "azure-identity")]
             SecureCredentialKind::AzureServicePrincipal { .. } => "Azure Service Principal",
-            #[cfg(feature = "integrated-auth")]
+            #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
             SecureCredentialKind::Integrated => "Integrated Authentication",
             #[cfg(feature = "cert-auth")]
             SecureCredentialKind::Certificate { .. } => "Certificate Authentication",
@@ -389,7 +399,7 @@ impl std::fmt::Debug for SecureCredentials {
                 .field("client_id", client_id)
                 .field("client_secret", &"[REDACTED]")
                 .finish(),
-            #[cfg(feature = "integrated-auth")]
+            #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
             SecureCredentialKind::Integrated => {
                 f.debug_struct("SecureCredentials::Integrated").finish()
             }
@@ -432,7 +442,7 @@ impl From<Credentials> for SecureCredentials {
                     client_secret: SecretString::new(client_secret.into_owned()),
                 },
             },
-            #[cfg(feature = "integrated-auth")]
+            #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
             Credentials::Integrated => SecureCredentials {
                 kind: SecureCredentialKind::Integrated,
             },
@@ -485,7 +495,7 @@ mod tests {
     #[test]
     fn test_credentials_debug_redacts_password() {
         let creds = Credentials::sql_server("user", "supersecret");
-        let debug = format!("{:?}", creds);
+        let debug = format!("{creds:?}");
         assert!(debug.contains("user"));
         assert!(!debug.contains("supersecret"));
         assert!(debug.contains("REDACTED"));
@@ -494,7 +504,7 @@ mod tests {
     #[test]
     fn test_credentials_debug_redacts_token() {
         let creds = Credentials::azure_token("supersecrettoken");
-        let debug = format!("{:?}", creds);
+        let debug = format!("{creds:?}");
         assert!(!debug.contains("supersecrettoken"));
         assert!(debug.contains("REDACTED"));
     }
@@ -524,7 +534,7 @@ mod tests {
         #[test]
         fn test_secret_string_debug_redacted() {
             let secret = SecretString::new("supersecret");
-            let debug = format!("{:?}", secret);
+            let debug = format!("{secret:?}");
             assert!(!debug.contains("supersecret"));
             assert!(debug.contains("REDACTED"));
         }
@@ -555,7 +565,7 @@ mod tests {
         #[test]
         fn test_secure_credentials_debug_redacts_password() {
             let creds = SecureCredentials::sql_server("user", "supersecret");
-            let debug = format!("{:?}", creds);
+            let debug = format!("{creds:?}");
             assert!(debug.contains("user"));
             assert!(!debug.contains("supersecret"));
             assert!(debug.contains("REDACTED"));
@@ -564,7 +574,7 @@ mod tests {
         #[test]
         fn test_secure_credentials_debug_redacts_token() {
             let creds = SecureCredentials::azure_token("supersecrettoken");
-            let debug = format!("{:?}", creds);
+            let debug = format!("{creds:?}");
             assert!(!debug.contains("supersecrettoken"));
             assert!(debug.contains("REDACTED"));
         }

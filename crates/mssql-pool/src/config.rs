@@ -41,16 +41,6 @@ pub struct PoolConfig {
     /// Whether to execute sp_reset_connection on return.
     pub sp_reset_connection: bool,
 
-    /// Deprecated: Use `sp_reset_connection` instead.
-    ///
-    /// This field is kept for backwards compatibility but has no effect.
-    /// Connection reset behavior is controlled by `sp_reset_connection`.
-    #[deprecated(
-        since = "0.5.2",
-        note = "Use sp_reset_connection instead; this field has no effect"
-    )]
-    pub reset_on_return: bool,
-
     /// Custom health check query (defaults to "SELECT 1").
     ///
     /// This query is executed to verify a connection is healthy.
@@ -66,7 +56,6 @@ pub struct PoolConfig {
 }
 
 impl Default for PoolConfig {
-    #[allow(deprecated)] // reset_on_return is deprecated but we still need to initialize it
     fn default() -> Self {
         Self {
             min_connections: 1,
@@ -78,7 +67,6 @@ impl Default for PoolConfig {
             test_on_checkin: false,
             health_check_interval: Duration::from_secs(30),
             sp_reset_connection: true,
-            reset_on_return: true,
             health_check_query: Arc::from(DEFAULT_HEALTH_CHECK_QUERY),
         }
     }
@@ -151,18 +139,6 @@ impl PoolConfig {
     #[must_use]
     pub fn sp_reset_connection(mut self, enabled: bool) -> Self {
         self.sp_reset_connection = enabled;
-        self
-    }
-
-    /// Deprecated: Use `sp_reset_connection` instead.
-    #[must_use]
-    #[deprecated(
-        since = "0.5.2",
-        note = "Use sp_reset_connection instead; this method has no effect"
-    )]
-    #[allow(deprecated)]
-    pub fn reset_on_return(self, _enabled: bool) -> Self {
-        // This is a no-op for backwards compatibility
         self
     }
 

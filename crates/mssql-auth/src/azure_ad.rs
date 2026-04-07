@@ -42,6 +42,7 @@ use crate::provider::{AuthData, AuthMethod, AuthProvider};
 /// These values indicate to the server which token library the client uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum FedAuthLibrary {
     /// ADAL (Azure Active Directory Authentication Library) - legacy.
     Adal = 0x01,
@@ -61,6 +62,7 @@ impl FedAuthLibrary {
 
 /// FEDAUTH workflow types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FedAuthWorkflow {
     /// Interactive authentication with user sign-in.
     Interactive,
@@ -325,7 +327,7 @@ mod tests {
     #[test]
     fn test_debug_redacts_token() {
         let auth = AzureAdAuth::with_token("secret_token");
-        let debug = format!("{:?}", auth);
+        let debug = format!("{auth:?}");
         assert!(!debug.contains("secret_token"));
         assert!(debug.contains("[REDACTED]"));
     }

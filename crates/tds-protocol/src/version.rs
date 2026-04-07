@@ -667,6 +667,6 @@ mod tests {
     #[test]
     fn test_sql_server_version_display() {
         let v = SqlServerVersion::from_raw(0x0D00189C, 2);
-        assert_eq!(format!("{}", v), "13.0.6300.2");
+        assert_eq!(format!("{v}"), "13.0.6300.2");
     }
 }

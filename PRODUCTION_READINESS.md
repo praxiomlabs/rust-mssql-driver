@@ -194,7 +194,7 @@ This document defines the criteria for declaring rust-mssql-driver production-re
 - [x] Unit test execution
 - [x] Integration tests with real SQL Server (Docker in CI)
 - [x] Cross-platform testing (Linux, macOS, Windows)
-- [x] MSRV verification (1.85)
+- [x] MSRV verification (1.88)
 - [x] Miri for unsafe code detection
 - [x] Semver checks (advisory for pre-1.0)
 - [x] Code coverage reporting (Codecov)
@@ -221,7 +221,7 @@ This document defines the criteria for declaring rust-mssql-driver production-re
 - [x] Azure SQL Managed Instance
 
 ### 7.2 Rust Versions
-- [x] MSRV 1.85 documented
+- [x] MSRV 1.88 documented
 - [x] MSRV enforced in CI
 
 ### 7.3 Platforms
@@ -296,7 +296,9 @@ The following are documented as known limitations, acceptable for initial releas
 | 0.1.0 Release | 2025-12-16 | Complete |
 | 0.5.0 Release | 2026-01-01 | Complete |
 | 0.5.1 Release | 2026-01-03 | Complete |
-| 0.5.2 Release | 2026-01-04 | In Progress |
+| 0.5.2 Release | 2026-01-04 | Complete |
+| 0.6.0 Release | 2026-01-12 | Complete |
+| 0.7.0 Release | 2026-04-07 | Complete (security + SSPI + pre-1.0 hardening) |
 | Test Coverage 60% | TBD | In Progress (46%) |
 | Security Audit | TBD | Not Scheduled |
 | 1.0.0 Release | TBD | Blocked |
@@ -322,7 +324,7 @@ cargo doc --workspace --no-deps --all-features
 cargo bench --workspace
 
 # MSRV verification
-cargo +1.85 check --workspace --all-features
+cargo +1.88 check --workspace --all-features
 ```
 
 ---

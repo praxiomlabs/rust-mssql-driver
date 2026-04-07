@@ -11,6 +11,7 @@ categories = ["database", "asynchronous"]
 
 [features]
 default = ["chrono", "uuid", "decimal", "encoding", "tls"]
+# Type support features — forwarded to mssql-types
 chrono = ["mssql-types/chrono", "dep:chrono"]
 uuid = ["mssql-types/uuid"]
 decimal = ["mssql-types/decimal", "dep:rust_decimal"]
@@ -23,11 +24,16 @@ otel = [
 # Secure credential handling with automatic memory zeroization
 zeroize = ["mssql-auth/zeroize"]
 # Always Encrypted client-side encryption support
+# Activates crypto deps in mssql-auth: aes, cbc, hmac, sha2, rsa, rand, parking_lot
 always-encrypted = ["mssql-auth/always-encrypted"]
-# Collation-aware string encoding/decoding for VARCHAR columns
-# Enables proper handling of non-ASCII text in VARCHAR/CHAR columns with
-# locale-specific encodings (Japanese Shift_JIS, Chinese GB18030/Big5, Korean EUC-KR, etc.)
+# Collation-aware string encoding/decoding for VARCHAR columns.
+# Forwarded to both tds-protocol (wire-level) and mssql-types (type-level).
+# Both use encoding_rs for codec support.
 encoding = ["tds-protocol/encoding", "mssql-types/encoding"]
+# Integrated authentication (Kerberos/SPNEGO) - Linux/macOS
+integrated-auth = ["mssql-auth/integrated-auth"]
+# Windows SSPI integrated authentication
+sspi-auth = ["mssql-auth/sspi-auth"]
 # TLS/SSL encryption support (enabled by default)
 # Disable this feature for environments where TLS is not needed (enterprise internal networks,
 # legacy SQL Server instances, or development environments) to reduce binary size and compile time.

@@ -58,6 +58,7 @@ pub trait DynConnectionLifecycle: Send + Sync {
 
 /// Health check result with timing information.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct HealthCheckResult {
     /// Whether the health check passed.
     pub healthy: bool,
@@ -89,6 +90,7 @@ impl HealthCheckResult {
 
 /// Connection state tracked by the pool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ConnectionState {
     /// Connection is idle and available for use.
     Idle,
@@ -128,6 +130,7 @@ impl ConnectionState {
 
 /// Metadata about a pooled connection.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ConnectionMetadata {
     /// Unique identifier for this connection.
     pub id: u64,

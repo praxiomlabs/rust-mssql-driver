@@ -32,8 +32,7 @@ fn get_test_config() -> Option<Config> {
     let encrypt = std::env::var("MSSQL_ENCRYPT").unwrap_or_else(|_| "false".into());
 
     let conn_str = format!(
-        "Server={};Database={};User Id={};Password={};TrustServerCertificate=true;Encrypt={}",
-        host, database, user, password, encrypt
+        "Server={host};Database={database};User Id={user};Password={password};TrustServerCertificate=true;Encrypt={encrypt}"
     );
 
     Config::from_connection_string(&conn_str).ok()
@@ -231,7 +230,7 @@ async fn test_pool_concurrent_access() {
 
             // Execute a query
             let rows = conn
-                .query(&format!("SELECT {} AS task_id", i), &[])
+                .query(&format!("SELECT {i} AS task_id"), &[])
                 .await
                 .expect("Query failed");
 
@@ -285,7 +284,7 @@ async fn test_pool_concurrent_stress_test() {
                 Ok(mut conn) => {
                     // Execute multiple queries per connection
                     for j in 0..3 {
-                        let sql = format!("SELECT {} + {} AS sum", i, j);
+                        let sql = format!("SELECT {i} + {j} AS sum");
                         match conn.query(&sql, &[]).await {
                             Ok(rows) => {
                                 let values: Vec<i32> = rows
@@ -297,14 +296,14 @@ async fn test_pool_concurrent_stress_test() {
                                 success_count.fetch_add(1, Ordering::Relaxed);
                             }
                             Err(e) => {
-                                eprintln!("Query {} failed: {:?}", i, e);
+                                eprintln!("Query {i} failed: {e:?}");
                                 error_count.fetch_add(1, Ordering::Relaxed);
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("Failed to get connection {}: {:?}", i, e);
+                    eprintln!("Failed to get connection {i}: {e:?}");
                     error_count.fetch_add(1, Ordering::Relaxed);
                 }
             }
@@ -319,10 +318,7 @@ async fn test_pool_concurrent_stress_test() {
     let successes = success_count.load(Ordering::Relaxed);
     let errors = error_count.load(Ordering::Relaxed);
 
-    println!(
-        "Stress test results: {} successes, {} errors",
-        successes, errors
-    );
+    println!("Stress test results: {successes} successes, {errors} errors");
 
     // We expect all 150 queries (50 tasks * 3 queries each) to succeed
     assert_eq!(successes, 150, "All queries should succeed");
@@ -374,7 +370,7 @@ async fn test_pool_metrics() {
     // Checkout success rate should be 100%
     assert!((metrics.checkout_success_rate() - 1.0).abs() < f64::EPSILON);
 
-    println!("Metrics: {:?}", metrics);
+    println!("Metrics: {metrics:?}");
 
     pool.close().await;
 }
@@ -446,7 +442,7 @@ async fn test_pool_connection_timeout() {
     // Try to get another connection - should timeout
     let result = pool.get().await;
     assert!(
-        matches!(result, Err(PoolError::Timeout)),
+        matches!(result, Err(PoolError::Timeout { .. })),
         "Should timeout waiting for connection"
     );
 
@@ -535,15 +531,13 @@ async fn test_pool_high_throughput() {
     let qps = total_queries as f64 / elapsed.as_secs_f64();
 
     println!(
-        "High throughput test: {} queries in {:?} ({:.2} queries/second)",
-        total_queries, elapsed, qps
+        "High throughput test: {total_queries} queries in {elapsed:?} ({qps:.2} queries/second)"
     );
 
     // Should be able to handle at least 100 queries per second (conservative)
     assert!(
         qps >= 100.0,
-        "Should achieve at least 100 queries/second, got {}",
-        qps
+        "Should achieve at least 100 queries/second, got {qps}"
     );
 
     pool.close().await;
@@ -574,7 +568,7 @@ async fn test_pool_connection_churn() {
         handles.push(tokio::spawn(async move {
             // Get connection, execute query, return
             if let Ok(mut conn) = pool.get().await {
-                let sql = format!("SELECT {} AS iteration", i);
+                let sql = format!("SELECT {i} AS iteration");
                 if conn.query(&sql, &[]).await.is_ok() {
                     success_count.fetch_add(1, Ordering::Relaxed);
                 }
@@ -591,7 +585,7 @@ async fn test_pool_connection_churn() {
 
     // Verify metrics after churn
     let metrics = pool.metrics();
-    println!("Connection churn metrics: {:?}", metrics);
+    println!("Connection churn metrics: {metrics:?}");
 
     // Should have reused connections heavily (not created 100 connections)
     assert!(
@@ -633,7 +627,7 @@ async fn test_pool_sustained_load() {
             for query_id in 0..50 {
                 match pool.get().await {
                     Ok(mut conn) => {
-                        let sql = format!("SELECT {} * 100 + {} AS id", worker_id, query_id);
+                        let sql = format!("SELECT {worker_id} * 100 + {query_id} AS id");
                         match conn.query(&sql, &[]).await {
                             Ok(rows) => {
                                 let values: Vec<i32> = rows
@@ -680,7 +674,7 @@ async fn test_pool_sustained_load() {
     assert_eq!(errors, 0, "No errors should occur");
 
     let metrics = pool.metrics();
-    println!("Final pool metrics: {:?}", metrics);
+    println!("Final pool metrics: {metrics:?}");
 
     pool.close().await;
 }
@@ -771,7 +765,7 @@ async fn test_pool_no_deadlock_under_contention() {
                     .expect("Should get connection without deadlock");
 
                 // Simulate some work
-                let sql = format!("SELECT {} + {} AS result", i, j);
+                let sql = format!("SELECT {i} + {j} AS result");
                 let _ = conn.query(&sql, &[]).await;
 
                 // Important: Drop connection before getting next one
@@ -825,7 +819,7 @@ async fn test_pool_no_deadlock_nested_acquisition() {
     // Trying to get another should timeout, not deadlock
     let result = pool.get().await;
     assert!(
-        matches!(result, Err(PoolError::Timeout)),
+        matches!(result, Err(PoolError::Timeout { .. })),
         "Should timeout, not deadlock"
     );
 
@@ -878,7 +872,7 @@ async fn test_pool_semaphore_fairness() {
     }
 
     let final_order = order.lock().unwrap().clone();
-    println!("Connection acquisition order: {:?}", final_order);
+    println!("Connection acquisition order: {final_order:?}");
 
     // First task should always be first (it started first and no queue yet)
     assert_eq!(final_order[0], 0, "First task should get connection first");
@@ -895,8 +889,7 @@ async fn test_pool_semaphore_fairness() {
     // Tokio's semaphore is FIFO, so we expect very few inversions (ideally 0)
     assert!(
         inversions <= 1,
-        "Too many order inversions ({}), semaphore may not be fair",
-        inversions
+        "Too many order inversions ({inversions}), semaphore may not be fair"
     );
 
     pool.close().await;

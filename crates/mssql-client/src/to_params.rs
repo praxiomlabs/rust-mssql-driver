@@ -39,6 +39,7 @@ use mssql_types::{SqlValue, ToSql, TypeError};
 
 /// A named query parameter.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct NamedParam {
     /// Parameter name (without @ prefix).
     pub name: String,
@@ -71,9 +72,9 @@ impl NamedParam {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
 /// use mssql_client::{ToParams, NamedParam};
-/// use mssql_types::{ToSql, TypeError};
+/// use mssql_types::TypeError;
 ///
 /// struct NewUser {
 ///     name: String,

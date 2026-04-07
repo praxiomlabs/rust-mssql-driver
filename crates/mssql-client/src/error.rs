@@ -20,11 +20,21 @@ pub enum Error {
     #[error("authentication failed: {0}")]
     Authentication(#[from] mssql_auth::AuthError),
 
-    /// TLS error (string for flexibility in connection code).
+    /// TLS error.
+    #[cfg(feature = "tls")]
+    #[error("TLS error: {0}")]
+    Tls(#[from] mssql_tls::TlsError),
+
+    /// TLS error (when TLS feature is disabled, stores the message).
+    #[cfg(not(feature = "tls"))]
     #[error("TLS error: {0}")]
     Tls(String),
 
-    /// Protocol error (string for flexibility in connection code).
+    /// Protocol error from the TDS layer (preserves the source error chain).
+    #[error("protocol error: {0}")]
+    ProtocolError(#[from] tds_protocol::ProtocolError),
+
+    /// Protocol violation with a descriptive message.
     #[error("protocol error: {0}")]
     Protocol(String),
 
@@ -41,7 +51,7 @@ pub enum Error {
     Query(String),
 
     /// Server returned an error.
-    #[error("server error {number}: {message}")]
+    #[error("server error {number} (severity {class}, state {state}): {message}{}", format_server_location(.server, .procedure, .line))]
     Server {
         /// Error number.
         number: i32,
@@ -59,25 +69,36 @@ pub enum Error {
         line: u32,
     },
 
-    /// Transaction error.
-    #[error("transaction error: {0}")]
-    Transaction(String),
-
     /// Configuration error.
     #[error("configuration error: {0}")]
     Config(String),
 
     /// TCP connection timeout occurred.
-    #[error("connection timed out")]
-    ConnectTimeout,
+    #[error("TCP connection timed out connecting to {host}:{port}")]
+    ConnectTimeout {
+        /// Target host.
+        host: String,
+        /// Target port.
+        port: u16,
+    },
 
     /// TLS handshake timeout occurred.
-    #[error("TLS handshake timed out")]
-    TlsTimeout,
+    #[error("TLS handshake timed out with {host}:{port}")]
+    TlsTimeout {
+        /// Target host.
+        host: String,
+        /// Target port.
+        port: u16,
+    },
 
-    /// Connection timeout occurred (alias for backwards compatibility).
-    #[error("connection timed out")]
-    ConnectionTimeout,
+    /// Login/authentication response timeout occurred.
+    #[error("login timed out for {host}:{port}")]
+    LoginTimeout {
+        /// Target host.
+        host: String,
+        /// Target port.
+        port: u16,
+    },
 
     /// Command execution timeout occurred.
     #[error("command timed out")]
@@ -101,7 +122,7 @@ pub enum Error {
 
     /// IO error (wrapped in Arc for Clone support).
     #[error("IO error: {0}")]
-    Io(Arc<std::io::Error>),
+    Io(#[source] SharedIoError),
 
     /// Invalid identifier (potential SQL injection attempt).
     #[error("invalid identifier: {0}")]
@@ -120,22 +141,32 @@ pub enum Error {
     Cancelled,
 }
 
-#[cfg(feature = "tls")]
-impl From<mssql_tls::TlsError> for Error {
-    fn from(e: mssql_tls::TlsError) -> Self {
-        Error::Tls(e.to_string())
+// Note: From<mssql_tls::TlsError> and From<tds_protocol::ProtocolError> are
+// derived via #[from] on the enum variants above, preserving the full error chain.
+
+/// A cloneable wrapper around `std::io::Error` that preserves the error source chain.
+///
+/// `Arc<io::Error>` does not implement `std::error::Error`, which breaks
+/// `source()` chain traversal used by libraries like `anyhow` and `eyre`.
+/// This newtype bridges the gap.
+#[derive(Debug, Clone)]
+pub struct SharedIoError(Arc<std::io::Error>);
+
+impl std::fmt::Display for SharedIoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 
-impl From<tds_protocol::ProtocolError> for Error {
-    fn from(e: tds_protocol::ProtocolError) -> Self {
-        Error::Protocol(e.to_string())
+impl std::error::Error for SharedIoError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.source()
     }
 }
 
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
-        Error::Io(Arc::new(e))
+        Error::Io(SharedIoError(Arc::new(e)))
     }
 }
 
@@ -158,11 +189,12 @@ impl Error {
     #[must_use]
     pub fn is_transient(&self) -> bool {
         match self {
-            Self::ConnectTimeout
-            | Self::TlsTimeout
-            | Self::ConnectionTimeout
+            Self::ConnectTimeout { .. }
+            | Self::TlsTimeout { .. }
+            | Self::LoginTimeout { .. }
             | Self::CommandTimeout
             | Self::ConnectionClosed
+            | Self::Connection(_)
             | Self::Routing { .. }
             | Self::PoolExhausted
             | Self::Io(_) => true,
@@ -174,6 +206,28 @@ impl Error {
     /// Check if a server error number is transient (may succeed on retry).
     ///
     /// This follows the error codes specified in ADR-009.
+    ///
+    /// # Extending with custom error codes
+    ///
+    /// Applications with domain-specific transient error codes can compose
+    /// this method with their own logic:
+    ///
+    /// ```rust
+    /// use mssql_client::Error;
+    ///
+    /// fn is_transient_for_my_app(err: &Error) -> bool {
+    ///     // Check built-in transient codes first
+    ///     if err.is_transient() {
+    ///         return true;
+    ///     }
+    ///     // Add application-specific transient server errors
+    ///     if let Error::Server { number, .. } = err {
+    ///         matches!(number, 50001 | 50002) // custom app error codes
+    ///     } else {
+    ///         false
+    ///     }
+    /// }
+    /// ```
     #[must_use]
     pub fn is_transient_server_error(number: i32) -> bool {
         matches!(
@@ -208,7 +262,13 @@ impl Error {
     #[must_use]
     pub fn is_terminal(&self) -> bool {
         match self {
-            Self::Config(_) | Self::InvalidIdentifier(_) => true,
+            Self::Config(_)
+            | Self::InvalidIdentifier(_)
+            | Self::Protocol(_)
+            | Self::ProtocolError(_)
+            | Self::Tls(_)
+            | Self::Authentication(_)
+            | Self::Cancel(_) => true,
             Self::Server { number, .. } => Self::is_terminal_server_error(*number),
             _ => false,
         }
@@ -233,10 +293,34 @@ impl Error {
     /// Check if this error indicates a protocol/driver bug.
     ///
     /// Protocol errors typically indicate a bug in the driver implementation
-    /// rather than a user error or server issue.
+    /// rather than a user error or server issue. These are always terminal.
     #[must_use]
     pub fn is_protocol_error(&self) -> bool {
-        matches!(self, Self::Protocol(_))
+        matches!(self, Self::Protocol(_) | Self::ProtocolError(_))
+    }
+
+    /// Check if this is a TLS/encryption error.
+    ///
+    /// TLS errors indicate certificate, handshake, or encryption failures.
+    /// These are terminal — TLS timeouts are reported as [`Error::TlsTimeout`] instead.
+    #[must_use]
+    pub fn is_tls_error(&self) -> bool {
+        matches!(self, Self::Tls(_) | Self::TlsTimeout { .. })
+    }
+
+    /// Check if this is an authentication error.
+    #[must_use]
+    pub fn is_authentication_error(&self) -> bool {
+        matches!(self, Self::Authentication(_))
+    }
+
+    /// Check if this is a configuration error.
+    ///
+    /// Configuration errors are always terminal — they indicate invalid
+    /// settings that cannot be resolved by retrying.
+    #[must_use]
+    pub fn is_config_error(&self) -> bool {
+        matches!(self, Self::Config(_))
     }
 
     /// Check if this is a server error with a specific number.
@@ -267,6 +351,33 @@ impl Error {
     }
 }
 
+/// Format the server/procedure/line suffix for server error Display.
+fn format_server_location(
+    server: &Option<String>,
+    procedure: &Option<String>,
+    line: &u32,
+) -> String {
+    let mut parts = Vec::new();
+    if let Some(srv) = server {
+        if !srv.is_empty() {
+            parts.push(format!("server: {srv}"));
+        }
+    }
+    if let Some(proc) = procedure {
+        if !proc.is_empty() {
+            parts.push(format!("procedure: {proc}"));
+        }
+    }
+    if *line > 0 {
+        parts.push(format!("line: {line}"));
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", parts.join(", "))
+    }
+}
+
 /// Result type for client operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -290,7 +401,27 @@ mod tests {
 
     #[test]
     fn test_is_transient_connection_errors() {
-        assert!(Error::ConnectionTimeout.is_transient());
+        assert!(
+            Error::ConnectTimeout {
+                host: "test".into(),
+                port: 1433
+            }
+            .is_transient()
+        );
+        assert!(
+            Error::TlsTimeout {
+                host: "test".into(),
+                port: 1433
+            }
+            .is_transient()
+        );
+        assert!(
+            Error::LoginTimeout {
+                host: "test".into(),
+                port: 1433
+            }
+            .is_transient()
+        );
         assert!(Error::CommandTimeout.is_transient());
         assert!(Error::ConnectionClosed.is_transient());
         assert!(Error::PoolExhausted.is_transient());
@@ -306,7 +437,7 @@ mod tests {
     #[test]
     fn test_is_transient_io_error() {
         let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "reset");
-        assert!(Error::Io(Arc::new(io_err)).is_transient());
+        assert!(Error::Io(SharedIoError(Arc::new(io_err))).is_transient());
     }
 
     #[test]
@@ -370,7 +501,13 @@ mod tests {
     #[test]
     fn test_is_not_terminal() {
         // Non-terminal errors (may be transient or other)
-        assert!(!Error::ConnectionTimeout.is_terminal());
+        assert!(
+            !Error::ConnectTimeout {
+                host: "test".into(),
+                port: 1433
+            }
+            .is_terminal()
+        );
         assert!(!make_server_error(1205).is_terminal()); // Deadlock - transient, not terminal
         assert!(!make_server_error(40501).is_terminal()); // Service busy - transient
     }
@@ -397,7 +534,14 @@ mod tests {
         assert_eq!(err.class(), Some(16));
         assert_eq!(err.severity(), Some(16));
 
-        assert_eq!(Error::ConnectionTimeout.class(), None);
+        assert_eq!(
+            Error::ConnectTimeout {
+                host: "test".into(),
+                port: 1433
+            }
+            .class(),
+            None
+        );
     }
 
     #[test]
@@ -406,6 +550,12 @@ mod tests {
         assert!(err.is_server_error(102));
         assert!(!err.is_server_error(103));
 
-        assert!(!Error::ConnectionTimeout.is_server_error(102));
+        assert!(
+            !Error::ConnectTimeout {
+                host: "test".into(),
+                port: 1433
+            }
+            .is_server_error(102)
+        );
     }
 }

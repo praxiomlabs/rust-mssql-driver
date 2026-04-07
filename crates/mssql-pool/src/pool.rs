@@ -156,11 +156,36 @@ impl Pool {
             wait_queue_depth: AtomicU64::new(0),
         });
 
-        // Start the reaper task for connection cleanup
+        // Start the reaper task for connection cleanup.
+        // The task is wrapped in a restart loop so that a panic in one
+        // iteration does not permanently kill idle-connection eviction.
         let reaper_inner = Arc::clone(&inner);
         let reaper_interval = config.health_check_interval;
         tokio::spawn(async move {
-            Self::reaper_task(reaper_inner, reaper_interval).await;
+            loop {
+                let inner = Arc::clone(&reaper_inner);
+                let result = tokio::task::spawn(Self::reaper_task(inner, reaper_interval)).await;
+
+                match result {
+                    Ok(()) => {
+                        // Reaper exited cleanly (pool closed)
+                        break;
+                    }
+                    Err(join_error) => {
+                        // Reaper panicked — log and restart after a delay
+                        tracing::error!(
+                            error = %join_error,
+                            "pool reaper task panicked, restarting in 5s"
+                        );
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+
+                        // If the pool was closed while we were sleeping, stop
+                        if reaper_inner.closed.load(Ordering::Acquire) {
+                            break;
+                        }
+                    }
+                }
+            }
         });
 
         let pool = Self {
@@ -364,10 +389,18 @@ impl Pool {
                 return Err(PoolError::PoolClosed);
             }
             Err(_) => {
-                // Timeout waiting for semaphore
-                self.inner.wait_queue_depth.fetch_sub(1, Ordering::Relaxed);
+                // Timeout waiting for semaphore — capture pool state for diagnostics
+                let current_waiters =
+                    self.inner.wait_queue_depth.fetch_sub(1, Ordering::Relaxed) as u32;
                 self.inner.metrics.lock().checkouts_failed += 1;
-                return Err(PoolError::Timeout);
+                let idle = self.inner.idle_connections.lock().len() as u32;
+                let in_use = self.inner.in_use_count.load(Ordering::Relaxed) as u32;
+                return Err(PoolError::Timeout {
+                    capacity: self.config.max_connections,
+                    in_use,
+                    idle,
+                    waiters: current_waiters,
+                });
             }
         };
 
@@ -430,7 +463,7 @@ impl Pool {
                             Err(e) => {
                                 drop(permit);
                                 self.inner.metrics.lock().checkouts_failed += 1;
-                                return Err(PoolError::Connection(e.to_string()));
+                                return Err(PoolError::Connection(e));
                             }
                         }
                     } else {
@@ -455,7 +488,7 @@ impl Pool {
                         // Return the permit since we failed to create connection
                         drop(permit);
                         self.inner.metrics.lock().checkouts_failed += 1;
-                        return Err(PoolError::Connection(e.to_string()));
+                        return Err(PoolError::Connection(e));
                     }
                 }
             }
@@ -799,6 +832,10 @@ pub struct PoolMetrics {
     /// Connection resets performed.
     pub resets_performed: u64,
     /// Connection resets that failed.
+    ///
+    /// Currently always 0 because the RESETCONNECTION flag is set on the TDS
+    /// packet header and cannot fail independently. Reserved for future use
+    /// if an explicit `sp_reset_connection` path is added.
     pub resets_failed: u64,
     /// Connections closed due to idle timeout expiration.
     pub connections_idle_expired: u64,
@@ -893,13 +930,13 @@ impl PooledConnection {
         sql: &str,
         params: &[&(dyn mssql_client::ToSql + Sync)],
     ) -> Result<mssql_client::QueryStream<'a>, PoolError> {
-        let client = self.client.as_mut().ok_or(PoolError::Connection(
+        let client = self.client.as_mut().ok_or(PoolError::ConnectionCreation(
             "connection detached or invalid".to_string(),
         ))?;
         client
             .query(sql, params)
             .await
-            .map_err(|e| PoolError::Connection(e.to_string()))
+            .map_err(PoolError::Connection)
     }
 
     /// Execute a statement on this pooled connection.
@@ -908,13 +945,13 @@ impl PooledConnection {
         sql: &str,
         params: &[&(dyn mssql_client::ToSql + Sync)],
     ) -> Result<u64, PoolError> {
-        let client = self.client.as_mut().ok_or(PoolError::Connection(
+        let client = self.client.as_mut().ok_or(PoolError::ConnectionCreation(
             "connection detached or invalid".to_string(),
         ))?;
         client
             .execute(sql, params)
             .await
-            .map_err(|e| PoolError::Connection(e.to_string()))
+            .map_err(PoolError::Connection)
     }
 }
 

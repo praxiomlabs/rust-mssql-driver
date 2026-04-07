@@ -4,6 +4,7 @@ use thiserror::Error;
 
 /// Errors that can occur during type conversion.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum TypeError {
     /// Value is null when non-null was expected.
     #[error("unexpected null value")]
@@ -66,4 +67,24 @@ pub enum TypeError {
         /// Bytes available.
         available: usize,
     },
+}
+
+impl TypeError {
+    /// Check if this error is transient and may succeed on retry.
+    ///
+    /// Type conversion errors are always terminal — they indicate
+    /// a mismatch between the SQL type and the Rust type, which
+    /// won't resolve itself on retry.
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        false
+    }
+
+    /// Check if this error is terminal and will never succeed on retry.
+    ///
+    /// All type errors are terminal.
+    #[must_use]
+    pub fn is_terminal(&self) -> bool {
+        true
+    }
 }

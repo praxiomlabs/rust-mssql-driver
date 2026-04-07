@@ -117,7 +117,7 @@ impl<S: AsyncRead + Unpin> AsyncRead for TlsPreloginWrapper<S> {
             if packet_type != PACKET_TYPE_PRELOGIN {
                 return Poll::Ready(Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("Expected PreLogin packet (0x12), got 0x{:02X}", packet_type),
+                    format!("Expected PreLogin packet (0x12), got 0x{packet_type:02X}"),
                 )));
             }
 

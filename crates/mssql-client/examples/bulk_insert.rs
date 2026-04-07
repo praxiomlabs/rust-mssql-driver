@@ -25,8 +25,7 @@ async fn main() -> Result<(), Error> {
     let password = std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "Password123!".into());
 
     let conn_str = format!(
-        "Server={};Database={};User Id={};Password={};TrustServerCertificate=true",
-        host, database, user, password
+        "Server={host};Database={database};User Id={user};Password={password};TrustServerCertificate=true"
     );
 
     let config = Config::from_connection_string(&conn_str)?;
@@ -74,8 +73,8 @@ async fn main() -> Result<(), Error> {
         .with_options(options.clone())
         .with_typed_columns(columns.clone());
 
-    let insert_bulk_sql = builder.build_insert_bulk_statement();
-    println!("INSERT BULK statement: {}", insert_bulk_sql);
+    let insert_bulk_sql = builder.build_insert_bulk_statement()?;
+    println!("INSERT BULK statement: {insert_bulk_sql}");
 
     println!("Starting bulk insert...");
 
@@ -87,7 +86,7 @@ async fn main() -> Result<(), Error> {
     for i in 0..num_rows {
         let row = vec![
             SqlValue::Int(i),
-            SqlValue::String(format!("User_{}", i)),
+            SqlValue::String(format!("User_{i}")),
             SqlValue::Null, // Using NULL for simplicity; real code could use Decimal
         ];
 
@@ -130,7 +129,7 @@ async fn main() -> Result<(), Error> {
     for result in rows {
         let row = result?;
         let status: String = row.get(0)?;
-        println!("Status: {}", status);
+        println!("Status: {status}");
     }
 
     client.close().await?;

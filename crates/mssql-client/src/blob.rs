@@ -488,7 +488,7 @@ mod tests {
     #[test]
     fn test_blob_reader_debug() {
         let reader = BlobReader::from_bytes(Bytes::from_static(b"test"));
-        let debug = format!("{:?}", reader);
+        let debug = format!("{reader:?}");
 
         assert!(debug.contains("BlobReader"));
         assert!(debug.contains("total_len"));

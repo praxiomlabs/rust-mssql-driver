@@ -1,10 +1,10 @@
 # Architectural Reference: High-Performance Rust MS SQL Driver
 
-**Version:** 1.5.0
-**Status:** Design Complete (v0.5.0 Released)
+**Version:** 1.6.0
+**Status:** Design Complete (v0.7.0 Released)
 **Target Protocol:** MS-TDS 7.3 – 8.0 (SQL Server 2008 – 2025)
 **Toolchain Standard:** Rust 2024 Edition (v1.85+, released February 20, 2025)
-**MSRV Policy:** Rust 1.85.0 (6-month rolling window)
+**MSRV Policy:** Rust 1.88.0 (6-month rolling window aligned with Tokio's policy)
 
 ---
 
@@ -77,7 +77,7 @@ The project follows a **Flat Workspace** layout. The root `Cargo.toml` is a virt
 ```
 mssql-driver/
 ├── Cargo.toml                    # Virtual manifest
-├── rust-toolchain.toml           # Pin to 1.85+
+├── rust-toolchain.toml           # Pin to 1.88+
 ├── deny.toml                     # cargo-deny configuration
 ├── hakari.toml                   # cargo-hakari configuration
 ├── crates/
@@ -404,6 +404,12 @@ let config = Config::builder()
 
 Token acquisition uses `azure_identity` crate for HTTP calls to identity endpoints.
 
+> **Known trade-off:** The `azure-identity` feature pulls in `openssl` as a transitive
+> dependency via the Azure SDK. This contradicts the project's rustls-only philosophy
+> but is unavoidable — the Azure SDK for Rust does not provide rustls-only builds.
+> This only affects users who enable the `azure-identity` feature; the default build
+> remains pure-Rust with rustls.
+
 **Tier 3 (Enterprise/Legacy — `integrated-auth` Feature):**
 
 | Method | Platform | Implementation |
@@ -707,9 +713,9 @@ resolver = "2"
 members = ["crates/*", "xtask"]
 
 [workspace.package]
-version = "0.5.2"
+version = "0.7.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/praxiomlabs/rust-mssql-driver"
 
@@ -1108,7 +1114,7 @@ enum ProtocolState {
 
 #### Async Trait Implementation Note
 
-With MSRV 1.85 (Rust 2024 Edition), native `async fn` in traits is stable. The driver uses native async traits where possible, reducing reliance on the `#[async_trait]` proc macro and its associated overhead:
+With MSRV 1.88 (Rust 2024 Edition), native `async fn` in traits is stable. The driver uses native async traits where possible, reducing reliance on the `#[async_trait]` proc macro and its associated overhead:
 
 ```rust
 // Native async trait (preferred - no macro overhead, better compiler errors)
@@ -1162,9 +1168,15 @@ pub enum Error {
     #[error("Configuration error: {0}")]
     Config(#[from] ConfigError),
     
-    #[error("Connection timeout")]
-    ConnectionTimeout,
-    
+    #[error("TCP connect timeout to {host}:{port}")]
+    ConnectTimeout { host: String, port: u16 },
+
+    #[error("TLS handshake timeout to {host}:{port}")]
+    TlsTimeout { host: String, port: u16 },
+
+    #[error("Login timeout to {host}:{port}")]
+    LoginTimeout { host: String, port: u16 },
+
     #[error("Command timeout")]
     CommandTimeout,
     
@@ -1211,7 +1223,9 @@ impl Error {
                 std::io::ErrorKind::TimedOut
             ),
             Error::Server(e) => e.is_transient(),
-            Error::ConnectionTimeout => true,
+            Error::ConnectTimeout { .. } => true,
+            Error::TlsTimeout { .. } => true,
+            Error::LoginTimeout { .. } => true,
             Error::CommandTimeout => true,
             Error::PoolExhausted => true,
             _ => false,
@@ -1856,13 +1870,13 @@ pub async fn query(&mut self, sql: &str) -> Result<QueryStream<'_>, Error> {
 
 **Policy:** Rolling 6-month MSRV window aligned with Tokio's policy.
 
-**Current MSRV:** Rust 1.85.0 (Rust 2024 Edition)
+**Current MSRV:** Rust 1.88.0 (Rust 2024 Edition)
 
 **Enforcement:**
 ```toml
 # Cargo.toml
 [package]
-rust-version = "1.85"
+rust-version = "1.88"
 ```
 
 **CI Verification:**
@@ -1871,7 +1885,7 @@ msrv:
   runs-on: ubuntu-latest
   steps:
     - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@1.85.0
+    - uses: dtolnay/rust-toolchain@1.88.0
     - run: cargo check --all-features
 ```
 
@@ -2047,21 +2061,30 @@ msrv:
 
 ### 8.3 Feature Flag Matrix
 
-| Feature | Default | Dependencies Added | Status |
-|---------|---------|-------------------|--------|
-| `default` | ✅ | Core functionality | Stable |
-| `chrono` | ✅ | `chrono` for date/time types | Stable |
-| `uuid` | ✅ | `uuid` for UNIQUEIDENTIFIER | Stable |
-| `decimal` | ✅ | `rust_decimal` for DECIMAL/NUMERIC | Stable |
-| `json` | ❌ | `serde_json` for JSON parsing | Stable |
-| `azure-identity` | ❌ | `azure_identity` | Stable |
-| `integrated-auth` | ❌ | `gssapi` (Linux/macOS) | Stable |
-| `sspi-auth` | ❌ | `sspi-rs` (cross-platform) | Stable |
-| `cert-auth` | ❌ | None (uses rustls) | Stable |
-| `otel` | ❌ | `opentelemetry`, `tracing-opentelemetry` | Stable |
-| `zeroize` | ❌ | `zeroize` for credential cleanup | Stable |
-| `always-encrypted` | ❌ | Cryptography dependencies | Stable |
-| `encoding` | ❌ | `encoding_rs` | Stable |
+Features are defined on `mssql-client` and forwarded to internal crates as needed.
+
+| Feature | Default | Crate(s) Activated | Platform | Dependencies Added |
+|---------|---------|-------------------|----------|-------------------|
+| `chrono` | ✅ | mssql-types | All | `chrono` |
+| `uuid` | ✅ | mssql-types | All | `uuid` |
+| `decimal` | ✅ | mssql-types | All | `rust_decimal` |
+| `encoding` | ✅ | tds-protocol, mssql-types | All | `encoding_rs` |
+| `tls` | ✅ | mssql-tls | All | `rustls`, `tokio-rustls` |
+| `json` | ❌ | mssql-types | All | `serde_json` |
+| `otel` | ❌ | (local to mssql-client) | All | `opentelemetry`, `tracing-opentelemetry` |
+| `zeroize` | ❌ | mssql-auth | All | `zeroize` |
+| `always-encrypted` | ❌ | mssql-auth | All | `aes`, `cbc`, `hmac`, `sha2`, `rsa`, `rand` |
+| `azure-identity` | ❌ | mssql-auth | All | `azure_identity` (pulls OpenSSL transitively) |
+| `integrated-auth` | ❌ | mssql-auth | Linux/macOS | `gssapi`, `libkrb5-dev` |
+| `sspi-auth` | ❌ | mssql-auth | Windows | `sspi-rs` |
+| `cert-auth` | ❌ | mssql-auth | All | None (uses rustls) |
+
+Features on `mssql-auth` only (not exposed via `mssql-client`):
+
+| Feature | Dependencies | Notes |
+|---------|-------------|-------|
+| `azure-keyvault` | `azure_security_keyvault_keys` | Requires `always-encrypted` + `azure-identity` |
+| `windows-certstore` | Windows Crypto API (FFI) | Requires `always-encrypted`, Windows only |
 
 ### 8.4 Migration Guide from Tiberius
 
@@ -2173,6 +2196,7 @@ let client = Client::connect(&connection_string).await?;
 | 1.3.0 | 2025-12-25 | Updated for v0.3.0 release: Always Encrypted key providers (InMemoryKeyStore, KeyStoreProvider trait), true LOB streaming (LobStream), Change Tracking integration, all 12 data type parsing fixes complete |
 | 1.4.0 | 2025-12-31 | Updated for v0.4.0 release: TDS 7.3 protocol support (SQL Server 2008/2008 R2), TdsVersion configuration, version negotiation |
 | 1.5.0 | 2026-01-01 | Updated for v0.5.0 release: Collation-aware VARCHAR decoding, encoding feature, Column marked non_exhaustive |
+| 1.6.0 | 2026-04-07 | Updated for v0.7.0 release: MSRV bumped to 1.88, SSPI integrated auth wired into client login, RUSTSEC advisories resolved, 33 public enums marked non_exhaustive for semver safety, deprecated APIs removed before 1.0 |
 
 ---
 

@@ -72,7 +72,7 @@ async fn connect_with_retry(
         match Client::connect(config.clone()).await {
             Ok(client) => return Ok(client),
             Err(e) if e.is_transient() => {
-                println!("  Transient error: {:?}", e);
+                println!("  Transient error: {e:?}");
                 last_error = Some(e);
                 attempts += 1;
             }
@@ -121,8 +121,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = Config::from_connection_string(&conn_str)?;
 
-    println!("Connecting to Azure SQL: {}", server);
-    println!("  Database: {}", database);
+    println!("Connecting to Azure SQL: {server}");
+    println!("  Database: {database}");
     println!("  Encryption: enabled (required for Azure)");
     println!();
 
@@ -148,7 +148,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let engine: i32 = row.get(2)?;
 
         println!("  Version: {}...", &version[..60.min(version.len())]);
-        println!("  Edition: {}", edition);
+        println!("  Edition: {edition}");
         println!(
             "  Engine: {} ({})",
             engine,
@@ -176,8 +176,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let row = result?;
         let tier: Option<String> = row.try_get(0);
         let edition: Option<String> = row.try_get(1);
-        println!("  Service Tier: {:?}", tier);
-        println!("  Edition: {:?}", edition);
+        println!("  Service Tier: {tier:?}");
+        println!("  Edition: {edition:?}");
     }
 
     // Example 3: Query with parameters (uses RPC for Azure efficiency)
@@ -194,7 +194,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let row = result?;
         let input: String = row.get(0)?;
         let current: String = row.get(1)?;
-        println!("  Input: {}, Current User: {}", input, current);
+        println!("  Input: {input}, Current User: {current}");
     }
 
     // Example 4: Handling Azure-specific scenarios
@@ -230,7 +230,7 @@ fn demonstrate_azure_patterns() {
         (40197, "Service error - retry"),
     ];
     for (code, desc) in azure_errors {
-        println!("   Error {}: {}", code, desc);
+        println!("   Error {code}: {desc}");
     }
     println!();
 
@@ -255,9 +255,6 @@ fn demonstrate_azure_patterns() {
     for (code, name) in test_errors {
         let transient = Error::is_transient_server_error(code);
         let terminal = Error::is_terminal_server_error(code);
-        println!(
-            "   Error {}: {} - transient: {}, terminal: {}",
-            code, name, transient, terminal
-        );
+        println!("   Error {code}: {name} - transient: {transient}, terminal: {terminal}");
     }
 }
