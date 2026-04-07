@@ -1,7 +1,7 @@
 # Architectural Reference: High-Performance Rust MS SQL Driver
 
-**Version:** 1.5.0
-**Status:** Design Complete (v0.5.0 Released)
+**Version:** 1.6.0
+**Status:** Design Complete (v0.7.0 Released)
 **Target Protocol:** MS-TDS 7.3 – 8.0 (SQL Server 2008 – 2025)
 **Toolchain Standard:** Rust 2024 Edition (v1.85+, released February 20, 2025)
 **MSRV Policy:** Rust 1.88.0 (6-month rolling window aligned with Tokio's policy)
@@ -713,7 +713,7 @@ resolver = "2"
 members = ["crates/*", "xtask"]
 
 [workspace.package]
-version = "0.5.2"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
@@ -2196,6 +2196,7 @@ let client = Client::connect(&connection_string).await?;
 | 1.3.0 | 2025-12-25 | Updated for v0.3.0 release: Always Encrypted key providers (InMemoryKeyStore, KeyStoreProvider trait), true LOB streaming (LobStream), Change Tracking integration, all 12 data type parsing fixes complete |
 | 1.4.0 | 2025-12-31 | Updated for v0.4.0 release: TDS 7.3 protocol support (SQL Server 2008/2008 R2), TdsVersion configuration, version negotiation |
 | 1.5.0 | 2026-01-01 | Updated for v0.5.0 release: Collation-aware VARCHAR decoding, encoding feature, Column marked non_exhaustive |
+| 1.6.0 | 2026-04-07 | Updated for v0.7.0 release: MSRV bumped to 1.88, SSPI integrated auth wired into client login, RUSTSEC advisories resolved, 33 public enums marked non_exhaustive for semver safety, deprecated APIs removed before 1.0 |
 
 ---
 

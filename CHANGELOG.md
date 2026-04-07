@@ -5,6 +5,247 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.7.0] - 2026-04-07
+
+This is a **security + API hardening release**. It resolves seven RUSTSEC
+advisories, wires SSPI integrated authentication into the client login flow,
+hardens the public API surface with `#[non_exhaustive]` on 33 public enums,
+removes deprecated items ahead of 1.0, and bumps MSRV to Rust 1.88 to unblock
+the security fixes.
+
+### Security
+
+- **Resolved 7 RUSTSEC advisories** (closes #63):
+  - RUSTSEC-2026-0044: aws-lc X.509 Name Constraints Bypass via Wildcard/Unicode CN
+  - RUSTSEC-2026-0045: aws-lc AES-CCM Timing Side-Channel
+  - RUSTSEC-2026-0046: aws-lc PKCS7 Certificate Chain Validation Bypass
+  - RUSTSEC-2026-0047: aws-lc PKCS7 Signature Validation Bypass
+  - RUSTSEC-2026-0048: aws-lc CRL Distribution Point Scope Check Logic Error
+  - RUSTSEC-2026-0049: rustls-webpki CRL matching logic flaw
+  - RUSTSEC-2026-0009: time crate DoS via stack exhaustion (unblocked by MSRV bump)
+
+  Fixed via `cargo update`: aws-lc-sys 0.35 → 0.39, rustls 0.23.36 → 0.23.37,
+  rustls-webpki 0.103.8 → 0.103.10, time 0.3.45 → 0.3.47, plus 100+ other
+  transitive patch bumps.
+
+- **SQL injection hardening in bulk insert**: Validate identifiers in generated
+  SQL to close a remaining injection vector; remove any residual credential
+  logging from bulk insert code paths.
+
+- **Savepoint identifier validation**: Identifiers passed to savepoint/release
+  operations now pass through the same `validate_identifier()` regex guard used
+  for other SQL identifiers.
+
+### Added
+
+- **SSPI / integrated authentication is now functional end-to-end** (closes #64):
+  - `SspiAuth` (Windows via sspi-rs) and `IntegratedAuth` (Linux/macOS via GSSAPI)
+    are now invoked during `Client::connect()`. Previously they compiled but
+    were never called, producing SQL Server error 18456.
+  - New `SspiNegotiator` trait abstracts the `initialize` / `step` / `is_complete`
+    handshake. Both providers implement it; the client login loop drives the
+    SPNEGO challenge/response over TDS SSPI packets (type 0x11).
+  - `Credentials::integrated()` constructor for API consistency with
+    `Credentials::sql_server()` / `Credentials::azure_token()`.
+  - Connection-string support for `Integrated Security=true` / `sspi` / `yes` /
+    `1` and `Trusted_Connection=true` (ADO.NET-compatible keywords).
+  - `Credentials::Integrated` variant is now gated on
+    `#[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]` so Windows
+    users with only `sspi-auth` can construct it.
+  - `mssql-driver-pool` now forwards `integrated-auth` and `sspi-auth` features
+    through to `mssql-client`, so pool users can enable SSPI via the pool crate
+    directly.
+
+- **`#[non_exhaustive]` on 33 public enums** for forward-compatible evolution
+  post-1.0. Users matching on these enums must now include a wildcard arm.
+  Consult the Breaking Changes section for the full list and migration notes.
+
+- **Error classification API**: `Error::is_transient()`, `is_terminal()`, and
+  related predicates now cover the complete set of error variants, enabling
+  programmatic retry decisions without pattern matching on internal shapes.
+
+- **TLS: rustls PKI type re-exports** and DER convenience methods in `mssql-tls`
+  so downstream code can construct `TlsConfig` without pulling in `rustls_pki_types`
+  directly.
+
+- **Testing: TLS support in the mock TDS server** used by integration tests,
+  enabling coverage of the PreLogin-wrapped TLS handshake path.
+
+- **Tooling**:
+  - `cargo xtask ci-local` mirrors GitHub Actions locally for faster feedback.
+  - `cargo xtask release` automates version bumping across the workspace.
+  - CI feature-combination validation now uses `cargo-hack` instead of a
+    hand-maintained matrix.
+
+### Changed
+
+- **BREAKING (pre-1.0 minor bump allowance)**: 33 public enums across the
+  workspace are now `#[non_exhaustive]`. See "Breaking Changes" below for the
+  full list and migration guide.
+
+- **BREAKING**: Deprecated items scheduled for removal before 1.0 have been
+  removed. See "Breaking Changes" below.
+
+- **Error handling**: Error chains are now preserved end-to-end (`source()` works
+  correctly across layer boundaries), and `Error::Server` display output is
+  significantly improved with structured server/procedure/line context.
+
+- **Timeout errors**: `Error::ConnectTimeout`, `Error::TlsTimeout`, and
+  `Error::LoginTimeout` now carry `host: String` and `port: u16` fields so
+  diagnostics show which endpoint timed out. Previously these variants were
+  anonymous and required the caller to remember which host was being dialed.
+
+- **TLS ALPN**: ALPN protocols (`tds/8.0` etc.) are now applied in all TLS paths,
+  including the PreLogin-wrapped handshake. Previously they were only set in the
+  TDS 8.0 strict mode path, causing servers to fall back to TLS defaults.
+
+- **TDS 8.0 strict mode now rejects `TrustServerCertificate=true`** at
+  connect time. Strict mode's entire security premise requires certificate
+  validation; silently honoring the flag was misleading. Use `Encrypt=true`
+  (non-strict) if you need to disable cert validation for legacy servers.
+
+- **OpenTelemetry crate versions aligned at 0.32** (from the previous mix of
+  0.31 / 0.32). All `opentelemetry*` dependencies now move together.
+
+- **Internal refactors** (no API impact):
+  - `mssql-client/src/config.rs` split into a directory module with submodules.
+  - `mssql-derive` split from a monolithic `lib.rs` into per-macro modules.
+  - `mssql-client/src/client.rs` split into `client/connect.rs`, `client/params.rs`,
+    `client/response.rs`, and `client/mod.rs`.
+  - Column value parsing extracted into `mssql-client/src/column_parser.rs`.
+  - `workspace-hack` crate and `cargo-hakari` configuration removed (dead code).
+  - `tokio` dependency tightened from `features = ["full"]` to the minimal feature
+    set actually used, reducing build time and binary size.
+  - `syn` features in `mssql-derive` reduced to the minimum needed for our macros.
+  - Platform dependency installation centralized in a reusable GitHub Actions
+    composite action.
+
+### Fixed
+
+- **SSPI login with empty credentials** (#64): `Client::connect()` now drives
+  the SSPI handshake when `Credentials::Integrated` is configured. Before, the
+  Login7 packet was sent with an empty username and password, producing
+  `error 18456: Login failed for user ''`.
+- **Error chain preservation**: `Error::Io` now correctly exposes the underlying
+  `std::io::Error` via `source()`, enabling downstream code to inspect causes.
+- **`mssql-testing` accidentally published** to crates.io: the crate now has
+  `publish = false` and is excluded from the publish workflow. Published versions
+  of `mssql-testing` are cosmetic and should not be depended on.
+- **CI MSRV drift**: the MSRV job now reads the required Rust version from
+  `Cargo.toml` dynamically instead of hardcoding a version that could drift.
+- **Release workflow resilience**: publish steps now use exponential retry with
+  a sane backoff to tolerate crates.io index propagation delays.
+- **CI xtask tool checks**: the `xtask` CLI now verifies tool availability
+  (cargo-deny, cargo-nextest, etc.) and prints install instructions rather than
+  failing with opaque errors.
+
+### Removed
+
+- **Deprecated APIs removed before 1.0** — see "Breaking Changes" for the list
+  and migration notes.
+- **`workspace-hack` crate and `cargo-hakari` configuration** (dead code; had
+  no effect on build performance).
+
+### Breaking Changes
+
+Per STABILITY.md § Pre-1.0 Releases, breaking changes are permitted in pre-1.0
+minor bumps. All breaking changes are documented here with migration notes.
+
+#### 1. MSRV bumped to Rust 1.88
+
+- **What changed**: Minimum Supported Rust Version is now **1.88** (up from 1.85).
+- **Why**: Required to pull in the `time 0.3.47` patch that fixes RUSTSEC-2026-0009
+  (DoS via stack exhaustion in RFC 2822 parsing). Rust 1.88 has been stable since
+  June 2025.
+- **Migration**: Update your toolchain. The project follows a rolling 6-month
+  MSRV window aligned with Tokio's policy (see ARCHITECTURE.md §6.6).
+- **Per STABILITY.md § MSRV Increase Policy**, MSRV bumps are not considered
+  breaking changes in the semver sense. Documented here for completeness.
+
+#### 2. Public enums marked `#[non_exhaustive]`
+
+- **What changed**: 33 public enums across `mssql-client`, `mssql-auth`,
+  `mssql-types`, `mssql-pool`, and `tds-protocol` now carry `#[non_exhaustive]`.
+  This prevents downstream code from exhaustively matching on them, which would
+  block us from adding new variants without a breaking change.
+- **Affected enums include**: `Error` (and its internal variants), `Credentials`,
+  `AuthMethod`, `EncryptionLevel`, `TdsVersion`, `TokenType`, `ColumnType`,
+  `PacketType`, and many more.
+- **Why**: Necessary hardening before we stabilize the 1.0 API. Without this,
+  every new `Error` variant or `Credentials` kind would be a breaking change
+  post-1.0.
+- **Migration**:
+  ```rust
+  // Before:
+  match err {
+      Error::Io(_) => ...,
+      Error::Protocol(_) => ...,
+      Error::Server { .. } => ...,
+      // Missing variants cause compile error
+  }
+
+  // After:
+  match err {
+      Error::Io(_) => ...,
+      Error::Protocol(_) => ...,
+      Error::Server { .. } => ...,
+      _ => ...,  // wildcard now required
+  }
+  ```
+  If you were exhaustively matching, add a wildcard arm. Consider whether the
+  wildcard should map to a sensible default (e.g., "unknown error, retry once")
+  rather than a panic.
+
+#### 3. Deprecated items removed
+
+- **What changed**: Items marked `#[deprecated]` in prior 0.x releases have been
+  removed. This includes old `Config::new()` forms, pre-builder API entry points,
+  and internal-but-`pub` items that were kept for backwards compatibility.
+- **Migration**: If `cargo build` fails on `0.7.0` with "cannot find function X",
+  check the deprecation notice in your previous `0.6.x` build output — it will
+  name the replacement API. All replacements are `Config::builder()`-style
+  fluent APIs.
+
+#### 4. `Error` variant shape changes
+
+- **What changed**: `Error::ConnectTimeout`, `Error::TlsTimeout`, `Error::LoginTimeout`
+  now carry `{ host: String, port: u16 }` fields instead of being unit variants.
+- **Migration**:
+  ```rust
+  // Before:
+  Err(Error::ConnectTimeout) => ...
+
+  // After:
+  Err(Error::ConnectTimeout { host, port }) => ...
+  // Or, if you don't care about the context:
+  Err(Error::ConnectTimeout { .. }) => ...
+  ```
+
+#### 5. TDS 8.0 strict mode rejects `TrustServerCertificate=true`
+
+- **What changed**: Configurations that combine `Encrypt=strict` and
+  `TrustServerCertificate=true` now return `Error::Config` at connect time.
+- **Why**: Strict mode's security guarantees depend on full certificate chain
+  validation. Silently honoring `TrustServerCertificate=true` was a footgun.
+- **Migration**: If you actually need to skip cert validation, use
+  `Encrypt=true` (non-strict TLS). If you're using strict mode because you need
+  TDS 8.0 features, your server should have a valid certificate.
+
+### MSRV
+
+- **MSRV**: Rust **1.88** (up from 1.85, see Breaking Changes #1).
+
+### Internal
+
+- Dropped the unused `workspace-hack` crate and `cargo-hakari` config.
+- `mssql-testing` is no longer published to crates.io (`publish = false`).
+- Pre-commit hooks now run fmt + clippy + typecheck on every commit.
+- Documentation additions: test taxonomy, xtask command reference, feature
+  matrix, module graphs, crate taxonomy, SAFETY comments on all `unsafe` FFI
+  blocks (Windows cert store, etc.).
+
 ## [0.6.0] - 2026-01-12
 
 ### Added
@@ -283,7 +524,8 @@ Initial release of the rust-mssql-driver project.
 - `mssql-derive` - Procedural macros
 - `mssql-testing` - Test infrastructure
 
-[Unreleased]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.5.0...v0.5.1

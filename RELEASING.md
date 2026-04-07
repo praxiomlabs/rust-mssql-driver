@@ -2,7 +2,7 @@
 
 Comprehensive guide for releasing new versions of rust-mssql-driver to crates.io.
 
-**Version:** 0.6.0 | **MSRV:** 1.88 | **Edition:** 2024 | **Workspace:** 9 crates
+**Version:** 0.7.0 | **MSRV:** 1.88 | **Edition:** 2024 | **Workspace:** 9 crates
 
 ---
 
