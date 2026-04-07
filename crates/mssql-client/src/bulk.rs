@@ -446,8 +446,7 @@ fn validate_sql_type(type_str: &str) -> Result<(), Error> {
 
     if !SQL_TYPE_RE.is_match(type_str) {
         return Err(Error::Config(format!(
-            "invalid SQL type '{}': contains disallowed characters",
-            type_str
+            "invalid SQL type '{type_str}': contains disallowed characters"
         )));
     }
 
@@ -468,9 +467,8 @@ fn validate_identifier(name: &str) -> Result<(), Error> {
 
     if !IDENTIFIER_RE.is_match(name) {
         return Err(Error::InvalidIdentifier(format!(
-            "invalid identifier '{}': must start with letter/underscore, \
-             contain only alphanumerics/_/@/#/$, and be 1-128 characters",
-            name
+            "invalid identifier '{name}': must start with letter/underscore, \
+             contain only alphanumerics/_/@/#/$, and be 1-128 characters"
         )));
     }
 
@@ -491,8 +489,7 @@ fn validate_qualified_identifier(name: &str) -> Result<(), Error> {
     let parts: Vec<&str> = name.split('.').collect();
     if parts.len() > 4 {
         return Err(Error::InvalidIdentifier(format!(
-            "invalid qualified identifier '{}': too many parts (max 4: server.catalog.schema.object)",
-            name
+            "invalid qualified identifier '{name}': too many parts (max 4: server.catalog.schema.object)"
         )));
     }
 
@@ -687,7 +684,7 @@ impl BulkInsert {
         // Write each column value
         for (i, (col, value)) in columns.iter().zip(values.iter()).enumerate() {
             self.encode_column_value(col, value)
-                .map_err(|e| Error::Config(format!("failed to encode column {}: {}", i, e)))?;
+                .map_err(|e| Error::Config(format!("failed to encode column {i}: {e}")))?;
         }
 
         Ok(())

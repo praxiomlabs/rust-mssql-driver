@@ -366,7 +366,7 @@ mod tests {
     fn test_debug_redacts_credentials() {
         // Just verify Debug impl doesn't panic and doesn't expose secrets
         if let Ok(auth) = ManagedIdentityAuth::system_assigned() {
-            let debug = format!("{:?}", auth);
+            let debug = format!("{auth:?}");
             assert!(debug.contains("ManagedIdentityAuth"));
         }
     }

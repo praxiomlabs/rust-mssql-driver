@@ -495,7 +495,7 @@ mod tests {
     #[test]
     fn test_credentials_debug_redacts_password() {
         let creds = Credentials::sql_server("user", "supersecret");
-        let debug = format!("{:?}", creds);
+        let debug = format!("{creds:?}");
         assert!(debug.contains("user"));
         assert!(!debug.contains("supersecret"));
         assert!(debug.contains("REDACTED"));
@@ -504,7 +504,7 @@ mod tests {
     #[test]
     fn test_credentials_debug_redacts_token() {
         let creds = Credentials::azure_token("supersecrettoken");
-        let debug = format!("{:?}", creds);
+        let debug = format!("{creds:?}");
         assert!(!debug.contains("supersecrettoken"));
         assert!(debug.contains("REDACTED"));
     }
@@ -534,7 +534,7 @@ mod tests {
         #[test]
         fn test_secret_string_debug_redacted() {
             let secret = SecretString::new("supersecret");
-            let debug = format!("{:?}", secret);
+            let debug = format!("{secret:?}");
             assert!(!debug.contains("supersecret"));
             assert!(debug.contains("REDACTED"));
         }
@@ -565,7 +565,7 @@ mod tests {
         #[test]
         fn test_secure_credentials_debug_redacts_password() {
             let creds = SecureCredentials::sql_server("user", "supersecret");
-            let debug = format!("{:?}", creds);
+            let debug = format!("{creds:?}");
             assert!(debug.contains("user"));
             assert!(!debug.contains("supersecret"));
             assert!(debug.contains("REDACTED"));
@@ -574,7 +574,7 @@ mod tests {
         #[test]
         fn test_secure_credentials_debug_redacts_token() {
             let creds = SecureCredentials::azure_token("supersecrettoken");
-            let debug = format!("{:?}", creds);
+            let debug = format!("{creds:?}");
             assert!(!debug.contains("supersecrettoken"));
             assert!(debug.contains("REDACTED"));
         }

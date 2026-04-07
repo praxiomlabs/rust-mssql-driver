@@ -327,7 +327,7 @@ mod tests {
     #[test]
     fn test_debug_redacts_token() {
         let auth = AzureAdAuth::with_token("secret_token");
-        let debug = format!("{:?}", auth);
+        let debug = format!("{auth:?}");
         assert!(!debug.contains("secret_token"));
         assert!(debug.contains("[REDACTED]"));
     }

@@ -183,7 +183,7 @@ fn demonstrate_to_params() {
                 println!("  @{} = {:?}", param.name, param.value);
             }
         }
-        Err(e) => println!("Error: {}", e),
+        Err(e) => println!("Error: {e}"),
     }
 
     println!("\nUsage in query:");
@@ -253,7 +253,7 @@ async fn database_example() -> Result<(), Error> {
             email: row.get(2)?,
             phone: row.try_get(3),
         };
-        println!("User: {:?}", user);
+        println!("User: {user:?}");
     }
 
     // Using ToParams with insert

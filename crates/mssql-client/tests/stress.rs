@@ -30,8 +30,7 @@ fn get_test_config() -> Option<Config> {
     let encrypt = std::env::var("MSSQL_ENCRYPT").unwrap_or_else(|_| "false".into());
 
     let conn_str = format!(
-        "Server={};Database={};User Id={};Password={};TrustServerCertificate=true;Encrypt={}",
-        host, database, user, password, encrypt
+        "Server={host};Database={database};User Id={user};Password={password};TrustServerCertificate=true;Encrypt={encrypt}"
     );
 
     Config::from_connection_string(&conn_str).ok()
@@ -53,7 +52,7 @@ async fn test_stress_sequential_queries() {
 
     for i in 0..query_count {
         let rows = client
-            .query(&format!("SELECT {} AS result", i), &[])
+            .query(&format!("SELECT {i} AS result"), &[])
             .await
             .expect("Query should succeed");
 
@@ -98,12 +97,12 @@ async fn test_stress_concurrent_queries() {
         handles.push(tokio::spawn(async move {
             let mut client = Client::connect(config)
                 .await
-                .expect(&format!("Connection {} failed", conn_id));
+                .expect(&format!("Connection {conn_id} failed"));
 
             for query_id in 0..queries_per_connection {
                 let expected = conn_id * 1000 + query_id;
                 let rows = client
-                    .query(&format!("SELECT {} AS result", expected), &[])
+                    .query(&format!("SELECT {expected} AS result"), &[])
                     .await
                     .expect("Query should succeed");
 
@@ -152,9 +151,9 @@ async fn test_stress_connection_cycling() {
     for i in 0..cycles {
         let client = Client::connect(config.clone())
             .await
-            .expect(&format!("Connection {} failed", i));
+            .expect(&format!("Connection {i} failed"));
 
-        client.close().await.expect(&format!("Close {} failed", i));
+        client.close().await.expect(&format!("Close {i} failed"));
     }
 
     let elapsed = start.elapsed();
@@ -182,7 +181,7 @@ async fn test_stress_concurrent_connections() {
         handles.push(tokio::spawn(async move {
             let mut client = Client::connect(config)
                 .await
-                .expect(&format!("Connection {} failed", i));
+                .expect(&format!("Connection {i} failed"));
 
             // Execute a simple query
             let rows = client
@@ -202,10 +201,7 @@ async fn test_stress_concurrent_connections() {
     }
 
     let elapsed = start.elapsed();
-    println!(
-        "Established and closed {} concurrent connections in {:?}",
-        concurrency, elapsed
-    );
+    println!("Established and closed {concurrency} concurrent connections in {elapsed:?}");
 }
 
 // =============================================================================
@@ -238,7 +234,7 @@ async fn test_stress_many_rows() {
         let mut values = Vec::new();
         for i in 0..batch_size {
             let id = batch * batch_size + i;
-            values.push(format!("({}, 'Value {}')", id, id));
+            values.push(format!("({id}, 'Value {id}')"));
         }
         let sql = format!("INSERT INTO #StressRows VALUES {}", values.join(","));
         client
@@ -313,10 +309,10 @@ async fn test_stress_large_values() {
                 &[&id, &big_text.as_str()],
             )
             .await
-            .expect(&format!("Insert size {} should succeed", size));
+            .expect(&format!("Insert size {size} should succeed"));
     }
 
-    println!("Inserted values of sizes: {:?}", sizes);
+    println!("Inserted values of sizes: {sizes:?}");
 
     // Retrieve and verify
     let rows = client
@@ -495,10 +491,7 @@ async fn test_stress_long_lived_connection() {
     }
 
     let elapsed = start.elapsed();
-    println!(
-        "Maintained connection for {:?} with {} queries",
-        elapsed, query_count
-    );
+    println!("Maintained connection for {elapsed:?} with {query_count} queries");
 
     client.close().await.expect("Failed to close");
 }
@@ -548,8 +541,7 @@ async fn test_stress_error_recovery() {
     assert_eq!(count, 1);
 
     println!(
-        "Completed {} iterations ({} successes, {} errors), connection still viable",
-        iterations, successes, errors
+        "Completed {iterations} iterations ({successes} successes, {errors} errors), connection still viable"
     );
 
     client.close().await.expect("Failed to close");

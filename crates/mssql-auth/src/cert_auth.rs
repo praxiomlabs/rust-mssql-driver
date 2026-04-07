@@ -173,7 +173,7 @@ impl CertificateAuth {
             Some(options),
         )
         .map_err(|e| {
-            AuthError::Certificate(format!("Failed to create certificate credential: {}", e))
+            AuthError::Certificate(format!("Failed to create certificate credential: {e}"))
         })?;
 
         Ok(Self { credential })
@@ -231,9 +231,7 @@ impl CertificateAuth {
         let mut cert_reader = BufReader::new(cert_pem_bytes);
         let certs: Vec<_> = rustls_pemfile::certs(&mut cert_reader)
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| {
-                AuthError::Certificate(format!("Failed to parse certificate PEM: {}", e))
-            })?;
+            .map_err(|e| AuthError::Certificate(format!("Failed to parse certificate PEM: {e}")))?;
 
         let cert_der = certs
             .first()
@@ -243,7 +241,7 @@ impl CertificateAuth {
         let key_pem_bytes = key_pem.as_ref();
         let mut key_reader = BufReader::new(key_pem_bytes);
         let key_der = rustls_pemfile::private_key(&mut key_reader)
-            .map_err(|e| AuthError::Certificate(format!("Failed to parse private key PEM: {}", e)))?
+            .map_err(|e| AuthError::Certificate(format!("Failed to parse private key PEM: {e}")))?
             .ok_or_else(|| AuthError::Certificate("No private key found in PEM data".into()))?;
 
         // Convert to PKCS#12 format
@@ -274,7 +272,7 @@ impl CertificateAuth {
             .credential
             .get_token(&[AZURE_SQL_SCOPE], None)
             .await
-            .map_err(|e| AuthError::Certificate(format!("Failed to acquire token: {}", e)))?;
+            .map_err(|e| AuthError::Certificate(format!("Failed to acquire token: {e}")))?;
         Ok(token.token.secret().to_string())
     }
 
@@ -288,7 +286,7 @@ impl CertificateAuth {
             .credential
             .get_token(&[AZURE_SQL_SCOPE], None)
             .await
-            .map_err(|e| AuthError::Certificate(format!("Failed to acquire token: {}", e)))?;
+            .map_err(|e| AuthError::Certificate(format!("Failed to acquire token: {e}")))?;
 
         // Calculate time until expiration
         let now = time::OffsetDateTime::now_utc();
@@ -417,8 +415,7 @@ mod tests {
         let err = result.unwrap_err();
         assert!(
             err.to_string().contains("No certificate found"),
-            "Expected 'No certificate found' error, got: {}",
-            err
+            "Expected 'No certificate found' error, got: {err}"
         );
     }
 
@@ -436,8 +433,7 @@ mod tests {
         let err = result.unwrap_err();
         assert!(
             err.to_string().contains("No private key found"),
-            "Expected 'No private key found' error, got: {}",
-            err
+            "Expected 'No private key found' error, got: {err}"
         );
     }
 

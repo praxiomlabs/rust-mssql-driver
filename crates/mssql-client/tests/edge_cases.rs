@@ -339,10 +339,7 @@ fn test_connection_string_with_special_characters_in_password() {
                 password.replace('}', "}}")
             )
         } else {
-            format!(
-                "Server=localhost;Database=test;User Id=sa;Password={}",
-                password
-            )
+            format!("Server=localhost;Database=test;User Id=sa;Password={password}")
         };
 
         // Should not panic during parsing
@@ -379,7 +376,7 @@ fn test_connection_string_case_insensitivity() {
 
     for conn_str in &variants {
         let result = Config::from_connection_string(conn_str);
-        assert!(result.is_ok(), "Failed to parse: {}", conn_str);
+        assert!(result.is_ok(), "Failed to parse: {conn_str}");
     }
 }
 
@@ -448,8 +445,7 @@ fn get_test_config() -> Option<Config> {
     let password = std::env::var("MSSQL_TEST_PASSWORD").ok()?;
 
     let conn_str = format!(
-        "Server={},{};Database=master;User Id={};Password={};TrustServerCertificate=true",
-        host, port, user, password
+        "Server={host},{port};Database=master;User Id={user};Password={password};TrustServerCertificate=true"
     );
 
     Config::from_connection_string(&conn_str).ok()

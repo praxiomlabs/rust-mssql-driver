@@ -361,7 +361,7 @@ fn test_all_timeout_types_are_transient() {
     ];
 
     for err in timeout_errors {
-        assert!(err.is_transient(), "{:?} should be transient", err);
+        assert!(err.is_transient(), "{err:?} should be transient");
     }
 }
 
@@ -423,7 +423,7 @@ fn test_azure_cannot_process_errors() {
     // 49918, 49919, 49920: Cannot process request
     for number in [49918, 49919, 49920] {
         let err = make_azure_error(number, "Cannot process request");
-        assert!(err.is_transient(), "Error {} should be transient", number);
+        assert!(err.is_transient(), "Error {number} should be transient");
     }
 }
 
@@ -504,7 +504,7 @@ fn test_error_debug_format() {
         line: 42,
     };
 
-    let debug = format!("{:?}", err);
+    let debug = format!("{err:?}");
     assert!(debug.contains("Server"));
     assert!(debug.contains("102"));
     assert!(debug.contains("Syntax error"));
@@ -547,7 +547,7 @@ fn test_all_error_variants_are_debug() {
             port: 1,
         },
         Error::TooManyRedirects { max: 1 },
-        Error::from(std::io::Error::new(std::io::ErrorKind::Other, "test")),
+        Error::from(std::io::Error::other("test")),
         Error::InvalidIdentifier("test".into()),
         Error::PoolExhausted,
         Error::Cancel("test".into()),
@@ -555,8 +555,8 @@ fn test_all_error_variants_are_debug() {
     ];
 
     for err in errors {
-        let _ = format!("{:?}", err);
-        let _ = format!("{}", err);
+        let _ = format!("{err:?}");
+        let _ = format!("{err}");
     }
 }
 
@@ -568,7 +568,7 @@ fn test_all_error_variants_are_debug() {
 fn test_io_error_source() {
     use std::error::Error as StdError;
 
-    let io_err = std::io::Error::new(std::io::ErrorKind::Other, "inner error");
+    let io_err = std::io::Error::other("inner error");
     let err = Error::from(io_err);
 
     // The error should have a source
@@ -699,10 +699,7 @@ fn test_every_variant_classified() {
             "transient",
         ),
         (Error::PoolExhausted, "transient"),
-        (
-            Error::from(std::io::Error::new(std::io::ErrorKind::Other, "test")),
-            "transient",
-        ),
+        (Error::from(std::io::Error::other("test")), "transient"),
         (Error::InvalidIdentifier("test".into()), "terminal"),
         (Error::Cancel("test".into()), "terminal"),
     ];
@@ -710,12 +707,12 @@ fn test_every_variant_classified() {
     for (err, expected) in classified_variants {
         match expected {
             "transient" => {
-                assert!(err.is_transient(), "{:?} should be transient", err);
-                assert!(!err.is_terminal(), "{:?} should not be terminal", err);
+                assert!(err.is_transient(), "{err:?} should be transient");
+                assert!(!err.is_terminal(), "{err:?} should not be terminal");
             }
             "terminal" => {
-                assert!(err.is_terminal(), "{:?} should be terminal", err);
-                assert!(!err.is_transient(), "{:?} should not be transient", err);
+                assert!(err.is_terminal(), "{err:?} should be terminal");
+                assert!(!err.is_transient(), "{err:?} should not be transient");
             }
             _ => unreachable!(),
         }

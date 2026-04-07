@@ -14,8 +14,7 @@ fn get_test_config() -> Option<Config> {
     let password = std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "YourStrong@Passw0rd".into());
 
     let conn_str = format!(
-        "Server={};Database=master;User Id={};Password={};TrustServerCertificate=true;Encrypt=true",
-        host, user, password
+        "Server={host};Database=master;User Id={user};Password={password};TrustServerCertificate=true;Encrypt=true"
     );
 
     Config::from_connection_string(&conn_str).ok()

@@ -75,13 +75,12 @@ async fn main() -> Result<(), Error> {
     let encrypt = std::env::var("MSSQL_ENCRYPT").unwrap_or_else(|_| "true".into());
 
     let conn_str = format!(
-        "Server={};Database={};User Id={};Password={};TrustServerCertificate=true;Encrypt={}",
-        host, database, user, password, encrypt
+        "Server={host};Database={database};User Id={user};Password={password};TrustServerCertificate=true;Encrypt={encrypt}"
     );
 
     let config = Config::from_connection_string(&conn_str)?;
 
-    println!("Connecting to SQL Server at {}...", host);
+    println!("Connecting to SQL Server at {host}...");
     let mut client = Client::connect(config).await?;
     println!("Connected successfully!\n");
 
@@ -92,10 +91,7 @@ async fn main() -> Result<(), Error> {
     // Only run VARCHAR tests if the server supports the required collations
     // (Some SQL Server installations may not have all collations available)
     if let Err(e) = demonstrate_varchar_with_collations(&mut client).await {
-        println!(
-            "\nNote: VARCHAR collation tests skipped or partially failed: {}",
-            e
-        );
+        println!("\nNote: VARCHAR collation tests skipped or partially failed: {e}");
         println!(
             "This is expected if the SQL Server instance doesn't have the required collations."
         );
@@ -206,7 +202,7 @@ async fn demonstrate_varchar_with_collations(client: &mut Client<Ready>) -> Resu
         .await;
 
     if let Err(e) = create_result {
-        println!("Could not create test table: {}", e);
+        println!("Could not create test table: {e}");
         return Ok(());
     }
 
@@ -231,7 +227,7 @@ async fn demonstrate_varchar_with_collations(client: &mut Client<Ready>) -> Resu
         let latin1: String = row.get(1)?;
         let unicode: String = row.get(2)?;
 
-        println!("  Row {}: latin1='{}' unicode='{}'", id, latin1, unicode);
+        println!("  Row {id}: latin1='{latin1}' unicode='{unicode}'");
 
         // Verify that both columns decode correctly
         if latin1 == unicode {

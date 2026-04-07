@@ -112,8 +112,7 @@ fn get_test_config_with_tds_version(tds_override: Option<TdsVersion>) -> Option<
     });
 
     let mut conn_str = format!(
-        "Server={},{};Database={};User Id={};Password={};TrustServerCertificate=true;Encrypt={}",
-        host, port, database, user, password, encrypt
+        "Server={host},{port};Database={database};User Id={user};Password={password};TrustServerCertificate=true;Encrypt={encrypt}"
     );
 
     // Add TDS version to connection string if specified
@@ -125,7 +124,7 @@ fn get_test_config_with_tds_version(tds_override: Option<TdsVersion>) -> Option<
             v if v == TdsVersion::V8_0 => "8.0",
             _ => "7.4",
         };
-        conn_str.push_str(&format!(";TDSVersion={}", version_str));
+        conn_str.push_str(&format!(";TDSVersion={version_str}"));
     }
 
     Config::from_connection_string(&conn_str).ok()
@@ -160,7 +159,7 @@ async fn test_version_detection() {
         version_string = row.get(0).expect("Should get version");
     }
 
-    println!("SQL Server Version: {}", version_string);
+    println!("SQL Server Version: {version_string}");
 
     // Verify we got a valid version string
     assert!(
@@ -178,8 +177,7 @@ async fn test_version_detection() {
         || version_string.contains("2022");
     assert!(
         is_known_version,
-        "Should be a known SQL Server version (2008+), got: {}",
-        version_string
+        "Should be a known SQL Server version (2008+), got: {version_string}"
     );
 
     client.close().await.expect("Failed to close");
@@ -213,14 +211,13 @@ async fn test_product_version() {
             .and_then(|s| s.parse().ok())
             .expect("Should parse major version from ProductVersion");
 
-        println!("Product Version: {}, Major: {}", version, major_num);
+        println!("Product Version: {version}, Major: {major_num}");
 
         // Major version should be 10+ (SQL Server 2008+)
         // 10 = 2008, 11 = 2012, 12 = 2014, 13 = 2016, 14 = 2017, 15 = 2019, 16 = 2022
         assert!(
             major_num >= 10,
-            "Should be SQL Server 2008 or later (major >= 10), got: {}",
-            major_num
+            "Should be SQL Server 2008 or later (major >= 10), got: {major_num}"
         );
     }
 
@@ -599,8 +596,7 @@ async fn test_sql_2017_features() {
 
     if major_version < 14 {
         println!(
-            "Skipping SQL Server 2017 features test (running on major version {})",
-            major_version
+            "Skipping SQL Server 2017 features test (running on major version {major_version})"
         );
         client.close().await.expect("Failed to close");
         return;
@@ -682,8 +678,7 @@ async fn test_sql_2019_features() {
 
     if major_version < 15 {
         println!(
-            "Skipping SQL Server 2019 features test (running on major version {})",
-            major_version
+            "Skipping SQL Server 2019 features test (running on major version {major_version})"
         );
         client.close().await.expect("Failed to close");
         return;
@@ -698,7 +693,7 @@ async fn test_sql_2019_features() {
     // Use a loop to insert values instead of GENERATE_SERIES (2022 feature)
     let mut values = Vec::new();
     for i in 1..=100 {
-        values.push(format!("({})", i));
+        values.push(format!("({i})"));
     }
     let sql = format!("INSERT INTO #ApproxTest VALUES {}", values.join(","));
     client
@@ -808,7 +803,7 @@ async fn test_tds_7_3_datetime_types() {
     let config =
         get_test_config_with_tds_version(Some(tds_version)).expect("SQL Server config required");
 
-    println!("Testing TDS 7.3+ datetime types with {}...", tds_version);
+    println!("Testing TDS 7.3+ datetime types with {tds_version}...");
 
     // Skip if explicitly using TDS 7.2 or earlier (though we don't support it)
     if tds_version.is_legacy() {
@@ -830,7 +825,7 @@ async fn test_tds_7_3_datetime_types() {
         assert_eq!(d.year(), 2024);
         assert_eq!(d.month(), 6);
         assert_eq!(d.day(), 15);
-        println!("DATE: {} ✓", d);
+        println!("DATE: {d} ✓");
     }
 
     // Test TIME type (TDS 7.3+)
@@ -845,7 +840,7 @@ async fn test_tds_7_3_datetime_types() {
         assert_eq!(t.hour(), 14);
         assert_eq!(t.minute(), 30);
         assert_eq!(t.second(), 45);
-        println!("TIME: {} ✓", t);
+        println!("TIME: {t} ✓");
     }
 
     // Test DATETIME2 type (TDS 7.3+)
@@ -865,7 +860,7 @@ async fn test_tds_7_3_datetime_types() {
         assert_eq!(dt.day(), 15);
         assert_eq!(dt.hour(), 14);
         assert_eq!(dt.minute(), 30);
-        println!("DATETIME2: {} ✓", dt);
+        println!("DATETIME2: {dt} ✓");
     }
 
     // Test DATETIMEOFFSET type (TDS 7.3+)
@@ -884,7 +879,7 @@ async fn test_tds_7_3_datetime_types() {
         assert_eq!(dto.year(), 2024);
         assert_eq!(dto.month(), 6);
         assert_eq!(dto.day(), 15);
-        println!("DATETIMEOFFSET: {} ✓", dto);
+        println!("DATETIMEOFFSET: {dto} ✓");
     }
 
     client.close().await.expect("Failed to close");
@@ -923,7 +918,7 @@ async fn test_tds_version_negotiation() {
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
 
-        println!("Connected to SQL Server {} (major: {})", version, major_num);
+        println!("Connected to SQL Server {version} (major: {major_num})");
 
         // Verify expected TDS version support
         if major_num >= 16 {
@@ -991,10 +986,10 @@ async fn test_tds_7_3_feature_detection() {
     assert!(!v7_4.is_legacy(), "TDS 7.4 should NOT be legacy");
 
     // Display format
-    assert_eq!(format!("{}", v7_3a), "TDS 7.3A");
-    assert_eq!(format!("{}", v7_3b), "TDS 7.3B");
-    assert_eq!(format!("{}", v7_4), "TDS 7.4");
-    assert_eq!(format!("{}", v8_0), "TDS 8.0");
+    assert_eq!(format!("{v7_3a}"), "TDS 7.3A");
+    assert_eq!(format!("{v7_3b}"), "TDS 7.3B");
+    assert_eq!(format!("{v7_4}"), "TDS 7.4");
+    assert_eq!(format!("{v8_0}"), "TDS 8.0");
 
     println!("TDS 7.3 feature detection tests passed!");
 }
@@ -1031,13 +1026,13 @@ async fn test_tds_7_3_encryption_options() {
                 for result in rows {
                     let row = result.expect("Row should be valid");
                     let mode: String = row.get(0).expect("Should get mode");
-                    println!("Connection mode: {}", mode);
+                    println!("Connection mode: {mode}");
                 }
                 client.close().await.expect("Failed to close");
                 println!("TDS 7.3A with encryption: OK ✓");
             }
             Err(e) => {
-                println!("TDS 7.3A with encryption failed: {}", e);
+                println!("TDS 7.3A with encryption failed: {e}");
                 // This is not necessarily a test failure - the server might not support
                 // the requested TDS version
             }
@@ -1055,7 +1050,7 @@ async fn test_tds_7_3_basic_operations() {
     let config =
         get_test_config_with_tds_version(Some(tds_version)).expect("SQL Server config required");
 
-    println!("Testing basic operations with {}...", tds_version);
+    println!("Testing basic operations with {tds_version}...");
 
     let mut client = Client::connect(config).await.expect("Failed to connect");
 
@@ -1148,7 +1143,7 @@ async fn test_tds_7_3_transactions() {
     let config =
         get_test_config_with_tds_version(Some(tds_version)).expect("SQL Server config required");
 
-    println!("Testing transactions with {}...", tds_version);
+    println!("Testing transactions with {tds_version}...");
 
     let mut client = Client::connect(config).await.expect("Failed to connect");
 

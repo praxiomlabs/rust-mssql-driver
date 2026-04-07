@@ -126,7 +126,7 @@ impl KeyStoreProvider for InMemoryKeyStore {
         encrypted_cek: &[u8],
     ) -> Result<Vec<u8>, EncryptionError> {
         let unwrapper = self.keys.get(cmk_path).ok_or_else(|| {
-            EncryptionError::KeyStoreNotFound(format!("Key not found: {}", cmk_path))
+            EncryptionError::KeyStoreNotFound(format!("Key not found: {cmk_path}"))
         })?;
 
         unwrapper.decrypt_cek(encrypted_cek)

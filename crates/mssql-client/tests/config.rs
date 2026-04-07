@@ -163,9 +163,9 @@ fn test_trust_server_certificate_true_values() {
     let cases = ["true", "True", "TRUE", "yes", "Yes", "YES", "1"];
 
     for case in cases {
-        let conn_str = format!("TrustServerCertificate={};", case);
+        let conn_str = format!("TrustServerCertificate={case};");
         let config = Config::from_connection_string(&conn_str).unwrap();
-        assert!(config.trust_server_certificate, "Failed for: {}", case);
+        assert!(config.trust_server_certificate, "Failed for: {case}");
     }
 }
 
@@ -175,9 +175,9 @@ fn test_trust_server_certificate_false_values() {
     let cases = ["false", "False", "FALSE", "no", "No", "NO", "0"];
 
     for case in cases {
-        let conn_str = format!("TrustServerCertificate={};", case);
+        let conn_str = format!("TrustServerCertificate={case};");
         let config = Config::from_connection_string(&conn_str).unwrap();
-        assert!(!config.trust_server_certificate, "Failed for: {}", case);
+        assert!(!config.trust_server_certificate, "Failed for: {case}");
     }
 }
 

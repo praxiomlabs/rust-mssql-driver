@@ -31,8 +31,7 @@ fn get_test_config() -> Option<Config> {
     let encrypt = std::env::var("MSSQL_ENCRYPT").unwrap_or_else(|_| "false".into());
 
     let conn_str = format!(
-        "Server={};Database={};User Id={};Password={};TrustServerCertificate=true;Encrypt={}",
-        host, database, user, password, encrypt
+        "Server={host};Database={database};User Id={user};Password={password};TrustServerCertificate=true;Encrypt={encrypt}"
     );
 
     Config::from_connection_string(&conn_str).ok()
@@ -70,8 +69,8 @@ async fn test_protocol_server_version_info() {
         let server_name: String = row.get(1).expect("Failed to get server_name");
         let session_id: i16 = row.get(2).expect("Failed to get session_id");
 
-        println!("Server: {}", server_name);
-        println!("Session ID: {}", session_id);
+        println!("Server: {server_name}");
+        println!("Session ID: {session_id}");
         println!("Version: {}", &full_version[..full_version.len().min(80)]);
 
         // Verify we got valid version information
@@ -101,7 +100,7 @@ async fn test_protocol_database_context() {
     for result in rows {
         let row = result.expect("Row should be valid");
         let db_name: String = row.get(0).expect("Failed to get db_name");
-        println!("Connected to database: {}", db_name);
+        println!("Connected to database: {db_name}");
         assert!(!db_name.is_empty());
         found = true;
     }
@@ -821,7 +820,7 @@ async fn test_protocol_many_columns() {
 
         // Verify we can access all 20 columns
         for i in 0..20 {
-            let val: i32 = row.get(i).expect(&format!("Failed to get column {}", i));
+            let val: i32 = row.get(i).expect(&format!("Failed to get column {i}"));
             assert_eq!(val, (i + 1) as i32);
         }
         count += 1;

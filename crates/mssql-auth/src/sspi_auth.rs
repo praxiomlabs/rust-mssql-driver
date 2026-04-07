@@ -115,10 +115,10 @@ impl SspiAuth {
     /// ```
     pub fn new(hostname: &str, port: u16) -> Result<Self, AuthError> {
         // SQL Server SPN format: MSSQLSvc/hostname:port
-        let spn = format!("MSSQLSvc/{}:{}", hostname, port);
+        let spn = format!("MSSQLSvc/{hostname}:{port}");
 
         let negotiate = Negotiate::new_client(create_negotiate_config())
-            .map_err(|e| AuthError::Sspi(format!("Failed to create Negotiate context: {}", e)))?;
+            .map_err(|e| AuthError::Sspi(format!("Failed to create Negotiate context: {e}")))?;
 
         Ok(Self {
             spn,
@@ -163,10 +163,10 @@ impl SspiAuth {
         username: impl Into<String>,
         password: impl Into<String>,
     ) -> Result<Self, AuthError> {
-        let spn = format!("MSSQLSvc/{}:{}", hostname, port);
+        let spn = format!("MSSQLSvc/{hostname}:{port}");
 
         let negotiate = Negotiate::new_client(create_negotiate_config())
-            .map_err(|e| AuthError::Sspi(format!("Failed to create Negotiate context: {}", e)))?;
+            .map_err(|e| AuthError::Sspi(format!("Failed to create Negotiate context: {e}")))?;
 
         Ok(Self {
             spn,
@@ -193,7 +193,7 @@ impl SspiAuth {
     /// Returns an error if the Negotiate context cannot be created.
     pub fn with_spn(spn: impl Into<String>) -> Result<Self, AuthError> {
         let negotiate = Negotiate::new_client(create_negotiate_config())
-            .map_err(|e| AuthError::Sspi(format!("Failed to create Negotiate context: {}", e)))?;
+            .map_err(|e| AuthError::Sspi(format!("Failed to create Negotiate context: {e}")))?;
 
         Ok(Self {
             spn: spn.into(),
@@ -224,7 +224,7 @@ impl SspiAuth {
         let credentials = if let Some((ref username, ref password)) = self.credentials {
             // Parse username into domain and user parts
             let parsed_user = Username::parse(username)
-                .map_err(|e| AuthError::Sspi(format!("Invalid username format: {}", e)))?;
+                .map_err(|e| AuthError::Sspi(format!("Invalid username format: {e}")))?;
 
             let identity = AuthIdentity {
                 username: parsed_user,
@@ -250,7 +250,7 @@ impl SspiAuth {
 
             builder
                 .execute(&mut ctx.negotiate)
-                .map_err(|e| AuthError::Sspi(format!("Failed to acquire credentials: {}", e)))?
+                .map_err(|e| AuthError::Sspi(format!("Failed to acquire credentials: {e}")))?
         };
 
         // Store credentials handle (may be None for integrated auth)
@@ -278,9 +278,9 @@ impl SspiAuth {
         let init_result = ctx
             .negotiate
             .initialize_security_context_impl(&mut builder)
-            .map_err(|e| AuthError::Sspi(format!("Failed to initialize context: {}", e)))?
+            .map_err(|e| AuthError::Sspi(format!("Failed to initialize context: {e}")))?
             .resolve_to_result()
-            .map_err(|e| AuthError::Sspi(format!("Failed to resolve context: {}", e)))?;
+            .map_err(|e| AuthError::Sspi(format!("Failed to resolve context: {e}")))?;
 
         // Put credentials handle back
         ctx.creds_handle = creds;
@@ -302,8 +302,7 @@ impl SspiAuth {
                 Ok(token)
             }
             status => Err(AuthError::Sspi(format!(
-                "Unexpected status during initialization: {:?}",
-                status
+                "Unexpected status during initialization: {status:?}"
             ))),
         }
     }
@@ -365,9 +364,9 @@ impl SspiAuth {
         let result = ctx
             .negotiate
             .initialize_security_context_impl(&mut builder)
-            .map_err(|e| AuthError::Sspi(format!("SSPI step failed: {}", e)))?
+            .map_err(|e| AuthError::Sspi(format!("SSPI step failed: {e}")))?
             .resolve_to_result()
-            .map_err(|e| AuthError::Sspi(format!("Failed to resolve step result: {}", e)))?;
+            .map_err(|e| AuthError::Sspi(format!("Failed to resolve step result: {e}")))?;
 
         // Put credentials handle back
         ctx.creds_handle = creds;
@@ -393,8 +392,7 @@ impl SspiAuth {
                 Ok(Some(token))
             }
             status => Err(AuthError::Sspi(format!(
-                "Unexpected status during step: {:?}",
-                status
+                "Unexpected status during step: {status:?}"
             ))),
         }
     }
@@ -467,7 +465,7 @@ mod tests {
     #[test]
     fn test_debug_output() {
         let auth = SspiAuth::new("test.example.com", 1433).unwrap();
-        let debug = format!("{:?}", auth);
+        let debug = format!("{auth:?}");
         assert!(debug.contains("SspiAuth"));
         assert!(debug.contains("test.example.com"));
     }
@@ -482,7 +480,7 @@ mod tests {
     fn test_with_credentials() {
         let auth = SspiAuth::with_credentials("test.example.com", 1433, "DOMAIN\\user", "password")
             .unwrap();
-        let debug = format!("{:?}", auth);
+        let debug = format!("{auth:?}");
         assert!(debug.contains("has_explicit_credentials: true"));
     }
 }

@@ -31,8 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let password = std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "Password123!".into());
 
     let conn_str = format!(
-        "Server={};Database=master;User Id={};Password={};TrustServerCertificate=true",
-        host, user, password
+        "Server={host};Database=master;User Id={user};Password={password};TrustServerCertificate=true"
     );
 
     let config = Config::from_connection_string(&conn_str)?;
@@ -114,8 +113,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "CRITICAL"
     };
 
-    println!("  Pool health: {}", health_status);
-    println!("  Utilization: {:.1}%", utilization);
+    println!("  Pool health: {health_status}");
+    println!("  Utilization: {utilization:.1}%");
 
     // Example 4: Simulate load and show metrics over time
     println!("\n4. Pool under load (20 concurrent queries):");

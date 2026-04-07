@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn test_query_debug() {
         let query = Query::new("SELECT 1");
-        let debug = format!("{:?}", query);
+        let debug = format!("{query:?}");
         assert!(debug.contains("SELECT 1"));
     }
 

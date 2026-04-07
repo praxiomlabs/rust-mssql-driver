@@ -1318,7 +1318,7 @@ mod tests {
         let result = parse_plp_nvarchar(&mut buf).unwrap();
         match result {
             SqlValue::String(s) => assert_eq!(s, "Hello"),
-            _ => panic!("expected String, got {:?}", result),
+            _ => panic!("expected String, got {result:?}"),
         }
     }
 
@@ -1494,14 +1494,14 @@ mod tests {
         let value0 = parse_column_value(&mut buf, &col0).unwrap();
         match value0 {
             SqlValue::String(s) => assert_eq!(s, "World"),
-            _ => panic!("expected String, got {:?}", value0),
+            _ => panic!("expected String, got {value0:?}"),
         }
 
         // Parse column 1 (IntN)
         let value1 = parse_column_value(&mut buf, &col1).unwrap();
         match value1 {
             SqlValue::Int(i) => assert_eq!(i, 42),
-            _ => panic!("expected Int, got {:?}", value1),
+            _ => panic!("expected Int, got {value1:?}"),
         }
 
         // Buffer should be fully consumed

@@ -183,7 +183,7 @@ mod tests {
     #[test]
     fn test_debug_redacts_password() {
         let auth = SqlServerAuth::new("sa", "secret");
-        let debug = format!("{:?}", auth);
+        let debug = format!("{auth:?}");
         assert!(debug.contains("sa"));
         assert!(!debug.contains("secret"));
         assert!(debug.contains("[REDACTED]"));

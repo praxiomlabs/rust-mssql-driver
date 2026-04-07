@@ -225,8 +225,7 @@ impl EncryptionContext {
             EncryptionTypeWire::Randomized => mssql_auth::EncryptionType::Randomized,
             _ => {
                 return Err(EncryptionError::UnsupportedOperation(format!(
-                    "unsupported encryption type: {:?}",
-                    encryption_type
+                    "unsupported encryption type: {encryption_type:?}"
                 )));
             }
         };

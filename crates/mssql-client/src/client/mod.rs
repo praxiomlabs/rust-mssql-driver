@@ -939,7 +939,7 @@ impl Client<InTransaction> {
 
         // Execute SAVE TRANSACTION <name>
         // Note: name is validated by validate_identifier() to prevent SQL injection
-        let sql = format!("SAVE TRANSACTION {}", name);
+        let sql = format!("SAVE TRANSACTION {name}");
         self.send_sql_batch(&sql).await?;
         self.read_execute_result().await?;
 
@@ -1028,9 +1028,8 @@ fn validate_identifier(name: &str) -> Result<()> {
 
     if !IDENTIFIER_RE.is_match(name) {
         return Err(Error::InvalidIdentifier(format!(
-            "invalid identifier '{}': must start with letter/underscore, \
-             contain only alphanumerics/_/@/#/$, and be 1-128 characters",
-            name
+            "invalid identifier '{name}': must start with letter/underscore, \
+             contain only alphanumerics/_/@/#/$, and be 1-128 characters"
         )));
     }
 

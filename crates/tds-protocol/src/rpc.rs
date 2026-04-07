@@ -676,7 +676,7 @@ impl RpcRequest {
                             "nvarchar(max)".to_string()
                         } else {
                             let len = p.type_info.max_length.unwrap_or(4000) / 2;
-                            format!("nvarchar({})", len)
+                            format!("nvarchar({len})")
                         }
                     }
                     0xA5 => {
@@ -684,25 +684,25 @@ impl RpcRequest {
                             "varbinary(max)".to_string()
                         } else {
                             let len = p.type_info.max_length.unwrap_or(8000);
-                            format!("varbinary({})", len)
+                            format!("varbinary({len})")
                         }
                     }
                     0x24 => "uniqueidentifier".to_string(),
                     0x28 => "date".to_string(),
                     0x2A => {
                         let scale = p.type_info.scale.unwrap_or(7);
-                        format!("datetime2({})", scale)
+                        format!("datetime2({scale})")
                     }
                     0x6C => {
                         let precision = p.type_info.precision.unwrap_or(18);
                         let scale = p.type_info.scale.unwrap_or(0);
-                        format!("decimal({}, {})", precision, scale)
+                        format!("decimal({precision}, {scale})")
                     }
                     0xF3 => {
                         // TVP - Table-Valued Parameter
                         // Must be declared with the table type name and READONLY
                         if let Some(ref tvp_name) = p.type_info.tvp_type_name {
-                            format!("{} READONLY", tvp_name)
+                            format!("{tvp_name} READONLY")
                         } else {
                             // Fallback if type name is missing (shouldn't happen)
                             "sql_variant".to_string()
@@ -711,7 +711,7 @@ impl RpcRequest {
                     _ => "sql_variant".to_string(),
                 };
 
-                format!("{} {}", name, type_name)
+                format!("{name} {type_name}")
             })
             .collect::<Vec<_>>()
             .join(", ")

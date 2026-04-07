@@ -105,7 +105,7 @@ impl AzureKeyVaultProvider {
     /// ```
     pub fn new() -> Result<Self, EncryptionError> {
         let credential = DeveloperToolsCredential::new(None).map_err(|e| {
-            EncryptionError::ConfigurationError(format!("Failed to create Azure credential: {}", e))
+            EncryptionError::ConfigurationError(format!("Failed to create Azure credential: {e}"))
         })?;
         Ok(Self { credential })
     }
@@ -132,7 +132,7 @@ impl AzureKeyVaultProvider {
     /// Expected format: `https://<vault>.vault.azure.net/keys/<key-name>[/<version>]`
     fn parse_cmk_path(cmk_path: &str) -> Result<(String, String, Option<String>), EncryptionError> {
         let url = Url::parse(cmk_path).map_err(|e| {
-            EncryptionError::CmkError(format!("Invalid CMK path '{}': {}", cmk_path, e))
+            EncryptionError::CmkError(format!("Invalid CMK path '{cmk_path}': {e}"))
         })?;
 
         // Extract vault URL (scheme + host)
@@ -166,7 +166,7 @@ impl AzureKeyVaultProvider {
     /// Create a Key Vault client for a specific vault.
     fn create_client(&self, vault_url: &str) -> Result<KeyClient, EncryptionError> {
         KeyClient::new(vault_url, self.credential.clone(), None).map_err(|e| {
-            EncryptionError::CmkError(format!("Failed to create Key Vault client: {}", e))
+            EncryptionError::CmkError(format!("Failed to create Key Vault client: {e}"))
         })
     }
 }
@@ -224,17 +224,17 @@ impl KeyStoreProvider for AzureKeyVaultProvider {
             .unwrap_key(
                 &key_name,
                 parameters.try_into().map_err(|e| {
-                    EncryptionError::CekDecryptionFailed(format!("Failed to create request: {}", e))
+                    EncryptionError::CekDecryptionFailed(format!("Failed to create request: {e}"))
                 })?,
                 options,
             )
             .await
             .map_err(|e| {
-                EncryptionError::CekDecryptionFailed(format!("Key Vault unwrap failed: {}", e))
+                EncryptionError::CekDecryptionFailed(format!("Key Vault unwrap failed: {e}"))
             })?
             .into_model()
             .map_err(|e| {
-                EncryptionError::CekDecryptionFailed(format!("Failed to parse response: {}", e))
+                EncryptionError::CekDecryptionFailed(format!("Failed to parse response: {e}"))
             })?;
 
         // Extract the decrypted CEK from response
@@ -277,14 +277,14 @@ impl KeyStoreProvider for AzureKeyVaultProvider {
             .sign(
                 &key_name,
                 parameters.try_into().map_err(|e| {
-                    EncryptionError::CmkError(format!("Failed to create request: {}", e))
+                    EncryptionError::CmkError(format!("Failed to create request: {e}"))
                 })?,
                 options,
             )
             .await
-            .map_err(|e| EncryptionError::CmkError(format!("Key Vault sign failed: {}", e)))?
+            .map_err(|e| EncryptionError::CmkError(format!("Key Vault sign failed: {e}")))?
             .into_model()
-            .map_err(|e| EncryptionError::CmkError(format!("Failed to parse response: {}", e)))?;
+            .map_err(|e| EncryptionError::CmkError(format!("Failed to parse response: {e}")))?;
 
         // Extract the signature from response
         let signature = result
@@ -332,14 +332,14 @@ impl KeyStoreProvider for AzureKeyVaultProvider {
             .verify(
                 &key_name,
                 parameters.try_into().map_err(|e| {
-                    EncryptionError::CmkError(format!("Failed to create request: {}", e))
+                    EncryptionError::CmkError(format!("Failed to create request: {e}"))
                 })?,
                 options,
             )
             .await
-            .map_err(|e| EncryptionError::CmkError(format!("Key Vault verify failed: {}", e)))?
+            .map_err(|e| EncryptionError::CmkError(format!("Key Vault verify failed: {e}")))?
             .into_model()
-            .map_err(|e| EncryptionError::CmkError(format!("Failed to parse response: {}", e)))?;
+            .map_err(|e| EncryptionError::CmkError(format!("Failed to parse response: {e}")))?;
 
         // Extract the verification result
         // KeyVerifyResult has a `value` field of type Option<bool>
@@ -357,8 +357,7 @@ fn map_algorithm(algorithm: &str) -> Result<EncryptionAlgorithm, EncryptionError
         "RSA_OAEP_256" | "RSA-OAEP-256" => Ok(EncryptionAlgorithm::RsaOaep256),
         "RSA1_5" | "RSA-1_5" => Ok(EncryptionAlgorithm::Rsa1_5),
         _ => Err(EncryptionError::ConfigurationError(format!(
-            "Unsupported key encryption algorithm: {}. Expected RSA_OAEP, RSA_OAEP_256, or RSA1_5",
-            algorithm
+            "Unsupported key encryption algorithm: {algorithm}. Expected RSA_OAEP, RSA_OAEP_256, or RSA1_5"
         ))),
     }
 }

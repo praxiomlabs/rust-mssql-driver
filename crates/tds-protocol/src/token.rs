@@ -1274,7 +1274,7 @@ impl NbcRow {
     /// columns are NULL, followed by only the non-NULL values.
     pub fn decode(src: &mut impl Buf, metadata: &ColMetaData) -> Result<Self, ProtocolError> {
         let col_count = metadata.columns.len();
-        let bitmap_len = (col_count + 7) / 8;
+        let bitmap_len = col_count.div_ceil(8);
 
         if src.remaining() < bitmap_len {
             return Err(ProtocolError::UnexpectedEof);

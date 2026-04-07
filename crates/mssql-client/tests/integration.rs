@@ -44,8 +44,7 @@ fn get_test_config() -> Option<Config> {
     let encrypt = std::env::var("MSSQL_ENCRYPT").unwrap_or_else(|_| "false".into());
 
     let conn_str = format!(
-        "Server={},{};Database={};User Id={};Password={};TrustServerCertificate=true;Encrypt={}",
-        host, port, database, user, password, encrypt
+        "Server={host},{port};Database={database};User Id={user};Password={password};TrustServerCertificate=true;Encrypt={encrypt}"
     );
 
     Config::from_connection_string(&conn_str).ok()
@@ -75,9 +74,8 @@ async fn test_connection_with_invalid_credentials() {
     let encrypt = std::env::var("MSSQL_ENCRYPT").unwrap_or_else(|_| "false".into());
 
     let conn_str = format!(
-        "Server={},{};Database=master;User Id=invalid_user;Password=wrong_password;\
-         TrustServerCertificate=true;Encrypt={}",
-        host, port, encrypt
+        "Server={host},{port};Database=master;User Id=invalid_user;Password=wrong_password;\
+         TrustServerCertificate=true;Encrypt={encrypt}"
     );
 
     let config = Config::from_connection_string(&conn_str).expect("Config should parse");
@@ -99,9 +97,8 @@ async fn test_connection_to_nonexistent_database() {
     let encrypt = std::env::var("MSSQL_ENCRYPT").unwrap_or_else(|_| "false".into());
 
     let conn_str = format!(
-        "Server={},{};Database=nonexistent_db_12345;User Id={};Password={};\
-         TrustServerCertificate=true;Encrypt={}",
-        host, port, user, password, encrypt
+        "Server={host},{port};Database=nonexistent_db_12345;User Id={user};Password={password};\
+         TrustServerCertificate=true;Encrypt={encrypt}"
     );
 
     let config = Config::from_connection_string(&conn_str).expect("Config should parse");
@@ -111,7 +108,7 @@ async fn test_connection_to_nonexistent_database() {
     // Either way, the connection attempt should not panic
     if let Err(e) = result {
         // Expected: database doesn't exist error
-        println!("Expected error: {:?}", e);
+        println!("Expected error: {e:?}");
     }
 }
 
@@ -385,12 +382,12 @@ async fn test_division_by_zero() {
             for r in rows {
                 if let Ok(row) = r {
                     let val: Option<i32> = row.get(0).ok().flatten();
-                    println!("Division by zero returned: {:?}", val);
+                    println!("Division by zero returned: {val:?}");
                 }
             }
         }
         Err(e) => {
-            println!("Division by zero error: {:?}", e);
+            println!("Division by zero error: {e:?}");
         }
     }
 
@@ -544,7 +541,7 @@ async fn test_multiple_queries_same_connection() {
     // Execute multiple queries on the same connection
     for i in 1..=5 {
         let rows = client
-            .query(&format!("SELECT {} AS iteration", i), &[])
+            .query(&format!("SELECT {i} AS iteration"), &[])
             .await
             .expect("Query failed");
 
@@ -672,7 +669,7 @@ async fn test_large_string() {
     // Create a string of 8000 characters (max for VARCHAR)
     let large_string = "X".repeat(8000);
     let rows = client
-        .query(&format!("SELECT '{}' AS large_value", large_string), &[])
+        .query(&format!("SELECT '{large_string}' AS large_value"), &[])
         .await
         .expect("Query failed");
 
@@ -1323,8 +1320,7 @@ async fn test_repeated_parameterized_queries() {
         assert_eq!(
             result,
             vec![param * 2],
-            "Iteration {} should return doubled value",
-            i
+            "Iteration {i} should return doubled value"
         );
     }
 
@@ -1419,11 +1415,11 @@ async fn test_high_query_volume() {
     for i in 0..500 {
         let param = i;
         // Use unique SQL text for each iteration to simulate many different statements
-        let sql = format!("SELECT @p1 + {} AS result", i);
+        let sql = format!("SELECT @p1 + {i} AS result");
         let rows = client
             .query(&sql, &[&param])
             .await
-            .unwrap_or_else(|e| panic!("Query {} failed: {:?}", i, e));
+            .unwrap_or_else(|e| panic!("Query {i} failed: {e:?}"));
 
         let result: i32 = rows
             .filter_map(|r| r.ok())
@@ -1431,7 +1427,7 @@ async fn test_high_query_volume() {
             .map(|row| row.get(0).unwrap())
             .unwrap_or(-1);
 
-        assert_eq!(result, param + i, "Query {} should return correct sum", i);
+        assert_eq!(result, param + i, "Query {i} should return correct sum");
     }
 
     client.close().await.expect("Failed to close");
@@ -1456,7 +1452,7 @@ async fn test_same_sql_different_params() {
 
     // Insert test data
     for i in 1..=100 {
-        let name = format!("User{}", i);
+        let name = format!("User{i}");
         let score = i * 10;
         client
             .execute(
@@ -1464,7 +1460,7 @@ async fn test_same_sql_different_params() {
                 &[&{ i }, &name.as_str(), &{ score }],
             )
             .await
-            .unwrap_or_else(|e| panic!("Insert {} failed: {:?}", i, e));
+            .unwrap_or_else(|e| panic!("Insert {i} failed: {e:?}"));
     }
 
     // Query with same SQL, different params (cache should help here)
@@ -1474,15 +1470,15 @@ async fn test_same_sql_different_params() {
         let rows = client
             .query(query, &[&{ i }])
             .await
-            .unwrap_or_else(|e| panic!("Query for id {} failed: {:?}", i, e));
+            .unwrap_or_else(|e| panic!("Query for id {i} failed: {e:?}"));
 
         let results: Vec<(String, i32)> = rows
             .filter_map(|r| r.ok())
             .map(|row| (row.get(0).unwrap(), row.get(1).unwrap()))
             .collect();
 
-        assert_eq!(results.len(), 1, "Should find exactly one row for id {}", i);
-        assert_eq!(results[0].0, format!("User{}", i));
+        assert_eq!(results.len(), 1, "Should find exactly one row for id {i}");
+        assert_eq!(results[0].0, format!("User{i}"));
         assert_eq!(results[0].1, { i * 10 });
     }
 
@@ -1505,8 +1501,7 @@ fn get_config_with_encrypt(encrypt: &str) -> Option<Config> {
     let database = std::env::var("MSSQL_DATABASE").unwrap_or_else(|_| "master".into());
 
     let conn_str = format!(
-        "Server={},{};Database={};User Id={};Password={};TrustServerCertificate=true;Encrypt={}",
-        host, port, database, user, password, encrypt
+        "Server={host},{port};Database={database};User Id={user};Password={password};TrustServerCertificate=true;Encrypt={encrypt}"
     );
 
     Config::from_connection_string(&conn_str).ok()
@@ -1560,9 +1555,8 @@ async fn should_skip_tls_tests() -> bool {
 
                             if major < 14 {
                                 println!(
-                                    "Skipping TLS test: SQL Server major version {} < 14 \
-                                     (may not support TLS 1.2 without updates)",
-                                    major
+                                    "Skipping TLS test: SQL Server major version {major} < 14 \
+                                     (may not support TLS 1.2 without updates)"
                                 );
                                 should_skip = true;
                             }
@@ -1654,7 +1648,7 @@ async fn test_tds_8_strict_mode() {
         Err(e) => {
             // Expected if server doesn't support TDS 8.0 strict mode
             // The connection may fail with "strict encryption mode required"
-            println!("TDS 8.0 strict mode not available: {:?}", e);
+            println!("TDS 8.0 strict mode not available: {e:?}");
         }
     }
 }
@@ -1678,7 +1672,7 @@ async fn test_server_tds_version() {
     for result in rows {
         let row = result.expect("Row should be valid");
         let version: String = row.get(0).expect("Failed to get version");
-        println!("SQL Server version: {}", version);
+        println!("SQL Server version: {version}");
 
         // SQL Server 2022 = version 16
         // SQL Server 2019 = version 15
@@ -1743,9 +1737,7 @@ async fn test_encrypted_query_roundtrip() {
         assert_eq!(data, test_string);
         assert!(
             (num - test_float).abs() < 0.0001,
-            "Float mismatch: {} vs {}",
-            num,
-            test_float
+            "Float mismatch: {num} vs {test_float}"
         );
         count += 1;
     }
@@ -1799,13 +1791,9 @@ async fn test_multiple_errors_recovery() {
     // Cause multiple errors
     for i in 1..=5 {
         let result = client
-            .query(&format!("SELECT * FROM NonExistentTable{}", i), &[])
+            .query(&format!("SELECT * FROM NonExistentTable{i}"), &[])
             .await;
-        assert!(
-            result.is_err(),
-            "Expected error {} for non-existent table",
-            i
-        );
+        assert!(result.is_err(), "Expected error {i} for non-existent table");
     }
 
     // Connection should still work
@@ -1961,32 +1949,32 @@ async fn test_binary_data_roundtrip() {
 
     for (id, data) in &test_cases {
         // Use literal hex for binary data insertion
-        let hex: String = data.iter().map(|b| format!("{:02X}", b)).collect();
-        let sql = format!("INSERT INTO #BinaryRoundtrip VALUES ({}, 0x{})", id, hex);
+        let hex: String = data.iter().map(|b| format!("{b:02X}")).collect();
+        let sql = format!("INSERT INTO #BinaryRoundtrip VALUES ({id}, 0x{hex})");
         client
             .execute(&sql, &[])
             .await
-            .unwrap_or_else(|e| panic!("Failed to insert binary data for id {}: {:?}", id, e));
+            .unwrap_or_else(|e| panic!("Failed to insert binary data for id {id}: {e:?}"));
     }
 
     // Verify each
     for (id, expected) in &test_cases {
         let rows = client
             .query(
-                &format!("SELECT data FROM #BinaryRoundtrip WHERE id = {}", id),
+                &format!("SELECT data FROM #BinaryRoundtrip WHERE id = {id}"),
                 &[],
             )
             .await
-            .unwrap_or_else(|e| panic!("Query failed for id {}: {:?}", id, e));
+            .unwrap_or_else(|e| panic!("Query failed for id {id}: {e:?}"));
 
         let mut found = false;
         for result in rows {
             let row = result.expect("Row should be valid");
             let data: Vec<u8> = row.get(0).expect("Failed to get binary data");
-            assert_eq!(&data, expected, "Binary data mismatch for id {}", id);
+            assert_eq!(&data, expected, "Binary data mismatch for id {id}");
             found = true;
         }
-        assert!(found, "No row found for id {}", id);
+        assert!(found, "No row found for id {id}");
     }
 
     client.close().await.expect("Failed to close");
@@ -2035,7 +2023,7 @@ async fn test_tvp_basic_int_list() {
         END
     "#;
     if let Err(e) = client.execute(create_type, &[]).await {
-        println!("Could not create TVP type (may already exist): {:?}", e);
+        println!("Could not create TVP type (may already exist): {e:?}");
     }
 
     // Create test data table
@@ -2119,7 +2107,7 @@ async fn test_tvp_empty_table() {
         END
     "#;
     if let Err(e) = client.execute(create_type, &[]).await {
-        println!("Could not create TVP type: {:?}", e);
+        println!("Could not create TVP type: {e:?}");
     }
 
     // Create an empty TVP
@@ -2190,7 +2178,7 @@ async fn test_tvp_multi_column() {
         END
     "#;
     if let Err(e) = client.execute(create_type, &[]).await {
-        println!("Could not create TVP type: {:?}", e);
+        println!("Could not create TVP type: {e:?}");
     }
 
     // Create TVP data
@@ -2280,7 +2268,7 @@ async fn test_tvp_bulk_insert() {
         END
     "#;
     if let Err(e) = client.execute(create_type, &[]).await {
-        println!("Could not create TVP type: {:?}", e);
+        println!("Could not create TVP type: {e:?}");
     }
 
     // Create destination table
@@ -2296,7 +2284,7 @@ async fn test_tvp_bulk_insert() {
     let rows: Vec<BulkRow> = (1..=100)
         .map(|i| BulkRow {
             id: i,
-            value: format!("Value {}", i),
+            value: format!("Value {i}"),
         })
         .collect();
 
@@ -2536,8 +2524,7 @@ async fn test_data_type_decimal_high_scale() {
         // Check approximate value (f64 won't have full precision)
         assert!(
             (value - 123456.123456789).abs() < 0.001,
-            "Value should be approximately correct: {}",
-            value
+            "Value should be approximately correct: {value}"
         );
     }
 
@@ -2556,8 +2543,7 @@ async fn test_data_type_decimal_high_scale() {
         let value: f64 = row.get(0).expect("Should get decimal");
         assert!(
             (value - 123.456789).abs() < 0.000001,
-            "Value should match: {}",
-            value
+            "Value should match: {value}"
         );
     }
 
@@ -2575,10 +2561,7 @@ async fn test_data_type_nvarchar_max() {
 
     let rows = client
         .query(
-            &format!(
-                "SELECT CAST(N'{}' AS NVARCHAR(MAX)) AS long_text",
-                long_text
-            ),
+            &format!("SELECT CAST(N'{long_text}' AS NVARCHAR(MAX)) AS long_text"),
             &[],
         )
         .await
@@ -2595,10 +2578,7 @@ async fn test_data_type_nvarchar_max() {
     let unicode_text = "Hello \u{4e16}\u{754c}! ".repeat(500);
     let rows = client
         .query(
-            &format!(
-                "SELECT CAST(N'{}' AS NVARCHAR(MAX)) AS unicode_text",
-                unicode_text
-            ),
+            &format!("SELECT CAST(N'{unicode_text}' AS NVARCHAR(MAX)) AS unicode_text"),
             &[],
         )
         .await
@@ -2624,7 +2604,7 @@ async fn test_data_type_varchar_max() {
 
     let rows = client
         .query(
-            &format!("SELECT CAST('{}' AS VARCHAR(MAX)) AS long_text", long_text),
+            &format!("SELECT CAST('{long_text}' AS VARCHAR(MAX)) AS long_text"),
             &[],
         )
         .await
@@ -2758,8 +2738,7 @@ async fn test_data_type_sql_variant() {
         let value: f64 = row.get(0).expect("Should get SQL_VARIANT as f64");
         assert!(
             (value - 123.456).abs() < 0.001,
-            "Value should be approximately correct: {}",
-            value
+            "Value should be approximately correct: {value}"
         );
     }
 
