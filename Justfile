@@ -36,7 +36,7 @@
 project_name := "rust-mssql-driver"
 # Version is read dynamically from Cargo.toml to avoid drift
 version := `cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "mssql-client") | .version'`
-msrv := "1.85"
+msrv := "1.88"
 edition := "2024"
 
 # ----------------------------------------------------------------------------
@@ -199,12 +199,12 @@ setup-linux:
     printf '{{green}}[OK]{{reset}}   Linux dependencies installed\n'
 
 [group('setup')]
-[doc("Install recommended cargo extensions (version-pinned for Rust 1.85)")]
+[doc("Install recommended cargo extensions (version-pinned for Rust 1.88)")]
 setup-tools:
     #!/usr/bin/env bash
     set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Installing recommended cargo extensions...\n'
-    printf '{{cyan}}[INFO]{{reset}} Note: Using version pins compatible with Rust 1.85\n'
+    printf '{{cyan}}[INFO]{{reset}} Note: Using version pins compatible with Rust 1.88\n'
 
     # Core testing and coverage
     cargo install cargo-nextest@0.9.100 --locked
@@ -838,11 +838,10 @@ semver:
     #!/usr/bin/env bash
     set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Checking semver compliance...\n'
-    # Exclude mssql-testing: testcontainers -> home@0.5.12 requires Rust 1.88,
-    # but we support MSRV 1.85. Testing utilities have relaxed API stability requirements.
-    # Re-enable when upstream testcontainers updates their dependencies.
-    # NOTE: cargo-semver-checks requires Rust 1.89+, so we explicitly use +stable
-    # even though the project MSRV is 1.85 (set in rust-toolchain.toml).
+    # Exclude mssql-testing: testing utilities have relaxed API stability requirements
+    # and are not published to crates.io (publish = false).
+    # NOTE: cargo-semver-checks requires a newer Rust than our MSRV, so we explicitly
+    # use +stable (MSRV is 1.88, set in rust-toolchain.toml).
     #
     # PRE-1.0 POLICY: Semver violations are ADVISORY, not blocking.
     # Per semver spec, breaking changes are allowed in 0.x.y minor bumps.

@@ -2,7 +2,7 @@
 
 Comprehensive guide for releasing new versions of rust-mssql-driver to crates.io.
 
-**Version:** 0.5.2 | **MSRV:** 1.85 | **Edition:** 2024 | **Workspace:** 9 crates
+**Version:** 0.6.0 | **MSRV:** 1.88 | **Edition:** 2024 | **Workspace:** 9 crates
 
 ---
 
@@ -651,7 +651,7 @@ Ensure your local commands match CI behavior to avoid surprise failures.
 | **Tests (default)** | `just test` | N/A | CI uses `--all-features --locked` |
 | **Tests (locked)** | `just nextest-locked-all` | `cargo nextest run --workspace --all-features --locked` | **Matches CI exactly** |
 | **Docs** | `just doc-check-all` | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps` | Warnings as errors |
-| **MSRV** | `just msrv-check-all` | `cargo +1.85 check --workspace --all-features` | Uses toolchain from rust-toolchain.toml |
+| **MSRV** | `just msrv-check-all` | `cargo +1.88 check --workspace --all-features` | Uses toolchain from rust-toolchain.toml |
 | **Deny** | `just deny` | `cargo deny check` | License + advisory check |
 | **Semver** | `just semver` | `cargo semver-checks check-release --exclude mssql-testing` | Uses stable toolchain |
 

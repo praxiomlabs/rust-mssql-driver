@@ -737,10 +737,7 @@ fn coverage(sh: &Shell, format: &str) -> Result<()> {
             println!("✅ Coverage report: target/coverage.json");
         }
         _ => {
-            bail!(
-                "Unknown coverage format: {}. Use html, lcov, or json.",
-                format
-            );
+            bail!("Unknown coverage format: {format}. Use html, lcov, or json.");
         }
     }
 
@@ -891,7 +888,7 @@ fn ci_local(sh: &Shell) -> Result<()> {
     println!("\n✅ Full CI pipeline passed!");
     println!("\nNote: MSRV check and Miri are not included in local CI.");
     println!("      Run these separately if needed:");
-    println!("        MSRV:  rustup run 1.85 cargo check --all-features");
+    println!("        MSRV:  rustup run 1.88 cargo check --all-features");
     println!("        Miri:  cargo +nightly miri test -p tds-protocol");
 
     Ok(())

@@ -55,7 +55,7 @@ just ci          # CI with default features
 
 | Tool | Version | Required | Notes |
 |------|---------|----------|-------|
-| Rust | 1.85+ | Yes | 2024 Edition |
+| Rust | 1.88+ | Yes | 2024 Edition |
 | Just | 1.23+ | Yes | Command runner |
 | jq | any | Yes | JSON parsing |
 | Docker | any | No | For integration tests |
@@ -76,7 +76,7 @@ This shows what's installed and what's missing.
 just setup-tools
 ```
 
-Installs version-pinned tools compatible with Rust 1.85:
+Installs version-pinned tools compatible with Rust 1.88:
 - `cargo-nextest` - Fast test runner
 - `cargo-llvm-cov` - Code coverage
 - `cargo-audit` - Security auditing
@@ -306,7 +306,6 @@ Breaking changes are changes that may require users to modify their code when up
 - Removing enum variants
 - Changing trait definitions
 - Removing or renaming feature flags
-- Increasing MSRV
 
 **Usually Breaking:**
 - Adding required fields to public structs (without `#[non_exhaustive]`)
@@ -320,6 +319,7 @@ Breaking changes are changes that may require users to modify their code when up
 - Bug fixes (even if code depended on buggy behavior)
 - Performance improvements
 - Documentation changes
+- **MSRV increases** — see [STABILITY.md § MSRV Increase Policy](STABILITY.md#minimum-supported-rust-version-msrv). MSRV bumps are allowed in minor releases when necessary for security fixes, critical bug fixes, or features requiring new language/stdlib capabilities. This aligns with the broader Rust ecosystem (Tokio, serde, etc.) and is consistent with our rolling 6-month MSRV window.
 
 ### Breaking Change Policy
 

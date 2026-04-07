@@ -5,7 +5,7 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 [![Crates.io](https://img.shields.io/crates/v/mssql-client.svg)](https://crates.io/crates/mssql-client)
 [![Documentation](https://docs.rs/mssql-client/badge.svg)](https://docs.rs/mssql-client)
 [![License](https://img.shields.io/crates/l/mssql-client.svg)](LICENSE-MIT)
-[![MSRV](https://img.shields.io/badge/MSRV-1.85-blue.svg)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0.html)
+[![MSRV](https://img.shields.io/badge/MSRV-1.88-blue.svg)](https://blog.rust-lang.org/2025/06/26/Rust-1.88.0/)
 
 ## Features
 
@@ -15,7 +15,7 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 - **Built-in Connection Pooling** - No external pooling crate required
 - **Reduced-Copy Architecture** - `Arc<Bytes>` pattern minimizes allocation overhead
 - **Pure Rust TLS** - Uses rustls, no OpenSSL dependency
-- **Modern Rust** - 2024 Edition, MSRV 1.85
+- **Modern Rust** - 2024 Edition, MSRV 1.88
 
 ### Feature Status (v0.6.x)
 

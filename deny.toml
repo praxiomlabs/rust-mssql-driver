@@ -21,9 +21,12 @@ ignore = [
     # The crate is archived but still functional and secure
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile is only used indirectly via bollard; migration pending upstream" },
 
-    # tokio-tar vulnerability - only used by testcontainers (dev dependency)
-    # Not exploitable in our use case (we control tar input)
-    { id = "RUSTSEC-2025-0111", reason = "tokio-tar is only used by testcontainers for testing; not used in library code" },
+    # astral-tokio-tar PAX extension validation - only used by testcontainers (dev dependency)
+    # Not exploitable: dev-only crate (mssql-testing, publish = false), we control tar input
+    # Low severity (CVSS 1.7). Fix available only in 0.6.1-rc1 (not stable yet).
+    # Supersedes the previous RUSTSEC-2025-0111 (tokio-tar) ignore — testcontainers
+    # migrated from tokio-tar to astral-tokio-tar, so the old advisory no longer applies.
+    { id = "RUSTSEC-2026-0066", reason = "astral-tokio-tar is only used by testcontainers for testing; not used in library code. Fix only in pre-release." },
 
     # RSA timing side-channel (Marvin Attack) - no fix available yet
     # Risk assessment:
@@ -45,6 +48,7 @@ confidence-threshold = 0.92
 # Explicitly allowed licenses
 allow = [
     "MIT",
+    "MIT-0",                    # MIT No Attribution - used by some aws-lc-sys sources
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
@@ -54,7 +58,6 @@ allow = [
     "CC0-1.0",
     "Unicode-3.0",
     "BSL-1.0",
-    "OpenSSL",                  # Used by aws-lc-sys
     "CDLA-Permissive-2.0",      # Used by webpki-roots (CA root certificates)
 ]
 

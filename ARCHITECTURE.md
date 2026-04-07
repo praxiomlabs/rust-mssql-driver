@@ -4,7 +4,7 @@
 **Status:** Design Complete (v0.5.0 Released)
 **Target Protocol:** MS-TDS 7.3 – 8.0 (SQL Server 2008 – 2025)
 **Toolchain Standard:** Rust 2024 Edition (v1.85+, released February 20, 2025)
-**MSRV Policy:** Rust 1.85.0 (6-month rolling window)
+**MSRV Policy:** Rust 1.88.0 (6-month rolling window aligned with Tokio's policy)
 
 ---
 
@@ -77,7 +77,7 @@ The project follows a **Flat Workspace** layout. The root `Cargo.toml` is a virt
 ```
 mssql-driver/
 ├── Cargo.toml                    # Virtual manifest
-├── rust-toolchain.toml           # Pin to 1.85+
+├── rust-toolchain.toml           # Pin to 1.88+
 ├── deny.toml                     # cargo-deny configuration
 ├── hakari.toml                   # cargo-hakari configuration
 ├── crates/
@@ -715,7 +715,7 @@ members = ["crates/*", "xtask"]
 [workspace.package]
 version = "0.5.2"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/praxiomlabs/rust-mssql-driver"
 
@@ -1114,7 +1114,7 @@ enum ProtocolState {
 
 #### Async Trait Implementation Note
 
-With MSRV 1.85 (Rust 2024 Edition), native `async fn` in traits is stable. The driver uses native async traits where possible, reducing reliance on the `#[async_trait]` proc macro and its associated overhead:
+With MSRV 1.88 (Rust 2024 Edition), native `async fn` in traits is stable. The driver uses native async traits where possible, reducing reliance on the `#[async_trait]` proc macro and its associated overhead:
 
 ```rust
 // Native async trait (preferred - no macro overhead, better compiler errors)
@@ -1870,13 +1870,13 @@ pub async fn query(&mut self, sql: &str) -> Result<QueryStream<'_>, Error> {
 
 **Policy:** Rolling 6-month MSRV window aligned with Tokio's policy.
 
-**Current MSRV:** Rust 1.85.0 (Rust 2024 Edition)
+**Current MSRV:** Rust 1.88.0 (Rust 2024 Edition)
 
 **Enforcement:**
 ```toml
 # Cargo.toml
 [package]
-rust-version = "1.85"
+rust-version = "1.88"
 ```
 
 **CI Verification:**
@@ -1885,7 +1885,7 @@ msrv:
   runs-on: ubuntu-latest
   steps:
     - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@1.85.0
+    - uses: dtolnay/rust-toolchain@1.88.0
     - run: cargo check --all-features
 ```
 

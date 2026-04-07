@@ -10,7 +10,7 @@ For architecture comparison with Tiberius, see [COMPARATIVE_BENCHMARKS.md](COMPA
 
 ### Prerequisites
 
-- Rust 1.85+ (stable)
+- Rust 1.88+ (stable)
 - Criterion 0.5+
 
 ### Commands
@@ -370,7 +370,7 @@ Benchmarks are not run in CI by default (too slow, variable). For regression det
 | Release | < 10 μs | < 50 μs | Return to pool |
 | Health check | < 1 ms | < 5 ms | SELECT 1 validation |
 
-*Benchmarks run on Linux with Rust 1.85 (release mode). Run `cargo bench --workspace` locally for accurate measurements.*
+*Benchmarks run on Linux with Rust 1.88 (release mode). Run `cargo bench --workspace` locally for accurate measurements.*
 
 ---
 
@@ -429,7 +429,7 @@ Baseline measurements were taken on:
 - **CPU:** AMD Ryzen 9 5900X / Apple M1 Pro
 - **Memory:** 32 GB DDR4-3200 / 16 GB LPDDR5
 - **OS:** Ubuntu 22.04 / macOS 14
-- **Rust:** 1.85.0
+- **Rust:** 1.88.0
 
 Adjust expectations for different hardware configurations.
 

@@ -1,12 +1,15 @@
 # Configuration for cargo-audit
-# These advisories are handled/accepted in deny.toml
+# These advisories are handled/accepted in deny.toml — keep in sync.
 
 [advisories]
 ignore = [
     # rustls-pemfile unmaintained - used indirectly, migration pending upstream
     "RUSTSEC-2025-0134",
-    # tokio-tar vulnerability - only used by testcontainers for testing
-    "RUSTSEC-2025-0111",
+    # astral-tokio-tar PAX extension validation - only used by testcontainers for testing
+    # Dev-only crate (mssql-testing, publish = false). Fix only in 0.6.1-rc1 (pre-release).
+    # Supersedes the previous RUSTSEC-2025-0111 (tokio-tar) ignore — testcontainers
+    # migrated from tokio-tar to astral-tokio-tar.
+    "RUSTSEC-2026-0066",
     # RSA timing side-channel (Marvin Attack) - no fix available yet
     # Our RSA usage is local (CEK unwrapping, SSPI auth), not network-observable
     # Tracking: https://github.com/RustCrypto/RSA/issues/390

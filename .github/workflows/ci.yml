@@ -142,9 +142,8 @@ jobs:
           # Use git tag as baseline to avoid workspace dependency issues.
           # When using crates.io baseline, workspace deps get mixed with local versions.
           baseline-rev: ${{ steps.latest_tag.outputs.tag }}
-          # Exclude mssql-testing: testcontainers -> home@0.5.12 requires Rust 1.88,
-          # but we support MSRV 1.85. Testing utilities have relaxed API stability requirements.
-          # Re-enable when upstream testcontainers updates their dependencies.
+          # Exclude mssql-testing: testing utilities have relaxed API stability
+          # requirements and are not published to crates.io (publish = false).
           exclude: mssql-testing
 
   coverage:
