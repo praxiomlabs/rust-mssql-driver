@@ -1849,9 +1849,20 @@ release-preflight:
         exit 1
     fi
 
+[group('lint')]
+[doc("Check documentation consistency (MSRV across files, policy agreement, version inheritance)")]
+doc-consistency:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -x ./scripts/check-doc-consistency.sh ]; then
+        printf '{{yellow}}[WARN]{{reset}} scripts/check-doc-consistency.sh is missing or not executable\n'
+        exit 0
+    fi
+    ./scripts/check-doc-consistency.sh
+
 [group('release')]
 [doc("Prepare for release (validates ALL features - REQUIRED before tagging)")]
-release-check: ci-release-all check-feature-flags wip-check panic-audit version-sync version-refs-check typos machete metadata-check url-check
+release-check: ci-release-all check-feature-flags wip-check panic-audit version-sync version-refs-check doc-consistency typos machete metadata-check url-check
     #!/usr/bin/env bash
     set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Release Validation ══════{{reset}}\n\n'

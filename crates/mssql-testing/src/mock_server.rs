@@ -546,9 +546,32 @@ async fn handle_connection(mut stream: TcpStream, config: Arc<MockServerConfig>)
             .map_err(|e| MockServerError::Protocol(format!("TLS handshake failed: {e}")))?;
 
         // Continue login and query processing over TLS
-        handle_session(&mut tls_stream, &config).await
+        let session_result = handle_session(&mut tls_stream, &config).await;
+
+        // CRITICAL: explicitly shut down the TLS stream so rustls sends a
+        // close_notify alert to the peer before the TCP socket closes.
+        //
+        // Without this, dropping `tls_stream` closes the TCP side abruptly,
+        // and clients on macOS/Windows (stricter rustls timing) report
+        // "peer closed connection without sending TLS close_notify" on
+        // whatever read was in flight, even if the server had already
+        // written the response. Linux's rustls tolerated this silently,
+        // which is why the bug was latent until the full CI matrix ran.
+        //
+        // See issue #70 for the full post-mortem and the fact that the
+        // test_mock_server_tls_full_connection test was previously gated
+        // to Linux only as a temporary workaround.
+        //
+        // We ignore the shutdown error because at this point the session is
+        // done and we only care about best-effort clean close. A real driver
+        // (not this mock) would log it.
+        use tokio::io::AsyncWriteExt;
+        let _ = tls_stream.shutdown().await;
+
+        session_result
     } else {
-        // Continue over plaintext TCP
+        // Continue over plaintext TCP. No TLS close_notify dance needed;
+        // the TCP half-close is unambiguous.
         handle_session(&mut stream, &config).await
     }
 }

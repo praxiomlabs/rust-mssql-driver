@@ -372,15 +372,12 @@ async fn test_mock_server_plaintext_prelogin() {
 /// a TDS PreLogin-wrapped TLS handshake, then Login7 and LoginAck exchange
 /// over the encrypted channel.
 ///
-/// **Platform gate**: Currently Linux-only. The test fails on macOS and Windows
-/// with `peer closed connection without sending TLS close_notify` — a known
-/// robustness gap in the mock server's TLS shutdown path. The mock server
-/// needs to explicitly `shutdown()` the TLS stream before dropping it so
-/// rustls on stricter platforms receives the close_notify alert. This is
-/// test-only infrastructure and does not affect production code.
-///
-/// Tracking: see issue #70 for the proper fix.
-#[cfg(target_os = "linux")]
+/// Runs on all platforms. Previously gated to Linux-only due to a mock server
+/// TLS shutdown bug (#70) where the TLS stream was dropped without sending
+/// close_notify, causing rustls on macOS/Windows (stricter timing) to fail
+/// the client's in-flight read with UnexpectedEof. Fixed by explicitly
+/// calling `tls_stream.shutdown().await` in the mock server's
+/// `handle_connection` before the stream goes out of scope.
 #[tokio::test]
 async fn test_mock_server_tls_full_connection() {
     use bytes::BufMut;
