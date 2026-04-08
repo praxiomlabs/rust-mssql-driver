@@ -122,6 +122,15 @@ enum Command {
     CheckFeatures,
     /// Run the full CI pipeline locally (mirrors GitHub Actions)
     CiLocal,
+    /// Generate a CHANGELOG draft from conventional commits since the last tag
+    ReleaseNotes {
+        /// Start point (defaults to the most recent tag matching v*.*.*)
+        #[arg(long)]
+        since: Option<String>,
+        /// End point (defaults to HEAD)
+        #[arg(long, default_value = "HEAD")]
+        until: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -167,6 +176,7 @@ fn main() -> Result<()> {
         } => release(&sh, &version, no_changelog)?,
         Command::CheckFeatures => check_features(&sh)?,
         Command::CiLocal => ci_local(&sh)?,
+        Command::ReleaseNotes { since, until } => release_notes(&sh, since.as_deref(), &until)?,
     }
 
     Ok(())
@@ -1098,4 +1108,218 @@ fn validate_version_consistency(cargo_toml: &str, expected: &str) -> Result<()> 
     }
 
     Ok(())
+}
+
+/// Generate a CHANGELOG draft from conventional commits.
+///
+/// Reads `git log <since>..<until>` (defaults: last v*.*.* tag to HEAD),
+/// parses conventional commit headers (`type(scope): subject`), groups by
+/// type, detects breaking changes (`!` suffix on type or `BREAKING CHANGE`
+/// footer), and emits a markdown document suitable for pasting into
+/// CHANGELOG.md under a new version heading.
+///
+/// Non-conforming commits are placed under "Other" so nothing is silently
+/// dropped. Merge commits are skipped.
+fn release_notes(sh: &Shell, since: Option<&str>, until: &str) -> Result<()> {
+    use std::collections::BTreeMap;
+
+    // Resolve `since` to the most recent vX.Y.Z tag if not provided.
+    let since = match since {
+        Some(s) => s.to_string(),
+        None => {
+            let tag = cmd!(sh, "git describe --tags --abbrev=0 --match=v*.*.*")
+                .ignore_stderr()
+                .read()
+                .context("Could not find a previous v*.*.* tag. Pass --since <ref> explicitly.")?;
+            tag.trim().to_string()
+        }
+    };
+
+    let range = format!("{since}..{until}");
+
+    // Get commit hash + subject + body, separator = 0x1f (unit separator),
+    // record separator = 0x1e (record separator). These bytes virtually
+    // never appear in commit messages.
+    let log_output = cmd!(
+        sh,
+        "git log {range} --no-merges --pretty=format:%h%x1f%s%x1f%b%x1e"
+    )
+    .read()
+    .context("Failed to read git log")?;
+
+    if log_output.trim().is_empty() {
+        println!("(no commits between {since} and {until})");
+        return Ok(());
+    }
+
+    // Bucket order matters: this is the order sections appear in output.
+    let bucket_order = [
+        ("feat", "Added"),
+        ("fix", "Fixed"),
+        ("perf", "Performance"),
+        ("refactor", "Changed"),
+        ("docs", "Documentation"),
+        ("test", "Tests"),
+        ("build", "Build"),
+        ("ci", "CI / Infrastructure"),
+        ("chore", "Chores"),
+        ("style", "Style"),
+        ("revert", "Reverts"),
+    ];
+
+    let mut buckets: BTreeMap<&'static str, Vec<String>> = BTreeMap::new();
+    let mut other: Vec<String> = Vec::new();
+    let mut breaking: Vec<String> = Vec::new();
+
+    for record in log_output.split('\u{1e}') {
+        let record = record.trim_matches('\n');
+        if record.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = record.splitn(3, '\u{1f}').collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let hash = parts[0];
+        let subject = parts[1];
+        let body = parts.get(2).copied().unwrap_or("");
+
+        // Parse conventional commit header: "type(scope)?!?: subject"
+        // e.g. "feat(auth)!: wire SSPI", "fix: patch", "docs(readme): update"
+        let (commit_type, is_breaking_header, stripped_subject) =
+            parse_conventional_header(subject);
+
+        let is_breaking_footer = body.contains("BREAKING CHANGE");
+        let is_breaking = is_breaking_header || is_breaking_footer;
+
+        let entry = format!("- {stripped_subject} ({hash})");
+
+        if is_breaking {
+            breaking.push(entry.clone());
+        }
+
+        match commit_type {
+            Some(t) if bucket_order.iter().any(|(key, _)| *key == t) => {
+                let label = bucket_order
+                    .iter()
+                    .find(|(k, _)| *k == t)
+                    .map(|(_, l)| *l)
+                    .unwrap();
+                buckets.entry(label).or_default().push(entry);
+            }
+            _ => {
+                other.push(entry);
+            }
+        }
+    }
+
+    // Render markdown
+    let today = chrono_today();
+    let workspace_version = extract_workspace_version(
+        &fs::read_to_string("Cargo.toml").context("Failed to read workspace Cargo.toml")?,
+    )
+    .unwrap_or_else(|| "X.Y.Z".to_string());
+
+    println!("## [{workspace_version}] - {today}");
+    println!();
+    println!("<!--");
+    println!("    Generated draft from conventional commits between {since} and {until}.");
+    println!("    Review and edit before committing. Group descriptions, add migration notes,");
+    println!("    expand user-facing language, and remove internal-only entries as needed.");
+    println!("-->");
+    println!();
+
+    if !breaking.is_empty() {
+        println!("### Breaking Changes");
+        println!();
+        for entry in &breaking {
+            println!("{entry}");
+        }
+        println!();
+    }
+
+    for (_, label) in &bucket_order {
+        if let Some(entries) = buckets.get(*label) {
+            if entries.is_empty() {
+                continue;
+            }
+            println!("### {label}");
+            println!();
+            for entry in entries {
+                println!("{entry}");
+            }
+            println!();
+        }
+    }
+
+    if !other.is_empty() {
+        println!("### Other");
+        println!();
+        println!(
+            "<!-- These commits did not use conventional commit format. Review and re-categorize. -->"
+        );
+        println!();
+        for entry in &other {
+            println!("{entry}");
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
+/// Parse a conventional commit header.
+///
+/// Returns `(Some(type), is_breaking, stripped_subject_without_prefix)` if the
+/// header matches the conventional commit format, otherwise
+/// `(None, false, original_subject)`.
+///
+/// Examples:
+/// - `"feat(auth)!: wire SSPI"` → `(Some("feat"), true, "wire SSPI")`
+/// - `"fix: patch"` → `(Some("fix"), false, "patch")`
+/// - `"random thing"` → `(None, false, "random thing")`
+fn parse_conventional_header(subject: &str) -> (Option<&str>, bool, &str) {
+    let colon_pos = match subject.find(':') {
+        Some(p) => p,
+        None => return (None, false, subject),
+    };
+
+    let prefix = &subject[..colon_pos];
+    let rest = subject[colon_pos + 1..].trim_start();
+
+    // Strip trailing '!' from prefix (breaking marker)
+    let (type_part, is_breaking) = if let Some(p) = prefix.strip_suffix('!') {
+        (p, true)
+    } else {
+        (prefix, false)
+    };
+
+    // Strip optional scope: "feat(auth)" → "feat"
+    let commit_type = if let Some(paren) = type_part.find('(') {
+        &type_part[..paren]
+    } else {
+        type_part
+    };
+
+    // Validate: commit type should be a simple lowercase word
+    if commit_type.is_empty() || !commit_type.chars().all(|c| c.is_ascii_lowercase()) {
+        return (None, false, subject);
+    }
+
+    (Some(commit_type), is_breaking, rest)
+}
+
+/// Return today's date in `YYYY-MM-DD` format.
+///
+/// We avoid adding the `chrono` crate to xtask for just this one use — instead,
+/// we shell out to the system `date` command which is portable across Linux,
+/// macOS, and modern Windows (PowerShell).
+fn chrono_today() -> String {
+    std::process::Command::new("date")
+        .arg("+%Y-%m-%d")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "YYYY-MM-DD".to_string())
 }
