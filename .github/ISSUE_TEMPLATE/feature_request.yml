@@ -1,0 +1,87 @@
+name: ✨ Feature request
+description: Suggest a new feature or enhancement
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature! Before filing, please check
+        [existing issues](https://github.com/praxiomlabs/rust-mssql-driver/issues?q=is%3Aissue) in case
+        the same request is already tracked.
+
+        Good feature requests describe the **use case** first and the **proposed API** second.
+        This helps us evaluate alternatives that may solve the same problem.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: The user-facing use case. What are you trying to do? Why can't you do it today?
+      placeholder: |
+        I'm migrating a .NET application that uses SqlClient's `SqlBulkCopy` for high-volume
+        inserts. The Rust driver has `bulk_insert()`, but it doesn't support COLUMN_ENCRYPTION
+        markers for Always Encrypted columns.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What API or behavior would you like to see? Rust code snippets welcome.
+      render: rust
+      placeholder: |
+        // Ideally something like:
+        client
+            .bulk_insert("dbo.SensitiveData")
+            .with_encryption(&[("ssn", &cek_metadata)])
+            .rows(records)
+            .execute()
+            .await?;
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds have you tried? What other approaches did you reject and why?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area of the codebase
+      description: Which part of the driver does this touch? (Select all that apply.)
+      multiple: true
+      options:
+        - Client API (mssql-client)
+        - Connection pool (mssql-driver-pool)
+        - TDS protocol (tds-protocol)
+        - Authentication (mssql-auth)
+        - TLS (mssql-tls)
+        - Type mapping (mssql-types)
+        - Derive macros (mssql-derive)
+        - Build tooling (xtask, Justfile)
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: breaking
+    attributes:
+      label: Would this require a breaking change?
+      description: If you're unsure, select "Not sure" — we'll assess.
+      options:
+        - "No — purely additive"
+        - "Yes — existing API would change"
+        - "Maybe — depends on implementation"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Links to related work in other drivers (Tiberius, SqlClient, JDBC, ODBC), relevant SQL Server docs, or anything else.

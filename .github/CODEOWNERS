@@ -1,0 +1,67 @@
+# Code owners for rust-mssql-driver
+#
+# Lines listed here auto-request review from the specified owners when a PR
+# touches matching paths. The last matching line wins — so more specific
+# rules (deeper in the file) override earlier, broader rules.
+#
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-security/customizing-your-repository/about-code-owners
+#
+# NOTE: Currently the project has a single maintainer (@jkindrix). This file
+# is structured to make expanding the maintainer set cheap — add more handles
+# (or GitHub teams like @praxiomlabs/protocol-reviewers) as they come on board.
+
+# Catch-all: every PR gets reviewed by the primary maintainer by default.
+* @jkindrix
+
+# Protocol layer — TDS wire format and parsing logic. Changes here can break
+# compatibility with SQL Server silently, so they deserve extra scrutiny.
+/crates/tds-protocol/        @jkindrix
+
+# Authentication and credential handling. Security-critical.
+/crates/mssql-auth/          @jkindrix
+
+# TLS layer. Security-critical.
+/crates/mssql-tls/           @jkindrix
+
+# Connection pool. Concurrency and resource lifecycle.
+/crates/mssql-pool/          @jkindrix
+
+# Main client API — public surface area.
+/crates/mssql-client/        @jkindrix
+
+# Type conversions — SQL ↔ Rust type mapping correctness matters for data integrity.
+/crates/mssql-types/         @jkindrix
+
+# Proc macros.
+/crates/mssql-derive/        @jkindrix
+
+# Test infrastructure (not published).
+/crates/mssql-testing/       @jkindrix
+
+# Build automation.
+/xtask/                      @jkindrix
+/Justfile                    @jkindrix
+
+# CI / CD workflows. Changes here can affect every future release, so any
+# workflow change should get maintainer review.
+/.github/workflows/          @jkindrix
+/.github/CODEOWNERS          @jkindrix
+/.github/dependabot.yml      @jkindrix
+
+# Release and security policy documents — any edit here should be deliberate.
+/RELEASING.md                @jkindrix
+/SECURITY.md                 @jkindrix
+/STABILITY.md                @jkindrix
+/CODE_OF_CONDUCT.md          @jkindrix
+/CONTRIBUTING.md             @jkindrix
+/MAINTAINERS.md              @jkindrix
+
+# Dependency and supply-chain policy.
+/deny.toml                   @jkindrix
+/.cargo/audit.toml           @jkindrix
+/docs/DEPENDENCY_POLICY.md   @jkindrix
+
+# Project-level config. Version bumps, workspace membership, etc.
+/Cargo.toml                  @jkindrix
+/Cargo.lock                  @jkindrix
+/rust-toolchain.toml         @jkindrix

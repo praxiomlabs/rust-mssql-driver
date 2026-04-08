@@ -1,0 +1,24 @@
+# Issue template configuration
+# See https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/configuring-issue-templates-for-your-repository
+
+# Require users to use one of the structured templates below.
+# Blank issues are often underspecified and take longer to triage.
+blank_issues_enabled: false
+
+# Point users at the right place for different kinds of reports.
+contact_links:
+  - name: 🔒 Security vulnerability (private report)
+    url: https://github.com/praxiomlabs/rust-mssql-driver/security/advisories/new
+    about: Report a security vulnerability privately via GitHub Security Advisories. DO NOT open a public issue for security problems — see SECURITY.md for the full policy.
+
+  - name: 💬 Question or usage help
+    url: https://github.com/praxiomlabs/rust-mssql-driver/discussions
+    about: Ask a question, share a use case, or get help using the driver. Start a Discussion for conversational topics.
+
+  - name: 📖 Documentation
+    url: https://docs.rs/mssql-client/latest/mssql_client/
+    about: API documentation on docs.rs. Consult this first — many questions are answered there.
+
+  - name: 🚢 Migration from Tiberius
+    url: https://github.com/praxiomlabs/rust-mssql-driver/blob/main/docs/MIGRATION_FROM_TIBERIUS.md
+    about: Migrating from the Tiberius driver? The migration guide covers API differences, feature parity, and common pitfalls.

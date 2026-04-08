@@ -1,0 +1,155 @@
+name: 🐛 Bug report
+description: Report a bug in rust-mssql-driver
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. The more specific you can be, the
+        faster we can reproduce and fix the issue.
+
+        **Before filing:** please check [existing issues](https://github.com/praxiomlabs/rust-mssql-driver/issues?q=is%3Aissue) to avoid duplicates, and consult [docs.rs](https://docs.rs/mssql-client) in case the behavior you're seeing is documented.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: A clear, concise description of the bug.
+      placeholder: "Calling `Client::query()` with a parameterized SELECT returns Err(Protocol(...)) when the parameter is NULL."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Minimal code that reproduces the bug. Include the connection string form (with credentials redacted), the SQL, and the Rust code calling into the driver.
+      render: rust
+      placeholder: |
+        use mssql_client::{Client, Config};
+
+        #[tokio::main]
+        async fn main() -> Result<(), Box<dyn std::error::Error>> {
+            let config = Config::from_connection_string(
+                "Server=localhost;Database=test;User Id=sa;Password=REDACTED;TrustServerCertificate=true"
+            )?;
+            let mut client = Client::connect(config).await?;
+
+            // ... trigger the bug here
+            let rows = client.query("SELECT @p1", &[&None::<i32>]).await?;
+
+            Ok(())
+        }
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened. Include the full error (if any) and relevant log output.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: driver-version
+    attributes:
+      label: Driver version
+      description: Version of `mssql-client` (or other workspace crate) you're using.
+      placeholder: "0.7.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: features
+    attributes:
+      label: Feature flags enabled
+      description: Which cargo features are you using? (Select all that apply.)
+      multiple: true
+      options:
+        - default
+        - tls
+        - chrono
+        - uuid
+        - decimal
+        - json
+        - encoding
+        - zeroize
+        - otel
+        - sspi-auth
+        - integrated-auth
+        - azure-identity
+        - cert-auth
+        - always-encrypted
+        - azure-keyvault
+        - windows-certstore
+    validations:
+      required: true
+
+  - type: input
+    id: rust-version
+    attributes:
+      label: Rust version
+      description: Output of `rustc --version`.
+      placeholder: "rustc 1.88.0 (6b00bc388 2025-06-23)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other (specify in additional context)
+    validations:
+      required: true
+
+  - type: input
+    id: sql-server-version
+    attributes:
+      label: SQL Server version and edition
+      description: The target SQL Server version. For Azure SQL, note which offering (DB, Managed Instance, Synapse).
+      placeholder: "SQL Server 2022 Developer Edition (16.0.1000.6)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: tds-version
+    attributes:
+      label: TDS version
+      description: Which TDS protocol version is in use? Check your connection string or `Config::tds_version`.
+      options:
+        - "8.0 (strict mode / SQL Server 2022+)"
+        - "7.4 (default / SQL Server 2012+)"
+        - "7.3A (SQL Server 2008)"
+        - "7.3B (SQL Server 2008 R2)"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        If possible, enable `tracing` at DEBUG level for `mssql_client` and include relevant
+        log output. **Do not include credentials or connection strings with passwords.**
+      render: text
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Anything else we should know? Custom deployments, network constraints, related issues, workarounds you've tried, etc.
