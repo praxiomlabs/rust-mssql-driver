@@ -1,0 +1,149 @@
+# CARGO_REGISTRY_TOKEN health check for rust-mssql-driver
+#
+# Runs weekly (and on-demand) to verify the crates.io API token is still
+# valid. This catches token expiry BEFORE the release workflow tries to
+# publish, which would otherwise fail at tier 0 and require a rerun.
+#
+# Added in response to the v0.7.0 release incident where the token had
+# silently expired between v0.6.0 and v0.7.0, only discovered when the
+# automated publish workflow attempted to upload tds-protocol and was
+# rejected with HTTP 403.
+#
+# The check uses crates.io's /api/v1/me endpoint, which returns the
+# authenticated user's info when the token is valid. This is cheap
+# (single HTTP call), non-destructive (read-only), and unambiguous
+# (a 200 response means the token works for authenticated API calls).
+#
+# On failure, this workflow automatically opens (or updates) a GitHub
+# issue labelled `security` so the token can be rotated before the
+# next release attempt.
+
+name: Token Health Check
+
+on:
+  # Run every Monday at 09:15 UTC (staggered after Security Audit to avoid
+  # both workflows hitting GitHub Actions capacity at the same time).
+  schedule:
+    - cron: '15 9 * * 1'
+  # Allow manual trigger for ad-hoc verification or post-rotation checks.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Required to open/update the notification issue on failure.
+  issues: write
+
+jobs:
+  check-token:
+    name: Verify CARGO_REGISTRY_TOKEN
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call crates.io /api/v1/me with token
+        id: check
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "::error::CARGO_REGISTRY_TOKEN secret is not set in this repository."
+            echo "status=missing" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          # crates.io accepts the token directly in the Authorization header
+          # (no "Bearer " prefix). This matches how cargo itself authenticates.
+          http_code=$(curl -s -o response.json -w "%{http_code}" \
+            -H "Authorization: $CARGO_REGISTRY_TOKEN" \
+            -H "User-Agent: rust-mssql-driver-token-health-check/1.0 (+https://github.com/praxiomlabs/rust-mssql-driver)" \
+            https://crates.io/api/v1/me)
+
+          echo "HTTP status: $http_code"
+
+          if [ "$http_code" = "200" ]; then
+            user=$(jq -r '.user.login // "unknown"' response.json 2>/dev/null || echo "unknown")
+            echo "::notice::Token is valid. Authenticated as crates.io user: $user"
+            echo "status=ok" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "::error::Token check failed with HTTP $http_code."
+          echo "status=failed" >> "$GITHUB_OUTPUT"
+          echo "http_code=$http_code" >> "$GITHUB_OUTPUT"
+
+          # Surface the response body for debugging (truncated to avoid
+          # leaking tokens in edge cases — crates.io never echoes the
+          # token back, but be defensive).
+          head -c 2000 response.json || true
+          exit 1
+
+      - name: Open or update tracking issue on failure
+        if: failure() && steps.check.outputs.status != 'ok'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const title = '🔒 CARGO_REGISTRY_TOKEN health check failed';
+            const body = [
+              'The weekly `CARGO_REGISTRY_TOKEN` health check workflow failed.',
+              '',
+              'This means the crates.io API token configured as a GitHub',
+              'repository secret can no longer authenticate against the',
+              '`https://crates.io/api/v1/me` endpoint. If left unresolved,',
+              'the next tag push to `v*.*.*` will trigger the release',
+              'workflow which will fail at tier 0 during `cargo publish`.',
+              '',
+              '## How to fix',
+              '',
+              '1. Visit https://crates.io/settings/tokens',
+              '2. Revoke the current `rust-mssql-driver-*` token if it still exists.',
+              '3. Create a new token with `publish-update` scope (plus `publish-new`',
+              '   if any workspace crate has never been published before).',
+              '4. Optionally scope the token to just the 8 published crates:',
+              '   `tds-protocol`, `mssql-types`, `mssql-tls`, `mssql-codec`,',
+              '   `mssql-auth`, `mssql-derive`, `mssql-client`, `mssql-driver-pool`.',
+              '5. Update the `CARGO_REGISTRY_TOKEN` secret at',
+              '   https://github.com/praxiomlabs/rust-mssql-driver/settings/secrets/actions',
+              '6. Re-run this workflow manually via `Actions → Token Health Check → Run workflow`',
+              '   and confirm it goes green.',
+              '7. Close this issue once the check passes.',
+              '',
+              '## Context',
+              '',
+              `- **Workflow run:** ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              `- **Triggered at:** ${new Date().toISOString()}`,
+              '- **See also:** [RELEASING.md § Token Health](../blob/main/RELEASING.md)',
+              '',
+              '---',
+              '*This issue was automatically created by `.github/workflows/token-health.yml`.*',
+            ].join('\n');
+
+            // Look for an existing open issue with this exact title so we
+            // don't spam a new issue every week if the token stays broken.
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'security',
+              per_page: 100,
+            });
+
+            const match = existing.data.find(i => i.title === title);
+
+            if (match) {
+              console.log(`Updating existing issue #${match.number}`);
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: match.number,
+                body: `Token health check failed again on ${new Date().toISOString()} (run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).`,
+              });
+            } else {
+              console.log('Creating new tracking issue');
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['security', 'dependencies'],
+              });
+            }
