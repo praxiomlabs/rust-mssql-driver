@@ -5,18 +5,37 @@ Thank you for your interest in contributing! This document provides guidelines a
 ## Table of Contents
 
 - [Code of Conduct](#code-of-conduct)
+- [First Contribution (Quick Path)](#first-contribution-quick-path)
 - [Getting Started](#getting-started)
 - [Development Setup](#development-setup)
 - [Making Changes](#making-changes)
 - [Breaking Changes](#breaking-changes)
 - [Pull Request Process](#pull-request-process)
+- [When Your PR Needs Review](#when-your-pr-needs-review)
 - [Coding Standards](#coding-standards)
 - [Testing](#testing)
 - [Documentation](#documentation)
+- [Architecture Decision Records (ADRs)](#architecture-decision-records-adrs)
 
 ## Code of Conduct
 
-This project follows the [Rust Code of Conduct](https://www.rust-lang.org/policies/code-of-conduct). Please be respectful and constructive in all interactions.
+This project follows the [Rust Code of Conduct](https://www.rust-lang.org/policies/code-of-conduct), reproduced in full in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Please be respectful and constructive in all interactions.
+
+Report code-of-conduct violations privately via the [GitHub Security Advisory](https://github.com/praxiomlabs/rust-mssql-driver/security/advisories/new) channel or by contacting the maintainers listed in [MAINTAINERS.md](MAINTAINERS.md).
+
+## First Contribution (Quick Path)
+
+If this is your first time contributing to the project, here's the shortest path from clone to green CI:
+
+1. **Pick an issue.** Browse [open issues](https://github.com/praxiomlabs/rust-mssql-driver/issues) — look for ones labelled `good first issue` if they exist, or ask on an issue for guidance before starting.
+2. **Fork and clone.** See [Getting Started](#getting-started) below.
+3. **Bootstrap your environment.** Run `just bootstrap` (or `just setup-all` if you don't want sudo for Kerberos deps).
+4. **Make your change.** Keep commits small and focused. Use [conventional commit format](#commit-messages).
+5. **Verify locally.** Run `just ci-all` before pushing — this mirrors what CI will run and is your fastest feedback loop.
+6. **Open a PR.** The [PR template](.github/pull_request_template.md) will walk you through what reviewers need to know. File a draft PR if you want early feedback.
+7. **Respond to review.** CODEOWNERS will automatically request review from the right maintainers. See [When Your PR Needs Review](#when-your-pr-needs-review) below.
+
+Don't worry if your first PR needs several rounds of revision — that's normal and expected. We try to keep review feedback kind, specific, and actionable.
 
 ## Getting Started
 
@@ -238,11 +257,29 @@ The project includes custom build commands via `cargo xtask`:
 
 | Command | Purpose |
 |---------|---------|
+| `cargo xtask ci` | Run format, lint, test, and deny checks |
+| `cargo xtask ci-local` | Full CI pipeline locally (mirrors GitHub Actions) |
 | `cargo xtask release <version>` | Bump version across all crates + update CHANGELOG |
+| `cargo xtask release-notes` | Generate a CHANGELOG draft from conventional commits since last tag |
 | `cargo xtask check-features` | Validate all feature flag combinations compile (uses cargo-hack) |
 | `cargo xtask fuzz` | Run fuzz tests on protocol parser |
 | `cargo xtask coverage` | Generate code coverage report |
-| `cargo xtask semver-check` | Check for semver-breaking API changes |
+| `cargo xtask semver` | Check for semver-breaking API changes |
+
+### Release-Adjacent Just Recipes
+
+For maintainers preparing a release (or for contributors who want to understand what release validation looks like):
+
+| Recipe | Purpose |
+|--------|---------|
+| `just release-status` | Dashboard of dev↔main divergence, last tag, open PRs, CI status, token health |
+| `just release-preflight` | Run all Cardinal Rules gate checks in sequence (working copy clean, audit, deny, wip-check, metadata, tier-0 publish dry-run) |
+| `just release-check` | Full release validation: ci-release-all + check-feature-flags + wip-check + panic-audit + version-sync + version-refs-check + doc-consistency + typos + machete + metadata-check + url-check |
+| `just doc-consistency` | Run the documentation consistency linter (`scripts/check-doc-consistency.sh`) — catches MSRV drift, version mismatches, policy contradictions |
+| `just ci-status-all` | Verify all three workflows (CI, Security Audit, Benchmarks) passed on `main` at the current HEAD — required before tagging |
+| `just tag` | Create an annotated release tag (verifies workflows are green first) |
+
+See [RELEASING.md](RELEASING.md) for the full release process and the Cardinal Rules that govern it.
 
 ## Making Changes
 
@@ -369,25 +406,42 @@ In your PR that introduces a breaking change:
 ## Pull Request Process
 
 1. **Before submitting:**
-   - Ensure all tests pass: `cargo test --workspace`
-   - Run lints: `cargo clippy --workspace --all-targets`
+   - Ensure all tests pass: `cargo test --workspace --all-features`
+   - Run lints: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
    - Format code: `cargo fmt --all`
+   - Verify doc consistency: `just doc-consistency`
    - Update documentation if needed
+   - Or simply run `just ci-all` which does all of the above in one command
 
-2. **PR Description should include:**
-   - Summary of changes
-   - Related issue number (if any)
-   - Breaking changes (if any)
-   - Testing performed
+2. **PR Description should use the [template](.github/pull_request_template.md).** The template includes:
+   - Summary and linked issues
+   - Type of change
+   - Test plan checklist
+   - Documentation updates checklist
+   - Breaking changes section (when applicable) with a pointer to STABILITY.md
+   - Security considerations section (for auth/TLS/SQL-gen changes)
 
 3. **Review process:**
    - At least one maintainer approval required
-   - All CI checks must pass
+   - All CI checks must pass (on all three platforms: Linux, macOS, Windows)
    - Breaking changes require additional review
+   - CODEOWNERS automatically requests review from the right maintainers based on which files you touched
 
 4. **After approval:**
    - Squash commits if requested
    - Maintainer will merge
+
+## When Your PR Needs Review
+
+CODEOWNERS automatically requests review from the appropriate maintainers based on the files you touched. You don't need to manually tag anyone — ownership rules in [`.github/CODEOWNERS`](.github/CODEOWNERS) handle that.
+
+**Expected response time**: maintainers aim to respond to new PRs within one week, even if it's just acknowledging the PR is in the review queue. If your PR hasn't received any response after one week, it's reasonable to leave a polite ping comment on the PR.
+
+**If your PR spans multiple areas** (e.g., protocol layer AND auth AND client API), all relevant CODEOWNERS entries will be requested and any one of them can start the review. Reviewers should coordinate via PR comments if the change needs combined expertise.
+
+**For substantial contributions** (roughly, PRs over ~500 lines or touching architectural decisions), consider opening a draft PR early for architectural feedback before polishing the implementation. This avoids situations where a contributor invests significant effort in an approach that doesn't align with the project's direction.
+
+**Large feature PRs**: review will often take longer than small ones. We'd rather take several weeks to review a 2,500-line feature carefully than rush it and merge something that needs significant follow-up. If your feature PR is a non-trivial addition, please be patient and engage constructively with review feedback.
 
 ## Coding Standards
 

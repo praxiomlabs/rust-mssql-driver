@@ -315,7 +315,20 @@ Each crate has its own README with crate-specific documentation:
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions are welcome! A few quick pointers:
+
+- **First time?** Read [CONTRIBUTING.md § First Contribution](CONTRIBUTING.md#first-contribution-quick-path) for the shortest path from clone to green CI.
+- **Filing an issue?** Use the [issue templates](https://github.com/praxiomlabs/rust-mssql-driver/issues/new/choose) — they'll ask the right questions so reviewers can help faster.
+- **Opening a PR?** The [PR template](.github/pull_request_template.md) walks you through what reviewers need to know.
+- **Architecture changes?** Review [ARCHITECTURE.md](ARCHITECTURE.md) and the [ADR process](CONTRIBUTING.md#architecture-decision-records-adrs).
+- **Code of Conduct**: We follow the [Rust Code of Conduct](CODE_OF_CONDUCT.md).
+- **Current maintainers** and how to contact them: [MAINTAINERS.md](MAINTAINERS.md).
+
+## Community
+
+- 💬 **Questions and discussions**: [GitHub Discussions](https://github.com/praxiomlabs/rust-mssql-driver/discussions)
+- 🐛 **Bugs and feature requests**: [GitHub Issues](https://github.com/praxiomlabs/rust-mssql-driver/issues)
+- 🔒 **Security vulnerabilities**: [Private Security Advisory](https://github.com/praxiomlabs/rust-mssql-driver/security/advisories/new) — see [SECURITY.md](SECURITY.md)
 
 ## License
 
