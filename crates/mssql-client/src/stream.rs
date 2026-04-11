@@ -41,6 +41,7 @@ use crate::row::{Column, Row};
 /// }
 /// ```
 #[must_use = "streams must be consumed; dropping a stream discards remaining rows"]
+#[derive(Debug)]
 pub struct QueryStream<'a> {
     /// Column metadata for the result set.
     columns: Vec<Column>,
@@ -167,52 +168,153 @@ impl Iterator for QueryStream<'_> {
     }
 }
 
-/// Result of a non-query execution.
+/// Result of a stored procedure execution.
 ///
-/// Contains the number of affected rows and any output parameters.
-#[derive(Debug, Clone)]
-#[non_exhaustive]
+/// Contains output parameters, affected rows, and optional result set.
+///
+/// # Structure
+///
+/// The `output_params` vector always contains:
+/// 1. **RETURN value** (index 0) - Always present per SQL Server spec
+/// 2. **OUTPUT parameters** - Following RETURN value, in declaration order
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let result = client.execute_procedure("dbo.MyProc", &[&1i32]).await?;
+///
+/// // Get RETURN value
+/// if let Some(rv) = result.get_return_value() {
+///     let status: i32 = rv.value.as_i32()?;
+///     println!("Status: {}", status);
+/// }
+///
+/// // Get output parameter
+/// if let Some(out) = result.get_output("result") {
+///     let value: i32 = out.value.as_i32()?;
+///     println!("Result: {}", value);
+/// }
+///
+/// // Process result set if available
+/// if let Some(stream) = result.result_set {
+///     while let Some(row) = stream.next() {
+///         // Handle rows
+///     }
+/// }
+/// ```
+#[derive(Debug)]
 #[must_use]
-pub struct ExecuteResult {
-    /// Number of rows affected by the statement.
-    pub rows_affected: u64,
-    /// Output parameters from stored procedures.
+pub struct ExecuteResult<'a> {
+    /// Output parameters from the stored procedure.
+    ///
+    /// Structure:
+    /// - Index 0: RETURN value (name = "return_value", type = i32)
+    /// - Index 1+: OUTPUT parameters in declaration order
+    ///
+    /// Per SQL Server specification, every stored procedure has an integer
+    /// return value (default: 0) automatically included here.
     pub output_params: Vec<OutputParam>,
+
+    /// Number of rows affected by the statement
+    pub rows_affected: u64,
+
+    /// Result set from SELECT statements (if any)
+    pub result_set: Option<QueryStream<'a>>,
 }
 
 /// An output parameter from a stored procedure call.
 #[derive(Debug, Clone)]
-#[non_exhaustive]
 pub struct OutputParam {
-    /// Parameter name.
+    /// Parameter name:
+    /// - "return_value" indicates the RETURN value (always present)
+    /// - Other strings indicate OUTPUT parameter names (e.g., "sum", "result")
     pub name: String,
-    /// Parameter value.
+
+    /// Parameter value
     pub value: mssql_types::SqlValue,
 }
 
-impl ExecuteResult {
-    /// Create a new execute result.
-    pub fn new(rows_affected: u64) -> Self {
+impl<'a> ExecuteResult<'a> {
+    /// Create a new execute result with all components.
+    pub(crate) fn new(
+        output_params: Vec<OutputParam>,
+        rows_affected: u64,
+        result_set: Option<QueryStream<'a>>,
+    ) -> Self {
         Self {
-            rows_affected,
-            output_params: Vec::new(),
-        }
-    }
-
-    /// Create a result with output parameters.
-    pub fn with_outputs(rows_affected: u64, output_params: Vec<OutputParam>) -> Self {
-        Self {
-            rows_affected,
             output_params,
+            rows_affected,
+            result_set,
         }
     }
 
-    /// Get an output parameter by name.
+    /// Create a result with only output parameters (no result set).
+    pub fn with_outputs(output_params: Vec<OutputParam>, rows_affected: u64) -> Self {
+        Self {
+            output_params,
+            rows_affected,
+            result_set: None,
+        }
+    }
+
+    /// Check if result set is available.
+    #[must_use]
+    pub fn has_result_set(&self) -> bool {
+        self.result_set.is_some()
+    }
+
+    /// Get result set reference.
+    #[must_use]
+    pub fn get_result_set(&self) -> Option<&QueryStream<'a>> {
+        self.result_set.as_ref()
+    }
+
+    /// Take result set, leaving None in its place.
+    pub fn take_result_set(&mut self) -> Option<QueryStream<'a>> {
+        self.result_set.take()
+    }
+
+    /// Get an output parameter by name (case-insensitive).
+    ///
+    /// The name can be with or without @ prefix. For example, both "@result" and "result"
+    /// will match a parameter named "result".
     #[must_use]
     pub fn get_output(&self, name: &str) -> Option<&OutputParam> {
+        // Strip @ prefix if present for matching
+        let search_name = name.strip_prefix('@').unwrap_or(name);
+
         self.output_params
             .iter()
-            .find(|p| p.name.eq_ignore_ascii_case(name))
+            .find(|p| p.name.eq_ignore_ascii_case(search_name))
+    }
+
+    /// Get the RETURN value from the stored procedure.
+    ///
+    /// Per SQL Server specification, every stored procedure has an integer return value
+    /// (default: 0) that is always included as the first output parameter with the name
+    /// "return_value".
+    ///
+    /// # Returns
+    ///
+    /// * `Some(&OutputParam)` - The RETURN value (always present)
+    /// * `None` - Only if the protocol implementation has a bug
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let result = client.execute_procedure("dbo.MyProc", &[&1i32]).await?;
+    ///
+    /// // Get RETURN value
+    /// if let Some(return_value) = result.get_return_value() {
+    ///     let status: i32 = return_value.value.as_i32().unwrap();
+    ///     println!("Stored procedure return status: {}", status);
+    /// }
+    /// ```
+    #[must_use]
+    pub fn get_return_value(&self) -> Option<&OutputParam> {
+        self.output_params
+            .first()
+            .filter(|p| p.name == "return_value")
     }
 }
 
@@ -392,6 +494,168 @@ impl<'a> MultiResultStream<'a> {
     }
 }
 
+/// Result of a stored procedure execution that may return multiple result sets.
+///
+/// This combines the OUTPUT parameters and RETURN value from a stored procedure
+/// with multiple result sets (e.g., from multiple SELECT statements).
+///
+/// # Example
+///
+/// ```rust,ignore
+/// // SQL: CREATE PROCEDURE dbo.sp_GetMultipleData
+/// //      @min_score INT,
+/// //      @row_count INT OUTPUT
+/// // AS
+/// // BEGIN
+/// //     -- First result set
+/// //     SELECT Id, Name FROM Users WHERE Score >= @min_score;
+/// //
+/// //     -- Second result set
+/// //     SELECT Id, Score FROM UserScores WHERE Score >= @min_score;
+/// //
+/// //     SET @row_count = @@ROWCOUNT;
+/// // END
+///
+/// let mut result = client
+///     .execute_procedure_multiple("dbo.sp_GetMultipleData", &[&90i32])
+///     .await?;
+///
+/// // Access OUTPUT parameters
+/// let row_count = result.get_output("@row_count").unwrap();
+/// println!("Total rows: {}", row_count.value.as_i32()?);
+///
+/// // Process first result set
+/// while let Some(row) = result.next_row().await? {
+///     let id: i32 = row.get(0)?;
+///     let name: String = row.get(1)?;
+///     println!("User: {} - {}", id, name);
+/// }
+///
+/// // Move to second result set
+/// if result.next_result().await? {
+///     while let Some(row) = result.next_row().await? {
+///         let id: i32 = row.get(0)?;
+///         let score: i32 = row.get(1)?;
+///         println!("Score: {} - {}", id, score);
+///     }
+/// }
+/// ```
+#[must_use = "results must be consumed; dropping discards remaining data"]
+pub struct MultiExecuteResult<'a> {
+    /// OUTPUT parameters (index 0 = RETURN value, index 1+ = OUTPUT parameters)
+    pub output_params: Vec<OutputParam>,
+
+    /// Number of rows affected
+    pub rows_affected: u64,
+
+    /// Multiple result sets from the stored procedure
+    result_sets: MultiResultStream<'a>,
+}
+
+impl<'a> MultiExecuteResult<'a> {
+    /// Create a new multi-execute result.
+    pub(crate) fn new(
+        output_params: Vec<OutputParam>,
+        rows_affected: u64,
+        result_sets: MultiResultStream<'a>,
+    ) -> Self {
+        Self {
+            output_params,
+            rows_affected,
+            result_sets,
+        }
+    }
+
+    /// Get the current result set index (0-based).
+    #[must_use]
+    pub fn current_result_index(&self) -> usize {
+        self.result_sets.current_result_index()
+    }
+
+    /// Get the total number of result sets.
+    #[must_use]
+    pub fn result_count(&self) -> usize {
+        self.result_sets.result_count()
+    }
+
+    /// Check if there are more result sets after the current one.
+    #[must_use]
+    pub fn has_more_results(&self) -> bool {
+        self.result_sets.has_more_results()
+    }
+
+    /// Get the column metadata for the current result set.
+    ///
+    /// Returns `None` if there are no result sets or we've moved past all of them.
+    #[must_use]
+    pub fn columns(&self) -> Option<&[Column]> {
+        self.result_sets.columns()
+    }
+
+    /// Move to the next result set.
+    ///
+    /// Returns `true` if there is another result set, `false` if no more.
+    pub async fn next_result(&mut self) -> Result<bool, Error> {
+        self.result_sets.next_result().await
+    }
+
+    /// Get the next row from the current result set.
+    ///
+    /// Returns `None` when no more rows in the current result set.
+    /// Call `next_result()` to move to the next result set.
+    pub async fn next_row(&mut self) -> Result<Option<Row>, Error> {
+        self.result_sets.next_row().await
+    }
+
+    /// Get a mutable reference to the current result set.
+    #[must_use]
+    pub fn current_result_set(&mut self) -> Option<&mut ResultSet> {
+        self.result_sets.current_result_set()
+    }
+
+    /// Collect all rows from the current result set.
+    pub fn collect_current(&mut self) -> Vec<Row> {
+        self.result_sets.collect_current()
+    }
+
+    /// Get an output parameter by name (case-insensitive).
+    ///
+    /// The name can be with or without @ prefix. For example, both "@result" and "result"
+    /// will match a parameter named "result".
+    #[must_use]
+    pub fn get_output(&self, name: &str) -> Option<&OutputParam> {
+        // Strip @ prefix if present for matching
+        let search_name = name.strip_prefix('@').unwrap_or(name);
+
+        self.output_params
+            .iter()
+            .find(|p| p.name.eq_ignore_ascii_case(search_name))
+    }
+
+    /// Get the RETURN value from the stored procedure.
+    ///
+    /// Per SQL Server specification, every stored procedure has an integer return value
+    /// (default: 0) that is always included as the first output parameter with the name
+    /// "return_value".
+    ///
+    /// # Returns
+    ///
+    /// * `Some(&OutputParam)` - The RETURN value (always present)
+    /// * `None` - Only if the protocol implementation has a bug
+    #[must_use]
+    pub fn get_return_value(&self) -> Option<&OutputParam> {
+        self.output_params
+            .first()
+            .filter(|p| p.name == "return_value")
+    }
+
+    /// Check if result set is available.
+    #[must_use]
+    pub fn has_result_set(&self) -> bool {
+        self.result_sets.result_count() > 0
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -399,7 +663,7 @@ mod tests {
 
     #[test]
     fn test_execute_result() {
-        let result = ExecuteResult::new(42);
+        let result = ExecuteResult::new(Vec::new(), 42, None);
         assert_eq!(result.rows_affected, 42);
         assert!(result.output_params.is_empty());
     }
@@ -411,7 +675,7 @@ mod tests {
             value: mssql_types::SqlValue::Int(100),
         }];
 
-        let result = ExecuteResult::with_outputs(10, outputs);
+        let result = ExecuteResult::with_outputs(outputs, 10);
         assert_eq!(result.rows_affected, 10);
         assert!(result.get_output("ReturnValue").is_some());
         assert!(result.get_output("returnvalue").is_some()); // case-insensitive

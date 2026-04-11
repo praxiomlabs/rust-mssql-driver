@@ -1569,6 +1569,203 @@ impl Default for RedirectConfig {
 
 ---
 
+### 4.7 Stored Procedure Execution
+
+The driver provides comprehensive stored procedure support with automatic OUTPUT parameter detection, eliminating the need for users to manually provide NULL placeholders for OUTPUT parameters.
+
+#### API Design Philosophy
+
+**Simplified API (Recommended):**
+```rust
+// Only provide INPUT parameters
+let result = client.execute_procedure("dbo.sp_Calc", &[&input_value]).await?;
+
+// Access OUTPUT parameters
+let output = result.get_output("@result").unwrap();
+```
+
+**Traditional API (Backward Compatible):**
+```rust
+// Explicitly provide all parameters
+let result = client.execute_procedure(
+    "dbo.sp_Calc",
+    &[&input_value, &None::<i32>]
+).await?;
+```
+
+#### Metadata-Driven Parameter Discovery
+
+The driver queries `sp_sproc_columns` to automatically discover parameter metadata:
+
+```rust
+pub struct ProcParamMetadata {
+    /// Parameter name (with @ prefix)
+    pub name: String,
+    /// Position (0-based, ordinal position)
+    pub position: usize,
+    /// Is OUTPUT parameter?
+    pub is_output: bool,
+    /// Max length for variable-length types
+    pub max_length: Option<usize>,
+    /// Precision for decimal types
+    pub precision: Option<u8>,
+    /// Scale for decimal/time types
+    pub scale: Option<u8>,
+    /// SQL Server type name
+    pub type_name: String,
+}
+```
+
+#### Smart Parameter Matching Algorithm
+
+```rust
+// Calculate parameter counts
+let input_count = metadata.iter().filter(|p| !p.is_output).count();
+let output_count = metadata.iter().filter(|p| p.is_output).count();
+let total_count = metadata.len();
+
+// Determine API mode
+let user_provided_only_inputs = params.len() == input_count;
+
+if user_provided_only_inputs {
+    // Simplified API: Auto-fill OUTPUT params with NULL
+    for param_meta in metadata.iter() {
+        if param_meta.is_output {
+            rpc_params.push(RpcParam::null(&param_meta.name, type_info));
+        } else {
+            rpc_params.push(convert_user_param(&params[input_index]));
+            input_index += 1;
+        }
+    }
+} else if params.len() != total_count {
+    return Err(Error::Protocol(format!(
+        "Parameter count mismatch: expected {} (all) or {} (INPUT only), got {}",
+        total_count, input_count, params.len()
+    )));
+}
+```
+
+#### Result Structure
+
+```rust
+pub struct ExecuteResult<'a> {
+    /// OUTPUT parameters:
+    /// - [0]: RETURN value (always present per SQL Server spec)
+    /// - [1..]: OUTPUT parameters in declaration order
+    pub output_params: Vec<OutputParam>,
+
+    /// Number of rows affected by the procedure
+    pub rows_affected: u64,
+
+    /// Result set from SELECT statements (if any)
+    pub result_set: Option<QueryStream<'a>>,
+}
+
+pub struct OutputParam {
+    /// Parameter name (with @ prefix)
+    pub name: String,
+
+    /// Parameter value
+    pub value: SqlValue,
+}
+```
+
+#### Protocol Flow
+
+```
+Client                              Server
+  │                                   │
+  ├─ sp_sproc_columns ──────────────►│
+  │◄─── metadata (all params) ───────┤
+  │                                   │
+  ├─ RPC request (named proc) ──────►│
+  │    - INPUT params                │
+  │    - OUTPUT params (NULL values) │
+  │                                   │
+  │◄─── ReturnStatus token ──────────┤
+  │◄─── ReturnValue tokens ───────────┤
+  │◄─── ColMetaData token ───────────┤
+  │◄─── Row tokens (if SELECT) ──────┤
+  │◄─── DoneProc token ───────────────┤
+```
+
+#### RETURN Value Handling
+
+Per SQL Server specification, every stored procedure has an integer return value (default: 0). The driver always includes this as the first OUTPUT parameter:
+
+```rust
+// Access RETURN value
+if let Some(rv) = result.get_return_value() {
+    let status: i32 = rv.value.as_i32()?;
+    println!("Procedure status: {}", status);
+}
+```
+
+#### Supported Data Types
+
+| INPUT (Rust → SQL) | OUTPUT (SQL → Rust) |
+|-------------------|---------------------|
+| `bool` → BIT | BIT → `SqlValue::Bool` |
+| `i32` → INT | INT → `SqlValue::Int` |
+| `i64` → BIGINT | BIGINT → `SqlValue::BigInt` |
+| `&str` → NVARCHAR | NVARCHAR → `SqlValue::String` |
+| `Option<T>` → NULL | NULL → `SqlValue::Null` |
+| `Decimal` → DECIMAL | DECIMAL → `SqlValue::String`* |
+| `DateTime` → DATETIME2 | DATETIME2 → `SqlValue::String`* |
+
+*Note: Complex types may be decoded as strings due to TDS protocol limitations.
+
+#### Error Handling
+
+Comprehensive error handling for all failure modes:
+
+```rust
+pub enum Error {
+    /// Parameter count mismatch
+    Protocol(String),
+
+    /// Metadata query failed
+    MetadataQuery(String),
+
+    /// Type conversion failed
+    Type(TypeError),
+
+    /// TDS protocol error
+    Tds(String),
+}
+```
+
+#### Transaction Integration
+
+Stored procedures work seamlessly with type-state transactions:
+
+```rust
+let mut tx = client.begin_transaction().await?;
+
+let result = tx
+    .execute_procedure("dbo.UpdateUser", &[&user_id])
+    .await?;
+
+let new_balance = result.get_output("@new_balance").unwrap();
+
+tx.commit().await?;
+```
+
+#### Test Coverage
+
+Comprehensive test suite with 16 integration tests covering:
+- INPUT-only and OUTPUT-only procedures
+- Mixed INPUT/OUTPUT parameters
+- RETURN values
+- Result sets + OUTPUT parameters
+- Multiple result sets
+- NULL handling
+- All supported data types
+- Transaction integration
+- Error cases
+
+---
+
 ## 5. Security Architecture
 
 ### 5.1 TLS Configuration

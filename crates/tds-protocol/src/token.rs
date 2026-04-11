@@ -373,6 +373,10 @@ pub struct ReturnValue {
     pub type_info: TypeInfo,
     /// Value data.
     pub value: bytes::Bytes,
+    /// Column type ID (stored for type conversion).
+    ///
+    /// This is the raw type ID byte from the TDS protocol.
+    pub col_type: u8,
 }
 
 /// Server error message.
@@ -1339,8 +1343,32 @@ impl ReturnValue {
         }
         let param_ordinal = src.get_u16_le();
 
-        // Parameter name (B_VARCHAR)
-        let param_name = read_b_varchar(src).ok_or(ProtocolError::UnexpectedEof)?;
+        // Parameter name in ReturnValue uses a special format:
+        // 0x00 + (actual param name WITHOUT @ in UTF-16LE) + 0x01 0x00 + 0x00 0x00
+        let param_name = {
+            // Skip leading 0x00
+            if src.remaining() >= 1 && src.chunk()[0] == 0 {
+                src.get_u8();
+            }
+
+            // Read UTF-16LE string until we hit 0x01 0x00 0x00 0x00 (param name suffix)
+            let mut chars = Vec::new();
+            while src.remaining() >= 2 {
+                let char1 = src.get_u16_le();
+
+                // Check for param name suffix: 01 00 (followed by 00 00)
+                if char1 == 1 && src.remaining() >= 2 && src.chunk()[0] == 0 && src.chunk()[1] == 0
+                {
+                    // Consume the remaining 00 00
+                    src.get_u16_le();
+                    break;
+                }
+
+                chars.push(char1);
+            }
+
+            String::from_utf16(&chars).unwrap_or_default()
+        };
 
         // Status (1 byte)
         if src.remaining() < 1 {
@@ -1348,13 +1376,20 @@ impl ReturnValue {
         }
         let status = src.get_u8();
 
-        // User type (4 bytes) + flags (2 bytes) + type id (1 byte)
-        if src.remaining() < 7 {
+        // User type (2 bytes) - NOTE: ReturnValue uses 2 bytes, ColMetaData uses 4 bytes
+        let user_type = if src.remaining() >= 2 {
+            src.get_u16_le() as u32
+        } else {
+            0
+        };
+
+        // No flags field in ReturnValue! Direct to TypeId
+        // Type ID (1 byte)
+        if src.remaining() < 1 {
             return Err(ProtocolError::UnexpectedEof);
         }
-        let user_type = src.get_u32_le();
-        let flags = src.get_u16_le();
         let col_type = src.get_u8();
+        let flags = 0u16; // No flags field in ReturnValue
 
         let type_id = TypeId::from_u8(col_type).unwrap_or(TypeId::Null);
 
@@ -1384,6 +1419,7 @@ impl ReturnValue {
             flags,
             type_info,
             value: value_buf.freeze(),
+            col_type,
         })
     }
 }

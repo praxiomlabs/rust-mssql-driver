@@ -34,6 +34,7 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 | Kerberos/GSSAPI | ✅ | Unix via `libgssapi` |
 | Windows SSPI | ✅ | Via `sspi-auth` feature |
 | Table-Valued Parameters | ✅ | Via `Tvp` type |
+| Stored Procedures | ✅ | OUTPUT parameters, RETURN values, result sets |
 | OpenTelemetry Metrics | ✅ | Via `otel` feature |
 | Always Encrypted | ✅ | Full support with Azure Key Vault and Windows CertStore providers |
 | Query Cancellation | ✅ | ATTENTION signal support |
@@ -97,6 +98,55 @@ Server=hostname,port;Database=dbname;User Id=user;Password=pass;Encrypt=strict;
 | `Encrypt` | | `true`, `false`, `strict`, `no_tls` |
 | `TrustServerCertificate` | | Skip certificate validation (dev only) |
 | `TDSVersion` | `ProtocolVersion` | TDS protocol version: `7.3`, `7.3A`, `7.3B`, `7.4`, `8.0` |
+
+## Stored Procedures
+
+The driver provides comprehensive stored procedure support with **automatic OUTPUT parameter detection**:
+
+```rust
+use mssql_client::Client;
+
+#[tokio::main]
+async fn main() -> Result<(), mssql_client::Error> {
+    let config = Config::from_connection_string("...")?;
+    let mut client = Client::connect(config).await?;
+
+    // Simplified API: Only provide INPUT parameters
+    // OUTPUT parameters are automatically detected
+    let result = client
+        .execute_procedure("dbo.sp_CalculateStats", &[&7i32])
+        .await?;
+
+    // Access OUTPUT parameters
+    let doubled = result.get_output("@doubled").unwrap();
+    let tripled = result.get_output("@tripled").unwrap();
+    let squared = result.get_output("@squared").unwrap();
+
+    println!("Doubled: {}", doubled.value.as_i32()?);   // 14
+    println!("Tripled: {}", tripled.value.as_i32()?);   // 21
+    println!("Squared: {}", squared.value.as_i32()?);   // 49
+
+    // Access RETURN value (always present)
+    if let Some(rv) = result.get_return_value() {
+        let status: i32 = rv.value.as_i32()?;
+        println!("Status: {}", status);
+    }
+
+    Ok(())
+}
+```
+
+### Key Features
+
+- **Simplified API**: Only provide INPUT parameters, OUTPUT parameters auto-detected
+- **RETURN Values**: Automatic handling of SQL Server return values
+- **Result Sets**: Full support for procedures returning data
+- **Transaction Safe**: Works seamlessly with transactions
+- **Type-Safe**: Leverages existing `ToSql` trait for compile-time checking
+
+For more details, see [STORED_PROCEDURES.md](STORED_PROCEDURES.md).
+
+## Connection Pooling
 | `Application Name` | | Application identifier |
 | `Connect Timeout` | | Connection timeout in seconds |
 | `Command Timeout` | | Default command timeout |
@@ -166,6 +216,53 @@ tx.execute("INSERT INTO order_items ...", &[]).await?;
 tx.rollback_to(&sp).await?;
 
 tx.commit().await?;
+```
+
+## Stored Procedures
+
+Execute stored procedures with automatic OUTPUT parameter detection:
+
+```rust
+// Basic OUTPUT parameters
+// SQL: CREATE PROCEDURE dbo.CalculateSum @a INT, @b INT, @result INT OUTPUT AS ...
+let result = client.execute_procedure(
+    "dbo.CalculateSum",
+    &[&10i32, &20i32, &Option::<i32>::None]
+).await?;
+
+let sum = result.get_output("@result").unwrap().value.as_i32()?;
+println!("Sum: {}", sum);
+```
+
+### Result Sets + OUTPUT Parameters
+
+```rust
+// SQL: CREATE PROCEDURE dbo.GetUserStats @userId INT, @totalCount INT OUTPUT AS ...
+let result = client.execute_procedure(
+    "dbo.GetUserStats",
+    &[&123i32, &Option::<i32>::None]
+).await?;
+
+// Process result set if available
+if let Some(mut rows) = result.take_result_set() {
+    while let Some(Ok(row)) = rows.next() {
+        // Handle row data
+    }
+}
+
+// Get output parameter
+let count = result.get_output("@totalCount").unwrap().value.as_i32()?;
+println!("Total: {} rows affected", result.rows_affected);
+```
+
+### RETURN Values
+
+```rust
+// SQL: CREATE PROCEDURE dbo.CheckStatus @id INT AS ...
+let result = client.execute_procedure("dbo.CheckStatus", &[&123i32]).await?;
+
+let status = result.get_return_value().unwrap().value.as_i32()?;
+println!("Status: {}", status);
 ```
 
 ## Derive Macros
@@ -270,6 +367,15 @@ See the [`examples/`](crates/mssql-client/examples/) directory:
 - [`streaming.rs`](crates/mssql-client/examples/streaming.rs) - Streaming large results
 - [`bulk_insert.rs`](crates/mssql-client/examples/bulk_insert.rs) - Bulk data loading
 - [`derive_macros.rs`](crates/mssql-client/examples/derive_macros.rs) - Row mapping macros
+
+**Stored Procedure Examples:**
+
+For complete stored procedure execution examples, see [STORED_PROCEDURES.md](STORED_PROCEDURES.md), including:
+- Basic OUTPUT parameter handling
+- Result sets + OUTPUT parameters combination
+- RETURN statement support
+- Transaction integration
+- Complete test cases
 
 ## Documentation
 

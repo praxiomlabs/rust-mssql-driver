@@ -456,6 +456,366 @@ impl Client<Ready> {
             .map_err(|_| Error::CommandTimeout)?
     }
 
+    /// Execute a stored procedure with automatic OUTPUT parameter detection.
+    ///
+    /// This method provides comprehensive stored procedure execution including:
+    /// - **Simplified API**: Only provide INPUT parameters, OUTPUT parameters are auto-detected
+    /// - RETURN value handling (always included per SQL Server spec)
+    /// - Result set processing (for SELECT statements within procedures)
+    /// - Row count tracking
+    ///
+    /// # Simplified API (Recommended)
+    ///
+    /// **Only provide INPUT parameters - OUTPUT parameters are automatically detected:**
+    ///
+    /// ```rust,ignore
+    /// // SQL: CREATE PROCEDURE dbo.CalculateSum
+    /// //      @a INT, @b INT, @result INT OUTPUT
+    /// //      AS SET @result = @a + @b;
+    ///
+    /// let result = client.execute_procedure(
+    ///     "dbo.CalculateSum",
+    ///     &[&10i32, &20i32]  // Only INPUT parameters needed!
+    /// ).await?;
+    ///
+    /// // Access OUTPUT parameter (auto-detected from metadata)
+    /// let sum: i32 = result.get_output("@result").unwrap().value.as_i32()?;
+    /// println!("Sum: {}", sum);  // 30
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `proc_name` - Stored procedure name (optionally schema-qualified, e.g., "dbo.MyProc")
+    /// * `params` - INPUT parameters only (OUTPUT parameters are auto-detected and filled)
+    ///
+    /// # Returns
+    ///
+    /// Returns an [`ExecuteResult`](crate::stream::ExecuteResult) containing:
+    /// - `output_params`: Vec of output parameters (index 0 = RETURN value, index 1+ = OUTPUT params)
+    /// - `rows_affected`: Number of rows modified
+    /// - `result_set`: Optional result set from SELECT statements
+    ///
+    /// # How It Works
+    ///
+    /// 1. **Metadata Query**: Queries `sp_sproc_columns` to get parameter information
+    /// 2. **Smart Detection**: Automatically identifies INPUT vs OUTPUT parameters
+    /// 3. **Auto-Fill**: OUTPUT parameters are automatically filled with NULL values
+    /// 4. **Type Safety**: Uses correct type information from metadata
+    ///
+    /// # Examples
+    ///
+    /// ## Basic OUTPUT Parameters
+    ///
+    /// ```rust,ignore
+    /// // SQL: CREATE PROCEDURE dbo.sp_Calculate
+    /// //      @input INT,
+    /// //      @doubled INT OUTPUT,
+    /// //      @tripled INT OUTPUT
+    /// //      AS
+    /// //      BEGIN
+    /// //          SET @doubled = @input * 2;
+    /// //          SET @tripled = @input * 3;
+    /// //      END
+    ///
+    /// let result = client
+    ///     .execute_procedure("dbo.sp_Calculate", &[&7i32])
+    ///     .await?;
+    ///
+    /// let doubled = result.get_output("@doubled").unwrap();
+    /// let tripled = result.get_output("@tripled").unwrap();
+    ///
+    /// println!("Doubled: {}", doubled.value.as_i32()?);  // 14
+    /// println!("Tripled: {}", tripled.value.as_i32()?);  // 21
+    /// ```
+    ///
+    /// ## Result Sets + OUTPUT Parameters
+    ///
+    /// ```rust,ignore
+    /// // SQL:
+    /// // CREATE PROCEDURE dbo.GetUserStats
+    /// //     @min_score INT,
+    /// //     @row_count INT OUTPUT
+    /// // AS
+    /// // BEGIN
+    /// //     SELECT Id, Name, Score FROM Users WHERE Score >= @min_score;
+    /// //     SET @row_count = @@ROWCOUNT;
+    /// // END
+    ///
+    /// let result = client
+    ///     .execute_procedure("dbo.GetUserStats", &[&90i32])
+    ///     .await?;
+    ///
+    /// // Process result set
+    /// if let Some(mut stream) = result.result_set {
+    ///     while let Some(Ok(row)) = stream.next() {
+    ///         let id: i32 = row.get(0)?;
+    ///         let name: String = row.get(1)?;
+    ///         let score: i32 = row.get(2)?;
+    ///         println!("{}: {} (score: {})", id, name, score);
+    ///     }
+    /// }
+    ///
+    /// // Get OUTPUT parameter
+    /// let count = result.get_output("@row_count").unwrap();
+    /// println!("Total: {} rows", count.value.as_i32()?);
+    /// ```
+    ///
+    /// ## RETURN Statement Support
+    ///
+    /// ```rust,ignore
+    /// // SQL:
+    /// // CREATE PROCEDURE dbo.CheckStatus
+    /// //     @id INT
+    /// // AS
+    /// // BEGIN
+    /// //     IF EXISTS (SELECT 1 FROM Users WHERE Id = @id)
+    /// //         RETURN 1;
+    /// //     RETURN 0;
+    /// // END
+    ///
+    /// let result = client
+    ///     .execute_procedure("dbo.CheckStatus", &[&123i32])
+    ///     .await?;
+    ///
+    /// // RETURN value comes as first output param (always present)
+    /// let status = result.get_return_value().unwrap();
+    /// let value: i32 = status.value.as_i32()?;
+    /// println!("Status: {}", value);
+    /// ```
+    ///
+    /// ## Only OUTPUT Parameters (No INPUT)
+    ///
+    /// ```rust,ignore
+    /// // SQL: CREATE PROCEDURE dbo.sp_GetConstant
+    /// //      @result INT OUTPUT
+    /// //      AS SET @result = 42;
+    ///
+    /// let params: &[&(dyn mssql_client::ToSql + Sync)] = &[];
+    /// let result = client
+    ///     .execute_procedure("dbo.sp_GetConstant", params)
+    ///     .await?;
+    ///
+    /// let value = result.get_output("@result").unwrap();
+    /// println!("Constant: {}", value.value.as_i32()?);  // 42
+    /// ```
+    ///
+    /// # Error Handling
+    ///
+    /// ```rust,ignore
+    /// use mssql_client::Error;
+    ///
+    /// match client.execute_procedure("dbo.MyProc", &[&input]).await {
+    ///     Ok(result) => {
+    ///         // Process result
+    ///     }
+    ///     Err(Error::Protocol(msg)) => {
+    ///         // Parameter count mismatch or other protocol errors
+    ///         eprintln!("Protocol error: {}", msg);
+    ///     }
+    ///     Err(e) => {
+    ///         eprintln!("Execution failed: {}", e);
+    ///     }
+    /// }
+    /// ```
+    pub async fn execute_procedure(
+        &mut self,
+        proc_name: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<crate::stream::ExecuteResult<'_>> {
+        tracing::debug!(
+            proc_name = proc_name,
+            params_count = params.len(),
+            "executing stored procedure"
+        );
+
+        #[cfg(feature = "otel")]
+        let instrumentation = self.instrumentation.clone();
+        #[cfg(feature = "otel")]
+        let mut span = instrumentation.query_span(proc_name);
+
+        let result = async {
+            // Convert ToSql parameters to RpcParam with automatic OUTPUT detection
+            let rpc_params = self.convert_params_for_procedure(proc_name, params).await?;
+
+            // Create RPC request for named procedure
+            let mut rpc = tds_protocol::rpc::RpcRequest::named(proc_name);
+            for param in rpc_params {
+                rpc = rpc.param(param);
+            }
+            self.send_rpc(&rpc).await?;
+
+            // Read response with output parameters, result set, and row count
+            self.read_stored_proc_result().await
+        }
+        .await;
+
+        #[cfg(feature = "otel")]
+        match &result {
+            Ok(res) => InstrumentationContext::record_success(&mut span, Some(res.rows_affected)),
+            Err(e) => InstrumentationContext::record_error(&mut span, e),
+        }
+
+        #[cfg(feature = "otel")]
+        drop(span);
+
+        result
+    }
+
+    /// Execute a stored procedure with a timeout.
+    ///
+    /// This is a convenience method that combines [`execute_procedure`](Self::execute_procedure)
+    /// with a timeout. Uses the same simplified API - only provide INPUT parameters.
+    ///
+    /// # Arguments
+    ///
+    /// * `proc_name` - Stored procedure name (optionally schema-qualified)
+    /// * `params` - INPUT parameters only (OUTPUT parameters are auto-detected)
+    /// * `timeout_duration` - Maximum time to wait for the procedure to complete
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Error::CommandTimeout`] if the timeout expires before completion.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use std::time::Duration;
+    ///
+    /// // Execute with a 5-second timeout
+    /// let result = client
+    ///     .execute_procedure_with_timeout(
+    ///         "dbo.sp_LongRunning",
+    ///         &[&input_value],
+    ///         Duration::from_secs(5),
+    ///     )
+    ///     .await?;
+    ///
+    /// // Access OUTPUT parameters
+    /// let output = result.get_output("@result").unwrap();
+    /// ```
+    pub async fn execute_procedure_with_timeout(
+        &mut self,
+        proc_name: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+        timeout_duration: std::time::Duration,
+    ) -> Result<crate::stream::ExecuteResult<'_>> {
+        timeout(timeout_duration, self.execute_procedure(proc_name, params))
+            .await
+            .map_err(|_| Error::CommandTimeout)?
+    }
+
+    /// Execute a stored procedure that may return multiple result sets.
+    ///
+    /// This method is similar to [`execute_procedure`](Self::execute_procedure) but
+    /// returns all result sets from the stored procedure, making it suitable for
+    /// procedures that contain multiple SELECT statements.
+    ///
+    /// The method uses the **simplified API** - only provide INPUT parameters,
+    /// OUTPUT parameters are automatically detected.
+    ///
+    /// # Arguments
+    ///
+    /// * `proc_name` - Stored procedure name (optionally schema-qualified, e.g., "dbo.MyProc")
+    /// * `params` - INPUT parameters only (OUTPUT parameters are auto-detected)
+    ///
+    /// # Returns
+    ///
+    /// Returns a [`MultiExecuteResult`](crate::stream::MultiExecuteResult) containing:
+    /// - `output_params`: Vec of output parameters (index 0 = RETURN value)
+    /// - `rows_affected`: Number of rows modified
+    /// - Multiple result sets (accessible via `next_row()` and `next_result()`)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // SQL: CREATE PROCEDURE dbo.sp_GetMultipleData
+    /// //      @min_score INT,
+    /// //      @row_count INT OUTPUT
+    /// // AS
+    /// // BEGIN
+    /// //     -- First result set
+    /// //     SELECT Id, Name FROM Users WHERE Score >= @min_score;
+    /// //
+    /// //     -- Second result set
+    /// //     SELECT Id, Score FROM UserScores WHERE Score >= @min_score;
+    /// //
+    /// //     SET @row_count = @@ROWCOUNT;
+    /// // END
+    ///
+    /// let mut result = client
+    ///     .execute_procedure_multiple("dbo.sp_GetMultipleData", &[&90i32])
+    ///     .await?;
+    ///
+    /// // Access OUTPUT parameters
+    /// let row_count = result.get_output("@row_count").unwrap();
+    /// println!("Total rows: {}", row_count.value.as_i32()?);
+    ///
+    /// // Process first result set
+    /// while let Some(row) = result.next_row().await? {
+    ///     let id: i32 = row.get(0)?;
+    ///     let name: String = row.get(1)?;
+    ///     println!("User: {} - {}", id, name);
+    /// }
+    ///
+    /// // Move to second result set
+    /// if result.next_result().await? {
+    ///     while let Some(row) = result.next_row().await? {
+    ///         let id: i32 = row.get(0)?;
+    ///         let score: i32 = row.get(1)?;
+    ///         println!("Score: {} - {}", id, score);
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # When to Use
+    ///
+    /// - Use `execute_procedure` when you only need the first result set
+    /// - Use `execute_procedure_multiple` when you need all result sets
+    /// - Both methods support OUTPUT parameters and RETURN values
+    pub async fn execute_procedure_multiple<'a>(
+        &'a mut self,
+        proc_name: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<crate::stream::MultiExecuteResult<'a>> {
+        tracing::debug!(
+            proc_name = proc_name,
+            params_count = params.len(),
+            "executing stored procedure with multiple result sets"
+        );
+
+        #[cfg(feature = "otel")]
+        let instrumentation = self.instrumentation.clone();
+        #[cfg(feature = "otel")]
+        let mut span = instrumentation.query_span(proc_name);
+
+        let result = async {
+            // Convert ToSql parameters to RpcParam with automatic OUTPUT detection
+            let rpc_params = self.convert_params_for_procedure(proc_name, params).await?;
+
+            // Create RPC request for named procedure
+            let mut rpc = tds_protocol::rpc::RpcRequest::named(proc_name);
+            for param in rpc_params {
+                rpc = rpc.param(param);
+            }
+            self.send_rpc(&rpc).await?;
+
+            // Read response with output parameters, multiple result sets, and row count
+            self.read_stored_proc_multiple_result().await
+        }
+        .await;
+
+        #[cfg(feature = "otel")]
+        match &result {
+            Ok(res) => InstrumentationContext::record_success(&mut span, Some(res.rows_affected)),
+            Err(e) => InstrumentationContext::record_error(&mut span, e),
+        }
+
+        #[cfg(feature = "otel")]
+        drop(span);
+
+        result
+    }
+
     /// Begin a transaction.
     ///
     /// This transitions the client from `Ready` to `InTransaction` state.
@@ -827,6 +1187,216 @@ impl Client<InTransaction> {
         timeout(timeout_duration, self.execute(sql, params))
             .await
             .map_err(|_| Error::CommandTimeout)?
+    }
+
+    /// Execute a stored procedure within the transaction with automatic OUTPUT parameter detection.
+    ///
+    /// This is the transaction-aware version of [`Client<Ready>::execute_procedure`].
+    /// See that method for full documentation and examples.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let mut tx = client.begin_transaction().await?;
+    ///
+    /// // SQL: CREATE PROCEDURE dbo.UpdateUser
+    /// //      @userId INT, @name NVARCHAR(100), @newId INT OUTPUT
+    /// //      AS
+    /// //      BEGIN
+    /// //          UPDATE Users SET Name = @name WHERE Id = @userId;
+    /// //          SET @newId = @userId;
+    /// //      END
+    ///
+    /// let result = tx
+    ///     .execute_procedure("dbo.UpdateUser", &[&123i32, &"John"])
+    ///     .await?;
+    ///
+    /// let new_id: i32 = result.get_output("@newId").unwrap().value.as_i32()?;
+    /// println!("New ID: {}", new_id);
+    /// println!("Rows affected: {}", result.rows_affected);
+    ///
+    /// tx.commit().await?;
+    /// ```
+    pub async fn execute_procedure(
+        &mut self,
+        proc_name: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<crate::stream::ExecuteResult<'_>> {
+        tracing::debug!(
+            proc_name = proc_name,
+            params_count = params.len(),
+            "executing stored procedure in transaction"
+        );
+
+        #[cfg(feature = "otel")]
+        let instrumentation = self.instrumentation.clone();
+        #[cfg(feature = "otel")]
+        let mut span = instrumentation.query_span(proc_name);
+
+        let result = async {
+            // Convert ToSql parameters to RpcParam with automatic OUTPUT detection
+            let rpc_params = self.convert_params_for_procedure(proc_name, params).await?;
+
+            // Create RPC request for named procedure
+            let mut rpc = tds_protocol::rpc::RpcRequest::named(proc_name);
+            for param in rpc_params {
+                rpc = rpc.param(param);
+            }
+            self.send_rpc(&rpc).await?;
+
+            // Read response with output parameters, result set, and row count
+            self.read_stored_proc_result().await
+        }
+        .await;
+
+        #[cfg(feature = "otel")]
+        match &result {
+            Ok(res) => InstrumentationContext::record_success(&mut span, Some(res.rows_affected)),
+            Err(e) => InstrumentationContext::record_error(&mut span, e),
+        }
+
+        #[cfg(feature = "otel")]
+        drop(span);
+
+        result
+    }
+
+    /// Execute a stored procedure within the transaction with a timeout.
+    ///
+    /// This is a convenience method that combines [`execute_procedure`](Self::execute_procedure)
+    /// with a timeout. Uses the same simplified API - only provide INPUT parameters.
+    ///
+    /// # Arguments
+    ///
+    /// * `proc_name` - Stored procedure name (optionally schema-qualified)
+    /// * `params` - INPUT parameters only (OUTPUT parameters are auto-detected)
+    /// * `timeout_duration` - Maximum time to wait for the procedure to complete
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Error::CommandTimeout`] if the timeout expires before completion.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use std::time::Duration;
+    ///
+    /// let mut tx = client.begin_transaction().await?;
+    ///
+    /// // Execute with a 5-second timeout
+    /// let result = tx
+    ///     .execute_procedure_with_timeout(
+    ///         "dbo.sp_UpdateUser",
+    ///         &[&user_id, &"John"],
+    ///         Duration::from_secs(5),
+    ///     )
+    ///     .await?;
+    ///
+    /// tx.commit().await?;
+    /// ```
+    pub async fn execute_procedure_with_timeout(
+        &mut self,
+        proc_name: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+        timeout_duration: std::time::Duration,
+    ) -> Result<crate::stream::ExecuteResult<'_>> {
+        timeout(timeout_duration, self.execute_procedure(proc_name, params))
+            .await
+            .map_err(|_| Error::CommandTimeout)?
+    }
+
+    /// Execute a stored procedure within the transaction that may return multiple result sets.
+    ///
+    /// This is the transaction-aware version of [`Client<Ready>::execute_procedure_multiple`].
+    /// See that method for full documentation and examples.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let mut tx = client.begin_transaction().await?;
+    ///
+    /// // SQL: CREATE PROCEDURE dbo.sp_GetUserData
+    /// //      @userId INT,
+    /// //      @profile_count INT OUTPUT
+    /// // AS
+    /// // BEGIN
+    /// //     -- First result set
+    /// //     SELECT Id, Name FROM Users WHERE Id = @userId;
+    /// //
+    /// //     -- Second result set
+    /// //     SELECT ProfileId, Bio FROM UserProfiles WHERE UserId = @userId;
+    /// //
+    /// //     SET @profile_count = @@ROWCOUNT;
+    /// // END
+    ///
+    /// let mut result = tx
+    ///     .execute_procedure_multiple("dbo.sp_GetUserData", &[&123i32])
+    ///     .await?;
+    ///
+    /// // Access OUTPUT parameters
+    /// let count = result.get_output("@profile_count").unwrap();
+    /// println!("Profile count: {}", count.value.as_i32()?);
+    ///
+    /// // Process first result set
+    /// while let Some(row) = result.next_row().await? {
+    ///     let id: i32 = row.get(0)?;
+    ///     let name: String = row.get(1)?;
+    ///     println!("User: {} - {}", id, name);
+    /// }
+    ///
+    /// // Move to second result set
+    /// if result.next_result().await? {
+    ///     while let Some(row) = result.next_row().await? {
+    ///         let profile_id: i32 = row.get(0)?;
+    ///         let bio: String = row.get(1)?;
+    ///         println!("Profile: {} - {}", profile_id, bio);
+    ///     }
+    /// }
+    ///
+    /// tx.commit().await?;
+    /// ```
+    pub async fn execute_procedure_multiple<'a>(
+        &'a mut self,
+        proc_name: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<crate::stream::MultiExecuteResult<'a>> {
+        tracing::debug!(
+            proc_name = proc_name,
+            params_count = params.len(),
+            "executing stored procedure with multiple result sets in transaction"
+        );
+
+        #[cfg(feature = "otel")]
+        let instrumentation = self.instrumentation.clone();
+        #[cfg(feature = "otel")]
+        let mut span = instrumentation.query_span(proc_name);
+
+        let result = async {
+            // Convert ToSql parameters to RpcParam with automatic OUTPUT detection
+            let rpc_params = self.convert_params_for_procedure(proc_name, params).await?;
+
+            // Create RPC request for named procedure
+            let mut rpc = tds_protocol::rpc::RpcRequest::named(proc_name);
+            for param in rpc_params {
+                rpc = rpc.param(param);
+            }
+            self.send_rpc(&rpc).await?;
+
+            // Read response with output parameters, multiple result sets, and row count
+            self.read_stored_proc_multiple_result().await
+        }
+        .await;
+
+        #[cfg(feature = "otel")]
+        match &result {
+            Ok(res) => InstrumentationContext::record_success(&mut span, Some(res.rows_affected)),
+            Err(e) => InstrumentationContext::record_error(&mut span, e),
+        }
+
+        #[cfg(feature = "otel")]
+        drop(span);
+
+        result
     }
 
     /// Commit the transaction.

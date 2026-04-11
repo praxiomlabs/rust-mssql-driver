@@ -224,6 +224,18 @@ pub fn decode_value(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, T
         // Decimal/Numeric
         0x6C | 0x6A => decode_decimal(buf, type_info),
 
+        // Deprecated types (Text/NText/Image)
+        0x23 | 0x63 | 0x22 => {
+            // Text, NText, Image - decode as string for compatibility
+            decode_nvarchar(buf, type_info)
+        }
+
+        // SQL Variant (fallback: decode as string)
+        0x62 => {
+            // Variant - try to decode as string for basic compatibility
+            decode_nvarchar(buf, type_info)
+        }
+
         // Date/Time types
         0x28 => decode_date(buf),                      // DATETYPE
         0x29 => decode_time(buf, type_info),           // TIMETYPE
