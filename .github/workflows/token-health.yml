@@ -79,7 +79,7 @@ jobs:
 
       - name: Open or update tracking issue on failure
         if: failure() && steps.check.outputs.status != 'ok'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const title = '🔒 CARGO_REGISTRY_TOKEN health check failed';

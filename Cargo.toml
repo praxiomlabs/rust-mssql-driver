@@ -78,9 +78,9 @@ opentelemetry-otlp = "0.31"
 tracing-opentelemetry = "0.32"
 
 # Testing
-criterion = { version = "0.7", features = ["async_tokio"] }
+criterion = { version = "0.8", features = ["async_tokio"] }
 proptest = "1.5"
-testcontainers = "0.25"
+testcontainers = "0.27"
 tokio-test = "0.4"
 
 # Azure authentication (optional)
