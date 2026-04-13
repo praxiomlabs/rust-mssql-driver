@@ -153,7 +153,7 @@ impl CertificateAuth {
             base64::engine::general_purpose::STANDARD.encode(cert_bytes)
         };
 
-        let cert_secret = Secret::new(cert_b64);
+        let cert_secret = azure_core::credentials::SecretBytes::new(cert_b64.into_bytes());
 
         // Create options with password if provided
         // Note: send_certificate_chain is now controlled by AZURE_CLIENT_SEND_CERTIFICATE_CHAIN env var
