@@ -372,31 +372,15 @@ async fn test_mock_server_plaintext_prelogin() {
 /// a TDS PreLogin-wrapped TLS handshake, then Login7 and LoginAck exchange
 /// over the encrypted channel.
 ///
-/// **Platform gate**: Linux-only. Fails on macOS and Windows with
-/// `peer closed connection without sending TLS close_notify` (see #70).
-///
-/// Investigation so far:
-/// - Adding explicit `tls_stream.shutdown().await` in the mock server's
-///   `handle_connection` (so close_notify IS sent) did NOT fix it.
-/// - The error occurs during the *LoginAck header read*, meaning the client
-///   sees EOF BEFORE the server's response arrives — not at connection close.
-/// - The mock server's `TlsPreloginWrapper` pass-through mode and/or the
-///   tokio current_thread runtime's scheduling may behave differently on
-///   macOS/Windows, causing the TLS write to not flush to the OS TCP buffer
-///   before the client's read polls.
-/// - Other mock TLS tests (prelogin handshake, raw TLS exchange, TLS start)
-///   all pass on all platforms, so the issue is specific to the full
-///   Login7→LoginAck round-trip over the PreLogin-wrapped TLS layer.
-/// - The production driver code is NOT affected — it uses a different
-///   connection architecture (split I/O via Connection<T>).
-///
-/// A proper fix likely requires restructuring the mock server to avoid the
-/// timing dependency, perhaps by using `Connection<TlsStream>` (the same
-/// type the real driver uses) instead of raw read/write_packet calls.
+/// Previously Linux-only due to a timing race (see #70): the mock server's
+/// raw `write_all()` + `flush()` on the TLS-over-PreLogin stream didn't
+/// reliably deliver data to the client before the single-thread runtime's
+/// cooperative scheduler yielded on macOS/Windows. The fix uses multi-thread
+/// runtime, which matches production usage and eliminates the scheduling
+/// dependency between server and client tasks.
 ///
 /// Tracking: #70
-#[cfg(target_os = "linux")]
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_mock_server_tls_full_connection() {
     use bytes::BufMut;
     use tds_protocol::prelogin::{EncryptionLevel, PreLogin};
