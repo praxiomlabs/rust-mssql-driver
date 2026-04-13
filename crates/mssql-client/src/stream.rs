@@ -236,7 +236,7 @@ impl ExecuteResult {
 ///     }
 /// }
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 #[must_use]
 pub struct ProcedureResult {
@@ -316,7 +316,7 @@ impl ProcedureResult {
 }
 
 /// A single result set within a multi-result batch.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[must_use]
 pub struct ResultSet {
     /// Column metadata for this result set.
