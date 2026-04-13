@@ -216,6 +216,107 @@ impl ExecuteResult {
     }
 }
 
+/// Result of a stored procedure execution.
+///
+/// Contains the return value, affected row count, output parameters,
+/// and any result sets produced by the procedure.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let result = client.call_procedure("dbo.GetUser", &[&1i32]).await?;
+///
+/// // Check the return value (RETURN statement in the proc)
+/// assert_eq!(result.return_value, 0);
+///
+/// // Process result sets
+/// for mut rs in result.result_sets {
+///     while let Some(row) = rs.next_row() {
+///         println!("{:?}", row);
+///     }
+/// }
+/// ```
+#[derive(Debug)]
+#[non_exhaustive]
+#[must_use]
+pub struct ProcedureResult {
+    /// Return value from the stored procedure's RETURN statement.
+    ///
+    /// Defaults to 0 if the procedure does not explicitly return a value,
+    /// which matches SQL Server's default behavior.
+    pub return_value: i32,
+    /// Total number of rows affected by statements within the procedure.
+    pub rows_affected: u64,
+    /// Output parameters returned by the procedure.
+    pub output_params: Vec<OutputParam>,
+    /// Result sets produced by SELECT statements within the procedure.
+    pub result_sets: Vec<ResultSet>,
+}
+
+impl ProcedureResult {
+    /// Create a new empty procedure result.
+    #[allow(dead_code)] // Used by read_procedure_result() in the next step
+    pub(crate) fn new() -> Self {
+        Self {
+            return_value: 0,
+            rows_affected: 0,
+            output_params: Vec::new(),
+            result_sets: Vec::new(),
+        }
+    }
+
+    /// Get the return value from the stored procedure.
+    ///
+    /// This is the value from the procedure's `RETURN` statement.
+    /// Defaults to 0 if not explicitly set by the procedure.
+    #[must_use]
+    pub fn get_return_value(&self) -> i32 {
+        self.return_value
+    }
+
+    /// Get an output parameter by name (case-insensitive).
+    ///
+    /// Strips the `@` prefix from both the search name and stored names
+    /// before comparing, so `get_output("result")` and `get_output("@result")`
+    /// are equivalent.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let result = client.procedure("dbo.CalculateSum")?
+    ///     .input("@a", &10i32)
+    ///     .input("@b", &20i32)
+    ///     .output_int("@result")
+    ///     .execute().await?;
+    ///
+    /// let sum: i32 = result.get_output("@result")
+    ///     .expect("output param exists")
+    ///     .value.try_into()?;
+    /// ```
+    #[must_use]
+    pub fn get_output(&self, name: &str) -> Option<&OutputParam> {
+        let search = name.strip_prefix('@').unwrap_or(name);
+        self.output_params.iter().find(|p| {
+            let stored = p.name.strip_prefix('@').unwrap_or(&p.name);
+            stored.eq_ignore_ascii_case(search)
+        })
+    }
+
+    /// Get the first result set, if any.
+    ///
+    /// Convenience method for procedures that return a single result set.
+    #[must_use]
+    pub fn first_result_set(&self) -> Option<&ResultSet> {
+        self.result_sets.first()
+    }
+
+    /// Check if the procedure produced any result sets.
+    #[must_use]
+    pub fn has_result_sets(&self) -> bool {
+        !self.result_sets.is_empty()
+    }
+}
+
 /// A single result set within a multi-result batch.
 #[derive(Debug)]
 #[must_use]
