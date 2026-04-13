@@ -193,7 +193,7 @@ impl<S: ConnectionState> Client<S> {
 
     /// Start building a stored procedure call with full control over parameters.
     ///
-    /// Returns a [`ProcedureBuilder`] that allows adding named input and output
+    /// Returns a [`crate::procedure::ProcedureBuilder`] that allows adding named input and output
     /// parameters before executing the call.
     ///
     /// The procedure name is validated to prevent SQL injection. It may be
