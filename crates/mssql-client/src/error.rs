@@ -139,6 +139,15 @@ pub enum Error {
     /// Query was cancelled by user request.
     #[error("query cancelled")]
     Cancelled,
+
+    /// SQL Browser service instance resolution failed.
+    #[error("SQL Browser resolution failed for instance '{instance}': {reason}")]
+    BrowserResolution {
+        /// The instance name that was being resolved.
+        instance: String,
+        /// Description of what went wrong.
+        reason: String,
+    },
 }
 
 // Note: From<mssql_tls::TlsError> and From<tds_protocol::ProtocolError> are

@@ -91,14 +91,40 @@ impl Client<Disconnected> {
     }
 
     async fn try_connect(config: &Config) -> Result<Client<Ready>> {
-        tracing::info!(
-            host = %config.host,
-            port = config.port,
-            database = ?config.database,
-            "connecting to SQL Server"
-        );
+        // If a named instance is specified, resolve the TCP port via SQL Browser
+        let port = if let Some(ref instance) = config.instance {
+            let resolved = crate::browser::resolve_instance(
+                &config.host,
+                instance,
+                Some(config.timeouts.connect_timeout),
+            )
+            .await?;
+            tracing::info!(
+                host = %config.host,
+                instance = %instance,
+                resolved_port = resolved,
+                database = ?config.database,
+                "connecting to named SQL Server instance"
+            );
+            resolved
+        } else {
+            tracing::info!(
+                host = %config.host,
+                port = config.port,
+                database = ?config.database,
+                "connecting to SQL Server"
+            );
+            config.port
+        };
 
-        let addr = format!("{}:{}", config.host, config.port);
+        // Normalize "." to localhost for TCP
+        let host = if config.host == "." {
+            "127.0.0.1"
+        } else {
+            &config.host
+        };
+
+        let addr = format!("{host}:{port}");
 
         // Step 1: Establish TCP connection
         tracing::debug!("establishing TCP connection to {}", addr);

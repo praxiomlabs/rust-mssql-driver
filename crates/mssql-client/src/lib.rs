@@ -86,6 +86,7 @@
 //   column_parser ──→ error, mssql_types, tds_protocol
 
 pub mod blob;
+pub(crate) mod browser;
 pub mod bulk;
 pub mod cancel;
 pub mod change_tracking;

@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Works in both `Ready` and `InTransaction` states
   - All procedure names validated to prevent SQL injection
   - Feature scope, API design, and documentation structure informed by PR #71 from @c5soft
+- **SQL Browser instance resolution** for named instances (`host\SQLEXPRESS`):
+  - Automatic TCP port discovery via SQL Server Browser service (UDP 1434)
+  - Transparent integration into `Client::connect()` — no API changes needed
+  - Supports `.` as localhost (e.g., `Server=.\SQLEXPRESS`)
+  - Requested by @tracker1 in #66
 - Added `col_type: u8` field and `#[non_exhaustive]` to protocol-level `ReturnValue` struct
 
 ## [0.7.0] - 2026-04-07
