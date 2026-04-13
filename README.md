@@ -17,7 +17,7 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 - **Pure Rust TLS** - Uses rustls, no OpenSSL dependency
 - **Modern Rust** - 2024 Edition, MSRV 1.88
 
-### Feature Status (v0.7.x)
+### Feature Status (v0.8.x)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -38,6 +38,8 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 | Always Encrypted | ✅ | Full support with Azure Key Vault and Windows CertStore providers |
 | Query Cancellation | ✅ | ATTENTION signal support |
 | Collation-Aware Decoding | ✅ | 14+ character encodings |
+| Stored Procedures | ✅ | RPC-based with OUTPUT params |
+| Named Instance Resolution | ✅ | SQL Browser service (UDP 1434) |
 
 ## Installation
 
@@ -45,7 +47,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-mssql-client = "0.7"
+mssql-client = "0.8"
 tokio = { version = "1.48", features = ["full"] }
 ```
 
@@ -219,8 +221,8 @@ Enable optional features:
 
 ```toml
 [dependencies]
-mssql-client = { version = "0.7", features = ["otel"] }
-mssql-auth = { version = "0.7", features = ["sspi-auth"] }
+mssql-client = { version = "0.8", features = ["otel"] }
+mssql-auth = { version = "0.8", features = ["sspi-auth"] }
 ```
 
 ## SQL Server Compatibility
@@ -260,6 +262,8 @@ See [STABILITY.md](STABILITY.md) for details on what's considered stable.
 | Prepared statement cache | Automatic LRU | Per-execution |
 | Azure SQL redirects | Automatic | Manual handling |
 | Type-state connections | Yes | No |
+| Stored procedures (RPC) | Yes (OUTPUT params, RETURN value) | No (todo!()) |
+| Named instance resolution | Yes (SQL Browser) | No |
 
 ## Examples
 

@@ -177,4 +177,4 @@ for the full API stability policy.
 
 ---
 
-*This document was last comprehensively audited for the v0.7.0 release.*
+*This document was last comprehensively audited for the v0.8.0 release.*

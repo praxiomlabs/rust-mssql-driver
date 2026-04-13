@@ -126,6 +126,28 @@ loop {
 }
 ```
 
+### Stored Procedure Execution (v0.8.0)
+
+Two-tier API for calling stored procedures via TDS RPC:
+
+```rust
+// Simple (input-only, positional params):
+let result = client.call_procedure("dbo.MyProc", &[&1i32]).await?;
+
+// Builder (named params, OUTPUT support):
+let result = client.procedure("dbo.CalculateSum")?
+    .input("@a", &10i32)
+    .input("@b", &20i32)
+    .output_int("@result")
+    .execute().await?;
+```
+
+Returns `ProcedureResult` with `return_value`, `rows_affected`, `output_params`, and `result_sets`. All methods on `impl<S: ConnectionState>` — works in both `Ready` and `InTransaction` states.
+
+### SQL Browser Instance Resolution (v0.8.0)
+
+Named instances (e.g., `Server=localhost\SQLEXPRESS`) are automatically resolved via the SQL Server Browser service (UDP 1434). The `crate::browser` module implements the SSRP protocol (MC-SQLR spec). Resolution happens transparently in `Client::connect()` when `config.instance` is `Some`.
+
 ## Development Tooling
 
 ### Required Tools

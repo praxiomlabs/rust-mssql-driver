@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-13
+
 ### Added
 
 - **Stored procedure support** with two-tier API:
@@ -22,7 +24,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Transparent integration into `Client::connect()` — no API changes needed
   - Supports `.` as localhost (e.g., `Server=.\SQLEXPRESS`)
   - Requested by @tracker1 in #66
+- **Pool `test_on_checkin` health check** — connections returned to the pool are now health-checked before reuse when enabled (closes #29)
+- `ProcedureResult` and `ResultSet` now implement `Clone`
 - Added `col_type: u8` field and `#[non_exhaustive]` to protocol-level `ReturnValue` struct
+
+### Fixed
+
+- **Mock TLS cross-platform race** — fixed `TlsPreloginWrapper` handshake-to-passthrough race condition that caused test failures on macOS and Windows (closes #70). Root cause: client sends raw TLS before server-side wrapper transitions from PreLogin framing
+- **RUSTSEC-2026-0097** (rand 0.8.5 unsoundness) — added ignore with justification (log feature not enabled, blocked on upstream rsa 0.10 stable)
+- Resolved stale advisory ignore for RUSTSEC-2026-0066 (fixed by testcontainers 0.27 bump)
+- Updated RUSTSEC-2025-0134 ignore reason (rustls-pemfile is a direct dep of mssql-auth, not just transitive via bollard)
+
+### Changed
+
+- **Azure SDK bump**: azure_core/azure_identity 0.30 → 0.34, azure_security_keyvault_keys 0.9 → 0.13
+  - `ClientCertificateCredential::new()` now takes `SecretBytes` instead of `Secret`
+  - Key Vault `unwrap_key()`/`sign()`/`verify()` now require `key_version` as a method parameter
+- Bumped dev dependencies: testcontainers 0.25 → 0.27, criterion 0.7 → 0.8, rustls 0.23.37 → 0.23.38, tokio 1.51.0 → 1.51.1
+- Bumped CI actions: codecov-action v5 → v6, action-gh-release v2 → v3, github-script v8 → v9
+- Extracted `validate_identifier()` and `validate_qualified_identifier()` to shared `validation` module
 
 ## [0.7.0] - 2026-04-07
 
@@ -541,7 +561,8 @@ Initial release of the rust-mssql-driver project.
 - `mssql-derive` - Procedural macros
 - `mssql-testing` - Test infrastructure
 
-[Unreleased]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.5.1...v0.5.2
