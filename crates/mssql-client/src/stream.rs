@@ -255,7 +255,6 @@ pub struct ProcedureResult {
 
 impl ProcedureResult {
     /// Create a new empty procedure result.
-    #[allow(dead_code)] // Used by read_procedure_result() in the next step
     pub(crate) fn new() -> Self {
         Self {
             return_value: 0,

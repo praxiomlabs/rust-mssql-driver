@@ -18,101 +18,101 @@ use crate::state::ConnectionState;
 use super::Client;
 
 impl<S: ConnectionState> Client<S> {
-    /// Convert ToSql parameters to RPC parameters.
-    pub(crate) fn convert_params(params: &[&(dyn crate::ToSql + Sync)]) -> Result<Vec<RpcParam>> {
+    /// Convert a single `ToSql` value into an `RpcParam` with the given name.
+    ///
+    /// This is the shared conversion logic used by both `convert_params()`
+    /// (for positional query parameters) and `ProcedureBuilder::input()`
+    /// (for named procedure parameters).
+    pub(crate) fn convert_single_param(
+        name: &str,
+        value: &(dyn crate::ToSql + Sync),
+    ) -> Result<RpcParam> {
         use bytes::{BufMut, BytesMut};
         use mssql_types::SqlValue;
 
+        let sql_value = value.to_sql()?;
+
+        Ok(match sql_value {
+            SqlValue::Null => RpcParam::null(name, RpcTypeInfo::nvarchar(1)),
+            SqlValue::Bool(v) => {
+                let mut buf = BytesMut::with_capacity(1);
+                buf.put_u8(if v { 1 } else { 0 });
+                RpcParam::new(name, RpcTypeInfo::bit(), buf.freeze())
+            }
+            SqlValue::TinyInt(v) => {
+                let mut buf = BytesMut::with_capacity(1);
+                buf.put_u8(v);
+                RpcParam::new(name, RpcTypeInfo::tinyint(), buf.freeze())
+            }
+            SqlValue::SmallInt(v) => {
+                let mut buf = BytesMut::with_capacity(2);
+                buf.put_i16_le(v);
+                RpcParam::new(name, RpcTypeInfo::smallint(), buf.freeze())
+            }
+            SqlValue::Int(v) => RpcParam::int(name, v),
+            SqlValue::BigInt(v) => RpcParam::bigint(name, v),
+            SqlValue::Float(v) => {
+                let mut buf = BytesMut::with_capacity(4);
+                buf.put_f32_le(v);
+                RpcParam::new(name, RpcTypeInfo::real(), buf.freeze())
+            }
+            SqlValue::Double(v) => {
+                let mut buf = BytesMut::with_capacity(8);
+                buf.put_f64_le(v);
+                RpcParam::new(name, RpcTypeInfo::float(), buf.freeze())
+            }
+            SqlValue::String(ref s) => RpcParam::nvarchar(name, s),
+            SqlValue::Binary(ref b) => {
+                RpcParam::new(name, RpcTypeInfo::varbinary(b.len() as u16), b.clone())
+            }
+            SqlValue::Xml(ref s) => RpcParam::nvarchar(name, s),
+            #[cfg(feature = "uuid")]
+            SqlValue::Uuid(u) => {
+                let bytes = u.as_bytes();
+                let mut buf = BytesMut::with_capacity(16);
+                // SQL Server stores GUIDs in mixed-endian format
+                buf.put_u32_le(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]));
+                buf.put_u16_le(u16::from_be_bytes([bytes[4], bytes[5]]));
+                buf.put_u16_le(u16::from_be_bytes([bytes[6], bytes[7]]));
+                buf.put_slice(&bytes[8..16]);
+                RpcParam::new(name, RpcTypeInfo::uniqueidentifier(), buf.freeze())
+            }
+            #[cfg(feature = "decimal")]
+            SqlValue::Decimal(d) => RpcParam::nvarchar(name, &d.to_string()),
+            #[cfg(feature = "chrono")]
+            SqlValue::Date(_)
+            | SqlValue::Time(_)
+            | SqlValue::DateTime(_)
+            | SqlValue::DateTimeOffset(_) => {
+                let s = match &sql_value {
+                    SqlValue::Date(d) => d.to_string(),
+                    SqlValue::Time(t) => t.to_string(),
+                    SqlValue::DateTime(dt) => dt.to_string(),
+                    SqlValue::DateTimeOffset(dto) => dto.to_rfc3339(),
+                    _ => unreachable!(),
+                };
+                RpcParam::nvarchar(name, &s)
+            }
+            #[cfg(feature = "json")]
+            SqlValue::Json(ref j) => RpcParam::nvarchar(name, &j.to_string()),
+            SqlValue::Tvp(ref tvp_data) => Self::encode_tvp_param(name, tvp_data)?,
+            _ => {
+                return Err(Error::Type(mssql_types::TypeError::UnsupportedConversion {
+                    from: sql_value.type_name().to_string(),
+                    to: "RPC parameter",
+                }));
+            }
+        })
+    }
+
+    /// Convert ToSql parameters to RPC parameters with auto-generated names.
+    pub(crate) fn convert_params(params: &[&(dyn crate::ToSql + Sync)]) -> Result<Vec<RpcParam>> {
         params
             .iter()
             .enumerate()
             .map(|(i, p)| {
-                let sql_value = p.to_sql()?;
                 let name = format!("@p{}", i + 1);
-
-                Ok(match sql_value {
-                    SqlValue::Null => RpcParam::null(&name, RpcTypeInfo::nvarchar(1)),
-                    SqlValue::Bool(v) => {
-                        let mut buf = BytesMut::with_capacity(1);
-                        buf.put_u8(if v { 1 } else { 0 });
-                        RpcParam::new(&name, RpcTypeInfo::bit(), buf.freeze())
-                    }
-                    SqlValue::TinyInt(v) => {
-                        let mut buf = BytesMut::with_capacity(1);
-                        buf.put_u8(v);
-                        RpcParam::new(&name, RpcTypeInfo::tinyint(), buf.freeze())
-                    }
-                    SqlValue::SmallInt(v) => {
-                        let mut buf = BytesMut::with_capacity(2);
-                        buf.put_i16_le(v);
-                        RpcParam::new(&name, RpcTypeInfo::smallint(), buf.freeze())
-                    }
-                    SqlValue::Int(v) => RpcParam::int(&name, v),
-                    SqlValue::BigInt(v) => RpcParam::bigint(&name, v),
-                    SqlValue::Float(v) => {
-                        let mut buf = BytesMut::with_capacity(4);
-                        buf.put_f32_le(v);
-                        RpcParam::new(&name, RpcTypeInfo::real(), buf.freeze())
-                    }
-                    SqlValue::Double(v) => {
-                        let mut buf = BytesMut::with_capacity(8);
-                        buf.put_f64_le(v);
-                        RpcParam::new(&name, RpcTypeInfo::float(), buf.freeze())
-                    }
-                    SqlValue::String(ref s) => RpcParam::nvarchar(&name, s),
-                    SqlValue::Binary(ref b) => {
-                        RpcParam::new(&name, RpcTypeInfo::varbinary(b.len() as u16), b.clone())
-                    }
-                    SqlValue::Xml(ref s) => RpcParam::nvarchar(&name, s),
-                    #[cfg(feature = "uuid")]
-                    SqlValue::Uuid(u) => {
-                        // UUID is stored in a specific byte order for SQL Server
-                        let bytes = u.as_bytes();
-                        let mut buf = BytesMut::with_capacity(16);
-                        // SQL Server stores GUIDs in mixed-endian format
-                        buf.put_u32_le(u32::from_be_bytes([
-                            bytes[0], bytes[1], bytes[2], bytes[3],
-                        ]));
-                        buf.put_u16_le(u16::from_be_bytes([bytes[4], bytes[5]]));
-                        buf.put_u16_le(u16::from_be_bytes([bytes[6], bytes[7]]));
-                        buf.put_slice(&bytes[8..16]);
-                        RpcParam::new(&name, RpcTypeInfo::uniqueidentifier(), buf.freeze())
-                    }
-                    #[cfg(feature = "decimal")]
-                    SqlValue::Decimal(d) => {
-                        // Decimal encoding is complex; use string representation for now
-                        RpcParam::nvarchar(&name, &d.to_string())
-                    }
-                    #[cfg(feature = "chrono")]
-                    SqlValue::Date(_)
-                    | SqlValue::Time(_)
-                    | SqlValue::DateTime(_)
-                    | SqlValue::DateTimeOffset(_) => {
-                        // For date/time types, use string representation for simplicity
-                        // A full implementation would encode these properly
-                        let s = match &sql_value {
-                            SqlValue::Date(d) => d.to_string(),
-                            SqlValue::Time(t) => t.to_string(),
-                            SqlValue::DateTime(dt) => dt.to_string(),
-                            SqlValue::DateTimeOffset(dto) => dto.to_rfc3339(),
-                            _ => unreachable!(),
-                        };
-                        RpcParam::nvarchar(&name, &s)
-                    }
-                    #[cfg(feature = "json")]
-                    SqlValue::Json(ref j) => RpcParam::nvarchar(&name, &j.to_string()),
-                    SqlValue::Tvp(ref tvp_data) => {
-                        // Encode TVP using the wire format
-                        Self::encode_tvp_param(&name, tvp_data)?
-                    }
-                    // Handle future SqlValue variants
-                    _ => {
-                        return Err(Error::Type(mssql_types::TypeError::UnsupportedConversion {
-                            from: sql_value.type_name().to_string(),
-                            to: "RPC parameter",
-                        }));
-                    }
-                })
+                Self::convert_single_param(&name, *p)
             })
             .collect()
     }
