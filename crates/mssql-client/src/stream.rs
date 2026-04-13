@@ -288,9 +288,8 @@ impl ProcedureResult {
     ///     .output_int("@result")
     ///     .execute().await?;
     ///
-    /// let sum: i32 = result.get_output("@result")
-    ///     .expect("output param exists")
-    ///     .value.try_into()?;
+    /// let output = result.get_output("@result").expect("output param exists");
+    /// assert_eq!(output.value, SqlValue::Int(30));
     /// ```
     #[must_use]
     pub fn get_output(&self, name: &str) -> Option<&OutputParam> {
@@ -502,6 +501,70 @@ mod tests {
         let result = ExecuteResult::new(42);
         assert_eq!(result.rows_affected, 42);
         assert!(result.output_params.is_empty());
+    }
+
+    #[test]
+    fn test_procedure_result_defaults() {
+        let result = ProcedureResult::new();
+        assert_eq!(result.return_value, 0);
+        assert_eq!(result.rows_affected, 0);
+        assert!(result.output_params.is_empty());
+        assert!(result.result_sets.is_empty());
+        assert!(!result.has_result_sets());
+        assert!(result.first_result_set().is_none());
+    }
+
+    #[test]
+    fn test_procedure_result_get_output() {
+        let mut result = ProcedureResult::new();
+        result.output_params.push(OutputParam {
+            name: "@Total".to_string(),
+            value: mssql_types::SqlValue::Int(42),
+        });
+        result.output_params.push(OutputParam {
+            name: "@Message".to_string(),
+            value: mssql_types::SqlValue::String("ok".to_string()),
+        });
+
+        // Exact match (case-insensitive)
+        assert!(result.get_output("@Total").is_some());
+        assert!(result.get_output("@total").is_some());
+        assert!(result.get_output("@TOTAL").is_some());
+
+        // @ prefix stripping
+        assert!(result.get_output("Total").is_some());
+        assert!(result.get_output("total").is_some());
+
+        // Non-existent
+        assert!(result.get_output("@NotHere").is_none());
+        assert!(result.get_output("NotHere").is_none());
+    }
+
+    #[test]
+    fn test_procedure_result_with_result_sets() {
+        use mssql_types::SqlValue;
+
+        let columns = vec![Column {
+            name: "id".to_string(),
+            index: 0,
+            type_name: "INT".to_string(),
+            nullable: false,
+            max_length: Some(4),
+            precision: None,
+            scale: None,
+            collation: None,
+        }];
+        let rows = vec![Row::from_values(columns.clone(), vec![SqlValue::Int(1)])];
+        let rs = ResultSet::new(columns, rows);
+
+        let mut result = ProcedureResult::new();
+        result.result_sets.push(rs);
+        result.return_value = 7;
+        result.rows_affected = 5;
+
+        assert!(result.has_result_sets());
+        assert_eq!(result.get_return_value(), 7);
+        assert_eq!(result.first_result_set().unwrap().columns().len(), 1);
     }
 
     #[test]

@@ -1567,6 +1567,49 @@ impl Default for RedirectConfig {
 
 **Azure-Specific Note:** Connections to Azure SQL Database through the gateway (`*.database.windows.net`) will almost always receive a redirect to an internal compute node (`*.database.windows.net` on port 11000-11999). This is expected behavior and does not indicate a security issue.
 
+### 4.7 Stored Procedure Execution
+
+Stored procedures are called via TDS RPC (Remote Procedure Call) requests using `RpcRequest::named()`. Unlike `sp_executesql` (used for parameterized queries), named RPC calls directly invoke the stored procedure on the server without SQL text parsing.
+
+#### Two-Tier API
+
+| Method | Use Case | Parameters |
+|--------|----------|------------|
+| `call_procedure(name, &[params])` | Simple input-only calls | Positional, auto-named `@p1`, `@p2`, ... |
+| `procedure(name)?.input().output_*().execute()` | Named params, OUTPUT params | Named by caller, output types declared |
+
+Both methods are available on `impl<S: ConnectionState> Client<S>`, meaning they work identically in `Ready` and `InTransaction` states with zero code duplication.
+
+#### TDS Response Token Flow
+
+The server responds to an RPC procedure call with the following token sequence:
+
+```
+[COLMETADATA → ROW(s) → DONEINPROC]    ← per SELECT statement in the proc
+RETURNVALUE(s)                          ← one per OUTPUT parameter
+RETURNSTATUS                            ← procedure RETURN value (i32)
+DONEPROC                                ← final token
+```
+
+The `read_procedure_result()` parser is order-tolerant and accumulative — it handles these tokens in any order and collects them into a `ProcedureResult`:
+
+| Token | Action |
+|-------|--------|
+| `ColMetaData` | Start new result set (save previous if non-empty) |
+| `Row` / `NbcRow` | Parse via `convert_raw_row()`/`convert_nbc_row()`, add to current result set |
+| `DoneInProc` | Save current result set, accumulate `rows_affected` |
+| `ReturnValue` | Decode via `parse_column_value()` using `ColumnData` bridge, push as `OutputParam` |
+| `ReturnStatus` | Store as `return_value: i32` |
+| `DoneProc` | Save remaining result set, break if `!more` |
+
+#### ReturnValue Decoding
+
+`ReturnValue` tokens carry the output parameter value in TYPE_VARBYTE format (the same format used for row column values). To decode, we construct a temporary `ColumnData` from the `ReturnValue`'s `col_type`, `flags`, `user_type`, and `type_info` fields, then call the existing `parse_column_value()` function. This reuses the full type decoding machinery without duplication.
+
+#### Security
+
+All procedure names are validated via `validate_qualified_identifier()` before being sent to the server. This prevents SQL injection through procedure name manipulation. Parameter values are sent as typed RPC parameters (never interpolated into SQL text).
+
 ---
 
 ## 5. Security Architecture

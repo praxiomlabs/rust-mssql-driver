@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Stored procedure support** with two-tier API:
+  - `client.call_procedure("dbo.MyProc", &[&1i32])` — simple convenience for input-only calls
+  - `client.procedure("dbo.MyProc")?.input("@a", &val).output_int("@result").execute()` — full builder with named input/output parameters
+  - `ProcedureResult` type with return value, rows affected, output parameters, and result sets
+  - `ProcedureBuilder` with typed output methods: `output_int`, `output_bigint`, `output_nvarchar`, `output_bit`, `output_float`, `output_decimal`, `output_raw`
+  - Works in both `Ready` and `InTransaction` states
+  - All procedure names validated to prevent SQL injection
+  - Feature scope, API design, and documentation structure informed by PR #71 from @c5soft
+- Added `col_type: u8` field and `#[non_exhaustive]` to protocol-level `ReturnValue` struct
+
 ## [0.7.0] - 2026-04-07
 
 This is a **security + API hardening release**. It resolves seven RUSTSEC

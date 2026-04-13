@@ -41,10 +41,8 @@ use crate::stream::ProcedureResult;
 ///     .execute().await?;
 ///
 /// // Access the output parameter
-/// let sum: i32 = result.get_output("@result")
-///     .expect("output param present")
-///     .value.try_into()?;
-/// assert_eq!(sum, 30);
+/// let output = result.get_output("@result").expect("output param present");
+/// assert_eq!(output.value, SqlValue::Int(30));
 /// ```
 pub struct ProcedureBuilder<'a, S: ConnectionState> {
     client: &'a mut Client<S>,
