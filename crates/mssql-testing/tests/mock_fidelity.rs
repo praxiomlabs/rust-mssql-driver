@@ -372,15 +372,20 @@ async fn test_mock_server_plaintext_prelogin() {
 /// a TDS PreLogin-wrapped TLS handshake, then Login7 and LoginAck exchange
 /// over the encrypted channel.
 ///
-/// Previously Linux-only due to a timing race (see #70): the mock server's
-/// raw `write_all()` + `flush()` on the TLS-over-PreLogin stream didn't
-/// reliably deliver data to the client before the single-thread runtime's
-/// cooperative scheduler yielded on macOS/Windows. The fix uses multi-thread
-/// runtime, which matches production usage and eliminates the scheduling
-/// dependency between server and client tasks.
+/// Root cause of the previous Linux-only gate (#70): the client completes
+/// the TLS handshake and sends Login7 as raw TLS (ApplicationData 0x17)
+/// before the server-side `TlsPreloginWrapper` has switched to pass-through
+/// mode. On macOS/Windows, TCP coalesces these bytes into one read, so the
+/// server's wrapper (still in handshake mode) tries to interpret the raw TLS
+/// record as a TDS PreLogin header and fails.
+///
+/// Fixed by auto-detecting non-PreLogin bytes during handshake mode:
+/// when the wrapper reads a header byte != 0x12, it auto-transitions to
+/// pass-through and feeds the already-read bytes back to rustls via a
+/// prefix buffer. See `TlsPreloginWrapper` in tls.rs.
 ///
 /// Tracking: #70
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn test_mock_server_tls_full_connection() {
     use bytes::BufMut;
     use tds_protocol::prelogin::{EncryptionLevel, PreLogin};

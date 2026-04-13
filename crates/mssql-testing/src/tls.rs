@@ -115,6 +115,17 @@ const PACKET_TYPE_PRELOGIN: u8 = 0x12;
 const PACKET_STATUS_EOM: u8 = 0x01;
 
 /// TDS PreLogin wrapper for server-side TLS handshake framing.
+///
+/// During the TLS handshake, TLS records are wrapped in TDS PreLogin packets
+/// (type 0x12). After `handshake_complete()` is called (or auto-detected),
+/// the wrapper becomes a transparent pass-through.
+///
+/// **Auto-transition**: If the wrapper reads a header byte that isn't 0x12
+/// during handshake mode, the peer has already switched to raw TLS. The
+/// wrapper auto-transitions to pass-through and feeds the already-read
+/// bytes back to the caller. This handles the race where the client
+/// completes the TLS handshake and sends application data before the
+/// server-side wrapper has been explicitly switched. See #70.
 pub struct TlsPreloginWrapper<S> {
     stream: S,
     pending_handshake: bool,
@@ -123,6 +134,14 @@ pub struct TlsPreloginWrapper<S> {
     header_buf: [u8; HEADER_SIZE],
     header_pos: usize,
     read_remaining: usize,
+
+    // Prefix buffer for bytes read during auto-transition from handshake
+    // to pass-through mode (see #70). When the wrapper reads a non-PreLogin
+    // header, those bytes are TLS record data that must be returned to the
+    // caller before reading more from the stream.
+    prefix_buf: [u8; HEADER_SIZE],
+    prefix_len: usize,
+    prefix_pos: usize,
 
     // Write state
     write_buf: Vec<u8>,
@@ -139,6 +158,9 @@ impl<S> TlsPreloginWrapper<S> {
             header_buf: [0u8; HEADER_SIZE],
             header_pos: 0,
             read_remaining: 0,
+            prefix_buf: [0u8; HEADER_SIZE],
+            prefix_len: 0,
+            prefix_pos: 0,
             write_buf: vec![0u8; HEADER_SIZE],
             write_pos: HEADER_SIZE,
             header_written: false,
@@ -160,10 +182,19 @@ impl<S: AsyncRead + Unpin> AsyncRead for TlsPreloginWrapper<S> {
         let this = self.get_mut();
 
         if !this.pending_handshake {
+            // Pass-through mode: drain prefix buffer first (from auto-transition),
+            // then read directly from the stream.
+            if this.prefix_pos < this.prefix_len {
+                let available = this.prefix_len - this.prefix_pos;
+                let to_copy = cmp::min(available, buf.remaining());
+                buf.put_slice(&this.prefix_buf[this.prefix_pos..this.prefix_pos + to_copy]);
+                this.prefix_pos += to_copy;
+                return Poll::Ready(Ok(()));
+            }
             return Pin::new(&mut this.stream).poll_read(cx, buf);
         }
 
-        // Read TDS header first
+        // Handshake mode: read TDS PreLogin header first
         while this.header_pos < HEADER_SIZE {
             let mut header_buf = ReadBuf::new(&mut this.header_buf[this.header_pos..]);
             match Pin::new(&mut this.stream).poll_read(cx, &mut header_buf)? {
@@ -178,13 +209,32 @@ impl<S: AsyncRead + Unpin> AsyncRead for TlsPreloginWrapper<S> {
             }
         }
 
-        // Parse header to get payload length
+        // Check if this is actually a PreLogin packet. If not, the peer has
+        // already switched to raw TLS (sent an ApplicationData record, etc.)
+        // before we called handshake_complete(). Auto-transition to pass-through
+        // and return the bytes we already consumed. See #70.
+        if this.header_buf[0] != PACKET_TYPE_PRELOGIN {
+            this.pending_handshake = false;
+            this.prefix_buf = this.header_buf;
+            this.prefix_len = HEADER_SIZE;
+            this.prefix_pos = 0;
+            this.header_pos = 0;
+            this.read_remaining = 0;
+
+            // Return as much of the prefix as the caller's buffer allows
+            let to_copy = cmp::min(HEADER_SIZE, buf.remaining());
+            buf.put_slice(&this.prefix_buf[..to_copy]);
+            this.prefix_pos = to_copy;
+            return Poll::Ready(Ok(()));
+        }
+
+        // Parse PreLogin header to get payload length
         if this.read_remaining == 0 {
             let length = u16::from_be_bytes([this.header_buf[2], this.header_buf[3]]) as usize;
             this.read_remaining = length.saturating_sub(HEADER_SIZE);
         }
 
-        // Read payload (TLS data)
+        // Read payload (TLS data inside the PreLogin packet)
         let max_read = cmp::min(this.read_remaining, buf.remaining());
         if max_read == 0 {
             return Poll::Ready(Ok(()));
