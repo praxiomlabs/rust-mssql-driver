@@ -358,6 +358,7 @@ pub struct DoneProc {
 
 /// Return value from stored procedure.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ReturnValue {
     /// Parameter ordinal.
     pub param_ordinal: u16,
@@ -369,6 +370,8 @@ pub struct ReturnValue {
     pub user_type: u32,
     /// Type flags.
     pub flags: u16,
+    /// Raw column type byte from the wire.
+    pub col_type: u8,
     /// Type info.
     pub type_info: TypeInfo,
     /// Value data.
@@ -1382,6 +1385,7 @@ impl ReturnValue {
             status,
             user_type,
             flags,
+            col_type,
             type_info,
             value: value_buf.freeze(),
         })

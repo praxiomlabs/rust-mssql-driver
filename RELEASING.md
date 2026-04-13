@@ -2,7 +2,7 @@
 
 Comprehensive guide for releasing new versions of rust-mssql-driver to crates.io.
 
-**Version:** 0.7.0 | **MSRV:** 1.88 | **Edition:** 2024 | **Workspace:** 9 crates
+**Version:** 0.8.0 | **MSRV:** 1.88 | **Edition:** 2024 | **Workspace:** 9 crates
 
 ---
 
@@ -954,6 +954,155 @@ This section documents issues encountered in past releases and patterns to avoid
 - Updated `just tag` to require ALL workflows to pass, not just the most recent
 - Added Cardinal Rule #5 (version refs check) and #6 (never cancel mid-publish)
 - Updated `release-check` to include version-refs-check
+
+### 12. The v0.7.0 Incidents (Token Expiry, Dev-Branch CI Gap, Doc Contradiction)
+
+**Issue**: The v0.7.0 release cycle surfaced three unrelated latent problems
+that had been accumulating since the last release. None were caused by the
+v0.7.0 changes themselves — they were pre-existing drift that only became
+visible under the pressure of a real release.
+
+**What went wrong**:
+
+1. **CARGO_REGISTRY_TOKEN expiry, discovered at publish time.** The release
+   workflow ran all validation jobs successfully (Semver, Test Suite, Docs,
+   Security Audit), then failed on the very first `cargo publish` attempt
+   with `HTTP 403: authentication failed`. Zero crates were published —
+   the cleanest possible failure mode — but it required a manual token
+   rotation and workflow rerun to complete the release. The token had
+   silently expired at some point between v0.6.0 (2026-01-12) and v0.7.0
+   (2026-04-07), and there was no early-warning mechanism.
+
+2. **Two pre-existing latent bugs surfaced at release PR time.** The mock
+   server's `test_mock_server_tls_full_connection` failed on macOS and
+   Windows with "peer closed connection without sending TLS close_notify"
+   because the mock server was dropping the TLS stream without calling
+   `shutdown()`. And `cargo xtask check-features` was running
+   `cargo check -p mssql-driver-pool --no-dev-deps` — but `--no-dev-deps`
+   is a cargo-hack flag, not a cargo flag, which older cargo silently
+   ignored and Rust 1.88's stricter cargo rejects. Both bugs had been
+   latent on `dev` for weeks (or months) without being caught, because
+   CI only ran on `main` and on PRs to `main`. The 42-commit backlog
+   that shipped in v0.7.0 had zero CI coverage between the last
+   main-branch push (2026-01-13) and the release PR (2026-04-07).
+
+3. **CONTRIBUTING.md contradicted STABILITY.md on MSRV policy.** The
+   "Definitely Breaking" list in CONTRIBUTING.md included "Increasing
+   MSRV", but STABILITY.md's explicit "MSRV Increase Policy" section
+   said MSRV bumps are _not_ considered breaking changes. The
+   contradiction had been present since CONTRIBUTING.md was created
+   and was only discovered when deciding how to handle the MSRV bump
+   needed for the `time 0.3.47` security fix.
+
+**Result**: The release shipped successfully but consumed an outsized amount
+of effort verifying, debugging, and re-running. Three separate decision
+points that should have been automated or obvious required manual
+investigation and judgment.
+
+**Solution** (implemented post-v0.7.0 as a release-hygiene sprint):
+
+- **Added `.github/workflows/token-health.yml`** — runs weekly (and
+  on-demand) to verify `CARGO_REGISTRY_TOKEN` still authenticates against
+  `crates.io/api/v1/me`. On failure, opens (or updates) a tracking issue
+  with rotation instructions. Would have surfaced the token problem up to
+  7 days before a real release attempt.
+- **Extended `ci.yml` and `benchmarks.yml` to trigger on pushes to `dev`**,
+  not just `main`. Both latent bugs would have been caught within minutes
+  of landing on `dev` instead of sitting there for weeks. Uses
+  `concurrency: cancel-in-progress` for non-main branches to avoid
+  wasted CI cycles.
+- **Added `workflow_dispatch` to all workflows** so maintainers can
+  manually retrigger after a transient failure or external fix (like
+  the token rotation) without needing to push a dummy commit.
+- **Fixed the mock server TLS shutdown bug properly** (closes #70) —
+  `handle_connection` now calls `tls_stream.shutdown().await` before
+  returning so rustls sends a clean `close_notify` alert. Removed the
+  `#[cfg(target_os = "linux")]` gate on
+  `test_mock_server_tls_full_connection`.
+- **Fixed the `xtask --no-dev-deps` bug** — wrapped the offending
+  invocation with `cargo hack check` like the other feature-matrix
+  commands in that function.
+- **Fixed the CONTRIBUTING.md / STABILITY.md contradiction** — removed
+  "Increasing MSRV" from the breaking-change list and added an explicit
+  non-breaking entry that points at STABILITY.md § MSRV Increase Policy
+  as the authoritative source.
+- **Added `scripts/check-doc-consistency.sh`** — codifies the class of
+  doc-drift bug that produced the CONTRIBUTING.md contradiction.
+  Validates: MSRV consistency across all files, CHANGELOG ↔ Cargo.toml
+  version agreement, STABILITY.md ↔ CONTRIBUTING.md MSRV policy
+  agreement, workspace crate version inheritance, deny.toml ↔
+  `.cargo/audit.toml` ignore-list sync.
+  Wired into `just release-check` via a new `just doc-consistency`
+  recipe.
+- **Added `just release-status`** — one-command dashboard showing
+  dev↔main divergence, last tag age, workflow status (including the
+  new token health check), open PRs grouped by bot vs contributor, and
+  local working-copy state. Answers "should I release?" without
+  needing to remember which commands to run.
+- **Added `just release-preflight`** — sequential gate check that runs
+  every Cardinal Rules verification in order with clear pass/fail
+  reporting.
+- **Added `cargo xtask release-notes`** — generates a CHANGELOG draft
+  from conventional commits since the last tag, grouped by type
+  (feat → Added, fix → Fixed, etc.), with breaking change detection.
+  Reduces the manual CHANGELOG-writing burden by ~80%.
+- **Added issue templates, PR template, CODE_OF_CONDUCT.md, CODEOWNERS,
+  MAINTAINERS.md** — not release-mechanics proper, but the sprint that
+  followed the v0.7.0 incident was the natural time to raise the
+  contributor-facing surface area of the repo. The new PR template
+  includes an explicit "MSRV bumps are NOT a breaking change" note
+  that prevents the exact CONTRIBUTING.md contradiction from being
+  re-introduced by a well-meaning contributor.
+
+---
+
+## Token Health
+
+The `CARGO_REGISTRY_TOKEN` secret authenticates the automated release
+workflow against crates.io. If it expires, is revoked, or is rotated
+without the GitHub secret being updated, the next release attempt will
+fail at tier 0.
+
+### Weekly health check
+
+`.github/workflows/token-health.yml` runs every Monday at 09:15 UTC and
+also supports manual `workflow_dispatch`. It calls
+`https://crates.io/api/v1/me` with the token — a non-destructive
+authenticated GET that returns 200 if and only if the token can perform
+authenticated operations against crates.io.
+
+On failure, the workflow opens (or updates) a tracking issue labelled
+`security` with rotation instructions. The same issue title is reused
+on subsequent failures so the alert is visible without spamming new
+issues every week.
+
+### Manual rotation
+
+1. Visit https://crates.io/settings/tokens
+2. Revoke the previous `rust-mssql-driver-*` token (optional but recommended).
+3. Create a new token with `publish-update` scope. Add `publish-new` only
+   if a workspace crate has never been published before (all 8 currently
+   published crates have `publish-update` coverage).
+4. Optionally scope the new token to just the 8 published crates:
+   `tds-protocol`, `mssql-types`, `mssql-tls`, `mssql-codec`, `mssql-auth`,
+   `mssql-derive`, `mssql-client`, `mssql-driver-pool`.
+5. Copy the token value (shown only once).
+6. Visit https://github.com/praxiomlabs/rust-mssql-driver/settings/secrets/actions
+7. Update the existing `CARGO_REGISTRY_TOKEN` secret.
+8. Manually trigger the Token Health Check workflow
+   (Actions → Token Health Check → Run workflow) to confirm the new
+   token works.
+9. If a release was in flight when the token failed, rerun the failed
+   publish job: `gh run rerun <run-id> --failed`. This was the exact
+   recovery path used during the v0.7.0 release.
+
+### Verification at release time
+
+The `release.yml` workflow will still attempt to publish tier 0 first,
+so a bad token fails loudly at the first upload attempt rather than
+partway through. This means the worst-case failure mode is "zero
+crates published, rerun after rotation" — which is what happened during
+the v0.7.0 release.
 
 ---
 

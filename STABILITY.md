@@ -46,6 +46,12 @@ The following APIs are considered stable and covered by semver guarantees:
 | `Transaction::commit()` | Stable |
 | `Transaction::rollback()` | Stable |
 | `Transaction::save_point()` | Stable |
+| `Client::call_procedure()` | Stable |
+| `Client::procedure()` | Stable |
+| `ProcedureBuilder::input()` | Stable |
+| `ProcedureBuilder::output_*()` | Stable |
+| `ProcedureBuilder::execute()` | Stable |
+| `ProcedureResult` fields | Stable |
 | `Error` enum variants | Stable |
 
 ### mssql-driver-pool

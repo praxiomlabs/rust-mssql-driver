@@ -158,7 +158,7 @@ impl<S: ConnectionState> Client<S> {
     ///
     /// If `needs_reset` is set (from pool return), the RESETCONNECTION flag
     /// is included in the first packet to reset connection state.
-    async fn send_rpc(&mut self, rpc: &RpcRequest) -> Result<()> {
+    pub(crate) async fn send_rpc(&mut self, rpc: &RpcRequest) -> Result<()> {
         let payload = rpc.encode_with_transaction(self.transaction_descriptor);
         let max_packet = self.config.packet_size as usize;
 
@@ -189,6 +189,72 @@ impl<S: ConnectionState> Client<S> {
         }
 
         Ok(())
+    }
+
+    /// Start building a stored procedure call with full control over parameters.
+    ///
+    /// Returns a [`crate::procedure::ProcedureBuilder`] that allows adding named input and output
+    /// parameters before executing the call.
+    ///
+    /// The procedure name is validated to prevent SQL injection. It may be
+    /// schema-qualified (e.g., `"dbo.MyProc"`).
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let result = client.procedure("dbo.CalculateSum")?
+    ///     .input("@a", &10i32)
+    ///     .input("@b", &20i32)
+    ///     .output_int("@result")
+    ///     .execute().await?;
+    ///
+    /// let sum = result.get_output("@result").unwrap();
+    /// ```
+    pub fn procedure(
+        &mut self,
+        proc_name: &str,
+    ) -> Result<crate::procedure::ProcedureBuilder<'_, S>> {
+        crate::validation::validate_qualified_identifier(proc_name)?;
+        Ok(crate::procedure::ProcedureBuilder::new(self, proc_name))
+    }
+
+    /// Execute a stored procedure with positional input parameters.
+    ///
+    /// This is a convenience method for the common case of calling a procedure
+    /// with input-only parameters. For output parameters or named parameters,
+    /// use [`procedure()`](Client::procedure) instead.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let result = client.call_procedure("dbo.GetUser", &[&1i32]).await?;
+    /// assert_eq!(result.return_value, 0);
+    ///
+    /// if let Some(rs) = result.first_result_set() {
+    ///     println!("columns: {:?}", rs.columns());
+    /// }
+    /// ```
+    pub async fn call_procedure(
+        &mut self,
+        proc_name: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<crate::stream::ProcedureResult> {
+        crate::validation::validate_qualified_identifier(proc_name)?;
+
+        tracing::debug!(
+            proc_name = proc_name,
+            params_count = params.len(),
+            "executing stored procedure"
+        );
+
+        let rpc_params = Self::convert_params(params)?;
+        let mut rpc = RpcRequest::named(proc_name);
+        for param in rpc_params {
+            rpc = rpc.param(param);
+        }
+
+        self.send_rpc(&rpc).await?;
+        self.read_procedure_result().await
     }
 }
 
@@ -934,7 +1000,7 @@ impl Client<InTransaction> {
     /// tx.commit().await?;
     /// ```
     pub async fn save_point(&mut self, name: &str) -> Result<SavePoint> {
-        validate_identifier(name)?;
+        crate::validation::validate_identifier(name)?;
         tracing::debug!(name = name, "creating savepoint");
 
         // Execute SAVE TRANSACTION <name>
@@ -1012,30 +1078,6 @@ impl Client<InTransaction> {
     }
 }
 
-/// Validate an identifier (table name, savepoint name, etc.) to prevent SQL injection.
-fn validate_identifier(name: &str) -> Result<()> {
-    use once_cell::sync::Lazy;
-    use regex::Regex;
-
-    static IDENTIFIER_RE: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_@#$]{0,127}$").unwrap());
-
-    if name.is_empty() {
-        return Err(Error::InvalidIdentifier(
-            "identifier cannot be empty".into(),
-        ));
-    }
-
-    if !IDENTIFIER_RE.is_match(name) {
-        return Err(Error::InvalidIdentifier(format!(
-            "invalid identifier '{name}': must start with letter/underscore, \
-             contain only alphanumerics/_/@/#/$, and be 1-128 characters"
-        )));
-    }
-
-    Ok(())
-}
-
 impl<S: ConnectionState> std::fmt::Debug for Client<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Client")
@@ -1043,28 +1085,5 @@ impl<S: ConnectionState> std::fmt::Debug for Client<S> {
             .field("port", &self.config.port)
             .field("database", &self.config.database)
             .finish()
-    }
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::panic)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_validate_identifier_valid() {
-        assert!(validate_identifier("my_table").is_ok());
-        assert!(validate_identifier("Table123").is_ok());
-        assert!(validate_identifier("_private").is_ok());
-        assert!(validate_identifier("sp_test").is_ok());
-    }
-
-    #[test]
-    fn test_validate_identifier_invalid() {
-        assert!(validate_identifier("").is_err());
-        assert!(validate_identifier("123abc").is_err());
-        assert!(validate_identifier("table-name").is_err());
-        assert!(validate_identifier("table name").is_err());
-        assert!(validate_identifier("table;DROP TABLE users").is_err());
     }
 }

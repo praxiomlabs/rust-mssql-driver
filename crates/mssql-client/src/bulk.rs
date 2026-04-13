@@ -364,11 +364,11 @@ impl BulkInsertBuilder {
     /// validation, preventing SQL injection.
     pub fn build_insert_bulk_statement(&self) -> Result<String, Error> {
         // Validate table name (may be schema-qualified: dbo.Users, catalog.schema.table)
-        validate_qualified_identifier(&self.table_name)?;
+        crate::validation::validate_qualified_identifier(&self.table_name)?;
 
         // Validate column names
         for col in &self.columns {
-            validate_identifier(&col.name)?;
+            crate::validation::validate_identifier(&col.name)?;
         }
 
         let mut sql = format!("INSERT BULK {}", self.table_name);
@@ -415,7 +415,7 @@ impl BulkInsertBuilder {
         if let Some(ref order) = self.options.order_hint {
             // Validate order hint column names
             for col_name in order {
-                validate_identifier(col_name)?;
+                crate::validation::validate_identifier(col_name)?;
             }
             hints.push(format!("ORDER({})", order.join(", ")));
         }
@@ -448,53 +448,6 @@ fn validate_sql_type(type_str: &str) -> Result<(), Error> {
         return Err(Error::Config(format!(
             "invalid SQL type '{type_str}': contains disallowed characters"
         )));
-    }
-
-    Ok(())
-}
-
-/// Validate a single SQL identifier to prevent SQL injection.
-fn validate_identifier(name: &str) -> Result<(), Error> {
-    #[allow(clippy::expect_used)] // Static regex compilation with known-valid pattern
-    static IDENTIFIER_RE: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_@#$]{0,127}$").expect("valid regex"));
-
-    if name.is_empty() {
-        return Err(Error::InvalidIdentifier(
-            "identifier cannot be empty".into(),
-        ));
-    }
-
-    if !IDENTIFIER_RE.is_match(name) {
-        return Err(Error::InvalidIdentifier(format!(
-            "invalid identifier '{name}': must start with letter/underscore, \
-             contain only alphanumerics/_/@/#/$, and be 1-128 characters"
-        )));
-    }
-
-    Ok(())
-}
-
-/// Validate a potentially schema-qualified identifier (e.g., `dbo.Users`, `catalog.schema.table`).
-///
-/// Splits on `.` and validates each part. SQL Server allows up to 4 parts:
-/// `server.catalog.schema.object`.
-fn validate_qualified_identifier(name: &str) -> Result<(), Error> {
-    if name.is_empty() {
-        return Err(Error::InvalidIdentifier(
-            "identifier cannot be empty".into(),
-        ));
-    }
-
-    let parts: Vec<&str> = name.split('.').collect();
-    if parts.len() > 4 {
-        return Err(Error::InvalidIdentifier(format!(
-            "invalid qualified identifier '{name}': too many parts (max 4: server.catalog.schema.object)"
-        )));
-    }
-
-    for part in &parts {
-        validate_identifier(part)?;
     }
 
     Ok(())

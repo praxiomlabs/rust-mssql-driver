@@ -216,8 +216,107 @@ impl ExecuteResult {
     }
 }
 
+/// Result of a stored procedure execution.
+///
+/// Contains the return value, affected row count, output parameters,
+/// and any result sets produced by the procedure.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let result = client.call_procedure("dbo.GetUser", &[&1i32]).await?;
+///
+/// // Check the return value (RETURN statement in the proc)
+/// assert_eq!(result.return_value, 0);
+///
+/// // Process result sets
+/// for mut rs in result.result_sets {
+///     while let Some(row) = rs.next_row() {
+///         println!("{:?}", row);
+///     }
+/// }
+/// ```
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+#[must_use]
+pub struct ProcedureResult {
+    /// Return value from the stored procedure's RETURN statement.
+    ///
+    /// Defaults to 0 if the procedure does not explicitly return a value,
+    /// which matches SQL Server's default behavior.
+    pub return_value: i32,
+    /// Total number of rows affected by statements within the procedure.
+    pub rows_affected: u64,
+    /// Output parameters returned by the procedure.
+    pub output_params: Vec<OutputParam>,
+    /// Result sets produced by SELECT statements within the procedure.
+    pub result_sets: Vec<ResultSet>,
+}
+
+impl ProcedureResult {
+    /// Create a new empty procedure result.
+    pub(crate) fn new() -> Self {
+        Self {
+            return_value: 0,
+            rows_affected: 0,
+            output_params: Vec::new(),
+            result_sets: Vec::new(),
+        }
+    }
+
+    /// Get the return value from the stored procedure.
+    ///
+    /// This is the value from the procedure's `RETURN` statement.
+    /// Defaults to 0 if not explicitly set by the procedure.
+    #[must_use]
+    pub fn get_return_value(&self) -> i32 {
+        self.return_value
+    }
+
+    /// Get an output parameter by name (case-insensitive).
+    ///
+    /// Strips the `@` prefix from both the search name and stored names
+    /// before comparing, so `get_output("result")` and `get_output("@result")`
+    /// are equivalent.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let result = client.procedure("dbo.CalculateSum")?
+    ///     .input("@a", &10i32)
+    ///     .input("@b", &20i32)
+    ///     .output_int("@result")
+    ///     .execute().await?;
+    ///
+    /// let output = result.get_output("@result").expect("output param exists");
+    /// assert_eq!(output.value, SqlValue::Int(30));
+    /// ```
+    #[must_use]
+    pub fn get_output(&self, name: &str) -> Option<&OutputParam> {
+        let search = name.strip_prefix('@').unwrap_or(name);
+        self.output_params.iter().find(|p| {
+            let stored = p.name.strip_prefix('@').unwrap_or(&p.name);
+            stored.eq_ignore_ascii_case(search)
+        })
+    }
+
+    /// Get the first result set, if any.
+    ///
+    /// Convenience method for procedures that return a single result set.
+    #[must_use]
+    pub fn first_result_set(&self) -> Option<&ResultSet> {
+        self.result_sets.first()
+    }
+
+    /// Check if the procedure produced any result sets.
+    #[must_use]
+    pub fn has_result_sets(&self) -> bool {
+        !self.result_sets.is_empty()
+    }
+}
+
 /// A single result set within a multi-result batch.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[must_use]
 pub struct ResultSet {
     /// Column metadata for this result set.
@@ -402,6 +501,70 @@ mod tests {
         let result = ExecuteResult::new(42);
         assert_eq!(result.rows_affected, 42);
         assert!(result.output_params.is_empty());
+    }
+
+    #[test]
+    fn test_procedure_result_defaults() {
+        let result = ProcedureResult::new();
+        assert_eq!(result.return_value, 0);
+        assert_eq!(result.rows_affected, 0);
+        assert!(result.output_params.is_empty());
+        assert!(result.result_sets.is_empty());
+        assert!(!result.has_result_sets());
+        assert!(result.first_result_set().is_none());
+    }
+
+    #[test]
+    fn test_procedure_result_get_output() {
+        let mut result = ProcedureResult::new();
+        result.output_params.push(OutputParam {
+            name: "@Total".to_string(),
+            value: mssql_types::SqlValue::Int(42),
+        });
+        result.output_params.push(OutputParam {
+            name: "@Message".to_string(),
+            value: mssql_types::SqlValue::String("ok".to_string()),
+        });
+
+        // Exact match (case-insensitive)
+        assert!(result.get_output("@Total").is_some());
+        assert!(result.get_output("@total").is_some());
+        assert!(result.get_output("@TOTAL").is_some());
+
+        // @ prefix stripping
+        assert!(result.get_output("Total").is_some());
+        assert!(result.get_output("total").is_some());
+
+        // Non-existent
+        assert!(result.get_output("@NotHere").is_none());
+        assert!(result.get_output("NotHere").is_none());
+    }
+
+    #[test]
+    fn test_procedure_result_with_result_sets() {
+        use mssql_types::SqlValue;
+
+        let columns = vec![Column {
+            name: "id".to_string(),
+            index: 0,
+            type_name: "INT".to_string(),
+            nullable: false,
+            max_length: Some(4),
+            precision: None,
+            scale: None,
+            collation: None,
+        }];
+        let rows = vec![Row::from_values(columns.clone(), vec![SqlValue::Int(1)])];
+        let rs = ResultSet::new(columns, rows);
+
+        let mut result = ProcedureResult::new();
+        result.result_sets.push(rs);
+        result.return_value = 7;
+        result.rows_affected = 5;
+
+        assert!(result.has_result_sets());
+        assert_eq!(result.get_return_value(), 7);
+        assert_eq!(result.first_result_set().unwrap().columns().len(), 1);
     }
 
     #[test]

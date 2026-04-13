@@ -56,11 +56,10 @@
 
 use std::sync::Arc;
 
+use azure_core::http::RequestContent;
 use azure_identity::DeveloperToolsCredential;
 use azure_security_keyvault_keys::KeyClient;
-use azure_security_keyvault_keys::models::{
-    EncryptionAlgorithm, KeyClientUnwrapKeyOptions, KeyOperationParameters,
-};
+use azure_security_keyvault_keys::models::{EncryptionAlgorithm, KeyOperationParameters};
 use tracing::{debug, instrument};
 use url::Url;
 
@@ -213,21 +212,22 @@ impl KeyStoreProvider for AzureKeyVaultProvider {
             ..Default::default()
         };
 
-        // Build options with key version if provided
-        let options = key_version.map(|v| KeyClientUnwrapKeyOptions {
-            key_version: Some(v),
-            ..Default::default()
-        });
+        // key_version is required by the Azure SDK 0.13+ API
+        let version = key_version.ok_or_else(|| {
+            EncryptionError::CmkError(
+                "CMK path must include key version (e.g., /keys/<name>/<version>)".into(),
+            )
+        })?;
+
+        // Convert parameters to RequestContent
+        let request_content: RequestContent<KeyOperationParameters> =
+            parameters.try_into().map_err(|e| {
+                EncryptionError::CekDecryptionFailed(format!("Failed to create request: {e}"))
+            })?;
 
         // Call Key Vault unwrap operation
         let result = client
-            .unwrap_key(
-                &key_name,
-                parameters.try_into().map_err(|e| {
-                    EncryptionError::CekDecryptionFailed(format!("Failed to create request: {e}"))
-                })?,
-                options,
-            )
+            .unwrap_key(&key_name, &version, request_content, None)
             .await
             .map_err(|e| {
                 EncryptionError::CekDecryptionFailed(format!("Key Vault unwrap failed: {e}"))
@@ -257,30 +257,25 @@ impl KeyStoreProvider for AzureKeyVaultProvider {
         let client = self.create_client(&vault_url)?;
 
         // Build sign parameters - use RS256 (RSA-SHA256) by default
-        use azure_security_keyvault_keys::models::{
-            KeyClientSignOptions, SignParameters, SignatureAlgorithm,
-        };
+        use azure_security_keyvault_keys::models::{SignParameters, SignatureAlgorithm};
 
         let parameters = SignParameters {
             algorithm: Some(SignatureAlgorithm::Rs256),
             value: Some(data.to_vec()),
         };
 
-        // Build options with key version if provided
-        let options = key_version.map(|v| KeyClientSignOptions {
-            key_version: Some(v),
-            ..Default::default()
-        });
+        // key_version is required by the Azure SDK 0.13+ API
+        let version = key_version.ok_or_else(|| {
+            EncryptionError::CmkError("CMK path must include key version for sign operation".into())
+        })?;
+
+        let request_content: RequestContent<SignParameters> = parameters
+            .try_into()
+            .map_err(|e| EncryptionError::CmkError(format!("Failed to create request: {e}")))?;
 
         // Call Key Vault sign operation
         let result = client
-            .sign(
-                &key_name,
-                parameters.try_into().map_err(|e| {
-                    EncryptionError::CmkError(format!("Failed to create request: {e}"))
-                })?,
-                options,
-            )
+            .sign(&key_name, &version, request_content, None)
             .await
             .map_err(|e| EncryptionError::CmkError(format!("Key Vault sign failed: {e}")))?
             .into_model()
@@ -311,9 +306,7 @@ impl KeyStoreProvider for AzureKeyVaultProvider {
         let client = self.create_client(&vault_url)?;
 
         // Build verify parameters
-        use azure_security_keyvault_keys::models::{
-            KeyClientVerifyOptions, SignatureAlgorithm, VerifyParameters,
-        };
+        use azure_security_keyvault_keys::models::{SignatureAlgorithm, VerifyParameters};
 
         let parameters = VerifyParameters {
             algorithm: Some(SignatureAlgorithm::Rs256),
@@ -321,21 +314,20 @@ impl KeyStoreProvider for AzureKeyVaultProvider {
             signature: Some(signature.to_vec()),
         };
 
-        // Build options with key version if provided
-        let options = key_version.map(|v| KeyClientVerifyOptions {
-            key_version: Some(v),
-            ..Default::default()
-        });
+        // key_version is required by the Azure SDK 0.13+ API
+        let version = key_version.ok_or_else(|| {
+            EncryptionError::CmkError(
+                "CMK path must include key version for verify operation".into(),
+            )
+        })?;
+
+        let request_content: RequestContent<VerifyParameters> = parameters
+            .try_into()
+            .map_err(|e| EncryptionError::CmkError(format!("Failed to create request: {e}")))?;
 
         // Call Key Vault verify operation
         let result = client
-            .verify(
-                &key_name,
-                parameters.try_into().map_err(|e| {
-                    EncryptionError::CmkError(format!("Failed to create request: {e}"))
-                })?,
-                options,
-            )
+            .verify(&key_name, &version, request_content, None)
             .await
             .map_err(|e| EncryptionError::CmkError(format!("Key Vault verify failed: {e}")))?
             .into_model()

@@ -1,0 +1,44 @@
+name: ❓ Question
+description: Ask a how-to question (prefer Discussions for conversational topics)
+labels: ["question", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **First, please check:**
+        - [docs.rs/mssql-client](https://docs.rs/mssql-client/latest/mssql_client/) — the full API reference
+        - [CONNECTION_STRINGS.md](https://github.com/praxiomlabs/rust-mssql-driver/blob/main/docs/CONNECTION_STRINGS.md) — connection string options
+        - [MIGRATION_FROM_TIBERIUS.md](https://github.com/praxiomlabs/rust-mssql-driver/blob/main/docs/MIGRATION_FROM_TIBERIUS.md) — if you're coming from Tiberius
+        - [existing issues](https://github.com/praxiomlabs/rust-mssql-driver/issues?q=is%3Aissue)
+        - [GitHub Discussions](https://github.com/praxiomlabs/rust-mssql-driver/discussions) — for conversational help
+
+        If you've already checked those and still need help, fill in the template below.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What are you trying to figure out?
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you tried?
+      description: Approaches you've already attempted and what happened.
+      render: rust
+
+  - type: input
+    id: driver-version
+    attributes:
+      label: Driver version
+      placeholder: "0.7.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Code snippets, error messages, links to relevant docs, etc.

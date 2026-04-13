@@ -1,7 +1,7 @@
 # Architectural Reference: High-Performance Rust MS SQL Driver
 
 **Version:** 1.6.0
-**Status:** Design Complete (v0.7.0 Released)
+**Status:** Design Complete (v0.8.0 Released)
 **Target Protocol:** MS-TDS 7.3 – 8.0 (SQL Server 2008 – 2025)
 **Toolchain Standard:** Rust 2024 Edition (v1.85+, released February 20, 2025)
 **MSRV Policy:** Rust 1.88.0 (6-month rolling window aligned with Tokio's policy)
@@ -713,7 +713,7 @@ resolver = "2"
 members = ["crates/*", "xtask"]
 
 [workspace.package]
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
@@ -746,9 +746,9 @@ opentelemetry-otlp = { version = "0.31", optional = true }
 tracing-opentelemetry = { version = "0.32", optional = true }
 
 # Testing
-criterion = { version = "0.7", features = ["async_tokio"] }
+criterion = { version = "0.8", features = ["async_tokio"] }
 proptest = "1.5"
-testcontainers = "0.25"
+testcontainers = "0.27"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
@@ -1567,6 +1567,49 @@ impl Default for RedirectConfig {
 
 **Azure-Specific Note:** Connections to Azure SQL Database through the gateway (`*.database.windows.net`) will almost always receive a redirect to an internal compute node (`*.database.windows.net` on port 11000-11999). This is expected behavior and does not indicate a security issue.
 
+### 4.7 Stored Procedure Execution
+
+Stored procedures are called via TDS RPC (Remote Procedure Call) requests using `RpcRequest::named()`. Unlike `sp_executesql` (used for parameterized queries), named RPC calls directly invoke the stored procedure on the server without SQL text parsing.
+
+#### Two-Tier API
+
+| Method | Use Case | Parameters |
+|--------|----------|------------|
+| `call_procedure(name, &[params])` | Simple input-only calls | Positional, auto-named `@p1`, `@p2`, ... |
+| `procedure(name)?.input().output_*().execute()` | Named params, OUTPUT params | Named by caller, output types declared |
+
+Both methods are available on `impl<S: ConnectionState> Client<S>`, meaning they work identically in `Ready` and `InTransaction` states with zero code duplication.
+
+#### TDS Response Token Flow
+
+The server responds to an RPC procedure call with the following token sequence:
+
+```
+[COLMETADATA → ROW(s) → DONEINPROC]    ← per SELECT statement in the proc
+RETURNVALUE(s)                          ← one per OUTPUT parameter
+RETURNSTATUS                            ← procedure RETURN value (i32)
+DONEPROC                                ← final token
+```
+
+The `read_procedure_result()` parser is order-tolerant and accumulative — it handles these tokens in any order and collects them into a `ProcedureResult`:
+
+| Token | Action |
+|-------|--------|
+| `ColMetaData` | Start new result set (save previous if non-empty) |
+| `Row` / `NbcRow` | Parse via `convert_raw_row()`/`convert_nbc_row()`, add to current result set |
+| `DoneInProc` | Save current result set, accumulate `rows_affected` |
+| `ReturnValue` | Decode via `parse_column_value()` using `ColumnData` bridge, push as `OutputParam` |
+| `ReturnStatus` | Store as `return_value: i32` |
+| `DoneProc` | Save remaining result set, break if `!more` |
+
+#### ReturnValue Decoding
+
+`ReturnValue` tokens carry the output parameter value in TYPE_VARBYTE format (the same format used for row column values). To decode, we construct a temporary `ColumnData` from the `ReturnValue`'s `col_type`, `flags`, `user_type`, and `type_info` fields, then call the existing `parse_column_value()` function. This reuses the full type decoding machinery without duplication.
+
+#### Security
+
+All procedure names are validated via `validate_qualified_identifier()` before being sent to the server. This prevents SQL injection through procedure name manipulation. Parameter values are sent as typed RPC parameters (never interpolated into SQL text).
+
 ---
 
 ## 5. Security Architecture
@@ -2197,6 +2240,7 @@ let client = Client::connect(&connection_string).await?;
 | 1.4.0 | 2025-12-31 | Updated for v0.4.0 release: TDS 7.3 protocol support (SQL Server 2008/2008 R2), TdsVersion configuration, version negotiation |
 | 1.5.0 | 2026-01-01 | Updated for v0.5.0 release: Collation-aware VARCHAR decoding, encoding feature, Column marked non_exhaustive |
 | 1.6.0 | 2026-04-07 | Updated for v0.7.0 release: MSRV bumped to 1.88, SSPI integrated auth wired into client login, RUSTSEC advisories resolved, 33 public enums marked non_exhaustive for semver safety, deprecated APIs removed before 1.0 |
+| 1.7.0 | 2026-04-13 | Updated for v0.8.0 release: Stored procedure support (§4.7), SQL Browser instance resolution, pool test_on_checkin, Azure SDK 0.34, mock TLS cross-platform fix |
 
 ---
 

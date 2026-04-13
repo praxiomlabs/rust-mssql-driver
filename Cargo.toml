@@ -4,7 +4,7 @@ members = ["crates/*", "xtask"]
 exclude = ["fuzz"]  # Fuzz tests have their own workspace (required by cargo-fuzz)
 
 [workspace.package]
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
@@ -19,15 +19,15 @@ categories = ["database"]
 #   Primary (user-facing): mssql-client (main API), mssql-driver-pool (connection pooling)
 #   Internal (implementation): tds-protocol, mssql-types, mssql-tls, mssql-codec, mssql-auth, mssql-derive
 #   Dev-only (publish = false): mssql-testing
-tds-protocol = { version = "0.7.0", path = "crates/tds-protocol" }
-mssql-tls = { version = "0.7.0", path = "crates/mssql-tls" }
-mssql-codec = { version = "0.7.0", path = "crates/mssql-codec" }
-mssql-types = { version = "0.7.0", path = "crates/mssql-types" }
-mssql-auth = { version = "0.7.0", path = "crates/mssql-auth" }
-mssql-driver-pool = { version = "0.7.0", path = "crates/mssql-pool" }
-mssql-client = { version = "0.7.0", path = "crates/mssql-client" }
-mssql-derive = { version = "0.7.0", path = "crates/mssql-derive" }
-mssql-testing = { version = "0.7.0", path = "crates/mssql-testing" }
+tds-protocol = { version = "0.8.0", path = "crates/tds-protocol" }
+mssql-tls = { version = "0.8.0", path = "crates/mssql-tls" }
+mssql-codec = { version = "0.8.0", path = "crates/mssql-codec" }
+mssql-types = { version = "0.8.0", path = "crates/mssql-types" }
+mssql-auth = { version = "0.8.0", path = "crates/mssql-auth" }
+mssql-driver-pool = { version = "0.8.0", path = "crates/mssql-pool" }
+mssql-client = { version = "0.8.0", path = "crates/mssql-client" }
+mssql-derive = { version = "0.8.0", path = "crates/mssql-derive" }
+mssql-testing = { version = "0.8.0", path = "crates/mssql-testing" }
 
 # Async runtime
 tokio = { version = "1.48", features = ["net", "io-util", "sync", "time", "macros", "rt", "rt-multi-thread"] }
@@ -78,16 +78,16 @@ opentelemetry-otlp = "0.31"
 tracing-opentelemetry = "0.32"
 
 # Testing
-criterion = { version = "0.7", features = ["async_tokio"] }
+criterion = { version = "0.8", features = ["async_tokio"] }
 proptest = "1.5"
-testcontainers = "0.25"
+testcontainers = "0.27"
 tokio-test = "0.4"
 
 # Azure authentication (optional)
 # Note: Azure SDK crates must be version-aligned
-azure_identity = "0.30"
-azure_core = "0.30"
-azure_security_keyvault_keys = "0.9"
+azure_identity = "0.34"
+azure_core = "0.34"
+azure_security_keyvault_keys = "0.13"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

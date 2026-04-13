@@ -283,7 +283,7 @@ This guide helps diagnose and resolve common issues with rust-mssql-driver.
 2. **Enable health checks:**
    ```rust
    let pool = Pool::builder()
-       .test_on_acquire(true)
+       .test_on_checkout(true)
        .health_check_interval(Duration::from_secs(30))
        .build(config)
        .await?;

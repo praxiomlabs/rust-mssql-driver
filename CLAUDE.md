@@ -126,24 +126,43 @@ loop {
 }
 ```
 
+### Stored Procedure Execution (v0.8.0)
+
+Two-tier API for calling stored procedures via TDS RPC:
+
+```rust
+// Simple (input-only, positional params):
+let result = client.call_procedure("dbo.MyProc", &[&1i32]).await?;
+
+// Builder (named params, OUTPUT support):
+let result = client.procedure("dbo.CalculateSum")?
+    .input("@a", &10i32)
+    .input("@b", &20i32)
+    .output_int("@result")
+    .execute().await?;
+```
+
+Returns `ProcedureResult` with `return_value`, `rows_affected`, `output_params`, and `result_sets`. All methods on `impl<S: ConnectionState>` — works in both `Ready` and `InTransaction` states.
+
+### SQL Browser Instance Resolution (v0.8.0)
+
+Named instances (e.g., `Server=localhost\SQLEXPRESS`) are automatically resolved via the SQL Server Browser service (UDP 1434). The `crate::browser` module implements the SSRP protocol (MC-SQLR spec). Resolution happens transparently in `Client::connect()` when `config.instance` is `Some`.
+
 ## Development Tooling
 
 ### Required Tools
 
-- Rust 1.88+ (2024 Edition)
-- cargo-hakari (workspace-hack management)
-- cargo-deny (dependency auditing)
+- Rust 1.88+ (2024 Edition) — pinned via `rust-toolchain.toml`
+- `just` — task runner used for all development workflows (`just ci-all`, `just release-status`, etc.)
+- `gh` CLI — required for `just release-status` and `just tag` (workflow status checks)
+- `cargo-deny` — dependency auditing
+- `cargo-hack` — feature flag matrix validation
+- `cargo-nextest` — fast test runner (CI uses this)
+- `cargo-audit` — security advisory scanning
+- `cargo-machete` — unused dependency detection
+- `cargo-semver-checks` — semver compliance detection
 
-### cargo-deny + cargo-hakari Interaction
-
-cargo-deny may flag workspace-hack as unused. Add to `deny.toml`:
-
-```toml
-[bans]
-skip = [
-    { name = "workspace-hack", reason = "cargo-hakari managed crate" }
-]
-```
+Run `just setup-tools` to install all of the above with pinned versions compatible with our MSRV.
 
 ### Version Constraint Policy
 
@@ -156,6 +175,64 @@ tokio = "1.48"           # >=1.48.0, <2.0.0
 # Avoid
 tokio = "=1.48.0"        # Exact pin - blocks security updates
 ```
+
+See [`docs/DEPENDENCY_POLICY.md`](docs/DEPENDENCY_POLICY.md) for the full dependency management policy: when to add a new dep, when to take a bump, when to bump MSRV for a security fix, and how advisory ignores are managed.
+
+## Process and Governance
+
+This is an actively maintained project with documented processes for contributions, releases, and incident response. When working in this repository as an AI assistant, these documents are the source of truth:
+
+### Contributor-facing documents
+
+- [`README.md`](README.md) — project overview and quick start
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — contribution guidelines, commit format, review process
+- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — community standards (Rust Code of Conduct)
+- [`MAINTAINERS.md`](MAINTAINERS.md) — current maintainers and contact channels
+- [`.github/CODEOWNERS`](.github/CODEOWNERS) — auto-review routing for PRs
+- [`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/) — structured issue templates (bug / feature / question)
+- [`.github/pull_request_template.md`](.github/pull_request_template.md) — PR checklist including **MSRV bumps are NOT breaking** note
+
+### Release and policy documents
+
+- [`RELEASING.md`](RELEASING.md) — the Cardinal Rules, the tier-based publish order, the Lessons Learned section (including the v0.5.1 and v0.7.0 incidents), and the Token Health section
+- [`STABILITY.md`](STABILITY.md) — API stability guarantees, MSRV Increase Policy (**authoritative: MSRV bumps are NOT breaking changes**), supported versions
+- [`SECURITY.md`](SECURITY.md) — security policy, threat model, supported versions for security fixes
+- [`docs/VERSION_REFS.md`](docs/VERSION_REFS.md) — comprehensive checklist of every file that must agree on version/MSRV at release time
+- [`docs/DEPENDENCY_POLICY.md`](docs/DEPENDENCY_POLICY.md) — when and how to take dep bumps, handle advisories, bump MSRV
+
+### Release observability tooling
+
+These just recipes and xtask commands were added post-v0.7.0 specifically to make releases reliable:
+
+- `just release-status` — dashboard: dev↔main divergence, last tag, CI/Security/Benchmarks/Token Health status, open PRs (bot vs contributor), issue count, local working copy state
+- `just release-preflight` — sequential gate check: working copy clean, version refs, audit, deny, wip-check, metadata, URLs, tier-0 publish dry-run
+- `just release-check` — comprehensive release validation (includes `release-preflight` gates plus full CI + feature-flag check + panic audit + doc consistency + typos + machete)
+- `just doc-consistency` — runs `scripts/check-doc-consistency.sh` to verify MSRV references agree across all files, CHANGELOG matches workspace version, deny.toml and audit.toml ignore lists are in sync, and the STABILITY.md ↔ CONTRIBUTING.md MSRV policy contradiction can never be reintroduced
+- `just ci-status-all` — verify CI + Security Audit + Benchmarks all passed on main HEAD (required before tagging per Cardinal Rule #2)
+- `just tag` — create an annotated release tag (reverifies workflows green)
+- `cargo xtask release-notes [--since <tag>]` — generate a CHANGELOG draft from conventional commits since the last tag, grouped by type with breaking-change detection
+
+When preparing a release, the canonical path is:
+
+```bash
+just release-status            # what's the state of the world?
+just release-check             # do all the gates pass?
+just ci-status-all             # are all workflows green on main HEAD?
+just tag                       # create the tag (revalidates workflows)
+git push origin vX.Y.Z         # trigger release.yml (publishes to crates.io)
+```
+
+Never manually run `cargo publish` — use the automated workflow. Never cancel the release workflow mid-publish. See RELEASING.md for the full Cardinal Rules.
+
+### CI/CD workflows
+
+- `.github/workflows/ci.yml` — runs on main, dev, PRs to main. Cross-platform matrix (Linux / macOS / Windows). Has `workflow_dispatch` for manual reruns.
+- `.github/workflows/benchmarks.yml` — runs on main, dev, PRs to main. Performance regression detection.
+- `.github/workflows/security-audit.yml` — weekly schedule + triggers on Cargo.toml/Cargo.lock/deny.toml/audit.toml changes on main or dev.
+- `.github/workflows/token-health.yml` — weekly schedule + manual dispatch. Verifies `CARGO_REGISTRY_TOKEN` secret is still valid. Opens an issue on failure.
+- `.github/workflows/release.yml` — triggered by `v*.*.*` tag push. Publishes all 8 crates to crates.io in tier order with exponential retry.
+
+All workflows use `concurrency: cancel-in-progress` for non-main branches to save CI cycles, while keeping main runs to completion for the full audit trail.
 
 ## OpenTelemetry Dependencies
 
@@ -196,6 +273,38 @@ Key differences for migrators:
 
 ## Document References
 
-- `ARCHITECTURE.md` - Complete architecture specification (v1.2.0)
-- MS-TDS Protocol Spec - Microsoft documentation
-- Tiberius source - `/tmp/tiberius/` (reference only)
+Primary references (in the repository):
+
+- `ARCHITECTURE.md` — Complete architecture specification (includes ADRs and MSRV policy §6.6)
+- `STABILITY.md` — API stability guarantees and the authoritative MSRV Increase Policy
+- `RELEASING.md` — Release process, Cardinal Rules, Lessons Learned (including v0.5.1 and v0.7.0 incidents), Token Health
+- `SECURITY.md` — Security policy and threat model
+- `CONTRIBUTING.md` — Contribution guide, commit format, review process
+- `MAINTAINERS.md` — Maintainer list and contact channels
+- `CODE_OF_CONDUCT.md` — Rust Code of Conduct
+- `docs/DEPENDENCY_POLICY.md` — Dependency management policy
+- `docs/VERSION_REFS.md` — Release-time version reference checklist
+- `docs/MIGRATION_FROM_TIBERIUS.md` — Migration guide from Tiberius
+
+External references:
+
+- MS-TDS Protocol Spec — Microsoft documentation
+- Tiberius source — Reference only (not a dependency)
+
+## Conventions for AI Assistants Working in This Repository
+
+When making changes here, remember:
+
+1. **MSRV bumps are NOT breaking changes.** This is stated authoritatively in STABILITY.md § MSRV Increase Policy. If CONTRIBUTING.md ever contradicts this, STABILITY.md wins — and fix CONTRIBUTING.md as part of your change. The doc consistency linter (`scripts/check-doc-consistency.sh`) catches this contradiction automatically.
+
+2. **Prefer fixing over ignoring** security advisories. Bumping MSRV for a security fix is explicitly permitted. See the v0.7.0 precedent documented in `docs/DEPENDENCY_POLICY.md`.
+
+3. **Use the release recipes.** Don't manually run `cargo publish`, don't manually construct CHANGELOG entries from scratch, don't manually check each file for version drift. `just release-notes`, `just release-status`, `just release-preflight`, and `scripts/check-doc-consistency.sh` exist to prevent exactly the kinds of mistakes that caused past incidents.
+
+4. **Respect the Cardinal Rules** documented in RELEASING.md. They exist because of specific past incidents. Don't work around them — if you find them inconvenient, propose a process change via an issue.
+
+5. **`dev` branch has CI.** Since post-v0.7.0, both `ci.yml` and `benchmarks.yml` trigger on pushes to `dev`. Cross-platform issues will surface there, not just at release PR time. Push to dev confidently — CI will tell you if something broke.
+
+6. **Update CLAUDE.md when you add new infrastructure.** This document is the entry point for future AI assistants working on the repo. Adding a new tool, workflow, or policy without updating CLAUDE.md leaves future sessions flying blind. The Process and Governance section above should reference all the discoverable infrastructure.
+
+7. **Use issue/PR templates.** They ask the right questions. If you're opening an issue or PR, fill out the template completely — it helps the human reviewer and it helps future AI sessions parse the intent.

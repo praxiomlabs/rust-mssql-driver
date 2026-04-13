@@ -61,6 +61,10 @@ struct PooledEntry {
     client: Client<Ready>,
     /// Connection metadata.
     metadata: ConnectionMetadata,
+    /// Whether this connection needs a health check before reuse.
+    /// Set to true when `test_on_checkin` is enabled and the connection
+    /// is returned to the pool. Checked (and cleared) on next checkout.
+    needs_health_check: bool,
 }
 
 struct PoolInner {
@@ -231,7 +235,11 @@ impl Pool {
             match Client::connect(self.client_config.clone()).await {
                 Ok(client) => {
                     let metadata = ConnectionMetadata::new(id);
-                    let entry = PooledEntry { client, metadata };
+                    let entry = PooledEntry {
+                        client,
+                        metadata,
+                        needs_health_check: false,
+                    };
                     self.inner.idle_connections.lock().push_back(entry);
                     self.inner.total_connections.fetch_add(1, Ordering::Relaxed);
                     self.inner.metrics.lock().connections_created += 1;
@@ -435,8 +443,9 @@ impl Pool {
             Some(mut entry) => {
                 tracing::trace!(connection_id = entry.metadata.id, "reusing idle connection");
 
-                // Perform health check if configured
-                if self.config.test_on_checkout {
+                // Perform health check if configured (test_on_checkout) or if the
+                // connection was marked for check at checkin time (test_on_checkin).
+                if self.config.test_on_checkout || entry.needs_health_check {
                     if !self
                         .health_check(&mut entry.client, entry.metadata.id)
                         .await
@@ -997,10 +1006,20 @@ impl Drop for PooledConnection {
             // Update metadata for checkin
             self.metadata.mark_checkin();
 
-            // Return connection to idle queue
+            // Return connection to idle queue.
+            // If test_on_checkin is enabled, mark for health check before next reuse.
+            let needs_health_check = self.pool.config.test_on_checkin;
+            if needs_health_check {
+                tracing::trace!(
+                    connection_id = self.metadata.id,
+                    "marked connection for health check on next checkout (test_on_checkin)"
+                );
+            }
+
             let entry = PooledEntry {
                 client,
                 metadata: self.metadata.clone(),
+                needs_health_check,
             };
 
             self.pool.idle_connections.lock().push_back(entry);

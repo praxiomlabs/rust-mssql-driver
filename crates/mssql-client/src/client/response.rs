@@ -348,6 +348,226 @@ impl<S: ConnectionState> Client<S> {
 
         Ok(transaction_descriptor)
     }
+
+    /// Read the complete response from a stored procedure RPC call.
+    ///
+    /// Parses the TDS token stream produced by an RPC request for a named
+    /// stored procedure, collecting result sets, output parameters (from
+    /// RETURNVALUE tokens), and the procedure return value (from RETURNSTATUS).
+    ///
+    /// Token handling is order-tolerant and accumulative:
+    /// - `ColMetaData` / `Row` / `NbcRow` / `DoneInProc`: collect result sets
+    /// - `ReturnValue`: decode value via `parse_column_value()`, push as `OutputParam`
+    /// - `ReturnStatus`: store as `return_value`
+    /// - `DoneProc`: final token, break when `!more`
+    /// - `Error` / `Info` / `EnvChange`: standard handling
+    pub(crate) async fn read_procedure_result(&mut self) -> Result<crate::stream::ProcedureResult> {
+        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
+
+        let message = match connection {
+            #[cfg(feature = "tls")]
+            ConnectionHandle::Tls(conn) => conn.read_message().await?,
+            #[cfg(feature = "tls")]
+            ConnectionHandle::TlsPrelogin(conn) => conn.read_message().await?,
+            ConnectionHandle::Plain(conn) => conn.read_message().await?,
+        }
+        .ok_or(Error::ConnectionClosed)?;
+
+        let mut parser = TokenParser::new(message.payload);
+        let mut result = crate::stream::ProcedureResult::new();
+
+        // State for accumulating the current result set
+        let mut current_columns: Vec<crate::row::Column> = Vec::new();
+        let mut current_rows: Vec<crate::row::Row> = Vec::new();
+        let mut protocol_metadata: Option<ColMetaData> = None;
+
+        loop {
+            let token = parser.next_token_with_metadata(protocol_metadata.as_ref())?;
+
+            let Some(token) = token else {
+                break;
+            };
+
+            match token {
+                Token::ColMetaData(meta) => {
+                    // New result set starting — save the previous one if it has columns
+                    if !current_columns.is_empty() {
+                        result.result_sets.push(crate::stream::ResultSet::new(
+                            std::mem::take(&mut current_columns),
+                            std::mem::take(&mut current_rows),
+                        ));
+                    }
+
+                    current_columns = meta
+                        .columns
+                        .iter()
+                        .enumerate()
+                        .map(|(i, col)| {
+                            let type_name = format!("{:?}", col.type_id);
+                            let mut column = crate::row::Column::new(&col.name, i, type_name)
+                                .with_nullable(col.flags & 0x01 != 0);
+
+                            if let Some(max_len) = col.type_info.max_length {
+                                column = column.with_max_length(max_len);
+                            }
+                            if let (Some(prec), Some(scale)) =
+                                (col.type_info.precision, col.type_info.scale)
+                            {
+                                column = column.with_precision_scale(prec, scale);
+                            }
+                            if let Some(collation) = col.type_info.collation {
+                                column = column.with_collation(collation);
+                            }
+                            column
+                        })
+                        .collect();
+
+                    tracing::debug!(
+                        columns = current_columns.len(),
+                        result_set = result.result_sets.len(),
+                        "procedure: received column metadata"
+                    );
+                    protocol_metadata = Some(meta);
+                }
+                Token::Row(raw_row) => {
+                    if let Some(ref meta) = protocol_metadata {
+                        let row = crate::column_parser::convert_raw_row(
+                            &raw_row,
+                            meta,
+                            &current_columns,
+                        )?;
+                        current_rows.push(row);
+                    }
+                }
+                Token::NbcRow(nbc_row) => {
+                    if let Some(ref meta) = protocol_metadata {
+                        let row = crate::column_parser::convert_nbc_row(
+                            &nbc_row,
+                            meta,
+                            &current_columns,
+                        )?;
+                        current_rows.push(row);
+                    }
+                }
+                Token::DoneInProc(done) => {
+                    // Save current result set if we have columns
+                    if !current_columns.is_empty() {
+                        result.result_sets.push(crate::stream::ResultSet::new(
+                            std::mem::take(&mut current_columns),
+                            std::mem::take(&mut current_rows),
+                        ));
+                        protocol_metadata = None;
+                    }
+
+                    if done.status.count {
+                        result.rows_affected += done.row_count;
+                    }
+                    if done.status.error {
+                        return Err(Error::Query(
+                            "statement within procedure failed (error flag in DONEINPROC token)"
+                                .to_string(),
+                        ));
+                    }
+                }
+                Token::ReturnValue(ret_val) => {
+                    // Decode the return value bytes into a SqlValue using
+                    // the same parser that handles column data in result rows.
+                    use tds_protocol::token::ColumnData;
+                    use tds_protocol::types::TypeId;
+
+                    let type_id = TypeId::from_u8(ret_val.col_type).unwrap_or(TypeId::Null);
+                    let col_data = ColumnData {
+                        name: String::new(),
+                        type_id,
+                        col_type: ret_val.col_type,
+                        flags: ret_val.flags,
+                        user_type: ret_val.user_type,
+                        type_info: ret_val.type_info.clone(),
+                    };
+                    let mut buf = ret_val.value.as_ref();
+                    let sql_value = crate::column_parser::parse_column_value(&mut buf, &col_data)?;
+
+                    result.output_params.push(crate::stream::OutputParam {
+                        name: ret_val.param_name,
+                        value: sql_value,
+                    });
+
+                    tracing::debug!(
+                        param_ordinal = ret_val.param_ordinal,
+                        "procedure: received output parameter"
+                    );
+                }
+                Token::ReturnStatus(status) => {
+                    result.return_value = status;
+                    tracing::debug!(return_value = status, "procedure: received return status");
+                }
+                Token::DoneProc(done) => {
+                    // Save any remaining result set
+                    if !current_columns.is_empty() {
+                        result.result_sets.push(crate::stream::ResultSet::new(
+                            std::mem::take(&mut current_columns),
+                            std::mem::take(&mut current_rows),
+                        ));
+                    }
+
+                    if done.status.count {
+                        result.rows_affected += done.row_count;
+                    }
+                    if done.status.error {
+                        return Err(Error::Query(
+                            "stored procedure failed (server set error flag in DONEPROC token)"
+                                .to_string(),
+                        ));
+                    }
+                    if !done.status.more {
+                        break;
+                    }
+                }
+                Token::Error(err) => {
+                    return Err(Error::Server {
+                        number: err.number,
+                        state: err.state,
+                        class: err.class,
+                        message: err.message.clone(),
+                        server: if err.server.is_empty() {
+                            None
+                        } else {
+                            Some(err.server.clone())
+                        },
+                        procedure: if err.procedure.is_empty() {
+                            None
+                        } else {
+                            Some(err.procedure.clone())
+                        },
+                        line: err.line as u32,
+                    });
+                }
+                Token::Info(info) => {
+                    tracing::debug!(
+                        number = info.number,
+                        message = %info.message,
+                        "procedure: server info message"
+                    );
+                }
+                Token::EnvChange(env) => {
+                    Self::process_transaction_env_change(&env, &mut self.transaction_descriptor);
+                }
+                other => {
+                    tracing::trace!(token = ?std::mem::discriminant(&other), "procedure: unhandled token");
+                }
+            }
+        }
+
+        tracing::debug!(
+            return_value = result.return_value,
+            rows_affected = result.rows_affected,
+            output_params = result.output_params.len(),
+            result_sets = result.result_sets.len(),
+            "procedure response parsed"
+        );
+
+        Ok(result)
+    }
 }
 
 // read_multi_result_response is on impl Client<Ready>, not the generic impl

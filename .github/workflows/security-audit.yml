@@ -9,12 +9,15 @@ on:
     - cron: '0 9 * * 1'
   # Allow manual trigger
   workflow_dispatch:
-  # Also run on changes to dependencies
+  # Also run on changes to dependencies (on main AND dev, so we catch
+  # supply-chain changes before they reach a release PR)
   push:
+    branches: [main, dev]
     paths:
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - 'deny.toml'
+      - '.cargo/audit.toml'
 
 jobs:
   audit:
@@ -77,7 +80,7 @@ jobs:
       issues: write
     steps:
       - name: Create issue
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const title = '🔒 Security Audit Failed';

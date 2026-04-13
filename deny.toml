@@ -17,16 +17,10 @@ all-features = true
 [advisories]
 # Ignore specific advisories (with justification)
 ignore = [
-    # rustls-pemfile unmaintained - used indirectly, migration path exists
-    # The crate is archived but still functional and secure
-    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile is only used indirectly via bollard; migration pending upstream" },
-
-    # astral-tokio-tar PAX extension validation - only used by testcontainers (dev dependency)
-    # Not exploitable: dev-only crate (mssql-testing, publish = false), we control tar input
-    # Low severity (CVSS 1.7). Fix available only in 0.6.1-rc1 (not stable yet).
-    # Supersedes the previous RUSTSEC-2025-0111 (tokio-tar) ignore — testcontainers
-    # migrated from tokio-tar to astral-tokio-tar, so the old advisory no longer applies.
-    { id = "RUSTSEC-2026-0066", reason = "astral-tokio-tar is only used by testcontainers for testing; not used in library code. Fix only in pre-release." },
+    # rustls-pemfile unmaintained - direct dependency of mssql-auth for PEM cert parsing
+    # Migration path: replace with rustls-pki-types PemObject trait (available since 1.9.0)
+    # Tracking: https://github.com/rustls/pemfile/issues/61
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile used by mssql-auth for cert parsing; migration to rustls-pki-types PemObject pending" },
 
     # RSA timing side-channel (Marvin Attack) - no fix available yet
     # Risk assessment:
@@ -36,6 +30,18 @@ ignore = [
     # - The sspi crate also uses rsa for Kerberos/NTLM authentication
     # Tracking: https://github.com/RustCrypto/RSA/issues/390
     { id = "RUSTSEC-2023-0071", reason = "RSA used locally for CEK unwrapping; no network-observable timing. No fix available; tracking RustCrypto/RSA#390" },
+
+    # rand 0.8.5 unsoundness with custom logger calling rand::rng() during ThreadRng reseeding
+    # Case C per DEPENDENCY_POLICY.md: no stable fix available.
+    # Risk assessment:
+    # - Requires `log` feature enabled on rand AND a custom logger that calls rand::rng()
+    # - Our rand 0.8.5 does NOT enable the `log` feature
+    # - Our code does not define custom loggers that call rand::rng()
+    # - All five prerequisite conditions for the UB cannot be met in our codebase
+    # Fix requires rand >= 0.9.3, which requires rsa 0.10 (still RC: 0.10.0-rc.17)
+    # Revisit when: rsa 0.10 stabilizes (also resolves RUSTSEC-2023-0071 above)
+    # Tracking: https://github.com/praxiomlabs/rust-mssql-driver/issues/21
+    { id = "RUSTSEC-2026-0097", reason = "rand 0.8 log feature not enabled; unsoundness requires custom logger calling rand::rng(). No stable fix; blocked on rsa 0.10. Tracking #21" },
 ]
 
 # ------------------------------------------------------------------------------

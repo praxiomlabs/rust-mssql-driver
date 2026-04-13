@@ -5,9 +5,18 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
     branches: [main]
+  # Allow manual triggering from the Actions tab (useful for retrying
+  # after transient failures or validating a branch on-demand).
+  workflow_dispatch:
+
+# Cancel in-progress runs for non-main branches when a new commit arrives.
+# Main always runs to completion so we have a full audit trail per commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -160,7 +169,7 @@ jobs:
       - name: Generate coverage report
         run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: lcov.info
           fail_ci_if_error: false

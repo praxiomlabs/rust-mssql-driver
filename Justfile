@@ -1623,8 +1623,246 @@ typos:
     printf '{{green}}[OK]{{reset}}   Typos check passed\n'
 
 [group('release')]
+[doc("Show release readiness dashboard (dev vs main, dependabot, audit, token)")]
+release-status:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    printf '\n{{bold}}{{blue}}══════ Release Readiness Dashboard ══════{{reset}}\n\n'
+
+    # Require gh CLI for the GitHub API queries
+    if ! command -v gh &> /dev/null; then
+        printf '{{red}}[ERR]{{reset}}  GitHub CLI (gh) is required for release-status.\n'
+        printf '{{cyan}}[INFO]{{reset}} Install: https://cli.github.com/\n'
+        exit 1
+    fi
+
+    REPO="praxiomlabs/rust-mssql-driver"
+
+    # -----------------------------------------------------------------
+    # Current branch and version
+    # -----------------------------------------------------------------
+    CURRENT_BRANCH=$(git branch --show-current)
+    WORKSPACE_VERSION=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+    printf '{{bold}}Current state:{{reset}}\n'
+    printf '  Branch:            %s\n' "$CURRENT_BRANCH"
+    printf '  Workspace version: v%s\n' "$WORKSPACE_VERSION"
+    printf '\n'
+
+    # -----------------------------------------------------------------
+    # Last tag and elapsed time
+    # -----------------------------------------------------------------
+    git fetch --tags --quiet 2>/dev/null || true
+    LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "none")
+    if [ "$LAST_TAG" != "none" ]; then
+        LAST_TAG_DATE=$(git log -1 --format=%cd --date=short "$LAST_TAG" 2>/dev/null || echo "unknown")
+        DAYS_SINCE=$(( ( $(date +%s) - $(git log -1 --format=%ct "$LAST_TAG" 2>/dev/null || echo 0) ) / 86400 ))
+        printf '{{bold}}Last release:{{reset}}\n'
+        printf '  Tag:               %s\n' "$LAST_TAG"
+        printf '  Date:              %s (%d days ago)\n' "$LAST_TAG_DATE" "$DAYS_SINCE"
+    else
+        printf '{{bold}}Last release:{{reset}}\n'
+        printf '  Tag:               none\n'
+    fi
+    printf '\n'
+
+    # -----------------------------------------------------------------
+    # dev vs main divergence
+    # -----------------------------------------------------------------
+    git fetch origin main dev --quiet 2>/dev/null || true
+
+    AHEAD_DEV_OF_MAIN=$(git rev-list --count origin/main..origin/dev 2>/dev/null || echo 0)
+    AHEAD_MAIN_OF_DEV=$(git rev-list --count origin/dev..origin/main 2>/dev/null || echo 0)
+
+    printf '{{bold}}Branch divergence (origin):{{reset}}\n'
+    if [ "$AHEAD_DEV_OF_MAIN" -eq 0 ] && [ "$AHEAD_MAIN_OF_DEV" -eq 0 ]; then
+        printf '  {{green}}[OK]{{reset}}    dev and main are in sync\n'
+    elif [ "$AHEAD_DEV_OF_MAIN" -gt 0 ] && [ "$AHEAD_MAIN_OF_DEV" -eq 0 ]; then
+        printf '  dev is {{cyan}}%s{{reset}} commits ahead of main (release candidate)\n' "$AHEAD_DEV_OF_MAIN"
+    elif [ "$AHEAD_MAIN_OF_DEV" -gt 0 ] && [ "$AHEAD_DEV_OF_MAIN" -eq 0 ]; then
+        printf '  {{yellow}}[WARN]{{reset}} main is %s commits ahead of dev — dev needs to catch up\n' "$AHEAD_MAIN_OF_DEV"
+    else
+        printf '  {{red}}[ERR]{{reset}}  dev and main have diverged: dev+%s, main+%s\n' "$AHEAD_DEV_OF_MAIN" "$AHEAD_MAIN_OF_DEV"
+    fi
+    printf '\n'
+
+    # -----------------------------------------------------------------
+    # Last CI runs on main
+    # -----------------------------------------------------------------
+    printf '{{bold}}Latest workflow runs on main:{{reset}}\n'
+    for WORKFLOW in "CI" "Security Audit" "Benchmarks" "Token Health Check"; do
+        STATUS=$(gh run list --repo "$REPO" --branch main --workflow="$WORKFLOW" --limit 1 --json conclusion,headSha --jq '.[0] // {}' 2>/dev/null)
+        if [ -z "$STATUS" ] || [ "$STATUS" = "{}" ]; then
+            printf '  %-22s {{yellow}}no runs found{{reset}}\n' "$WORKFLOW:"
+            continue
+        fi
+        CONCLUSION=$(echo "$STATUS" | jq -r '.conclusion // "in-progress"')
+        SHA=$(echo "$STATUS" | jq -r '.headSha // "unknown"' | cut -c1-7)
+        case "$CONCLUSION" in
+            success)
+                printf '  %-22s {{green}}✓ passed{{reset}} (commit %s)\n' "$WORKFLOW:" "$SHA"
+                ;;
+            failure)
+                printf '  %-22s {{red}}✗ failed{{reset}} (commit %s)\n' "$WORKFLOW:" "$SHA"
+                ;;
+            *)
+                printf '  %-22s {{yellow}}%s{{reset}} (commit %s)\n' "$WORKFLOW:" "$CONCLUSION" "$SHA"
+                ;;
+        esac
+    done
+    printf '\n'
+
+    # -----------------------------------------------------------------
+    # Open dependabot PRs
+    # -----------------------------------------------------------------
+    printf '{{bold}}Open dependabot PRs:{{reset}}\n'
+    DEPENDABOT_PRS=$(gh pr list --repo "$REPO" --author "dependabot[bot]" --state open --limit 20 --json number,title,statusCheckRollup --jq '.[] | "\(.number)|\(.title)|\([.statusCheckRollup[] | select(.conclusion != null and .conclusion != "SKIPPED" and .conclusion != "SUCCESS")] | length)"' 2>/dev/null || true)
+    if [ -z "$DEPENDABOT_PRS" ]; then
+        printf '  {{green}}[OK]{{reset}}    No open dependabot PRs\n'
+    else
+        echo "$DEPENDABOT_PRS" | while IFS='|' read -r num title failures; do
+            if [ "$failures" = "0" ]; then
+                printf '  #%-4s {{green}}green{{reset}}  %s\n' "$num" "$title"
+            else
+                printf '  #%-4s {{red}}%s failing{{reset}} %s\n' "$num" "$failures" "$title"
+            fi
+        done
+    fi
+    printf '\n'
+
+    # -----------------------------------------------------------------
+    # Open non-bot PRs (contributors)
+    # -----------------------------------------------------------------
+    printf '{{bold}}Open contributor PRs:{{reset}}\n'
+    OTHER_PRS=$(gh pr list --repo "$REPO" --state open --limit 20 --json number,title,author --jq '.[] | select(.author.is_bot == false) | "#\(.number) \(.title) (@\(.author.login))"' 2>/dev/null || true)
+    if [ -z "$OTHER_PRS" ]; then
+        printf '  {{green}}[OK]{{reset}}    No open PRs from contributors\n'
+    else
+        echo "$OTHER_PRS" | while read -r line; do printf '  %s\n' "$line"; done
+    fi
+    printf '\n'
+
+    # -----------------------------------------------------------------
+    # Open issues by age
+    # -----------------------------------------------------------------
+    printf '{{bold}}Open issues:{{reset}}\n'
+    ISSUE_COUNT=$(gh issue list --repo "$REPO" --state open --limit 100 --json number --jq 'length' 2>/dev/null || echo 0)
+    printf '  %s open\n' "$ISSUE_COUNT"
+    printf '\n'
+
+    # -----------------------------------------------------------------
+    # Local working copy state
+    # -----------------------------------------------------------------
+    printf '{{bold}}Local working copy:{{reset}}\n'
+    if git diff-index --quiet HEAD -- 2>/dev/null; then
+        printf '  {{green}}[OK]{{reset}}    Clean (no uncommitted changes)\n'
+    else
+        DIRTY=$(git status --short | wc -l | tr -d ' ')
+        printf '  {{yellow}}[WARN]{{reset}} %s files with uncommitted changes\n' "$DIRTY"
+    fi
+
+    UNPUSHED=$(git log @{u}.. --oneline 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$UNPUSHED" -eq 0 ]; then
+        printf '  {{green}}[OK]{{reset}}    All local commits pushed\n'
+    else
+        printf '  {{yellow}}[WARN]{{reset}} %s unpushed commit(s) on %s\n' "$UNPUSHED" "$CURRENT_BRANCH"
+    fi
+    printf '\n'
+
+    printf '{{bold}}{{blue}}══════════════════════════════════════════{{reset}}\n'
+    printf '{{cyan}}[TIP]{{reset}}  Run {{bold}}just release-preflight{{reset}} to run all release gate checks.\n'
+
+[group('release')]
+[doc("Run all pre-release gate checks in sequence (Cardinal Rules verification)")]
+release-preflight:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '\n{{bold}}{{blue}}══════ Release Preflight ══════{{reset}}\n\n'
+    printf '{{cyan}}[INFO]{{reset}} Running all pre-release gate checks...\n\n'
+
+    FAILED=0
+    run_check() {
+        local name="$1"
+        shift
+        printf '{{bold}}▸ %s{{reset}}\n' "$name"
+        if "$@" > /tmp/preflight-$$.log 2>&1; then
+            printf '  {{green}}[OK]{{reset}}    Passed\n\n'
+        else
+            printf '  {{red}}[ERR]{{reset}}  Failed — output:\n'
+            sed 's/^/    /' /tmp/preflight-$$.log
+            printf '\n'
+            FAILED=1
+        fi
+        rm -f /tmp/preflight-$$.log
+    }
+
+    # Gate 1: working directory clean
+    printf '{{bold}}▸ Working directory clean{{reset}}\n'
+    if git diff-index --quiet HEAD -- 2>/dev/null; then
+        printf '  {{green}}[OK]{{reset}}    Clean\n\n'
+    else
+        printf '  {{red}}[ERR]{{reset}}  Uncommitted changes\n\n'
+        FAILED=1
+    fi
+
+    # Gate 2: version references
+    run_check "Version references consistent" just version-refs-check
+
+    # Gate 3: documentation consistency (will be added by scripts/check-doc-consistency.sh)
+    if [ -x ./scripts/check-doc-consistency.sh ]; then
+        run_check "Doc consistency" ./scripts/check-doc-consistency.sh
+    fi
+
+    # Gate 4: security audit
+    run_check "cargo audit" cargo audit
+
+    # Gate 5: cargo-deny (licenses, bans, advisories)
+    run_check "cargo deny check" cargo deny check
+
+    # Gate 6: WIP markers
+    run_check "No TODO/FIXME in production code" just wip-check
+
+    # Gate 7: metadata
+    run_check "crates.io metadata" just metadata-check
+
+    # Gate 8: repository URLs
+    run_check "Repository URLs" just url-check
+
+    # Gate 9: tier 0 publish dry-run (the only check that hits crates.io index)
+    printf '{{bold}}▸ Tier 0 publish dry-run (tds-protocol){{reset}}\n'
+    if cargo publish -p tds-protocol --dry-run --allow-dirty > /tmp/preflight-$$.log 2>&1; then
+        printf '  {{green}}[OK]{{reset}}    Packaged successfully\n\n'
+    else
+        printf '  {{red}}[ERR]{{reset}}  Packaging failed\n'
+        sed 's/^/    /' /tmp/preflight-$$.log
+        printf '\n'
+        FAILED=1
+    fi
+    rm -f /tmp/preflight-$$.log
+
+    # Summary
+    printf '{{bold}}{{blue}}══════════════════════════════════════════{{reset}}\n'
+    if [ $FAILED -eq 0 ]; then
+        printf '{{green}}[OK]{{reset}}    All preflight gates passed\n'
+        printf '{{cyan}}[NEXT]{{reset}} Review {{bold}}just release-status{{reset}}, then {{bold}}just ci-status-all && just tag{{reset}}\n'
+    else
+        printf '{{red}}[ERR]{{reset}}  One or more preflight gates failed — resolve before tagging\n'
+        exit 1
+    fi
+
+[group('lint')]
+[doc("Check documentation consistency (MSRV across files, policy agreement, version inheritance)")]
+doc-consistency:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -x ./scripts/check-doc-consistency.sh ]; then
+        printf '{{yellow}}[WARN]{{reset}} scripts/check-doc-consistency.sh is missing or not executable\n'
+        exit 0
+    fi
+    ./scripts/check-doc-consistency.sh
+
+[group('release')]
 [doc("Prepare for release (validates ALL features - REQUIRED before tagging)")]
-release-check: ci-release-all check-feature-flags wip-check panic-audit version-sync version-refs-check typos machete metadata-check url-check
+release-check: ci-release-all check-feature-flags wip-check panic-audit version-sync version-refs-check doc-consistency typos machete metadata-check url-check
     #!/usr/bin/env bash
     set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Release Validation ══════{{reset}}\n\n'

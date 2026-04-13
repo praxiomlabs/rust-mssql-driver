@@ -17,7 +17,7 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 - **Pure Rust TLS** - Uses rustls, no OpenSSL dependency
 - **Modern Rust** - 2024 Edition, MSRV 1.88
 
-### Feature Status (v0.7.x)
+### Feature Status (v0.8.x)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -38,6 +38,8 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 | Always Encrypted | ✅ | Full support with Azure Key Vault and Windows CertStore providers |
 | Query Cancellation | ✅ | ATTENTION signal support |
 | Collation-Aware Decoding | ✅ | 14+ character encodings |
+| Stored Procedures | ✅ | RPC-based with OUTPUT params |
+| Named Instance Resolution | ✅ | SQL Browser service (UDP 1434) |
 
 ## Installation
 
@@ -45,7 +47,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-mssql-client = "0.7"
+mssql-client = "0.8"
 tokio = { version = "1.48", features = ["full"] }
 ```
 
@@ -219,8 +221,8 @@ Enable optional features:
 
 ```toml
 [dependencies]
-mssql-client = { version = "0.7", features = ["otel"] }
-mssql-auth = { version = "0.7", features = ["sspi-auth"] }
+mssql-client = { version = "0.8", features = ["otel"] }
+mssql-auth = { version = "0.8", features = ["sspi-auth"] }
 ```
 
 ## SQL Server Compatibility
@@ -260,6 +262,8 @@ See [STABILITY.md](STABILITY.md) for details on what's considered stable.
 | Prepared statement cache | Automatic LRU | Per-execution |
 | Azure SQL redirects | Automatic | Manual handling |
 | Type-state connections | Yes | No |
+| Stored procedures (RPC) | Yes (OUTPUT params, RETURN value) | No (todo!()) |
+| Named instance resolution | Yes (SQL Browser) | No |
 
 ## Examples
 
@@ -315,7 +319,20 @@ Each crate has its own README with crate-specific documentation:
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions are welcome! A few quick pointers:
+
+- **First time?** Read [CONTRIBUTING.md § First Contribution](CONTRIBUTING.md#first-contribution-quick-path) for the shortest path from clone to green CI.
+- **Filing an issue?** Use the [issue templates](https://github.com/praxiomlabs/rust-mssql-driver/issues/new/choose) — they'll ask the right questions so reviewers can help faster.
+- **Opening a PR?** The [PR template](.github/pull_request_template.md) walks you through what reviewers need to know.
+- **Architecture changes?** Review [ARCHITECTURE.md](ARCHITECTURE.md) and the [ADR process](CONTRIBUTING.md#architecture-decision-records-adrs).
+- **Code of Conduct**: We follow the [Rust Code of Conduct](CODE_OF_CONDUCT.md).
+- **Current maintainers** and how to contact them: [MAINTAINERS.md](MAINTAINERS.md).
+
+## Community
+
+- 💬 **Questions and discussions**: [GitHub Discussions](https://github.com/praxiomlabs/rust-mssql-driver/discussions)
+- 🐛 **Bugs and feature requests**: [GitHub Issues](https://github.com/praxiomlabs/rust-mssql-driver/issues)
+- 🔒 **Security vulnerabilities**: [Private Security Advisory](https://github.com/praxiomlabs/rust-mssql-driver/security/advisories/new) — see [SECURITY.md](SECURITY.md)
 
 ## License
 

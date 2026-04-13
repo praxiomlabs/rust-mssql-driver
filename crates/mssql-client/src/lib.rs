@@ -76,6 +76,7 @@
 //     ├── connect.rs ──→ config, state, instrumentation, mssql_tls, mssql_codec, tds_protocol
 //     ├── params.rs  ──→ mssql_types, tds_protocol
 //     └── response.rs ──→ error, mssql_codec, tds_protocol
+//   procedure ──→ client, error, state, stream, tds_protocol
 //   stream ──→ error, row
 //   row ──→ blob, error, mssql_types
 //   config ──→ mssql_auth, mssql_tls, tds_protocol
@@ -85,6 +86,7 @@
 //   column_parser ──→ error, mssql_types, tds_protocol
 
 pub mod blob;
+pub(crate) mod browser;
 pub mod bulk;
 pub mod cancel;
 pub mod change_tracking;
@@ -95,6 +97,7 @@ pub mod encryption;
 pub mod error;
 pub mod from_row;
 pub mod instrumentation;
+pub mod procedure;
 pub mod query;
 pub mod row;
 pub mod state;
@@ -103,6 +106,7 @@ pub mod stream;
 pub mod to_params;
 pub mod transaction;
 pub mod tvp;
+pub(crate) mod validation;
 
 // Re-export commonly used types
 pub use bulk::{BulkColumn, BulkInsert, BulkInsertBuilder, BulkInsertResult, BulkOptions};
@@ -120,13 +124,16 @@ pub use tds_protocol::version::TdsVersion;
 #[cfg(feature = "zeroize")]
 pub use mssql_auth::{SecretString, SecureCredentials};
 pub use mssql_types::{FromSql, SqlValue, ToSql};
+pub use procedure::ProcedureBuilder;
 pub use query::Query;
 pub use row::{Column, Row};
 pub use state::{
     Connected, ConnectionState, Disconnected, InTransaction, ProtocolState, Ready, Streaming,
 };
 pub use statement_cache::{PreparedStatement, StatementCache, StatementCacheConfig};
-pub use stream::{ExecuteResult, MultiResultStream, OutputParam, QueryStream, ResultSet};
+pub use stream::{
+    ExecuteResult, MultiResultStream, OutputParam, ProcedureResult, QueryStream, ResultSet,
+};
 pub use to_params::{NamedParam, ParamList, ToParams};
 pub use transaction::{IsolationLevel, SavePoint, Transaction};
 pub use tvp::{Tvp, TvpColumn, TvpRow, TvpValue};
@@ -222,6 +229,18 @@ mod auto_trait_tests {
     fn execute_result_is_send_sync() {
         assert_send::<ExecuteResult>();
         assert_sync::<ExecuteResult>();
+    }
+
+    #[test]
+    fn procedure_result_is_send_sync() {
+        assert_send::<ProcedureResult>();
+        assert_sync::<ProcedureResult>();
+    }
+
+    #[test]
+    fn procedure_builder_is_send_sync() {
+        assert_send::<ProcedureBuilder<'_, Ready>>();
+        assert_sync::<ProcedureBuilder<'_, Ready>>();
     }
 
     // --- Bulk insert types ---
