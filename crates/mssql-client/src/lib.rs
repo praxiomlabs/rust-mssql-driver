@@ -103,6 +103,7 @@ pub mod stream;
 pub mod to_params;
 pub mod transaction;
 pub mod tvp;
+pub(crate) mod validation;
 
 // Re-export commonly used types
 pub use bulk::{BulkColumn, BulkInsert, BulkInsertBuilder, BulkInsertResult, BulkOptions};

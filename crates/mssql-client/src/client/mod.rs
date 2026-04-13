@@ -934,7 +934,7 @@ impl Client<InTransaction> {
     /// tx.commit().await?;
     /// ```
     pub async fn save_point(&mut self, name: &str) -> Result<SavePoint> {
-        validate_identifier(name)?;
+        crate::validation::validate_identifier(name)?;
         tracing::debug!(name = name, "creating savepoint");
 
         // Execute SAVE TRANSACTION <name>
@@ -1012,30 +1012,6 @@ impl Client<InTransaction> {
     }
 }
 
-/// Validate an identifier (table name, savepoint name, etc.) to prevent SQL injection.
-fn validate_identifier(name: &str) -> Result<()> {
-    use once_cell::sync::Lazy;
-    use regex::Regex;
-
-    static IDENTIFIER_RE: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_@#$]{0,127}$").unwrap());
-
-    if name.is_empty() {
-        return Err(Error::InvalidIdentifier(
-            "identifier cannot be empty".into(),
-        ));
-    }
-
-    if !IDENTIFIER_RE.is_match(name) {
-        return Err(Error::InvalidIdentifier(format!(
-            "invalid identifier '{name}': must start with letter/underscore, \
-             contain only alphanumerics/_/@/#/$, and be 1-128 characters"
-        )));
-    }
-
-    Ok(())
-}
-
 impl<S: ConnectionState> std::fmt::Debug for Client<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Client")
@@ -1043,28 +1019,5 @@ impl<S: ConnectionState> std::fmt::Debug for Client<S> {
             .field("port", &self.config.port)
             .field("database", &self.config.database)
             .finish()
-    }
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::panic)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_validate_identifier_valid() {
-        assert!(validate_identifier("my_table").is_ok());
-        assert!(validate_identifier("Table123").is_ok());
-        assert!(validate_identifier("_private").is_ok());
-        assert!(validate_identifier("sp_test").is_ok());
-    }
-
-    #[test]
-    fn test_validate_identifier_invalid() {
-        assert!(validate_identifier("").is_err());
-        assert!(validate_identifier("123abc").is_err());
-        assert!(validate_identifier("table-name").is_err());
-        assert!(validate_identifier("table name").is_err());
-        assert!(validate_identifier("table;DROP TABLE users").is_err());
     }
 }
