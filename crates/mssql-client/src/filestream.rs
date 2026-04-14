@@ -167,8 +167,9 @@ impl FileStream {
 
         if handle == INVALID_HANDLE_VALUE || handle.is_null() {
             let err_code = unsafe { GetLastError() };
+            let message = format_win32_error(err_code);
             return Err(Error::FileStream(format!(
-                "OpenSqlFilestream failed (Win32 error {err_code})"
+                "OpenSqlFilestream failed: {message} (Win32 error {err_code})"
             )));
         }
 
@@ -274,11 +275,50 @@ type OpenSqlFilestreamFn = unsafe extern "system" fn(
     allocation_size: *const i64,      // PLARGE_INTEGER (nullable)
 ) -> *mut c_void; // HANDLE
 
-// Win32 kernel32 imports for runtime DLL loading.
+// Win32 kernel32 imports for runtime DLL loading and error formatting.
 unsafe extern "system" {
     fn LoadLibraryW(name: *const u16) -> *mut c_void;
     fn GetProcAddress(module: *mut c_void, name: *const u8) -> *mut c_void;
     fn GetLastError() -> u32;
+    fn FormatMessageW(
+        flags: u32,
+        source: *const c_void,
+        message_id: u32,
+        language_id: u32,
+        buffer: *mut u16,
+        size: u32,
+        arguments: *const c_void,
+    ) -> u32;
+}
+
+/// Format a Win32 error code into a human-readable message.
+fn format_win32_error(error_code: u32) -> String {
+    const FORMAT_MESSAGE_FROM_SYSTEM: u32 = 0x0000_1000;
+    const FORMAT_MESSAGE_IGNORE_INSERTS: u32 = 0x0000_0200;
+
+    let mut buf = [0u16; 512];
+
+    // SAFETY: FormatMessageW with FROM_SYSTEM | IGNORE_INSERTS is safe to call
+    // with a stack-allocated buffer. It writes at most `buf.len()` wide chars.
+    let len = unsafe {
+        FormatMessageW(
+            FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+            std::ptr::null(),
+            error_code,
+            0, // default language
+            buf.as_mut_ptr(),
+            buf.len() as u32,
+            std::ptr::null(),
+        )
+    };
+
+    if len == 0 {
+        return format!("Unknown error (0x{error_code:08X})");
+    }
+
+    // Trim trailing \r\n
+    let s = String::from_utf16_lossy(&buf[..len as usize]);
+    s.trim_end().to_string()
 }
 
 /// Cached function pointer — resolved once on first use.
