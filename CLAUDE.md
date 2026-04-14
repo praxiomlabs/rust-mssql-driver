@@ -148,6 +148,10 @@ Returns `ProcedureResult` with `return_value`, `rows_affected`, `output_params`,
 
 Named instances (e.g., `Server=localhost\SQLEXPRESS`) are automatically resolved via the SQL Server Browser service (UDP 1434). The `crate::browser` module implements the SSRP protocol (MC-SQLR spec). Resolution happens transparently in `Client::connect()` when `config.instance` is `Some`.
 
+### FILESTREAM BLOB Access (Windows only, `filestream` feature)
+
+Async read/write of SQL Server FILESTREAM data via `OpenSqlFilestream` from the OLE DB Driver DLL. The implementation uses runtime dynamic loading (`LoadLibraryW` + `GetProcAddress`) with a fallback chain: `msoledbsql19.dll` → `msoledbsql.dll` → `sqlncli11.dll`. The function pointer is cached via `OnceLock`. The Win32 `HANDLE` is wrapped in `tokio::fs::File` for `AsyncRead + AsyncWrite`. See [`docs/FILESTREAM.md`](docs/FILESTREAM.md) for setup and usage.
+
 ## Development Tooling
 
 ### Required Tools

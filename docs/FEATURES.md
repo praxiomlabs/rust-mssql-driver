@@ -19,6 +19,7 @@ The main client crate (`mssql-client`) provides these features:
 | `otel` | No | OpenTelemetry instrumentation for tracing |
 | `zeroize` | No | Secure credential wiping from memory |
 | `encoding` | No | Collation-aware VARCHAR decoding via encoding_rs |
+| `filestream` | No | FILESTREAM BLOB access (Windows only) |
 
 ### chrono
 
@@ -167,6 +168,32 @@ When enabled:
 - Reduces risk of credential leakage through memory dumps
 
 **Enable if:** You have strict security requirements or handle highly sensitive data.
+
+### filestream
+
+**Default: Disabled**
+
+Enables async read/write access to SQL Server FILESTREAM BLOBs (Windows only):
+
+```toml
+mssql-client = { version = "0.8", features = ["sspi-auth", "filestream"] }
+```
+
+When enabled:
+- `FileStream` type implementing `AsyncRead + AsyncWrite` for FILESTREAM BLOBs
+- `Client<InTransaction>::open_filestream()` convenience method
+- Runtime dynamic loading of `OpenSqlFilestream` from the OLE DB Driver DLL
+- Clear error messages if the OLE DB Driver is not installed
+
+**Requirements:**
+- Windows client machine
+- Microsoft OLE DB Driver for SQL Server (`msoledbsql.dll`) installed at runtime
+- SQL Server with FILESTREAM enabled (access level 2)
+- Windows Authentication (FILESTREAM does not work with SQL auth)
+
+**Enable if:** You need to read or write large binary data stored in SQL Server FILESTREAM columns.
+
+See [`docs/FILESTREAM.md`](FILESTREAM.md) for setup instructions and usage examples.
 
 ## mssql-auth Features
 

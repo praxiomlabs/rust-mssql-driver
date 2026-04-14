@@ -40,6 +40,7 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 | Collation-Aware Decoding | ✅ | 14+ character encodings |
 | Stored Procedures | ✅ | RPC-based with OUTPUT params |
 | Named Instance Resolution | ✅ | SQL Browser service (UDP 1434) |
+| FILESTREAM BLOB Access | ✅ | Windows only, via `filestream` feature |
 
 ## Installation
 
@@ -205,6 +206,7 @@ for result in rows {
 | `tls` | Yes | TLS/SSL encryption via rustls (disable for `Encrypt=no_tls` environments) |
 | `otel` | No | OpenTelemetry tracing and metrics |
 | `zeroize` | No | Secure credential wiping |
+| `filestream` | No | FILESTREAM BLOB access (Windows only, requires OLE DB Driver) |
 
 ### Authentication Features (mssql-auth crate)
 

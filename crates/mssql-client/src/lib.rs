@@ -143,7 +143,7 @@ pub use tvp::{Tvp, TvpColumn, TvpRow, TvpValue};
 
 // FILESTREAM support (Windows only)
 #[cfg(all(windows, feature = "filestream"))]
-pub use filestream::{FileStream, FileStreamAccess};
+pub use filestream::{FileStream, FileStreamAccess, open_options as filestream_options};
 
 // Always Encrypted types
 #[cfg(feature = "always-encrypted")]

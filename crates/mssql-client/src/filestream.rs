@@ -7,9 +7,9 @@
 //!
 //! ## Requirements
 //!
-//! - **Windows only** — FILESTREAM uses Win32 file handles via `secur32.dll`
+//! - **Windows only** — FILESTREAM uses Win32 file handles via the OLE DB Driver
 //! - **SQL Server with FILESTREAM enabled** — `sp_configure 'filestream access level', 2`
-//! - **OLE DB Driver for SQL Server** — `msoledbsql.dll` or `msoledbsql19.dll`
+//! - **OLE DB Driver for SQL Server** — `msoledbsql19.dll` or `msoledbsql.dll`
 //!   (alternatively, the deprecated SQL Server Native Client `sqlncli11.dll`)
 //! - **Active transaction** — FILESTREAM handles are bound to a SQL transaction
 //!
@@ -54,6 +54,20 @@
 //!
 //! Steps 1 and 2 are regular SQL queries. Step 3 is the FFI call this module provides.
 //! The returned handle is wrapped in a [`tokio::fs::File`] for async I/O.
+//!
+//! ## Async I/O Strategy
+//!
+//! The Win32 `HANDLE` from `OpenSqlFilestream` is wrapped in [`tokio::fs::File`], which
+//! dispatches read/write operations to tokio's blocking thread pool via `spawn_blocking`.
+//! This is the standard tokio approach for file handles and works correctly for typical
+//! FILESTREAM workloads.
+//!
+//! A future optimization could register the handle directly with tokio's IOCP reactor
+//! for true completion-based async I/O (via overlapped `ReadFile`/`WriteFile`). This would
+//! eliminate the per-operation thread dispatch overhead and improve throughput under high
+//! concurrency. The [`open_options::ASYNC`] flag is provided to enable overlapped I/O at
+//! the Win32 level for advanced users who implement their own IOCP wrapper around the
+//! handle obtained from [`FileStream::into_tokio_file`].
 
 use std::ffi::c_void;
 use std::io;
@@ -71,6 +85,7 @@ use crate::error::Error;
 
 /// Access mode for FILESTREAM BLOB data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FileStreamAccess {
     /// Read-only access to the BLOB.
     Read,
@@ -89,6 +104,31 @@ impl FileStreamAccess {
             Self::ReadWrite => SQL_FILESTREAM_READWRITE,
         }
     }
+}
+
+/// Options for opening a FILESTREAM handle.
+///
+/// These flags are passed to the `OpenOptions` parameter of `OpenSqlFilestream`.
+/// They can be combined with bitwise OR.
+pub mod open_options {
+    /// No special open options. I/O is performed via tokio's blocking thread pool.
+    pub const NONE: u32 = 0x0000_0000;
+
+    /// Request sequential scan optimization.
+    ///
+    /// Hints that the file will be read sequentially from beginning to end,
+    /// allowing the OS to optimize read-ahead caching.
+    pub const SEQUENTIAL_SCAN: u32 = 0x0000_0008;
+
+    /// Enable overlapped (async) I/O at the Win32 level.
+    ///
+    /// This flag tells the Win32 subsystem to open the handle for overlapped I/O,
+    /// which is required for true IOCP-based async. Note that `FileStream` currently
+    /// wraps the handle in `tokio::fs::File` which uses `spawn_blocking` regardless
+    /// of this flag. This option is provided for advanced users who extract the
+    /// handle via [`FileStream::into_tokio_file`] and implement their own
+    /// IOCP integration.
+    pub const ASYNC: u32 = 0x0000_0001;
 }
 
 /// An open FILESTREAM BLOB handle with async read/write support.
@@ -144,6 +184,26 @@ impl FileStream {
         access: FileStreamAccess,
         txn_context: &[u8],
     ) -> Result<Self, Error> {
+        Self::open_with_options(path, access, txn_context, open_options::NONE)
+    }
+
+    /// Open a FILESTREAM BLOB with custom open options.
+    ///
+    /// Like [`open`](Self::open), but allows specifying Win32 open flags via the
+    /// `options` parameter. See [`open_options`] for available flags.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` — UNC path from the T-SQL `column.PathName()` function
+    /// * `access` — Read, write, or read/write access mode
+    /// * `txn_context` — Transaction context bytes from `GET_FILESTREAM_TRANSACTION_CONTEXT()`
+    /// * `options` — Bitwise OR of [`open_options`] flags
+    pub fn open_with_options(
+        path: &str,
+        access: FileStreamAccess,
+        txn_context: &[u8],
+        options: u32,
+    ) -> Result<Self, Error> {
         // Load the function pointer (cached after first call)
         let open_fn = load_open_sql_filestream()?;
 
@@ -158,7 +218,7 @@ impl FileStream {
             open_fn(
                 path_wide.as_ptr(),
                 access.to_raw(),
-                SQL_FILESTREAM_OPEN_NONE,
+                options,
                 txn_context.as_ptr(),
                 txn_context.len(),
                 std::ptr::null(), // no allocation size hint
@@ -252,9 +312,6 @@ const SQL_FILESTREAM_READ: u32 = 0;
 const SQL_FILESTREAM_WRITE: u32 = 1;
 /// Read and write access.
 const SQL_FILESTREAM_READWRITE: u32 = 2;
-
-/// No special open options.
-const SQL_FILESTREAM_OPEN_NONE: u32 = 0x0000_0000;
 
 /// Invalid handle sentinel value (`(HANDLE)-1`).
 const INVALID_HANDLE_VALUE: *mut c_void = -1_isize as *mut c_void;
