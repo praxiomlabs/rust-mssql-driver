@@ -52,6 +52,8 @@ mssql-client = "0.8"
 tokio = { version = "1.48", features = ["full"] }
 ```
 
+**Windows note:** The default TLS feature requires a C compiler (`ring`/`aws-lc-sys`). Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the "Desktop development with C++" workload, or any edition of Visual Studio with that workload. This is a one-time setup — see [CONTRIBUTING.md](CONTRIBUTING.md#4-platform-specific-windows-c-build-tools) for details.
+
 ## Quick Start
 
 ```rust

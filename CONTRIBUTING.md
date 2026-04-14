@@ -78,6 +78,8 @@ just ci          # CI with default features
 | Just | 1.23+ | Yes | Command runner |
 | jq | any | Yes | JSON parsing |
 | Docker | any | No | For integration tests |
+| MSVC C++ Build Tools | any | Windows only | Required for TLS (ring/aws-lc-sys). Free via [VS Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) |
+| libkrb5-dev | any | Linux only | Required for `integrated-auth` feature |
 
 ### Step-by-Step Setup
 
@@ -115,7 +117,22 @@ Installs a pre-commit hook that runs:
 - Clippy lints
 - Type check (`cargo check`)
 
-#### 4. Platform-Specific: Linux Kerberos Support
+#### 4. Platform-Specific: Windows C++ Build Tools
+
+The default TLS feature uses `rustls` with `ring`, which requires a C compiler to build
+its cryptographic primitives. On Windows, install one of:
+
+- **[Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)** (free, ~2 GB) — select the "Desktop development with C++" workload
+- **Visual Studio Community/Professional/Enterprise** — with the "Desktop development with C++" workload
+
+This provides the MSVC compiler (`cl.exe`) and Windows SDK headers needed by `ring` and `aws-lc-sys`.
+
+If you only need `sspi-auth` or `filestream` (no TLS), you can skip the C++ tools:
+```bash
+cargo build --no-default-features --features sspi-auth,filestream
+```
+
+#### 5. Platform-Specific: Linux Kerberos Support
 
 For `--all-features` (integrated authentication):
 
