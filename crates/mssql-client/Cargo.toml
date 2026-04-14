@@ -39,6 +39,10 @@ sspi-auth = ["mssql-auth/sspi-auth"]
 # legacy SQL Server instances, or development environments) to reduce binary size and compile time.
 # When disabled, only `Encrypt=no_tls` connections are supported.
 tls = ["dep:mssql-tls"]
+# FILESTREAM BLOB access (Windows only)
+# Enables async read/write of SQL Server FILESTREAM data via the Win32 OpenSqlFilestream API.
+# Requires the Microsoft OLE DB Driver for SQL Server (msoledbsql.dll) at runtime.
+filestream = ["tokio/fs"]
 
 [dependencies]
 tds-protocol = { workspace = true }

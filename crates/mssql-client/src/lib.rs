@@ -95,6 +95,9 @@ pub(crate) mod column_parser;
 pub mod config;
 pub mod encryption;
 pub mod error;
+#[cfg(all(windows, feature = "filestream"))]
+#[allow(unsafe_code)] // Win32 FFI for OpenSqlFilestream; see SAFETY comments in each unsafe block
+pub mod filestream;
 pub mod from_row;
 pub mod instrumentation;
 pub mod procedure;
@@ -137,6 +140,10 @@ pub use stream::{
 pub use to_params::{NamedParam, ParamList, ToParams};
 pub use transaction::{IsolationLevel, SavePoint, Transaction};
 pub use tvp::{Tvp, TvpColumn, TvpRow, TvpValue};
+
+// FILESTREAM support (Windows only)
+#[cfg(all(windows, feature = "filestream"))]
+pub use filestream::{FileStream, FileStreamAccess};
 
 // Always Encrypted types
 #[cfg(feature = "always-encrypted")]

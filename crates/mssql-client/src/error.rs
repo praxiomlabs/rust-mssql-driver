@@ -148,6 +148,14 @@ pub enum Error {
         /// Description of what went wrong.
         reason: String,
     },
+
+    /// FILESTREAM operation failed.
+    ///
+    /// This error occurs when opening or accessing a FILESTREAM BLOB fails,
+    /// typically due to a missing driver DLL, invalid path, or permission issue.
+    #[cfg(all(windows, feature = "filestream"))]
+    #[error("FILESTREAM error: {0}")]
+    FileStream(String),
 }
 
 // Note: From<mssql_tls::TlsError> and From<tds_protocol::ProtocolError> are
