@@ -828,7 +828,12 @@ impl Client<Disconnected> {
     /// Create an SSPI/GSSAPI negotiator if integrated auth is configured.
     ///
     /// Returns `None` for non-integrated credential types.
-    /// Prefers `sspi-auth` over `integrated-auth` when both features are enabled.
+    ///
+    /// On Windows with `sspi-auth`, uses native Windows SSPI (`secur32.dll`) which
+    /// supports all account types including Microsoft Accounts. Falls back to sspi-rs
+    /// on non-Windows platforms.
+    ///
+    /// With `integrated-auth` (Linux/macOS), uses GSSAPI/Kerberos.
     #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
     fn create_negotiator(config: &Config) -> Result<Option<Box<dyn mssql_auth::SspiNegotiator>>> {
         #[allow(clippy::match_like_matches_macro)]
@@ -841,8 +846,16 @@ impl Client<Disconnected> {
             return Ok(None);
         }
 
-        // Prefer SSPI (Windows-native / sspi-rs) when available
-        #[cfg(feature = "sspi-auth")]
+        // On Windows: prefer native SSPI (secur32.dll) for integrated auth.
+        // This handles all Windows account types including Microsoft Accounts,
+        // domain accounts, and local accounts — unlike sspi-rs which requires
+        // explicit credentials.
+        #[cfg(all(windows, feature = "sspi-auth"))]
+        let negotiator: Box<dyn mssql_auth::SspiNegotiator> =
+            Box::new(mssql_auth::NativeSspiAuth::new(&config.host, config.port)?);
+
+        // On non-Windows: use sspi-rs (pure Rust SSPI implementation)
+        #[cfg(all(not(windows), feature = "sspi-auth"))]
         let negotiator: Box<dyn mssql_auth::SspiNegotiator> =
             Box::new(mssql_auth::SspiAuth::new(&config.host, config.port)?);
 
