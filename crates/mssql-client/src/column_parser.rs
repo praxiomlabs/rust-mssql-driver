@@ -317,13 +317,14 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
                         let minutes = buf.get_u16_le() as u32;
                         #[cfg(feature = "chrono")]
                         {
-                            let base = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
+                            let base = chrono::NaiveDate::from_ymd_opt(1900, 1, 1)
+                                .expect("epoch 1900-01-01 is valid");
                             let date = base + chrono::Duration::days(days);
                             let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(
                                 minutes * 60,
                                 0,
                             )
-                            .unwrap();
+                            .expect("SMALLDATETIME minutes should be 0-1439");
                             SqlValue::DateTime(date.and_time(time))
                         }
                         #[cfg(not(feature = "chrono"))]
@@ -337,7 +338,8 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
                         let time_300ths = buf.get_u32_le() as u64;
                         #[cfg(feature = "chrono")]
                         {
-                            let base = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
+                            let base = chrono::NaiveDate::from_ymd_opt(1900, 1, 1)
+                                .expect("epoch 1900-01-01 is valid");
                             let date = base + chrono::Duration::days(days);
                             // Convert 300ths of second to nanoseconds
                             let total_ms = (time_300ths * 1000) / 300;
@@ -345,7 +347,7 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
                             let nanos = ((total_ms % 1000) * 1_000_000) as u32;
                             let time =
                                 chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nanos)
-                                    .unwrap();
+                                    .expect("DATETIME time component should be valid");
                             SqlValue::DateTime(date.and_time(time))
                         }
                         #[cfg(not(feature = "chrono"))]
@@ -369,13 +371,14 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
             let time_300ths = buf.get_u32_le() as u64;
             #[cfg(feature = "chrono")]
             {
-                let base = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
+                let base =
+                    chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("epoch 1900-01-01 is valid");
                 let date = base + chrono::Duration::days(days);
                 let total_ms = (time_300ths * 1000) / 300;
                 let secs = (total_ms / 1000) as u32;
                 let nanos = ((total_ms % 1000) * 1_000_000) as u32;
-                let time =
-                    chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nanos).unwrap();
+                let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nanos)
+                    .expect("DATETIME time component should be valid");
                 SqlValue::DateTime(date.and_time(time))
             }
             #[cfg(not(feature = "chrono"))]
@@ -395,10 +398,11 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
             let minutes = buf.get_u16_le() as u32;
             #[cfg(feature = "chrono")]
             {
-                let base = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
+                let base =
+                    chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("epoch 1900-01-01 is valid");
                 let date = base + chrono::Duration::days(days);
-                let time =
-                    chrono::NaiveTime::from_num_seconds_from_midnight_opt(minutes * 60, 0).unwrap();
+                let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(minutes * 60, 0)
+                    .expect("SMALLDATETIME minutes should be 0-1439");
                 SqlValue::DateTime(date.and_time(time))
             }
             #[cfg(not(feature = "chrono"))]
@@ -426,7 +430,8 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
                     | ((buf.get_u8() as u32) << 16);
                 #[cfg(feature = "chrono")]
                 {
-                    let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
+                    let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1)
+                        .expect("epoch 0001-01-01 is valid");
                     let date = base + chrono::Duration::days(days as i64);
                     SqlValue::Date(date)
                 }
@@ -496,7 +501,8 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
 
                 #[cfg(feature = "chrono")]
                 {
-                    let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
+                    let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1)
+                        .expect("epoch 0001-01-01 is valid");
                     let date = base + chrono::Duration::days(days as i64);
                     let time = intervals_to_time(intervals, scale);
                     SqlValue::DateTime(date.and_time(time))
@@ -544,11 +550,14 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
                 #[cfg(feature = "chrono")]
                 {
                     use chrono::TimeZone;
-                    let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
+                    let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1)
+                        .expect("epoch 0001-01-01 is valid");
                     let date = base + chrono::Duration::days(days as i64);
                     let time = intervals_to_time(intervals, scale);
                     let offset = chrono::FixedOffset::east_opt((offset_minutes as i32) * 60)
-                        .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).unwrap());
+                        .unwrap_or_else(|| {
+                            chrono::FixedOffset::east_opt(0).expect("UTC offset 0 is valid")
+                        });
                     let datetime = offset
                         .from_local_datetime(&date.and_time(time))
                         .single()
@@ -1069,9 +1078,9 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
                     let days = buf.get_u16_le() as i64;
                     let mins = buf.get_u16_le() as u32;
                     let base = NaiveDate::from_ymd_opt(1900, 1, 1)
-                        .unwrap()
+                        .expect("epoch 1900-01-01 is valid")
                         .and_hms_opt(0, 0, 0)
-                        .unwrap();
+                        .expect("midnight is valid");
                     let dt = base
                         + chrono::Duration::days(days)
                         + chrono::Duration::minutes(mins as i64);
@@ -1081,9 +1090,9 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
                     let days = buf.get_i32_le() as i64;
                     let ticks = buf.get_u32_le() as i64;
                     let base = NaiveDate::from_ymd_opt(1900, 1, 1)
-                        .unwrap()
+                        .expect("epoch 1900-01-01 is valid")
                         .and_hms_opt(0, 0, 0)
-                        .unwrap();
+                        .expect("midnight is valid");
                     let millis = (ticks * 10) / 3;
                     let dt = base
                         + chrono::Duration::days(days)
@@ -1174,7 +1183,8 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
                 date_bytes[1] = buf.get_u8();
                 date_bytes[2] = buf.get_u8();
                 let days = u32::from_le_bytes(date_bytes);
-                let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
+                let base =
+                    chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
                 let date = base + chrono::Duration::days(days as i64);
                 Ok(SqlValue::Date(date))
             }
@@ -1276,7 +1286,7 @@ fn intervals_to_time(intervals: u64, scale: u8) -> chrono::NaiveTime {
     let nano_part = (nanos % 1_000_000_000) as u32;
 
     chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nano_part)
-        .unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap())
+        .unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(0, 0, 0).expect("midnight is valid"))
 }
 
 #[cfg(test)]

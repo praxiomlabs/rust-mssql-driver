@@ -540,7 +540,10 @@ async fn handle_connection(mut stream: TcpStream, config: Arc<MockServerConfig>)
 
     // Step 2: If TLS is negotiated, perform TLS handshake
     if use_tls && server_encryption != 0x02 {
-        let acceptor = config.tls_acceptor.as_ref().unwrap();
+        let acceptor = config
+            .tls_acceptor
+            .as_ref()
+            .expect("TLS acceptor present when use_tls is true");
         let mut tls_stream = crate::tls::accept_tls_prelogin(stream, acceptor)
             .await
             .map_err(|e| MockServerError::Protocol(format!("TLS handshake failed: {e}")))?;

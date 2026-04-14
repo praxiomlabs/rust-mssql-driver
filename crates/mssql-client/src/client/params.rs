@@ -278,7 +278,8 @@ impl<S: ConnectionState> Client<S> {
             #[cfg(feature = "chrono")]
             SqlValue::Date(d) => {
                 // Calculate days since 0001-01-01
-                let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
+                let base =
+                    chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
                 let days = d.signed_duration_since(base).num_days() as u32;
                 tds_protocol::tvp::encode_tvp_date(days, buf);
             }
@@ -302,7 +303,8 @@ impl<S: ConnectionState> Client<S> {
                     + dt.time().nanosecond() as u64;
                 let intervals = nanos / 100;
                 // Date component
-                let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
+                let base =
+                    chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
                 let days = dt.date().signed_duration_since(base).num_days() as u32;
                 let scale = match wire_type {
                     TvpWireType::DateTime2 { scale } => *scale,
@@ -318,7 +320,8 @@ impl<S: ConnectionState> Client<S> {
                     + dto.time().nanosecond() as u64;
                 let intervals = nanos / 100;
                 // Date component (days since 0001-01-01)
-                let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
+                let base =
+                    chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
                 let days = dto.date_naive().signed_duration_since(base).num_days() as u32;
                 // Timezone offset in minutes
                 let offset_minutes = (dto.offset().fix().local_minus_utc() / 60) as i16;
