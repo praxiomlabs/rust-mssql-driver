@@ -958,9 +958,7 @@ impl Client<InTransaction> {
                 ctx = Some(row.get::<Vec<u8>>(0)?);
             }
             ctx.ok_or_else(|| {
-                Error::FileStream(
-                    "GET_FILESTREAM_TRANSACTION_CONTEXT() returned no rows".into(),
-                )
+                Error::FileStream("GET_FILESTREAM_TRANSACTION_CONTEXT() returned no rows".into())
             })?
         };
 

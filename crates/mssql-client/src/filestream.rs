@@ -179,11 +179,7 @@ impl FileStream {
     /// Returns an error if:
     /// - No FILESTREAM driver DLL is installed (`msoledbsql.dll` / `sqlncli11.dll`)
     /// - The `OpenSqlFilestream` call fails (invalid path, permissions, etc.)
-    pub fn open(
-        path: &str,
-        access: FileStreamAccess,
-        txn_context: &[u8],
-    ) -> Result<Self, Error> {
+    pub fn open(path: &str, access: FileStreamAccess, txn_context: &[u8]) -> Result<Self, Error> {
         Self::open_with_options(path, access, txn_context, open_options::NONE)
     }
 
@@ -324,12 +320,12 @@ const INVALID_HANDLE_VALUE: *mut c_void = -1_isize as *mut c_void;
 ///
 /// See: <https://learn.microsoft.com/en-us/sql/relational-databases/blob/access-filestream-data-with-opensqlfilestream>
 type OpenSqlFilestreamFn = unsafe extern "system" fn(
-    filestream_path: *const u16,      // LPCWSTR
-    desired_access: u32,              // SQL_FILESTREAM_DESIRED_ACCESS
-    open_options: u32,                // ULONG
+    filestream_path: *const u16,       // LPCWSTR
+    desired_access: u32,               // SQL_FILESTREAM_DESIRED_ACCESS
+    open_options: u32,                 // ULONG
     filestream_txn_context: *const u8, // LPBYTE
     filestream_txn_context_len: usize, // SIZE_T (note: SSIZE_T in some docs, but usize on 64-bit)
-    allocation_size: *const i64,      // PLARGE_INTEGER (nullable)
+    allocation_size: *const i64,       // PLARGE_INTEGER (nullable)
 ) -> *mut c_void; // HANDLE
 
 // Win32 kernel32 imports for runtime DLL loading and error formatting.
@@ -408,8 +404,7 @@ fn load_open_sql_filestream() -> Result<OpenSqlFilestreamFn, Error> {
 
                 // SAFETY: module is a valid HMODULE from LoadLibraryW.
                 // The function name is a valid null-terminated ASCII string.
-                let proc =
-                    unsafe { GetProcAddress(module, c"OpenSqlFilestream".as_ptr().cast()) };
+                let proc = unsafe { GetProcAddress(module, c"OpenSqlFilestream".as_ptr().cast()) };
                 if proc.is_null() {
                     continue;
                 }

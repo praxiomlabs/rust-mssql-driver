@@ -70,9 +70,7 @@ fn get_filestream_config() -> Config {
 #[ignore = "Requires Windows with FILESTREAM-enabled SQL Server"]
 async fn test_filestream_read() {
     let config = get_filestream_config();
-    let client = Client::connect(config)
-        .await
-        .expect("Connection failed");
+    let client = Client::connect(config).await.expect("Connection failed");
 
     // Begin transaction (required for FILESTREAM)
     let mut tx = client
@@ -109,17 +107,11 @@ async fn test_filestream_read() {
 
     // Read the content
     let mut data = Vec::new();
-    stream
-        .read_to_end(&mut data)
-        .await
-        .expect("Read failed");
+    stream.read_to_end(&mut data).await.expect("Read failed");
 
     // Verify content matches what we inserted
     let content = String::from_utf8(data).expect("Content is not valid UTF-8");
-    assert_eq!(
-        content, "Hello FILESTREAM from Rust!",
-        "Content mismatch"
-    );
+    assert_eq!(content, "Hello FILESTREAM from Rust!", "Content mismatch");
 
     // Drop the stream before committing
     drop(stream);
@@ -131,9 +123,7 @@ async fn test_filestream_read() {
 #[ignore = "Requires Windows with FILESTREAM-enabled SQL Server"]
 async fn test_filestream_write() {
     let config = get_filestream_config();
-    let client = Client::connect(config)
-        .await
-        .expect("Connection failed");
+    let client = Client::connect(config).await.expect("Connection failed");
 
     let mut tx = client
         .begin_transaction()
