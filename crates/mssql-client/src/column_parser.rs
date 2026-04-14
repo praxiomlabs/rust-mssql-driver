@@ -173,7 +173,9 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
                     }
                     buf.get_u8() as usize
                 }
-                _ => unreachable!(),
+                // The outer match arm restricts col.type_id to Money | Money4 | MoneyN,
+                // so this branch is unreachable.
+                _ => unreachable!("inner match is bounded by outer Money|Money4|MoneyN arm"),
             };
 
             if buf.remaining() < bytes {

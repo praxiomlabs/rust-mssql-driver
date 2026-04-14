@@ -89,7 +89,8 @@ impl<S: ConnectionState> Client<S> {
                     SqlValue::Time(t) => t.to_string(),
                     SqlValue::DateTime(dt) => dt.to_string(),
                     SqlValue::DateTimeOffset(dto) => dto.to_rfc3339(),
-                    _ => unreachable!(),
+                    // The outer arm restricts sql_value to Date|Time|DateTime|DateTimeOffset.
+                    _ => unreachable!("inner match is bounded by outer chrono type arm"),
                 };
                 RpcParam::nvarchar(name, &s)
             }
@@ -127,14 +128,14 @@ impl<S: ConnectionState> Client<S> {
             .columns
             .iter()
             .map(|col| {
-                let wire_type = Self::convert_tvp_column_type(&col.column_type);
-                if col.nullable {
+                let wire_type = Self::convert_tvp_column_type(&col.column_type)?;
+                Ok(if col.nullable {
                     TvpWireColumnDef::nullable(wire_type)
                 } else {
                     TvpWireColumnDef::new(wire_type)
-                }
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
 
         // Create encoder
         let encoder = TvpEncoder::new(&tvp_data.schema, &tvp_data.type_name, &wire_columns);
@@ -178,11 +179,11 @@ impl<S: ConnectionState> Client<S> {
     }
 
     /// Convert mssql-types TvpColumnType to wire TvpWireType.
-    fn convert_tvp_column_type(col_type: &mssql_types::TvpColumnType) -> TvpWireType {
+    fn convert_tvp_column_type(col_type: &mssql_types::TvpColumnType) -> Result<TvpWireType> {
         // TvpColumnType is #[non_exhaustive], so the wildcard arm is required
         // for forward compatibility even though all current variants are covered.
         #[allow(unreachable_patterns)]
-        match col_type {
+        Ok(match col_type {
             mssql_types::TvpColumnType::Bit => TvpWireType::Bit,
             mssql_types::TvpColumnType::TinyInt => TvpWireType::Int { size: 1 },
             mssql_types::TvpColumnType::SmallInt => TvpWireType::Int { size: 2 },
@@ -213,8 +214,13 @@ impl<S: ConnectionState> Client<S> {
                 TvpWireType::DateTimeOffset { scale: *scale }
             }
             mssql_types::TvpColumnType::Xml => TvpWireType::Xml,
-            _ => unreachable!("unknown TvpColumnType variant"),
-        }
+            _ => {
+                return Err(Error::Type(mssql_types::TypeError::UnsupportedConversion {
+                    from: format!("{col_type:?}"),
+                    to: "TVP wire type",
+                }));
+            }
+        })
     }
 
     /// Encode a single TVP column value.
