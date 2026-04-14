@@ -1,7 +1,7 @@
 # Architectural Reference: High-Performance Rust MS SQL Driver
 
 **Version:** 1.6.0
-**Status:** Design Complete (v0.7.0 Released)
+**Status:** Design Complete (v0.8.0 Released)
 **Target Protocol:** MS-TDS 7.3 – 8.0 (SQL Server 2008 – 2025)
 **Toolchain Standard:** Rust 2024 Edition (v1.85+, released February 20, 2025)
 **MSRV Policy:** Rust 1.88.0 (6-month rolling window aligned with Tokio's policy)
@@ -713,7 +713,7 @@ resolver = "2"
 members = ["crates/*", "xtask"]
 
 [workspace.package]
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
@@ -746,9 +746,9 @@ opentelemetry-otlp = { version = "0.31", optional = true }
 tracing-opentelemetry = { version = "0.32", optional = true }
 
 # Testing
-criterion = { version = "0.7", features = ["async_tokio"] }
+criterion = { version = "0.8", features = ["async_tokio"] }
 proptest = "1.5"
-testcontainers = "0.25"
+testcontainers = "0.27"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
@@ -2240,6 +2240,7 @@ let client = Client::connect(&connection_string).await?;
 | 1.4.0 | 2025-12-31 | Updated for v0.4.0 release: TDS 7.3 protocol support (SQL Server 2008/2008 R2), TdsVersion configuration, version negotiation |
 | 1.5.0 | 2026-01-01 | Updated for v0.5.0 release: Collation-aware VARCHAR decoding, encoding feature, Column marked non_exhaustive |
 | 1.6.0 | 2026-04-07 | Updated for v0.7.0 release: MSRV bumped to 1.88, SSPI integrated auth wired into client login, RUSTSEC advisories resolved, 33 public enums marked non_exhaustive for semver safety, deprecated APIs removed before 1.0 |
+| 1.7.0 | 2026-04-13 | Updated for v0.8.0 release: Stored procedure support (§4.7), SQL Browser instance resolution, pool test_on_checkin, Azure SDK 0.34, mock TLS cross-platform fix |
 
 ---
 

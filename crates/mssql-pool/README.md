@@ -86,13 +86,13 @@ println!("Avg checkout time: {:?}", metrics.avg_checkout_time);
 | `checkout_timeout` | 30s | Timeout waiting for available connection |
 | `health_check_interval` | 30s | Interval between health checks |
 | `sp_reset_connection` | true | Execute `sp_reset_connection` on return |
-| `test_on_acquire` | true | Validate connection before use |
+| `test_on_checkout` | true | Validate connection before use |
 
 ## Connection Lifecycle
 
 ```text
 1. Connection created or reused from pool
-2. Health check (if test_on_acquire enabled)
+2. Health check (if test_on_checkout enabled)
 3. Connection checked out to application
 4. Application uses connection
 5. Connection dropped/returned

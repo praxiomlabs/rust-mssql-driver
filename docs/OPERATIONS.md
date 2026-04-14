@@ -120,7 +120,7 @@ let pool = Pool::builder()
 
     // Health checks
     .health_check_interval(Duration::from_secs(30))  // Check idle connections
-    .test_on_acquire(true)        // Validate before use
+    .test_on_checkout(true)        // Validate before use
 
     // Retry behavior
     .retry_policy(RetryPolicy {
@@ -388,7 +388,7 @@ let app = Router::new()
 .acquire_timeout(Duration::from_secs(10))
 
 // Enable connection health checks
-.test_on_acquire(true)
+.test_on_checkout(true)
 ```
 
 #### Connection Resets

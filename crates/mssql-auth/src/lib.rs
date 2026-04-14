@@ -79,13 +79,13 @@ pub mod encryption;
 pub mod error;
 #[cfg(feature = "integrated-auth")]
 pub mod integrated_auth;
+#[cfg(all(windows, feature = "sspi-auth"))]
+#[allow(unsafe_code)] // Windows SSPI FFI; see SAFETY comments in each unsafe block
+pub mod native_sspi;
 #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
 pub mod negotiator;
 pub mod provider;
 pub mod sql_auth;
-#[cfg(all(windows, feature = "sspi-auth"))]
-#[allow(unsafe_code)] // Windows SSPI FFI; see SAFETY comments in each unsafe block
-pub mod native_sspi;
 #[cfg(feature = "sspi-auth")]
 pub mod sspi_auth;
 

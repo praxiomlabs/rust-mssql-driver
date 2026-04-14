@@ -32,14 +32,13 @@
 
 use std::sync::Mutex;
 
-use windows::core::{HRESULT, PCWSTR};
 use windows::Win32::Security::Authentication::Identity::{
-    AcquireCredentialsHandleW, DeleteSecurityContext, FreeCredentialsHandle,
-    InitializeSecurityContextW, SecBuffer, SecBufferDesc, ISC_REQ_CONNECTION,
+    AcquireCredentialsHandleW, DeleteSecurityContext, FreeCredentialsHandle, ISC_REQ_CONNECTION,
     ISC_REQ_MUTUAL_AUTH, ISC_REQ_REPLAY_DETECT, ISC_REQ_SEQUENCE_DETECT,
-    SECPKG_CRED_OUTBOUND,
+    InitializeSecurityContextW, SECPKG_CRED_OUTBOUND, SecBuffer, SecBufferDesc,
 };
 use windows::Win32::Security::Credentials::SecHandle;
+use windows::core::{HRESULT, PCWSTR};
 
 use crate::error::AuthError;
 
@@ -139,15 +138,15 @@ impl NativeSspiAuth {
         // with FreeCredentialsHandle, which we do in Drop.
         let result = unsafe {
             AcquireCredentialsHandleW(
-                None,                            // principal: current user
-                PCWSTR(package.as_ptr()),         // package: "Negotiate"
-                SECPKG_CRED_OUTBOUND,            // credential use: client-side
-                None,                            // logon id: current session
-                None,                            // auth data: current user creds
-                None,                            // get key fn: not used
-                None,                            // get key arg: not used
-                &mut cred_handle,                // output: credential handle
-                Some(&mut expiry),               // output: expiry time
+                None,                     // principal: current user
+                PCWSTR(package.as_ptr()), // package: "Negotiate"
+                SECPKG_CRED_OUTBOUND,     // credential use: client-side
+                None,                     // logon id: current session
+                None,                     // auth data: current user creds
+                None,                     // get key fn: not used
+                None,                     // get key arg: not used
+                &mut cred_handle,         // output: credential handle
+                Some(&mut expiry),        // output: expiry time
             )
         };
 
@@ -227,18 +226,18 @@ impl NativeSspiAuth {
         // and out_sec_buf.cbBuffer is updated with the actual token size.
         let hr = unsafe {
             InitializeSecurityContextW(
-                Some(&ctx.cred_handle),          // credential handle
-                None,                            // no existing context (first call)
+                Some(&ctx.cred_handle),                   // credential handle
+                None,                                     // no existing context (first call)
                 Some(PCWSTR(spn_wide.as_ptr()).as_ptr()), // target SPN
-                context_req,                     // context requirements
-                0,                               // reserved
-                SECURITY_NATIVE_DREP,            // data representation
-                None,                            // no input (first call)
-                0,                               // reserved
-                Some(&mut ctx.ctx_handle),       // output context handle
-                Some(&mut out_buf_desc),         // output buffer
-                &mut context_attrs,              // output context attributes
-                Some(&mut expiry),               // output expiry
+                context_req,                              // context requirements
+                0,                                        // reserved
+                SECURITY_NATIVE_DREP,                     // data representation
+                None,                                     // no input (first call)
+                0,                                        // reserved
+                Some(&mut ctx.ctx_handle),                // output context handle
+                Some(&mut out_buf_desc),                  // output buffer
+                &mut context_attrs,                       // output context attributes
+                Some(&mut expiry),                        // output expiry
             )
         };
 
@@ -345,18 +344,18 @@ impl NativeSspiAuth {
         // the response token to send to the server.
         let hr = unsafe {
             InitializeSecurityContextW(
-                Some(&ctx.cred_handle),          // credential handle
-                Some(&ctx.ctx_handle),           // existing context
+                Some(&ctx.cred_handle),                   // credential handle
+                Some(&ctx.ctx_handle),                    // existing context
                 Some(PCWSTR(spn_wide.as_ptr()).as_ptr()), // target SPN
-                context_req,                     // context requirements
-                0,                               // reserved
-                SECURITY_NATIVE_DREP,            // data representation
-                Some(&in_buf_desc),              // input from server
-                0,                               // reserved
-                Some(&mut ctx.ctx_handle),       // context handle (updated)
-                Some(&mut out_buf_desc),         // output buffer
-                &mut context_attrs,              // output context attributes
-                Some(&mut expiry),               // output expiry
+                context_req,                              // context requirements
+                0,                                        // reserved
+                SECURITY_NATIVE_DREP,                     // data representation
+                Some(&in_buf_desc),                       // input from server
+                0,                                        // reserved
+                Some(&mut ctx.ctx_handle),                // context handle (updated)
+                Some(&mut out_buf_desc),                  // output buffer
+                &mut context_attrs,                       // output context attributes
+                Some(&mut expiry),                        // output expiry
             )
         };
 
