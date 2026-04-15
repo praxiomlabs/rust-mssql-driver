@@ -451,6 +451,8 @@ impl<S: ConnectionState> Client<S> {
         let mut current_columns: Vec<crate::row::Column> = Vec::new();
         let mut current_rows: Vec<crate::row::Row> = Vec::new();
         let mut protocol_metadata: Option<ColMetaData> = None;
+        #[cfg(feature = "always-encrypted")]
+        let mut current_decryptor: Option<crate::column_decryptor::ColumnDecryptor> = None;
 
         loop {
             let token = parser.next_token_with_metadata(protocol_metadata.as_ref())?;
@@ -471,6 +473,11 @@ impl<S: ConnectionState> Client<S> {
 
                     current_columns = Self::build_columns(&meta);
 
+                    #[cfg(feature = "always-encrypted")]
+                    {
+                        current_decryptor = self.resolve_decryptor(&meta).await?;
+                    }
+
                     tracing::debug!(
                         columns = current_columns.len(),
                         result_set = result.result_sets.len(),
@@ -480,6 +487,18 @@ impl<S: ConnectionState> Client<S> {
                 }
                 Token::Row(raw_row) => {
                     if let Some(ref meta) = protocol_metadata {
+                        #[cfg(feature = "always-encrypted")]
+                        let row = if let Some(ref dec) = current_decryptor {
+                            crate::column_parser::convert_raw_row_decrypted(
+                                &raw_row,
+                                meta,
+                                &current_columns,
+                                dec,
+                            )?
+                        } else {
+                            crate::column_parser::convert_raw_row(&raw_row, meta, &current_columns)?
+                        };
+                        #[cfg(not(feature = "always-encrypted"))]
                         let row = crate::column_parser::convert_raw_row(
                             &raw_row,
                             meta,
@@ -490,6 +509,18 @@ impl<S: ConnectionState> Client<S> {
                 }
                 Token::NbcRow(nbc_row) => {
                     if let Some(ref meta) = protocol_metadata {
+                        #[cfg(feature = "always-encrypted")]
+                        let row = if let Some(ref dec) = current_decryptor {
+                            crate::column_parser::convert_nbc_row_decrypted(
+                                &nbc_row,
+                                meta,
+                                &current_columns,
+                                dec,
+                            )?
+                        } else {
+                            crate::column_parser::convert_nbc_row(&nbc_row, meta, &current_columns)?
+                        };
+                        #[cfg(not(feature = "always-encrypted"))]
                         let row = crate::column_parser::convert_nbc_row(
                             &nbc_row,
                             meta,
@@ -644,6 +675,8 @@ impl Client<Ready> {
         let mut current_columns: Vec<crate::row::Column> = Vec::new();
         let mut current_rows: Vec<crate::row::Row> = Vec::new();
         let mut protocol_metadata: Option<ColMetaData> = None;
+        #[cfg(feature = "always-encrypted")]
+        let mut current_decryptor: Option<crate::column_decryptor::ColumnDecryptor> = None;
 
         loop {
             let token = parser.next_token_with_metadata(protocol_metadata.as_ref())?;
@@ -665,6 +698,11 @@ impl Client<Ready> {
                     // Parse the new column metadata
                     current_columns = Self::build_columns(&meta);
 
+                    #[cfg(feature = "always-encrypted")]
+                    {
+                        current_decryptor = self.resolve_decryptor(&meta).await?;
+                    }
+
                     tracing::debug!(
                         columns = current_columns.len(),
                         result_set = result_sets.len(),
@@ -674,6 +712,18 @@ impl Client<Ready> {
                 }
                 Token::Row(raw_row) => {
                     if let Some(ref meta) = protocol_metadata {
+                        #[cfg(feature = "always-encrypted")]
+                        let row = if let Some(ref dec) = current_decryptor {
+                            crate::column_parser::convert_raw_row_decrypted(
+                                &raw_row,
+                                meta,
+                                &current_columns,
+                                dec,
+                            )?
+                        } else {
+                            crate::column_parser::convert_raw_row(&raw_row, meta, &current_columns)?
+                        };
+                        #[cfg(not(feature = "always-encrypted"))]
                         let row = crate::column_parser::convert_raw_row(
                             &raw_row,
                             meta,
@@ -684,6 +734,18 @@ impl Client<Ready> {
                 }
                 Token::NbcRow(nbc_row) => {
                     if let Some(ref meta) = protocol_metadata {
+                        #[cfg(feature = "always-encrypted")]
+                        let row = if let Some(ref dec) = current_decryptor {
+                            crate::column_parser::convert_nbc_row_decrypted(
+                                &nbc_row,
+                                meta,
+                                &current_columns,
+                                dec,
+                            )?
+                        } else {
+                            crate::column_parser::convert_nbc_row(&nbc_row, meta, &current_columns)?
+                        };
+                        #[cfg(not(feature = "always-encrypted"))]
                         let row = crate::column_parser::convert_nbc_row(
                             &nbc_row,
                             meta,
