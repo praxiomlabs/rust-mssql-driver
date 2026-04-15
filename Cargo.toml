@@ -4,7 +4,7 @@ members = ["crates/*", "xtask"]
 exclude = ["fuzz"]  # Fuzz tests have their own workspace (required by cargo-fuzz)
 
 [workspace.package]
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
@@ -19,15 +19,15 @@ categories = ["database"]
 #   Primary (user-facing): mssql-client (main API), mssql-driver-pool (connection pooling)
 #   Internal (implementation): tds-protocol, mssql-types, mssql-tls, mssql-codec, mssql-auth, mssql-derive
 #   Dev-only (publish = false): mssql-testing
-tds-protocol = { version = "0.8.0", path = "crates/tds-protocol" }
-mssql-tls = { version = "0.8.0", path = "crates/mssql-tls" }
-mssql-codec = { version = "0.8.0", path = "crates/mssql-codec" }
-mssql-types = { version = "0.8.0", path = "crates/mssql-types" }
-mssql-auth = { version = "0.8.0", path = "crates/mssql-auth" }
-mssql-driver-pool = { version = "0.8.0", path = "crates/mssql-pool" }
-mssql-client = { version = "0.8.0", path = "crates/mssql-client" }
-mssql-derive = { version = "0.8.0", path = "crates/mssql-derive" }
-mssql-testing = { version = "0.8.0", path = "crates/mssql-testing" }
+tds-protocol = { version = "0.9.0", path = "crates/tds-protocol" }
+mssql-tls = { version = "0.9.0", path = "crates/mssql-tls" }
+mssql-codec = { version = "0.9.0", path = "crates/mssql-codec" }
+mssql-types = { version = "0.9.0", path = "crates/mssql-types" }
+mssql-auth = { version = "0.9.0", path = "crates/mssql-auth" }
+mssql-driver-pool = { version = "0.9.0", path = "crates/mssql-pool" }
+mssql-client = { version = "0.9.0", path = "crates/mssql-client" }
+mssql-derive = { version = "0.9.0", path = "crates/mssql-derive" }
+mssql-testing = { version = "0.9.0", path = "crates/mssql-testing" }
 
 # Async runtime
 tokio = { version = "1.48", features = ["net", "io-util", "sync", "time", "macros", "rt", "rt-multi-thread"] }

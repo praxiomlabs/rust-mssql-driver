@@ -26,3 +26,9 @@ Hel = "Hel"
 
 # Caf appears in CHANGELOG showing encoding corruption example ("Café" → "Caf�")
 Caf = "Caf"
+
+# secur32.dll is a real Windows system DLL (SSPI subsystem)
+secur = "secur"
+
+# "tru" is an intentional typo in tests to verify boolean validation rejects it
+tru = "tru"

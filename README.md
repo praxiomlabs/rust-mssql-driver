@@ -17,7 +17,7 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 - **Pure Rust TLS** - Uses rustls, no OpenSSL dependency
 - **Modern Rust** - 2024 Edition, MSRV 1.88
 
-### Feature Status (v0.8.x)
+### Feature Status (v0.9.x)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -48,7 +48,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-mssql-client = "0.8"
+mssql-client = "0.9"
 tokio = { version = "1.48", features = ["full"] }
 ```
 
@@ -226,7 +226,7 @@ Enable optional features:
 ```toml
 [dependencies]
 mssql-client = { version = "0.8", features = ["otel"] }
-mssql-auth = { version = "0.8", features = ["sspi-auth"] }
+mssql-auth = { version = "0.9", features = ["sspi-auth"] }
 ```
 
 ## SQL Server Compatibility
