@@ -101,11 +101,6 @@ pub struct BulkOptions {
     /// here to avoid a sort operation on the server.
     /// Default: None
     pub order_hint: Option<Vec<String>>,
-
-    /// Maximum errors allowed before aborting.
-    ///
-    /// Default: 0 (abort on first error)
-    pub max_errors: u32,
 }
 
 impl Default for BulkOptions {
@@ -117,7 +112,6 @@ impl Default for BulkOptions {
             keep_nulls: true,
             table_lock: false,
             order_hint: None,
-            max_errors: 0,
         }
     }
 }
@@ -211,7 +205,7 @@ fn parse_sql_type(sql_type: &str) -> (u8, Option<u32>, Option<u8>, Option<u8>) {
             let scale = params.and_then(|p| p.parse().ok()).unwrap_or(7);
             (0x2B, None, None, Some(scale))
         }
-        "SMALLDATETIME" => (0x3F, None, None, None),
+        "SMALLDATETIME" => (0x3A, None, None, None),
         "UNIQUEIDENTIFIER" => (0x24, Some(16), None, None),
         "VARCHAR" | "CHAR" => {
             let len = params
@@ -524,7 +518,7 @@ impl BulkInsert {
             // Type-specific length/precision/scale
             match col.type_id {
                 // Fixed-length types - no additional info needed
-                0x32 | 0x30 | 0x34 | 0x38 | 0x7F | 0x3B | 0x3E | 0x3D | 0x3F | 0x28 => {}
+                0x32 | 0x30 | 0x34 | 0x38 | 0x7F | 0x3B | 0x3E | 0x3D | 0x3A | 0x28 => {}
 
                 // Variable-length string/binary types
                 0xE7 | 0xA7 | 0xA5 | 0xAD => {
@@ -1111,6 +1105,13 @@ mod tests {
         assert_eq!(type_id, 0x6C);
         assert_eq!(prec, Some(10));
         assert_eq!(scale, Some(2));
+
+        // SMALLDATETIME must map to DateTime4 (0x3A), NOT Numeric (0x3F)
+        let (type_id, _, _, _) = parse_sql_type("SMALLDATETIME");
+        assert_eq!(type_id, 0x3A);
+
+        let (type_id, _, _, _) = parse_sql_type("DATETIME");
+        assert_eq!(type_id, 0x3D);
     }
 
     #[test]

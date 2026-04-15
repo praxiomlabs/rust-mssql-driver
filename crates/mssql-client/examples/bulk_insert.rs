@@ -57,7 +57,6 @@ async fn main() -> Result<(), Error> {
         keep_nulls: true,
         table_lock: false, // Use row-level locking
         order_hint: None,
-        max_errors: 0, // Abort on first error
     };
 
     // Define columns for bulk insert
