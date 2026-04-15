@@ -117,8 +117,9 @@ impl Client<Disconnected> {
             config.port
         };
 
-        // Normalize "." to localhost for TCP
-        let host = if config.host == "." {
+        // Normalize "." and "(local)" to localhost for TCP.
+        // These are standard ADO.NET aliases for the local machine.
+        let host = if config.host == "." || config.host.eq_ignore_ascii_case("(local)") {
             "127.0.0.1"
         } else {
             &config.host
@@ -257,7 +258,11 @@ impl Client<Disconnected> {
             needs_reset: false,        // Fresh connection, no reset needed
             #[cfg(feature = "otel")]
             instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
-                .with_database(current_database.unwrap_or_default()),
+                .with_database(current_database.clone().unwrap_or_default()),
+            #[cfg(feature = "always-encrypted")]
+            encryption_context: config.column_encryption.clone().map(|cfg| {
+                std::sync::Arc::new(crate::encryption::EncryptionContext::from_arc(cfg))
+            }),
         })
     }
 
@@ -526,7 +531,11 @@ impl Client<Disconnected> {
                     needs_reset: false,        // Fresh connection, no reset needed
                     #[cfg(feature = "otel")]
                     instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
-                        .with_database(current_database.unwrap_or_default()),
+                        .with_database(current_database.clone().unwrap_or_default()),
+                    #[cfg(feature = "always-encrypted")]
+                    encryption_context: config.column_encryption.clone().map(|cfg| {
+                        std::sync::Arc::new(crate::encryption::EncryptionContext::from_arc(cfg))
+                    }),
                 })
             } else {
                 // Full Encryption (ENCRYPT_ON per MS-TDS spec):
@@ -579,7 +588,11 @@ impl Client<Disconnected> {
                     needs_reset: false,        // Fresh connection, no reset needed
                     #[cfg(feature = "otel")]
                     instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
-                        .with_database(current_database.unwrap_or_default()),
+                        .with_database(current_database.clone().unwrap_or_default()),
+                    #[cfg(feature = "always-encrypted")]
+                    encryption_context: config.column_encryption.clone().map(|cfg| {
+                        std::sync::Arc::new(crate::encryption::EncryptionContext::from_arc(cfg))
+                    }),
                 })
             }
         } else {
@@ -637,7 +650,11 @@ impl Client<Disconnected> {
                 needs_reset: false,        // Fresh connection, no reset needed
                 #[cfg(feature = "otel")]
                 instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
-                    .with_database(current_database.unwrap_or_default()),
+                    .with_database(current_database.clone().unwrap_or_default()),
+                #[cfg(feature = "always-encrypted")]
+                encryption_context: config.column_encryption.clone().map(|cfg| {
+                    std::sync::Arc::new(crate::encryption::EncryptionContext::from_arc(cfg))
+                }),
             })
         }
     }
@@ -761,7 +778,11 @@ impl Client<Disconnected> {
             needs_reset: false,
             #[cfg(feature = "otel")]
             instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
-                .with_database(current_database.unwrap_or_default()),
+                .with_database(current_database.clone().unwrap_or_default()),
+            #[cfg(feature = "always-encrypted")]
+            encryption_context: config.column_encryption.clone().map(|cfg| {
+                std::sync::Arc::new(crate::encryption::EncryptionContext::from_arc(cfg))
+            }),
         })
     }
 
@@ -789,6 +810,24 @@ impl Client<Disconnected> {
         prelogin
     }
 
+    /// Resolve the workstation ID for the LOGIN7 HostName field.
+    ///
+    /// Per MS-TDS, the LOGIN7 HostName field contains the client machine name
+    /// (not the server name). Priority:
+    /// 1. `Config::workstation_id` (explicit override)
+    /// 2. Machine hostname from environment (`COMPUTERNAME` on Windows, `HOSTNAME` on Linux)
+    /// 3. Empty string (fallback)
+    fn resolve_workstation_id(config: &Config) -> String {
+        if let Some(ref id) = config.workstation_id {
+            return id.clone();
+        }
+        // COMPUTERNAME is set on Windows; HOSTNAME is set on most Linux systems.
+        // This avoids adding a dependency for a simple lookup.
+        std::env::var("COMPUTERNAME")
+            .or_else(|_| std::env::var("HOSTNAME"))
+            .unwrap_or_default()
+    }
+
     /// Build a Login7 packet.
     ///
     /// When `sspi_token` is provided (integrated auth), the Login7 packet is
@@ -806,10 +845,20 @@ impl Client<Disconnected> {
             .with_packet_size(config.packet_size as u32)
             .with_app_name(&config.application_name)
             .with_server_name(&config.host)
-            .with_hostname(&config.host);
+            .with_hostname(Self::resolve_workstation_id(config));
 
         if let Some(ref database) = config.database {
             login = login.with_database(database);
+        }
+
+        // ApplicationIntent → LOGIN7 TypeFlags READONLY_INTENT bit
+        if config.application_intent == crate::config::ApplicationIntent::ReadOnly {
+            login = login.with_read_only_intent(true);
+        }
+
+        // Session language → LOGIN7 Language field
+        if let Some(ref lang) = config.language {
+            login = login.with_language(lang);
         }
 
         // Set credentials
@@ -822,13 +871,29 @@ impl Client<Disconnected> {
             login = login.with_sql_auth(username.as_ref(), password.as_ref());
         }
 
+        // When Always Encrypted is configured, add the ColumnEncryption feature extension.
+        // Version 1 = client supports column encryption without enclave computations.
+        #[cfg(feature = "always-encrypted")]
+        if config.column_encryption.is_some() {
+            login = login.with_feature(tds_protocol::login7::FeatureExtension {
+                feature_id: tds_protocol::login7::FeatureId::ColumnEncryption,
+                data: bytes::Bytes::from_static(&[0x01]), // Version 1
+            });
+            tracing::debug!("Login7: adding ColumnEncryption feature extension (version 1)");
+        }
+
         login
     }
 
     /// Create an SSPI/GSSAPI negotiator if integrated auth is configured.
     ///
     /// Returns `None` for non-integrated credential types.
-    /// Prefers `sspi-auth` over `integrated-auth` when both features are enabled.
+    ///
+    /// On Windows with `sspi-auth`, uses native Windows SSPI (`secur32.dll`) which
+    /// supports all account types including Microsoft Accounts. Falls back to sspi-rs
+    /// on non-Windows platforms.
+    ///
+    /// With `integrated-auth` (Linux/macOS), uses GSSAPI/Kerberos.
     #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
     fn create_negotiator(config: &Config) -> Result<Option<Box<dyn mssql_auth::SspiNegotiator>>> {
         #[allow(clippy::match_like_matches_macro)]
@@ -841,8 +906,16 @@ impl Client<Disconnected> {
             return Ok(None);
         }
 
-        // Prefer SSPI (Windows-native / sspi-rs) when available
-        #[cfg(feature = "sspi-auth")]
+        // On Windows: prefer native SSPI (secur32.dll) for integrated auth.
+        // This handles all Windows account types including Microsoft Accounts,
+        // domain accounts, and local accounts — unlike sspi-rs which requires
+        // explicit credentials.
+        #[cfg(all(windows, feature = "sspi-auth"))]
+        let negotiator: Box<dyn mssql_auth::SspiNegotiator> =
+            Box::new(mssql_auth::NativeSspiAuth::new(&config.host, config.port)?);
+
+        // On non-Windows: use sspi-rs (pure Rust SSPI implementation)
+        #[cfg(all(not(windows), feature = "sspi-auth"))]
         let negotiator: Box<dyn mssql_auth::SspiNegotiator> =
             Box::new(mssql_auth::SspiAuth::new(&config.host, config.port)?);
 

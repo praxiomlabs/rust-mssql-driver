@@ -79,6 +79,9 @@ pub mod encryption;
 pub mod error;
 #[cfg(feature = "integrated-auth")]
 pub mod integrated_auth;
+#[cfg(all(windows, feature = "sspi-auth"))]
+#[allow(unsafe_code)] // Windows SSPI FFI; see SAFETY comments in each unsafe block
+pub mod native_sspi;
 #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
 pub mod negotiator;
 pub mod provider;
@@ -126,7 +129,11 @@ pub use integrated_auth::IntegratedAuth;
 #[cfg(feature = "cert-auth")]
 pub use cert_auth::CertificateAuth;
 
-// Windows SSPI authentication (with sspi-auth feature)
+// Native Windows SSPI authentication (with sspi-auth feature, Windows only)
+#[cfg(all(windows, feature = "sspi-auth"))]
+pub use native_sspi::NativeSspiAuth;
+
+// Windows SSPI authentication via sspi-rs (with sspi-auth feature)
 #[cfg(feature = "sspi-auth")]
 pub use sspi_auth::SspiAuth;
 

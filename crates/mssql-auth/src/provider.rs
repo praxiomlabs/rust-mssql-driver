@@ -186,7 +186,7 @@ impl Drop for AuthData {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -200,5 +200,143 @@ mod tests {
 
         assert!(AuthMethod::SqlServer.uses_login7_credentials());
         assert!(!AuthMethod::AzureAd.uses_login7_credentials());
+    }
+
+    #[test]
+    fn test_auth_method_all_variants_classified() {
+        // Every auth method should have exactly one primary category
+        let methods = [
+            AuthMethod::SqlServer,
+            AuthMethod::AzureAd,
+            AuthMethod::Integrated,
+            AuthMethod::Certificate,
+        ];
+
+        for method in &methods {
+            let categories = [
+                method.uses_login7_credentials(),
+                method.is_federated(),
+                method.is_sspi(),
+            ];
+            // At most one category should be true (Certificate has none)
+            let count = categories.iter().filter(|&&b| b).count();
+            assert!(
+                count <= 1,
+                "{method:?} has {count} categories, expected 0 or 1"
+            );
+        }
+    }
+
+    #[test]
+    fn test_auth_method_certificate() {
+        let cert = AuthMethod::Certificate;
+        assert!(!cert.is_federated());
+        assert!(!cert.is_sspi());
+        assert!(!cert.uses_login7_credentials());
+    }
+
+    #[test]
+    fn test_auth_data_sql_server() {
+        let data = AuthData::SqlServer {
+            username: "sa".to_string(),
+            password_bytes: vec![0xA5, 0xB6],
+        };
+        // Verify it's the right variant via pattern match
+        match &data {
+            AuthData::SqlServer {
+                username,
+                password_bytes,
+            } => {
+                assert_eq!(username, "sa");
+                assert_eq!(password_bytes.len(), 2);
+            }
+            _ => panic!("Expected SqlServer variant"),
+        }
+    }
+
+    #[test]
+    fn test_auth_data_fed_auth() {
+        let data = AuthData::FedAuth {
+            token: "eyJhbGciOiJSUzI1NiJ9.test".to_string(),
+            nonce: None,
+        };
+        match &data {
+            AuthData::FedAuth { token, nonce } => {
+                assert!(token.starts_with("eyJ"));
+                assert!(nonce.is_none());
+            }
+            _ => panic!("Expected FedAuth variant"),
+        }
+    }
+
+    #[test]
+    fn test_auth_data_sspi() {
+        let data = AuthData::Sspi {
+            blob: vec![0x4E, 0x54, 0x4C, 0x4D], // "NTLM" bytes
+        };
+        match &data {
+            AuthData::Sspi { blob } => {
+                assert_eq!(blob.len(), 4);
+            }
+            _ => panic!("Expected Sspi variant"),
+        }
+    }
+
+    #[test]
+    fn test_auth_data_none() {
+        let data = AuthData::None;
+        assert!(matches!(data, AuthData::None));
+    }
+
+    #[test]
+    fn test_auth_data_debug_output() {
+        // Verify Debug impl doesn't panic on any variant
+        let variants: Vec<AuthData> = vec![
+            AuthData::SqlServer {
+                username: "test".into(),
+                password_bytes: vec![1, 2, 3],
+            },
+            AuthData::FedAuth {
+                token: "tok".into(),
+                nonce: Some(Bytes::from_static(b"nonce")),
+            },
+            AuthData::Sspi {
+                blob: vec![0x01, 0x02],
+            },
+            AuthData::None,
+        ];
+
+        for v in &variants {
+            let _ = format!("{v:?}");
+        }
+    }
+
+    /// A mock auth provider for testing the trait interface.
+    struct MockProvider {
+        method: AuthMethod,
+    }
+
+    impl AuthProvider for MockProvider {
+        fn method(&self) -> AuthMethod {
+            self.method
+        }
+
+        fn authenticate(&self) -> Result<AuthData, crate::error::AuthError> {
+            Ok(AuthData::None)
+        }
+    }
+
+    #[test]
+    fn test_auth_provider_trait_defaults() {
+        let provider = MockProvider {
+            method: AuthMethod::SqlServer,
+        };
+
+        assert_eq!(provider.method(), AuthMethod::SqlServer);
+        assert!(provider.feature_extension_data().is_none());
+        assert!(!provider.needs_refresh());
+
+        let data = provider.authenticate().unwrap();
+        assert!(matches!(data, AuthData::None));
     }
 }

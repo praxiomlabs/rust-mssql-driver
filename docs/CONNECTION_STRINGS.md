@@ -18,6 +18,24 @@ Server=hostname;Database=dbname;User Id=username;Password=password;
 - Keys are case-insensitive
 - Whitespace around keys and values is trimmed
 - Unknown keys are ignored (logged at debug level)
+- Known ADO.NET keywords we don't support are logged at info level
+- Pool-related keywords (Max Pool Size, etc.) are logged with guidance to use PoolConfig
+
+### Quoted Values
+
+Values containing semicolons must be enclosed in double or single quotes per the ADO.NET specification:
+
+```
+Password="my;complex;password";
+Password='my;complex;password';
+```
+
+Doubled quotes inside are escapes: `""` → `"`, `''` → `'`:
+
+```
+Password="has ""quotes""";
+Password='it''s complex';
+```
 
 ## Complete Keyword Reference
 
@@ -25,7 +43,7 @@ Server=hostname;Database=dbname;User Id=username;Password=password;
 
 | Keyword | Aliases | Type | Default | Description |
 |---------|---------|------|---------|-------------|
-| `Server` | `Data Source`, `Host` | String | `localhost` | SQL Server hostname or IP |
+| `Server` | `Data Source`, `Addr`, `Address`, `Network Address`, `Host` | String | `localhost` | SQL Server hostname or IP |
 | `Port` | — | Number | `1433` | TCP port number |
 
 #### Server Format Options
@@ -43,6 +61,26 @@ Server=db.example.com,1434
 **Hostname with named instance (backslash-separated):**
 ```
 Server=db.example.com\SQLEXPRESS
+```
+
+**Azure Portal format (tcp: prefix automatically stripped):**
+```
+Server=tcp:yourserver.database.windows.net,1433
+```
+
+**Local host aliases:**
+```
+Server=.\SQLEXPRESS
+Server=(local)\SQLEXPRESS
+Server=localhost\SQLEXPRESS
+```
+
+Both `.` and `(local)` are normalized to `127.0.0.1`, matching ADO.NET behavior.
+
+**Unsupported protocols (return an error with guidance):**
+```
+Server=np:\\host\pipe\sql\query   ← Named Pipes not supported
+Server=lpc:host                    ← Shared Memory not supported
 ```
 
 **Azure SQL Database:**
@@ -101,7 +139,7 @@ Encrypt=true;TrustServerCertificate=true;
 
 | Keyword | Aliases | Type | Default | Description |
 |---------|---------|------|---------|-------------|
-| `Connect Timeout` | `Connection Timeout` | Seconds | `15` | TCP connection timeout |
+| `Connect Timeout` | `Connection Timeout`, `Timeout` | Seconds | `15` | TCP connection timeout |
 | `Command Timeout` | — | Seconds | `30` | Query execution timeout |
 
 ```
@@ -115,12 +153,28 @@ Connect Timeout=30;Command Timeout=60;
 | Keyword | Aliases | Type | Default | Description |
 |---------|---------|------|---------|-------------|
 | `Application Name` | `App` | String | `mssql-client` | Application identifier |
+| `ApplicationIntent` | `Application Intent` | String | `ReadWrite` | AlwaysOn AG routing (`ReadOnly` or `ReadWrite`) |
+| `Workstation ID` | `WSID` | String | (machine hostname) | Client workstation name for audit trails |
+| `Current Language` | `Language` | String | (server default) | Session language for server messages |
 
 ```
-Application Name=MyApp-v1.2.3;
+Application Name=MyApp-v1.2.3;ApplicationIntent=ReadOnly;
 ```
 
-This appears in SQL Server's `sys.dm_exec_sessions` for monitoring.
+`Application Name` appears in SQL Server's `sys.dm_exec_sessions` for monitoring.
+
+`ApplicationIntent=ReadOnly` routes the connection to a readable secondary in AlwaysOn Availability Group configurations.
+
+`Workstation ID` is sent in the LOGIN7 HostName field and appears in `sys.dm_exec_sessions.host_name`. When not specified, the driver sends the machine hostname automatically.
+
+### Connection Resiliency
+
+| Keyword | Aliases | Type | Default | Description |
+|---------|---------|------|---------|-------------|
+| `ConnectRetryCount` | `Connect Retry Count` | Number | `3` | Number of reconnect attempts on idle connection failure |
+| `ConnectRetryInterval` | `Connect Retry Interval` | Seconds | `0` | Seconds between reconnect attempts |
+
+These wire to the driver's `RetryPolicy.max_retries` and `RetryPolicy.initial_backoff` respectively.
 
 ### Advanced Options
 
@@ -128,6 +182,17 @@ This appears in SQL Server's `sys.dm_exec_sessions` for monitoring.
 |---------|---------|------|---------|-------------|
 | `MultipleActiveResultSets` | `MARS` | Boolean | `false` | Enable MARS (not fully supported) |
 | `Packet Size` | — | Number | `4096` | TDS packet size in bytes |
+
+### Recognized but Not Supported
+
+The following ADO.NET keywords are recognized (logged at info level) but not processed by this driver:
+
+| Keyword | Guidance |
+|---------|----------|
+| `Max Pool Size`, `Min Pool Size`, `Pooling`, `Connection Lifetime`, `Load Balance Timeout` | Use `PoolConfig` instead of connection string |
+| `Failover Partner`, `MultiSubnetFailover` | Database mirroring/AG failover not implemented |
+| `Persist Security Info` | Password is never returned in connection strings |
+| `Network Library`, `Enlist`, `Replication`, `Transaction Binding`, `Type System Version`, `User Instance`, `AttachDbFilename`, `Context Connection`, `Asynchronous Processing` | .NET-specific features not applicable |
 
 ## Boolean Values
 

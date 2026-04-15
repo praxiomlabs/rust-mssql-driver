@@ -300,6 +300,7 @@ The following are documented as known limitations, acceptable for initial releas
 | 0.6.0 Release | 2026-01-12 | Complete |
 | 0.7.0 Release | 2026-04-07 | Complete (security + SSPI + pre-1.0 hardening) |
 | 0.8.0 Release | 2026-04-13 | Complete (stored procs + SQL Browser + pool health) |
+| 0.9.0 Release | 2026-04-15 | Pending (AE decryption + ADO.NET conn string conformance) |
 | Test Coverage 60% | TBD | In Progress (46%) |
 | Security Audit | TBD | Not Scheduled |
 | 1.0.0 Release | TBD | Blocked |

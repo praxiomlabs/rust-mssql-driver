@@ -55,6 +55,9 @@ pub struct Client<S: ConnectionState> {
     /// OpenTelemetry instrumentation context (when otel feature is enabled)
     #[cfg(feature = "otel")]
     instrumentation: InstrumentationContext,
+    /// Always Encrypted context for column decryption (when always-encrypted feature is enabled)
+    #[cfg(feature = "always-encrypted")]
+    pub(crate) encryption_context: Option<std::sync::Arc<crate::encryption::EncryptionContext>>,
 }
 
 /// Internal connection handle wrapping the actual connection.
@@ -566,6 +569,8 @@ impl Client<Ready> {
             needs_reset: self.needs_reset,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
+            #[cfg(feature = "always-encrypted")]
+            encryption_context: self.encryption_context,
         })
     }
 
@@ -630,6 +635,8 @@ impl Client<Ready> {
             needs_reset: self.needs_reset,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
+            #[cfg(feature = "always-encrypted")]
+            encryption_context: self.encryption_context,
         })
     }
 
@@ -895,6 +902,76 @@ impl Client<InTransaction> {
             .map_err(|_| Error::CommandTimeout)?
     }
 
+    /// Open a FILESTREAM BLOB for async reading and/or writing.
+    ///
+    /// This method queries the server for the transaction context, then opens
+    /// the FILESTREAM handle using the native Win32 `OpenSqlFilestream` API.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` — The UNC path obtained from the T-SQL `column.PathName()` function.
+    ///   Query this yourself before calling `open_filestream`:
+    ///   ```sql
+    ///   SELECT Content.PathName() FROM dbo.Documents WHERE Id = @p1
+    ///   ```
+    /// * `access` — Read, write, or read/write access mode.
+    ///
+    /// # Requirements
+    ///
+    /// - SQL Server must have FILESTREAM enabled (`sp_configure 'filestream access level', 2`)
+    /// - The Microsoft OLE DB Driver for SQL Server must be installed on the client
+    /// - The `FileStream` must be dropped before calling [`commit`] or [`rollback`]
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use mssql_client::FileStreamAccess;
+    /// use tokio::io::AsyncReadExt;
+    ///
+    /// let mut tx = client.begin_transaction().await?;
+    ///
+    /// // Get the FILESTREAM path
+    /// let rows = tx.query(
+    ///     "SELECT Content.PathName() FROM dbo.Documents WHERE Id = @p1",
+    ///     &[&doc_id],
+    /// ).await?;
+    /// let path: String = rows.into_iter().next().unwrap()?.get(0)?;
+    ///
+    /// // Open and read the BLOB
+    /// let mut stream = tx.open_filestream(&path, FileStreamAccess::Read).await?;
+    /// let mut data = Vec::new();
+    /// stream.read_to_end(&mut data).await?;
+    /// drop(stream);
+    ///
+    /// tx.commit().await?;
+    /// ```
+    #[cfg(all(windows, feature = "filestream"))]
+    pub async fn open_filestream(
+        &mut self,
+        path: &str,
+        access: crate::filestream::FileStreamAccess,
+    ) -> Result<crate::filestream::FileStream> {
+        tracing::debug!(path = path, ?access, "opening FILESTREAM BLOB");
+
+        // Get the transaction context from SQL Server.
+        // This binds the file access to the current SQL transaction.
+        let txn_context: Vec<u8> = {
+            let rows = self
+                .query("SELECT GET_FILESTREAM_TRANSACTION_CONTEXT()", &[])
+                .await?;
+            let mut ctx = None;
+            for result in rows {
+                let row = result?;
+                ctx = Some(row.get::<Vec<u8>>(0)?);
+            }
+            ctx.ok_or_else(|| {
+                Error::FileStream("GET_FILESTREAM_TRANSACTION_CONTEXT() returned no rows".into())
+            })?
+        };
+
+        crate::filestream::FileStream::open(path, access, &txn_context)
+    }
+
     /// Commit the transaction.
     ///
     /// This transitions the client back to `Ready` state.
@@ -936,6 +1013,8 @@ impl Client<InTransaction> {
             needs_reset: self.needs_reset,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
+            #[cfg(feature = "always-encrypted")]
+            encryption_context: self.encryption_context,
         })
     }
 
@@ -980,6 +1059,8 @@ impl Client<InTransaction> {
             needs_reset: self.needs_reset,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
+            #[cfg(feature = "always-encrypted")]
+            encryption_context: self.encryption_context,
         })
     }
 

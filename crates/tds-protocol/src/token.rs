@@ -158,6 +158,9 @@ pub enum Token {
 pub struct ColMetaData {
     /// Column definitions.
     pub columns: Vec<ColumnData>,
+    /// CEK table for Always Encrypted result sets.
+    /// Present only when the server sends encrypted column metadata.
+    pub cek_table: Option<crate::crypto::CekTable>,
 }
 
 /// Column definition within metadata.
@@ -175,6 +178,9 @@ pub struct ColumnData {
     pub user_type: u32,
     /// Type-specific metadata.
     pub type_info: TypeInfo,
+    /// Per-column encryption metadata (Always Encrypted).
+    /// Present only for columns with the encrypted flag (0x0800) set.
+    pub crypto_metadata: Option<crate::crypto::CryptoMetadata>,
 }
 
 /// Type-specific metadata.
@@ -552,6 +558,244 @@ pub struct FedAuthInfo {
 // ColMetaData and Row Parsing Implementation
 // =============================================================================
 
+/// Decode collation information (5 bytes).
+///
+/// Shared by ColMetaData column parsing and CryptoMetadata base type parsing.
+pub(crate) fn decode_collation(src: &mut impl Buf) -> Result<Collation, ProtocolError> {
+    if src.remaining() < 5 {
+        return Err(ProtocolError::UnexpectedEof);
+    }
+    // Collation: LCID (4 bytes) + Sort ID (1 byte)
+    let lcid = src.get_u32_le();
+    let sort_id = src.get_u8();
+    Ok(Collation { lcid, sort_id })
+}
+
+/// Decode type-specific metadata for a column based on its TypeId.
+///
+/// Shared by ColMetaData column parsing and CryptoMetadata base type parsing.
+pub(crate) fn decode_type_info(
+    src: &mut impl Buf,
+    type_id: TypeId,
+    col_type: u8,
+) -> Result<TypeInfo, ProtocolError> {
+    match type_id {
+        // Fixed-length types have no additional metadata
+        TypeId::Null => Ok(TypeInfo::default()),
+        TypeId::Int1 | TypeId::Bit => Ok(TypeInfo::default()),
+        TypeId::Int2 => Ok(TypeInfo::default()),
+        TypeId::Int4 => Ok(TypeInfo::default()),
+        TypeId::Int8 => Ok(TypeInfo::default()),
+        TypeId::Float4 => Ok(TypeInfo::default()),
+        TypeId::Float8 => Ok(TypeInfo::default()),
+        TypeId::Money => Ok(TypeInfo::default()),
+        TypeId::Money4 => Ok(TypeInfo::default()),
+        TypeId::DateTime => Ok(TypeInfo::default()),
+        TypeId::DateTime4 => Ok(TypeInfo::default()),
+
+        // Variable length integer/float/money (1-byte max length)
+        TypeId::IntN | TypeId::BitN | TypeId::FloatN | TypeId::MoneyN | TypeId::DateTimeN => {
+            if src.remaining() < 1 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u8() as u32;
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                ..Default::default()
+            })
+        }
+
+        // GUID has 1-byte length
+        TypeId::Guid => {
+            if src.remaining() < 1 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u8() as u32;
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                ..Default::default()
+            })
+        }
+
+        // Decimal/Numeric types (1-byte length + precision + scale)
+        TypeId::Decimal | TypeId::Numeric | TypeId::DecimalN | TypeId::NumericN => {
+            if src.remaining() < 3 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u8() as u32;
+            let precision = src.get_u8();
+            let scale = src.get_u8();
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                precision: Some(precision),
+                scale: Some(scale),
+                ..Default::default()
+            })
+        }
+
+        // Old-style byte-length strings (Char, VarChar, Binary, VarBinary)
+        TypeId::Char | TypeId::VarChar | TypeId::Binary | TypeId::VarBinary => {
+            if src.remaining() < 1 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u8() as u32;
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                ..Default::default()
+            })
+        }
+
+        // Big varchar/binary with 2-byte length + collation for strings
+        TypeId::BigVarChar | TypeId::BigChar => {
+            if src.remaining() < 7 {
+                // 2 (length) + 5 (collation)
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u16_le() as u32;
+            let collation = decode_collation(src)?;
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                collation: Some(collation),
+                ..Default::default()
+            })
+        }
+
+        // Big binary (2-byte length, no collation)
+        TypeId::BigVarBinary | TypeId::BigBinary => {
+            if src.remaining() < 2 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u16_le() as u32;
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                ..Default::default()
+            })
+        }
+
+        // Unicode strings (NChar, NVarChar) - 2-byte length + collation
+        TypeId::NChar | TypeId::NVarChar => {
+            if src.remaining() < 7 {
+                // 2 (length) + 5 (collation)
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u16_le() as u32;
+            let collation = decode_collation(src)?;
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                collation: Some(collation),
+                ..Default::default()
+            })
+        }
+
+        // Date type (no additional metadata)
+        TypeId::Date => Ok(TypeInfo::default()),
+
+        // Time, DateTime2, DateTimeOffset have scale
+        TypeId::Time | TypeId::DateTime2 | TypeId::DateTimeOffset => {
+            if src.remaining() < 1 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let scale = src.get_u8();
+            Ok(TypeInfo {
+                scale: Some(scale),
+                ..Default::default()
+            })
+        }
+
+        // Text/NText/Image (deprecated LOB types)
+        TypeId::Text | TypeId::NText | TypeId::Image => {
+            // These have complex metadata: length (4) + collation (5) + table name parts
+            if src.remaining() < 4 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u32_le();
+
+            // For Text/NText, read collation
+            let collation = if type_id == TypeId::Text || type_id == TypeId::NText {
+                if src.remaining() < 5 {
+                    return Err(ProtocolError::UnexpectedEof);
+                }
+                Some(decode_collation(src)?)
+            } else {
+                None
+            };
+
+            // Skip table name parts (variable length)
+            // Format: numParts (1 byte) followed by us_varchar for each part
+            if src.remaining() < 1 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let num_parts = src.get_u8();
+            for _ in 0..num_parts {
+                // Read and discard table name part
+                let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?;
+            }
+
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                collation,
+                ..Default::default()
+            })
+        }
+
+        // XML type
+        TypeId::Xml => {
+            if src.remaining() < 1 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let schema_present = src.get_u8();
+
+            if schema_present != 0 {
+                // Read schema info (3 us_varchar strings)
+                let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // db name
+                let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // owning schema
+                let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // xml schema collection
+            }
+
+            Ok(TypeInfo::default())
+        }
+
+        // UDT (User-defined type) - complex metadata
+        TypeId::Udt => {
+            // Max length (2 bytes)
+            if src.remaining() < 2 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u16_le() as u32;
+
+            // UDT metadata: db name, schema name, type name, assembly qualified name
+            let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // db name
+            let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // schema name
+            let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // type name
+            let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // assembly qualified name
+
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                ..Default::default()
+            })
+        }
+
+        // Table-valued parameter - complex metadata (skip for now)
+        TypeId::Tvp => {
+            // TVP has very complex metadata, not commonly used
+            // For now, we can't properly parse this
+            Err(ProtocolError::InvalidTokenType(col_type))
+        }
+
+        // SQL Variant - 4-byte length
+        TypeId::Variant => {
+            if src.remaining() < 4 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u32_le();
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                ..Default::default()
+            })
+        }
+    }
+}
+
 impl ColMetaData {
     /// Special value indicating no metadata.
     pub const NO_METADATA: u16 = 0xFFFF;
@@ -568,6 +812,7 @@ impl ColMetaData {
         if column_count == Self::NO_METADATA {
             return Ok(Self {
                 columns: Vec::new(),
+                cek_table: None,
             });
         }
 
@@ -578,7 +823,10 @@ impl ColMetaData {
             columns.push(column);
         }
 
-        Ok(Self { columns })
+        Ok(Self {
+            columns,
+            cek_table: None,
+        })
     }
 
     /// Decode a single column from the metadata.
@@ -595,7 +843,7 @@ impl ColMetaData {
         let type_id = TypeId::from_u8(col_type).unwrap_or(TypeId::Null); // Default to Null for unknown types
 
         // Parse type-specific metadata
-        let type_info = Self::decode_type_info(src, type_id, col_type)?;
+        let type_info = decode_type_info(src, type_id, col_type)?;
 
         // Read column name (B_VARCHAR format - 1 byte length in characters)
         let name = read_b_varchar(src).ok_or(ProtocolError::UnexpectedEof)?;
@@ -607,241 +855,88 @@ impl ColMetaData {
             flags,
             user_type,
             type_info,
+            crypto_metadata: None,
         })
     }
 
-    /// Decode type-specific metadata based on the type ID.
-    fn decode_type_info(
-        src: &mut impl Buf,
-        type_id: TypeId,
-        col_type: u8,
-    ) -> Result<TypeInfo, ProtocolError> {
-        match type_id {
-            // Fixed-length types have no additional metadata
-            TypeId::Null => Ok(TypeInfo::default()),
-            TypeId::Int1 | TypeId::Bit => Ok(TypeInfo::default()),
-            TypeId::Int2 => Ok(TypeInfo::default()),
-            TypeId::Int4 => Ok(TypeInfo::default()),
-            TypeId::Int8 => Ok(TypeInfo::default()),
-            TypeId::Float4 => Ok(TypeInfo::default()),
-            TypeId::Float8 => Ok(TypeInfo::default()),
-            TypeId::Money => Ok(TypeInfo::default()),
-            TypeId::Money4 => Ok(TypeInfo::default()),
-            TypeId::DateTime => Ok(TypeInfo::default()),
-            TypeId::DateTime4 => Ok(TypeInfo::default()),
-
-            // Variable length integer/float/money (1-byte max length)
-            TypeId::IntN | TypeId::BitN | TypeId::FloatN | TypeId::MoneyN | TypeId::DateTimeN => {
-                if src.remaining() < 1 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u8() as u32;
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    ..Default::default()
-                })
-            }
-
-            // GUID has 1-byte length
-            TypeId::Guid => {
-                if src.remaining() < 1 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u8() as u32;
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    ..Default::default()
-                })
-            }
-
-            // Decimal/Numeric types (1-byte length + precision + scale)
-            TypeId::Decimal | TypeId::Numeric | TypeId::DecimalN | TypeId::NumericN => {
-                if src.remaining() < 3 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u8() as u32;
-                let precision = src.get_u8();
-                let scale = src.get_u8();
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    precision: Some(precision),
-                    scale: Some(scale),
-                    ..Default::default()
-                })
-            }
-
-            // Old-style byte-length strings (Char, VarChar, Binary, VarBinary)
-            TypeId::Char | TypeId::VarChar | TypeId::Binary | TypeId::VarBinary => {
-                if src.remaining() < 1 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u8() as u32;
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    ..Default::default()
-                })
-            }
-
-            // Big varchar/binary with 2-byte length + collation for strings
-            TypeId::BigVarChar | TypeId::BigChar => {
-                if src.remaining() < 7 {
-                    // 2 (length) + 5 (collation)
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u16_le() as u32;
-                let collation = Self::decode_collation(src)?;
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    collation: Some(collation),
-                    ..Default::default()
-                })
-            }
-
-            // Big binary (2-byte length, no collation)
-            TypeId::BigVarBinary | TypeId::BigBinary => {
-                if src.remaining() < 2 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u16_le() as u32;
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    ..Default::default()
-                })
-            }
-
-            // Unicode strings (NChar, NVarChar) - 2-byte length + collation
-            TypeId::NChar | TypeId::NVarChar => {
-                if src.remaining() < 7 {
-                    // 2 (length) + 5 (collation)
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u16_le() as u32;
-                let collation = Self::decode_collation(src)?;
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    collation: Some(collation),
-                    ..Default::default()
-                })
-            }
-
-            // Date type (no additional metadata)
-            TypeId::Date => Ok(TypeInfo::default()),
-
-            // Time, DateTime2, DateTimeOffset have scale
-            TypeId::Time | TypeId::DateTime2 | TypeId::DateTimeOffset => {
-                if src.remaining() < 1 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let scale = src.get_u8();
-                Ok(TypeInfo {
-                    scale: Some(scale),
-                    ..Default::default()
-                })
-            }
-
-            // Text/NText/Image (deprecated LOB types)
-            TypeId::Text | TypeId::NText | TypeId::Image => {
-                // These have complex metadata: length (4) + collation (5) + table name parts
-                if src.remaining() < 4 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u32_le();
-
-                // For Text/NText, read collation
-                let collation = if type_id == TypeId::Text || type_id == TypeId::NText {
-                    if src.remaining() < 5 {
-                        return Err(ProtocolError::UnexpectedEof);
-                    }
-                    Some(Self::decode_collation(src)?)
-                } else {
-                    None
-                };
-
-                // Skip table name parts (variable length)
-                // Format: numParts (1 byte) followed by us_varchar for each part
-                if src.remaining() < 1 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let num_parts = src.get_u8();
-                for _ in 0..num_parts {
-                    // Read and discard table name part
-                    let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?;
-                }
-
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    collation,
-                    ..Default::default()
-                })
-            }
-
-            // XML type
-            TypeId::Xml => {
-                if src.remaining() < 1 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let schema_present = src.get_u8();
-
-                if schema_present != 0 {
-                    // Read schema info (3 us_varchar strings)
-                    let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // db name
-                    let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // owning schema
-                    let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // xml schema collection
-                }
-
-                Ok(TypeInfo::default())
-            }
-
-            // UDT (User-defined type) - complex metadata
-            TypeId::Udt => {
-                // Max length (2 bytes)
-                if src.remaining() < 2 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u16_le() as u32;
-
-                // UDT metadata: db name, schema name, type name, assembly qualified name
-                let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // db name
-                let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // schema name
-                let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // type name
-                let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // assembly qualified name
-
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    ..Default::default()
-                })
-            }
-
-            // Table-valued parameter - complex metadata (skip for now)
-            TypeId::Tvp => {
-                // TVP has very complex metadata, not commonly used
-                // For now, we can't properly parse this
-                Err(ProtocolError::InvalidTokenType(col_type))
-            }
-
-            // SQL Variant - 4-byte length
-            TypeId::Variant => {
-                if src.remaining() < 4 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u32_le();
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    ..Default::default()
-                })
-            }
-        }
-    }
-
-    /// Decode collation information (5 bytes).
-    fn decode_collation(src: &mut impl Buf) -> Result<Collation, ProtocolError> {
-        if src.remaining() < 5 {
+    /// Decode a COLMETADATA token with Always Encrypted support.
+    ///
+    /// When column encryption was negotiated in Login7, the server sends a CekTable
+    /// before column definitions and per-column CryptoMetadata for encrypted columns.
+    ///
+    /// # Wire Format (with encryption)
+    ///
+    /// ```text
+    /// column_count: USHORT
+    /// cek_table: CekTable (always present when encryption negotiated)
+    /// columns: ColumnData[column_count] (with CryptoMetadata for encrypted columns)
+    /// ```
+    pub fn decode_encrypted(src: &mut impl Buf) -> Result<Self, ProtocolError> {
+        if src.remaining() < 2 {
             return Err(ProtocolError::UnexpectedEof);
         }
-        // Collation: LCID (4 bytes) + Sort ID (1 byte)
-        let lcid = src.get_u32_le();
-        let sort_id = src.get_u8();
-        Ok(Collation { lcid, sort_id })
+
+        let column_count = src.get_u16_le();
+
+        if column_count == Self::NO_METADATA {
+            return Ok(Self {
+                columns: Vec::new(),
+                cek_table: None,
+            });
+        }
+
+        // Parse CEK table (always present when encryption was negotiated)
+        let cek_table = crate::crypto::CekTable::decode(src)?;
+
+        let mut columns = Vec::with_capacity(column_count as usize);
+
+        for _ in 0..column_count {
+            let column = Self::decode_column_encrypted(src)?;
+            columns.push(column);
+        }
+
+        Ok(Self {
+            columns,
+            cek_table: Some(cek_table),
+        })
+    }
+
+    /// Decode a single column definition with Always Encrypted support.
+    ///
+    /// For encrypted columns (flags & 0x0800), parses CryptoMetadata after the type info.
+    fn decode_column_encrypted(src: &mut impl Buf) -> Result<ColumnData, ProtocolError> {
+        if src.remaining() < 7 {
+            return Err(ProtocolError::UnexpectedEof);
+        }
+
+        let user_type = src.get_u32_le();
+        let flags = src.get_u16_le();
+        let col_type = src.get_u8();
+
+        let type_id = TypeId::from_u8(col_type).unwrap_or(TypeId::Null);
+
+        // Parse type-specific metadata (for encrypted columns, this is the transport type)
+        let type_info = decode_type_info(src, type_id, col_type)?;
+
+        // Parse CryptoMetadata if the column is encrypted
+        let crypto_metadata = if crate::crypto::is_column_encrypted(flags) {
+            Some(crate::crypto::CryptoMetadata::decode(src)?)
+        } else {
+            None
+        };
+
+        // Read column name
+        let name = read_b_varchar(src).ok_or(ProtocolError::UnexpectedEof)?;
+
+        Ok(ColumnData {
+            name,
+            type_id,
+            col_type,
+            flags,
+            user_type,
+            type_info,
+            crypto_metadata,
+        })
     }
 
     /// Get the number of columns.
@@ -1362,7 +1457,7 @@ impl ReturnValue {
         let type_id = TypeId::from_u8(col_type).unwrap_or(TypeId::Null);
 
         // Parse type info
-        let type_info = ColMetaData::decode_type_info(src, type_id, col_type)?;
+        let type_info = decode_type_info(src, type_id, col_type)?;
 
         // Read the value data
         let mut value_buf = bytes::BytesMut::new();
@@ -1375,6 +1470,7 @@ impl ReturnValue {
             flags,
             user_type,
             type_info: type_info.clone(),
+            crypto_metadata: None,
         };
 
         RawRow::decode_column_value(src, &temp_col, &mut value_buf)?;
@@ -2068,13 +2164,30 @@ impl FedAuthInfo {
 pub struct TokenParser {
     data: Bytes,
     position: usize,
+    /// Whether Always Encrypted was negotiated for this connection.
+    /// When true, ColMetaData tokens are parsed with CekTable and per-column CryptoMetadata.
+    encryption_enabled: bool,
 }
 
 impl TokenParser {
     /// Create a new token parser from bytes.
     #[must_use]
     pub fn new(data: Bytes) -> Self {
-        Self { data, position: 0 }
+        Self {
+            data,
+            position: 0,
+            encryption_enabled: false,
+        }
+    }
+
+    /// Enable Always Encrypted metadata parsing.
+    ///
+    /// When enabled, ColMetaData tokens are parsed using the encrypted format
+    /// which includes a CekTable and per-column CryptoMetadata.
+    #[must_use]
+    pub fn with_encryption(mut self, enabled: bool) -> Self {
+        self.encryption_enabled = enabled;
+        self
     }
 
     /// Get remaining bytes in the buffer.
@@ -2183,7 +2296,11 @@ impl TokenParser {
                 Token::ReturnStatus(status)
             }
             Some(TokenType::ColMetaData) => {
-                let col_meta = ColMetaData::decode(&mut buf)?;
+                let col_meta = if self.encryption_enabled {
+                    ColMetaData::decode_encrypted(&mut buf)?
+                } else {
+                    ColMetaData::decode(&mut buf)?
+                };
                 Token::ColMetaData(col_meta)
             }
             Some(TokenType::Row) => {
@@ -2490,6 +2607,7 @@ mod tests {
     fn test_raw_row_decode_int() {
         // Create metadata for a single INT column
         let metadata = ColMetaData {
+            cek_table: None,
             columns: vec![ColumnData {
                 name: "id".to_string(),
                 type_id: TypeId::Int4,
@@ -2497,6 +2615,7 @@ mod tests {
                 flags: 0,
                 user_type: 0,
                 type_info: TypeInfo::default(),
+                crypto_metadata: None,
             }],
         };
 
@@ -2514,6 +2633,7 @@ mod tests {
     fn test_raw_row_decode_nullable_int() {
         // Create metadata for a nullable INT column (IntN)
         let metadata = ColMetaData {
+            cek_table: None,
             columns: vec![ColumnData {
                 name: "id".to_string(),
                 type_id: TypeId::IntN,
@@ -2524,6 +2644,7 @@ mod tests {
                     max_length: Some(4),
                     ..Default::default()
                 },
+                crypto_metadata: None,
             }],
         };
 
@@ -2541,6 +2662,7 @@ mod tests {
     fn test_raw_row_decode_null_value() {
         // Create metadata for a nullable INT column (IntN)
         let metadata = ColMetaData {
+            cek_table: None,
             columns: vec![ColumnData {
                 name: "id".to_string(),
                 type_id: TypeId::IntN,
@@ -2551,6 +2673,7 @@ mod tests {
                     max_length: Some(4),
                     ..Default::default()
                 },
+                crypto_metadata: None,
             }],
         };
 
@@ -2605,6 +2728,7 @@ mod tests {
     fn test_token_parser_row_with_metadata() {
         // Build metadata
         let metadata = ColMetaData {
+            cek_table: None,
             columns: vec![ColumnData {
                 name: "id".to_string(),
                 type_id: TypeId::Int4,
@@ -2612,6 +2736,7 @@ mod tests {
                 flags: 0,
                 user_type: 0,
                 type_info: TypeInfo::default(),
+                crypto_metadata: None,
             }],
         };
 
@@ -2669,6 +2794,7 @@ mod tests {
             flags: 0,
             user_type: 0,
             type_info: TypeInfo::default(),
+            crypto_metadata: None,
         };
         assert_eq!(col.fixed_size(), Some(4));
 
@@ -2679,6 +2805,7 @@ mod tests {
             flags: 0,
             user_type: 0,
             type_info: TypeInfo::default(),
+            crypto_metadata: None,
         };
         assert_eq!(col2.fixed_size(), None);
     }
@@ -2713,6 +2840,7 @@ mod tests {
 
         // Build column metadata
         let metadata = ColMetaData {
+            cek_table: None,
             columns: vec![
                 ColumnData {
                     name: "greeting".to_string(),
@@ -2726,6 +2854,7 @@ mod tests {
                         scale: None,
                         collation: None,
                     },
+                    crypto_metadata: None,
                 },
                 ColumnData {
                     name: "number".to_string(),
@@ -2739,6 +2868,7 @@ mod tests {
                         scale: None,
                         collation: None,
                     },
+                    crypto_metadata: None,
                 },
             ],
         };
@@ -2824,6 +2954,7 @@ mod tests {
 
         // Build metadata with MAX type
         let metadata = ColMetaData {
+            cek_table: None,
             columns: vec![
                 ColumnData {
                     name: "text".to_string(),
@@ -2837,6 +2968,7 @@ mod tests {
                         scale: None,
                         collation: None,
                     },
+                    crypto_metadata: None,
                 },
                 ColumnData {
                     name: "num".to_string(),
@@ -2850,6 +2982,7 @@ mod tests {
                         scale: None,
                         collation: None,
                     },
+                    crypto_metadata: None,
                 },
             ],
         };
@@ -2897,5 +3030,729 @@ mod tests {
             0,
             "stored data should be fully consumed"
         );
+    }
+
+    // ========================================================================
+    // ReturnStatus Token Tests
+    // ========================================================================
+
+    #[test]
+    fn test_return_status_via_parser() {
+        // RETURNSTATUS token: type (0x79) + value (i32 LE)
+        let data = Bytes::from_static(&[
+            0x79, // RETURNSTATUS token type
+            0x00, 0x00, 0x00, 0x00, // return value = 0 (success)
+        ]);
+
+        let mut parser = TokenParser::new(data);
+        let token = parser.next_token().unwrap().unwrap();
+
+        match token {
+            Token::ReturnStatus(status) => {
+                assert_eq!(status, 0);
+            }
+            _ => panic!("Expected ReturnStatus token, got {token:?}"),
+        }
+
+        assert!(parser.next_token().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_return_status_nonzero() {
+        // Return value = -6 (common for error returns)
+        let mut buf = BytesMut::new();
+        buf.put_u8(0x79); // RETURNSTATUS
+        buf.put_i32_le(-6);
+
+        let mut parser = TokenParser::new(buf.freeze());
+        let token = parser.next_token().unwrap().unwrap();
+
+        match token {
+            Token::ReturnStatus(status) => {
+                assert_eq!(status, -6);
+            }
+            _ => panic!("Expected ReturnStatus token"),
+        }
+    }
+
+    // ========================================================================
+    // DoneProc Token Tests
+    // ========================================================================
+
+    #[test]
+    fn test_done_proc_roundtrip() {
+        let done = DoneProc {
+            status: DoneStatus {
+                more: false,
+                error: false,
+                in_xact: false,
+                count: true,
+                attn: false,
+                srverror: false,
+            },
+            cur_cmd: 0x00C6, // EXECUTE (198)
+            row_count: 100,
+        };
+
+        let mut buf = BytesMut::new();
+        done.encode(&mut buf);
+
+        // Verify token type byte
+        assert_eq!(buf[0], 0xFE);
+
+        // Skip token type byte and decode
+        let mut cursor = &buf[1..];
+        let decoded = DoneProc::decode(&mut cursor).unwrap();
+
+        assert!(decoded.status.count);
+        assert!(!decoded.status.more);
+        assert!(!decoded.status.error);
+        assert_eq!(decoded.cur_cmd, 0x00C6);
+        assert_eq!(decoded.row_count, 100);
+    }
+
+    #[test]
+    fn test_done_proc_via_parser() {
+        let data = Bytes::from_static(&[
+            0xFE, // DONEPROC token type
+            0x00, 0x00, // status: no flags
+            0xC6, 0x00, // cur_cmd: EXECUTE (198)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // row_count: 0
+        ]);
+
+        let mut parser = TokenParser::new(data);
+        let token = parser.next_token().unwrap().unwrap();
+
+        match token {
+            Token::DoneProc(done) => {
+                assert!(!done.status.count);
+                assert!(!done.status.more);
+                assert_eq!(done.cur_cmd, 198);
+                assert_eq!(done.row_count, 0);
+            }
+            _ => panic!("Expected DoneProc token"),
+        }
+    }
+
+    #[test]
+    fn test_done_proc_with_error_flag() {
+        let mut buf = BytesMut::new();
+        buf.put_u8(0xFE); // DONEPROC
+        buf.put_u16_le(0x0002); // status: DONE_ERROR
+        buf.put_u16_le(0x00C6); // cur_cmd: EXECUTE
+        buf.put_u64_le(0); // row_count
+
+        let mut parser = TokenParser::new(buf.freeze());
+        let token = parser.next_token().unwrap().unwrap();
+
+        match token {
+            Token::DoneProc(done) => {
+                assert!(done.status.error);
+                assert!(!done.status.count);
+                assert!(!done.status.more);
+            }
+            _ => panic!("Expected DoneProc token"),
+        }
+    }
+
+    // ========================================================================
+    // DoneInProc Token Tests
+    // ========================================================================
+
+    #[test]
+    fn test_done_in_proc_roundtrip() {
+        let done = DoneInProc {
+            status: DoneStatus {
+                more: true,
+                error: false,
+                in_xact: false,
+                count: true,
+                attn: false,
+                srverror: false,
+            },
+            cur_cmd: 193, // SELECT
+            row_count: 7,
+        };
+
+        let mut buf = BytesMut::new();
+        done.encode(&mut buf);
+
+        assert_eq!(buf[0], 0xFF);
+
+        let mut cursor = &buf[1..];
+        let decoded = DoneInProc::decode(&mut cursor).unwrap();
+
+        assert!(decoded.status.more);
+        assert!(decoded.status.count);
+        assert!(!decoded.status.error);
+        assert_eq!(decoded.cur_cmd, 193);
+        assert_eq!(decoded.row_count, 7);
+    }
+
+    #[test]
+    fn test_done_in_proc_via_parser() {
+        let data = Bytes::from_static(&[
+            0xFF, // DONEINPROC token type
+            0x11, 0x00, // status: MORE | COUNT
+            0xC1, 0x00, // cur_cmd: SELECT (193)
+            0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // row_count: 3
+        ]);
+
+        let mut parser = TokenParser::new(data);
+        let token = parser.next_token().unwrap().unwrap();
+
+        match token {
+            Token::DoneInProc(done) => {
+                assert!(done.status.more);
+                assert!(done.status.count);
+                assert_eq!(done.cur_cmd, 193);
+                assert_eq!(done.row_count, 3);
+            }
+            _ => panic!("Expected DoneInProc token"),
+        }
+    }
+
+    // ========================================================================
+    // ServerError Token Tests
+    // ========================================================================
+
+    #[test]
+    fn test_server_error_decode() {
+        // Build a realistic ERROR token (without the 0xAA type byte,
+        // since decode() is called after the parser strips it).
+        let mut buf = BytesMut::new();
+
+        // Construct the message fields first to compute length
+        let msg_utf16: Vec<u16> = "Invalid column name 'foo'.".encode_utf16().collect();
+        let srv_utf16: Vec<u16> = "SQLDB01".encode_utf16().collect();
+        let proc_utf16: Vec<u16> = "".encode_utf16().collect();
+
+        // Length = number(4) + state(1) + class(1)
+        //        + us_varchar(message): 2 + msg_utf16.len()*2
+        //        + b_varchar(server): 1 + srv_utf16.len()*2
+        //        + b_varchar(procedure): 1 + proc_utf16.len()*2
+        //        + line(4)
+        let length: u16 = (4
+            + 1
+            + 1
+            + 2
+            + (msg_utf16.len() * 2)
+            + 1
+            + (srv_utf16.len() * 2)
+            + 1
+            + (proc_utf16.len() * 2)
+            + 4) as u16;
+
+        buf.put_u16_le(length);
+        buf.put_i32_le(207); // error number: Invalid column
+        buf.put_u8(1); // state
+        buf.put_u8(16); // class (severity 16)
+
+        // Message (US_VARCHAR: 2-byte char count + UTF-16LE)
+        buf.put_u16_le(msg_utf16.len() as u16);
+        for &c in &msg_utf16 {
+            buf.put_u16_le(c);
+        }
+
+        // Server (B_VARCHAR: 1-byte char count + UTF-16LE)
+        buf.put_u8(srv_utf16.len() as u8);
+        for &c in &srv_utf16 {
+            buf.put_u16_le(c);
+        }
+
+        // Procedure (B_VARCHAR: empty)
+        buf.put_u8(proc_utf16.len() as u8);
+
+        // Line number
+        buf.put_i32_le(42);
+
+        let mut cursor = buf.freeze();
+        let error = ServerError::decode(&mut cursor).unwrap();
+
+        assert_eq!(error.number, 207);
+        assert_eq!(error.state, 1);
+        assert_eq!(error.class, 16);
+        assert_eq!(error.message, "Invalid column name 'foo'.");
+        assert_eq!(error.server, "SQLDB01");
+        assert_eq!(error.procedure, "");
+        assert_eq!(error.line, 42);
+    }
+
+    #[test]
+    fn test_server_error_severity_helpers() {
+        let fatal = ServerError {
+            number: 4014,
+            state: 1,
+            class: 20,
+            message: "Fatal error".to_string(),
+            server: String::new(),
+            procedure: String::new(),
+            line: 0,
+        };
+        assert!(fatal.is_fatal());
+        assert!(fatal.is_batch_abort());
+
+        let batch_abort = ServerError {
+            number: 547,
+            state: 0,
+            class: 16,
+            message: "Constraint violation".to_string(),
+            server: String::new(),
+            procedure: String::new(),
+            line: 1,
+        };
+        assert!(!batch_abort.is_fatal());
+        assert!(batch_abort.is_batch_abort());
+
+        let informational = ServerError {
+            number: 5701,
+            state: 2,
+            class: 10,
+            message: "Changed db context".to_string(),
+            server: String::new(),
+            procedure: String::new(),
+            line: 0,
+        };
+        assert!(!informational.is_fatal());
+        assert!(!informational.is_batch_abort());
+    }
+
+    #[test]
+    fn test_server_error_via_parser() {
+        // Build an ERROR token with the 0xAA type byte for the parser
+        let mut buf = BytesMut::new();
+        buf.put_u8(0xAA); // ERROR token type
+
+        let msg_utf16: Vec<u16> = "Syntax error".encode_utf16().collect();
+        let srv_utf16: Vec<u16> = "SRV".encode_utf16().collect();
+        let proc_utf16: Vec<u16> = "sp_test".encode_utf16().collect();
+
+        let length: u16 = (4
+            + 1
+            + 1
+            + 2
+            + (msg_utf16.len() * 2)
+            + 1
+            + (srv_utf16.len() * 2)
+            + 1
+            + (proc_utf16.len() * 2)
+            + 4) as u16;
+
+        buf.put_u16_le(length);
+        buf.put_i32_le(102); // Syntax error
+        buf.put_u8(1);
+        buf.put_u8(15);
+
+        buf.put_u16_le(msg_utf16.len() as u16);
+        for &c in &msg_utf16 {
+            buf.put_u16_le(c);
+        }
+        buf.put_u8(srv_utf16.len() as u8);
+        for &c in &srv_utf16 {
+            buf.put_u16_le(c);
+        }
+        buf.put_u8(proc_utf16.len() as u8);
+        for &c in &proc_utf16 {
+            buf.put_u16_le(c);
+        }
+        buf.put_i32_le(5);
+
+        let mut parser = TokenParser::new(buf.freeze());
+        let token = parser.next_token().unwrap().unwrap();
+
+        match token {
+            Token::Error(err) => {
+                assert_eq!(err.number, 102);
+                assert_eq!(err.class, 15);
+                assert_eq!(err.message, "Syntax error");
+                assert_eq!(err.server, "SRV");
+                assert_eq!(err.procedure, "sp_test");
+                assert_eq!(err.line, 5);
+            }
+            _ => panic!("Expected Error token"),
+        }
+    }
+
+    // ========================================================================
+    // ReturnValue Token Tests
+    // ========================================================================
+
+    /// Helper: build a ReturnValue token (without the 0xAC type byte)
+    /// for an IntN output parameter.
+    fn build_return_value_intn(
+        ordinal: u16,
+        name: &str,
+        status: u8,
+        value: Option<i32>,
+    ) -> BytesMut {
+        let mut inner = BytesMut::new();
+
+        // param_ordinal
+        inner.put_u16_le(ordinal);
+
+        // param_name (B_VARCHAR)
+        let name_utf16: Vec<u16> = name.encode_utf16().collect();
+        inner.put_u8(name_utf16.len() as u8);
+        for &c in &name_utf16 {
+            inner.put_u16_le(c);
+        }
+
+        // status
+        inner.put_u8(status);
+
+        // user_type (4 bytes)
+        inner.put_u32_le(0);
+
+        // flags (2 bytes)
+        inner.put_u16_le(0x0001); // nullable
+
+        // type_id: IntN = 0x26
+        inner.put_u8(0x26);
+
+        // type_info for IntN: 1-byte max_length
+        inner.put_u8(4);
+
+        // value (TYPE_VARBYTE for IntN: 1-byte length + data)
+        match value {
+            Some(v) => {
+                inner.put_u8(4); // length = 4
+                inner.put_i32_le(v);
+            }
+            None => {
+                inner.put_u8(0); // length = 0 means NULL
+            }
+        }
+
+        // Now build the full token with the 2-byte length prefix
+        let mut buf = BytesMut::new();
+        buf.put_u16_le(inner.len() as u16);
+        buf.extend_from_slice(&inner);
+        buf
+    }
+
+    #[test]
+    fn test_return_value_int_output() {
+        let buf = build_return_value_intn(1, "@result", 0x01, Some(42));
+        let mut cursor = buf.freeze();
+        let rv = ReturnValue::decode(&mut cursor).unwrap();
+
+        assert_eq!(rv.param_ordinal, 1);
+        assert_eq!(rv.param_name, "@result");
+        assert_eq!(rv.status, 0x01); // OUTPUT
+        assert_eq!(rv.col_type, 0x26); // IntN
+        assert_eq!(rv.type_info.max_length, Some(4));
+        // Value should contain: length byte (4) + i32 LE (42)
+        assert_eq!(rv.value.len(), 5);
+        assert_eq!(rv.value[0], 4);
+        assert_eq!(
+            i32::from_le_bytes([rv.value[1], rv.value[2], rv.value[3], rv.value[4]]),
+            42
+        );
+    }
+
+    #[test]
+    fn test_return_value_null_output() {
+        let buf = build_return_value_intn(2, "@count", 0x01, None);
+        let mut cursor = buf.freeze();
+        let rv = ReturnValue::decode(&mut cursor).unwrap();
+
+        assert_eq!(rv.param_ordinal, 2);
+        assert_eq!(rv.param_name, "@count");
+        assert_eq!(rv.status, 0x01);
+        assert_eq!(rv.col_type, 0x26);
+        // NULL value: length byte = 0
+        assert_eq!(rv.value.len(), 1);
+        assert_eq!(rv.value[0], 0);
+    }
+
+    #[test]
+    fn test_return_value_udf_status() {
+        // UDF return value has status = 0x02
+        let buf = build_return_value_intn(0, "@RETURN_VALUE", 0x02, Some(-1));
+        let mut cursor = buf.freeze();
+        let rv = ReturnValue::decode(&mut cursor).unwrap();
+
+        assert_eq!(rv.param_ordinal, 0);
+        assert_eq!(rv.param_name, "@RETURN_VALUE");
+        assert_eq!(rv.status, 0x02); // UDF return value
+        assert_eq!(rv.value[0], 4);
+        assert_eq!(
+            i32::from_le_bytes([rv.value[1], rv.value[2], rv.value[3], rv.value[4]]),
+            -1
+        );
+    }
+
+    #[test]
+    fn test_return_value_nvarchar_output() {
+        // Build a ReturnValue for NVARCHAR(100) output parameter
+        let mut inner = BytesMut::new();
+
+        // param_ordinal
+        inner.put_u16_le(1);
+
+        // param_name "@name"
+        let name_utf16: Vec<u16> = "@name".encode_utf16().collect();
+        inner.put_u8(name_utf16.len() as u8);
+        for &c in &name_utf16 {
+            inner.put_u16_le(c);
+        }
+
+        // status = OUTPUT
+        inner.put_u8(0x01);
+        // user_type
+        inner.put_u32_le(0);
+        // flags (nullable)
+        inner.put_u16_le(0x0001);
+        // type_id: NVarChar = 0xE7
+        inner.put_u8(0xE7);
+        // type_info for NVarChar: 2-byte max_length + 5-byte collation
+        inner.put_u16_le(200); // max 100 chars * 2 bytes
+        inner.put_u32_le(0x0904D000); // collation LCID
+        inner.put_u8(0x34); // collation sort_id
+
+        // value: "Hello" in UTF-16LE with 2-byte length prefix
+        let val_utf16: Vec<u16> = "Hello".encode_utf16().collect();
+        let byte_len = (val_utf16.len() * 2) as u16;
+        inner.put_u16_le(byte_len);
+        for &c in &val_utf16 {
+            inner.put_u16_le(c);
+        }
+
+        // Wrap with length prefix
+        let mut buf = BytesMut::new();
+        buf.put_u16_le(inner.len() as u16);
+        buf.extend_from_slice(&inner);
+
+        let mut cursor = buf.freeze();
+        let rv = ReturnValue::decode(&mut cursor).unwrap();
+
+        assert_eq!(rv.param_ordinal, 1);
+        assert_eq!(rv.param_name, "@name");
+        assert_eq!(rv.status, 0x01);
+        assert_eq!(rv.col_type, 0xE7); // NVarChar
+        assert_eq!(rv.type_info.max_length, Some(200));
+        assert!(rv.type_info.collation.is_some());
+
+        // Value: 2-byte length (10) + "Hello" in UTF-16LE
+        assert_eq!(rv.value.len(), 12); // 2 + 10
+        let val_len = u16::from_le_bytes([rv.value[0], rv.value[1]]);
+        assert_eq!(val_len, 10);
+    }
+
+    #[test]
+    fn test_return_value_via_parser() {
+        // Build a full ReturnValue token with the 0xAC type byte
+        let mut data = BytesMut::new();
+        data.put_u8(0xAC); // RETURNVALUE token type
+        data.extend_from_slice(&build_return_value_intn(0, "@out", 0x01, Some(99)));
+
+        let mut parser = TokenParser::new(data.freeze());
+        let token = parser.next_token().unwrap().unwrap();
+
+        match token {
+            Token::ReturnValue(rv) => {
+                assert_eq!(rv.param_name, "@out");
+                assert_eq!(rv.param_ordinal, 0);
+                assert_eq!(rv.status, 0x01);
+                assert_eq!(rv.col_type, 0x26);
+            }
+            _ => panic!("Expected ReturnValue token"),
+        }
+    }
+
+    // ========================================================================
+    // Multi-Token Stream Tests
+    // ========================================================================
+
+    #[test]
+    fn test_multi_token_stored_proc_response() {
+        // Simulate a stored procedure response:
+        // DoneInProc (result set done) → ReturnStatus → DoneProc
+        let mut data = BytesMut::new();
+
+        // Token 1: DONEINPROC — result set with 3 rows
+        data.put_u8(0xFF); // DONEINPROC
+        data.put_u16_le(0x0010); // status: COUNT
+        data.put_u16_le(0x00C1); // cur_cmd: SELECT
+        data.put_u64_le(3); // row_count
+
+        // Token 2: RETURNSTATUS — procedure returned 0
+        data.put_u8(0x79); // RETURNSTATUS
+        data.put_i32_le(0);
+
+        // Token 3: DONEPROC — final
+        data.put_u8(0xFE); // DONEPROC
+        data.put_u16_le(0x0000); // status: no flags
+        data.put_u16_le(0x00C6); // cur_cmd: EXECUTE
+        data.put_u64_le(0);
+
+        let mut parser = TokenParser::new(data.freeze());
+
+        // Token 1: DoneInProc
+        let t1 = parser.next_token().unwrap().unwrap();
+        match t1 {
+            Token::DoneInProc(done) => {
+                assert!(done.status.count);
+                assert_eq!(done.row_count, 3);
+                assert_eq!(done.cur_cmd, 193);
+            }
+            _ => panic!("Expected DoneInProc, got {t1:?}"),
+        }
+
+        // Token 2: ReturnStatus
+        let t2 = parser.next_token().unwrap().unwrap();
+        match t2 {
+            Token::ReturnStatus(status) => {
+                assert_eq!(status, 0);
+            }
+            _ => panic!("Expected ReturnStatus, got {t2:?}"),
+        }
+
+        // Token 3: DoneProc
+        let t3 = parser.next_token().unwrap().unwrap();
+        match t3 {
+            Token::DoneProc(done) => {
+                assert!(!done.status.count);
+                assert!(!done.status.more);
+                assert_eq!(done.cur_cmd, 198);
+            }
+            _ => panic!("Expected DoneProc, got {t3:?}"),
+        }
+
+        // No more tokens
+        assert!(parser.next_token().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_multi_token_error_in_stream() {
+        // Simulate: ERROR → DONE (error during query)
+        let mut data = BytesMut::new();
+
+        // Token 1: ERROR
+        data.put_u8(0xAA);
+
+        let msg_utf16: Vec<u16> = "Deadlock".encode_utf16().collect();
+        let srv_utf16: Vec<u16> = "DB1".encode_utf16().collect();
+
+        let length: u16 = (4 + 1 + 1
+            + 2 + (msg_utf16.len() * 2)
+            + 1 + (srv_utf16.len() * 2)
+            + 1  // empty procedure
+            + 4) as u16;
+
+        data.put_u16_le(length);
+        data.put_i32_le(1205); // deadlock
+        data.put_u8(51); // state
+        data.put_u8(13); // class
+
+        data.put_u16_le(msg_utf16.len() as u16);
+        for &c in &msg_utf16 {
+            data.put_u16_le(c);
+        }
+        data.put_u8(srv_utf16.len() as u8);
+        for &c in &srv_utf16 {
+            data.put_u16_le(c);
+        }
+        data.put_u8(0); // empty procedure
+        data.put_i32_le(0);
+
+        // Token 2: DONE with error flag
+        data.put_u8(0xFD);
+        data.put_u16_le(0x0002); // DONE_ERROR
+        data.put_u16_le(0x00C1); // SELECT
+        data.put_u64_le(0);
+
+        let mut parser = TokenParser::new(data.freeze());
+
+        // Token 1: Error
+        let t1 = parser.next_token().unwrap().unwrap();
+        match t1 {
+            Token::Error(err) => {
+                assert_eq!(err.number, 1205);
+                assert_eq!(err.class, 13);
+                assert_eq!(err.message, "Deadlock");
+                assert_eq!(err.server, "DB1");
+            }
+            _ => panic!("Expected Error token, got {t1:?}"),
+        }
+
+        // Token 2: Done with error
+        let t2 = parser.next_token().unwrap().unwrap();
+        match t2 {
+            Token::Done(done) => {
+                assert!(done.status.error);
+                assert!(!done.status.count);
+            }
+            _ => panic!("Expected Done token, got {t2:?}"),
+        }
+
+        assert!(parser.next_token().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_multi_token_proc_with_return_value() {
+        // Simulate stored proc: ReturnValue → ReturnStatus → DoneProc
+        let mut data = BytesMut::new();
+
+        // Token 1: ReturnValue (@result = 42)
+        data.put_u8(0xAC);
+        data.extend_from_slice(&build_return_value_intn(1, "@result", 0x01, Some(42)));
+
+        // Token 2: ReturnStatus = 0
+        data.put_u8(0x79);
+        data.put_i32_le(0);
+
+        // Token 3: DoneProc
+        data.put_u8(0xFE);
+        data.put_u16_le(0x0000);
+        data.put_u16_le(0x00C6);
+        data.put_u64_le(0);
+
+        let mut parser = TokenParser::new(data.freeze());
+
+        let t1 = parser.next_token().unwrap().unwrap();
+        match t1 {
+            Token::ReturnValue(rv) => {
+                assert_eq!(rv.param_name, "@result");
+                assert_eq!(rv.param_ordinal, 1);
+            }
+            _ => panic!("Expected ReturnValue, got {t1:?}"),
+        }
+
+        let t2 = parser.next_token().unwrap().unwrap();
+        assert!(matches!(t2, Token::ReturnStatus(0)));
+
+        let t3 = parser.next_token().unwrap().unwrap();
+        assert!(matches!(t3, Token::DoneProc(_)));
+
+        assert!(parser.next_token().unwrap().is_none());
+    }
+
+    // ========================================================================
+    // EOF / Truncation Edge Cases
+    // ========================================================================
+
+    #[test]
+    fn test_return_status_truncated() {
+        // Only 3 bytes instead of 4 for i32
+        let data = Bytes::from_static(&[0x79, 0x01, 0x02, 0x03]);
+        let mut parser = TokenParser::new(data);
+        assert!(parser.next_token().is_err());
+    }
+
+    #[test]
+    fn test_done_proc_truncated() {
+        // Only 8 bytes instead of 12
+        let data = Bytes::from_static(&[0xFE, 0x00, 0x00, 0xC1, 0x00, 0x01, 0x00, 0x00, 0x00]);
+        let mut parser = TokenParser::new(data);
+        assert!(parser.next_token().is_err());
+    }
+
+    #[test]
+    fn test_server_error_truncated() {
+        // ERROR token with only the length field (body truncated)
+        let data = Bytes::from_static(&[0xAA, 0x20, 0x00]);
+        let mut parser = TokenParser::new(data);
+        assert!(parser.next_token().is_err());
     }
 }

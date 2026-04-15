@@ -148,6 +148,22 @@ pub enum Error {
         /// Description of what went wrong.
         reason: String,
     },
+
+    /// FILESTREAM operation failed.
+    ///
+    /// This error occurs when opening or accessing a FILESTREAM BLOB fails,
+    /// typically due to a missing driver DLL, invalid path, or permission issue.
+    #[cfg(all(windows, feature = "filestream"))]
+    #[error("FILESTREAM error: {0}")]
+    FileStream(String),
+
+    /// Always Encrypted operation failed.
+    ///
+    /// This error occurs during CEK decryption, column value decryption, or
+    /// parameter encryption. Key material is never included in the error message.
+    #[cfg(feature = "always-encrypted")]
+    #[error("encryption error: {0}")]
+    Encryption(String),
 }
 
 // Note: From<mssql_tls::TlsError> and From<tds_protocol::ProtocolError> are
@@ -176,6 +192,16 @@ impl std::error::Error for SharedIoError {
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
         Error::Io(SharedIoError(Arc::new(e)))
+    }
+}
+
+#[cfg(feature = "always-encrypted")]
+impl From<mssql_auth::EncryptionError> for Error {
+    fn from(e: mssql_auth::EncryptionError) -> Self {
+        // SECURITY: Do NOT include key material in the error message.
+        // EncryptionError::Display does not log keys, but we convert to
+        // String to ensure no internal state leaks.
+        Error::Encryption(e.to_string())
     }
 }
 

@@ -210,7 +210,7 @@ When evaluating feature requests:
 
 1. **Complexity vs. Value** - Features with high complexity for limited benefit are deprioritized
 2. **Modern Practices** - Features obsoleted by modern alternatives are not implemented
-3. **Cross-Platform** - Windows-only features are generally not supported
+3. **Cross-Platform First** - Core functionality works on all platforms; platform-specific features (SSPI, FILESTREAM, CertStore) are gated behind feature flags
 4. **Security** - Features with security implications receive extra scrutiny
 
 ---
@@ -225,4 +225,4 @@ If you need a feature not listed here:
 
 ---
 
-*Last updated: January 2026*
+*Last updated: April 2026 (v0.8.0+)*

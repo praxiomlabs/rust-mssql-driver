@@ -390,6 +390,16 @@ impl Login7 {
         self
     }
 
+    /// Set the session language for server warning/error messages.
+    ///
+    /// The language name can be up to 128 characters (e.g., `"us_english"`).
+    /// When not set, the server uses its default language.
+    #[must_use]
+    pub fn with_language(mut self, language: impl Into<String>) -> Self {
+        self.language = language.into();
+        self
+    }
+
     /// Set the packet size.
     #[must_use]
     pub fn with_packet_size(mut self, packet_size: u32) -> Self {

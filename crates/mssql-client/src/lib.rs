@@ -91,10 +91,15 @@ pub mod bulk;
 pub mod cancel;
 pub mod change_tracking;
 pub mod client;
+#[cfg(feature = "always-encrypted")]
+pub(crate) mod column_decryptor;
 pub(crate) mod column_parser;
 pub mod config;
 pub mod encryption;
 pub mod error;
+#[cfg(all(windows, feature = "filestream"))]
+#[allow(unsafe_code)] // Win32 FFI for OpenSqlFilestream; see SAFETY comments in each unsafe block
+pub mod filestream;
 pub mod from_row;
 pub mod instrumentation;
 pub mod procedure;
@@ -112,7 +117,7 @@ pub(crate) mod validation;
 pub use bulk::{BulkColumn, BulkInsert, BulkInsertBuilder, BulkInsertResult, BulkOptions};
 pub use cancel::CancelHandle;
 pub use client::Client;
-pub use config::{Config, RedirectConfig, RetryPolicy, TimeoutConfig};
+pub use config::{ApplicationIntent, Config, RedirectConfig, RetryPolicy, TimeoutConfig};
 pub use error::{Error, SharedIoError};
 
 // Re-export TDS version for configuration
@@ -137,6 +142,10 @@ pub use stream::{
 pub use to_params::{NamedParam, ParamList, ToParams};
 pub use transaction::{IsolationLevel, SavePoint, Transaction};
 pub use tvp::{Tvp, TvpColumn, TvpRow, TvpValue};
+
+// FILESTREAM support (Windows only)
+#[cfg(all(windows, feature = "filestream"))]
+pub use filestream::{FileStream, FileStreamAccess, open_options as filestream_options};
 
 // Always Encrypted types
 #[cfg(feature = "always-encrypted")]

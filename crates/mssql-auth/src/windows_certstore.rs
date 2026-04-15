@@ -51,37 +51,17 @@
 use std::ffi::c_void;
 
 use tracing::{debug, instrument};
-use windows::Win32::Foundation::BOOL;
 use windows::Win32::Security::Cryptography::CryptAcquireCertificatePrivateKey;
 use windows::Win32::Security::Cryptography::{
-    BCRYPT_OAEP_PADDING_INFO,
-    // Constants
-    BCRYPT_PAD_OAEP,
-    BCRYPT_PAD_PKCS1,
-    BCRYPT_PKCS1_PADDING_INFO,
-    CERT_CLOSE_STORE_CHECK_FLAG,
-    CERT_FIND_HASH,
-    CERT_OPEN_STORE_FLAGS,
-    CERT_QUERY_ENCODING_TYPE,
-    CERT_STORE_PROV_SYSTEM_W,
-    CRYPT_ACQUIRE_ONLY_NCRYPT_KEY_FLAG,
-    CRYPT_HASH_BLOB,
-    // Certificate store functions
-    CertCloseStore,
-    CertFindCertificateInStore,
-    CertFreeCertificateContext,
-    CertOpenStore,
-    NCRYPT_FLAGS,
-    NCRYPT_KEY_HANDLE,
-    NCRYPT_SILENT_FLAG,
-    // CNG functions
-    NCryptDecrypt,
-    NCryptFreeObject,
-    NCryptSignHash,
-    NCryptVerifySignature,
+    BCRYPT_OAEP_PADDING_INFO, BCRYPT_PAD_OAEP, BCRYPT_PAD_PKCS1, BCRYPT_PKCS1_PADDING_INFO,
+    CERT_CLOSE_STORE_CHECK_FLAG, CERT_FIND_HASH, CERT_KEY_SPEC, CERT_OPEN_STORE_FLAGS,
+    CERT_QUERY_ENCODING_TYPE, CERT_STORE_PROV_SYSTEM_W, CRYPT_ACQUIRE_ONLY_NCRYPT_KEY_FLAG,
+    CRYPT_INTEGER_BLOB, CertCloseStore, CertFindCertificateInStore, CertFreeCertificateContext,
+    CertOpenStore, HCRYPTPROV_OR_NCRYPT_KEY_HANDLE, NCRYPT_FLAGS, NCRYPT_HANDLE, NCRYPT_KEY_HANDLE,
+    NCRYPT_SILENT_FLAG, NCryptDecrypt, NCryptFreeObject, NCryptSignHash, NCryptVerifySignature,
     X509_ASN_ENCODING,
 };
-use windows::core::PCWSTR;
+use windows::core::{BOOL, PCWSTR};
 
 use crate::encryption::{EncryptionError, KeyStoreProvider};
 
@@ -128,8 +108,7 @@ impl WindowsCertStoreProvider {
 
         if parts.len() < 3 {
             return Err(EncryptionError::CmkError(format!(
-                "Invalid CMK path format: expected '<StoreLocation>/<StoreName>/<Thumbprint>', got '{}'",
-                cmk_path
+                "Invalid CMK path format: expected '<StoreLocation>/<StoreName>/<Thumbprint>', got '{cmk_path}'"
             )));
         }
 
@@ -149,7 +128,7 @@ impl WindowsCertStoreProvider {
         // Parse thumbprint (hex string)
         let thumbprint_hex = parts[2..].join("");
         let thumbprint = hex_to_bytes(&thumbprint_hex)
-            .map_err(|e| EncryptionError::CmkError(format!("Invalid thumbprint hex: {}", e)))?;
+            .map_err(|e| EncryptionError::CmkError(format!("Invalid thumbprint hex: {e}")))?;
 
         Ok((store_location, store_name, thumbprint))
     }
@@ -180,8 +159,7 @@ impl WindowsCertStoreProvider {
         }
         .map_err(|e| {
             EncryptionError::CmkError(format!(
-                "Failed to open certificate store '{}': {}",
-                store_name, e
+                "Failed to open certificate store '{store_name}': {e}"
             ))
         })?;
 
@@ -189,7 +167,7 @@ impl WindowsCertStoreProvider {
         let store_guard = CertStoreGuard(store);
 
         // Create hash blob for certificate lookup
-        let hash_blob = CRYPT_HASH_BLOB {
+        let hash_blob = CRYPT_INTEGER_BLOB {
             cbData: thumbprint.len() as u32,
             pbData: thumbprint.as_ptr() as *mut u8,
         };
@@ -220,22 +198,22 @@ impl WindowsCertStoreProvider {
         let cert_guard = CertContextGuard(cert_context);
 
         // Acquire the private key
-        let mut key_handle = NCRYPT_KEY_HANDLE::default();
-        let mut key_spec = 0u32;
-        let mut caller_free = BOOL::from(false);
+        let mut key_handle = HCRYPTPROV_OR_NCRYPT_KEY_HANDLE::default();
+        let mut key_spec = CERT_KEY_SPEC::default();
+        let mut caller_free = BOOL::default();
 
         // SAFETY: cert_guard.0 is a valid certificate context (from CertFindCertificateInStore).
-        // Output parameters (key_handle, key_spec, caller_free) are stack-allocated mutable
-        // references. The result is checked before using key_handle, which is then wrapped
-        // in CngKeyHandle for RAII cleanup via NCryptFreeObject.
+        // Output parameters (key_handle, key_spec, caller_free) are stack-allocated variables
+        // passed as raw pointers. The result is checked before using key_handle, which is then
+        // converted to NCRYPT_KEY_HANDLE and wrapped in CngKeyHandle for RAII cleanup.
         let result = unsafe {
             CryptAcquireCertificatePrivateKey(
                 cert_guard.0,
                 CRYPT_ACQUIRE_ONLY_NCRYPT_KEY_FLAG,
                 None,
-                &mut key_handle,
-                Some(&mut key_spec),
-                Some(&mut caller_free),
+                &raw mut key_handle,
+                Some(&raw mut key_spec),
+                Some(&raw mut caller_free),
             )
         };
 
@@ -247,7 +225,7 @@ impl WindowsCertStoreProvider {
         }
 
         Ok(CngKeyHandle {
-            handle: key_handle,
+            handle: NCRYPT_KEY_HANDLE(key_handle.0),
             should_free: caller_free.as_bool(),
         })
     }
@@ -361,7 +339,7 @@ impl KeyStoreProvider for WindowsCertStoreProvider {
                 data,
                 None,
                 &mut sig_size,
-                BCRYPT_PAD_PKCS1,
+                NCRYPT_FLAGS(BCRYPT_PAD_PKCS1.0),
             )
         };
 
@@ -384,7 +362,7 @@ impl KeyStoreProvider for WindowsCertStoreProvider {
                 data,
                 Some(&mut signature),
                 &mut sig_size,
-                BCRYPT_PAD_PKCS1,
+                NCRYPT_FLAGS(BCRYPT_PAD_PKCS1.0),
             )
         };
 
@@ -431,7 +409,7 @@ impl KeyStoreProvider for WindowsCertStoreProvider {
                 Some(&padding_info as *const _ as *const c_void),
                 data,
                 signature,
-                BCRYPT_PAD_PKCS1,
+                NCRYPT_FLAGS(BCRYPT_PAD_PKCS1.0),
             )
         };
 
@@ -466,7 +444,7 @@ impl Drop for CertStoreGuard {
         // SAFETY: self.0 was obtained from a successful CertOpenStore call. Drop is
         // called at most once (guaranteed by the type system). The return value is
         // intentionally ignored as cleanup errors during drop should not panic.
-        let _ = unsafe { CertCloseStore(self.0, CERT_CLOSE_STORE_CHECK_FLAG) };
+        let _ = unsafe { CertCloseStore(Some(self.0), CERT_CLOSE_STORE_CHECK_FLAG) };
     }
 }
 
@@ -478,7 +456,7 @@ impl Drop for CertContextGuard {
         if !self.0.is_null() {
             // SAFETY: self.0 is checked for null before freeing. If non-null, it was
             // obtained from CertFindCertificateInStore. Drop is called at most once.
-            unsafe { CertFreeCertificateContext(Some(self.0)) };
+            let _ = unsafe { CertFreeCertificateContext(Some(self.0)) };
         }
     }
 }
@@ -495,7 +473,7 @@ impl Drop for CngKeyHandle {
             // SAFETY: Freeing is guarded by should_free (set by CryptAcquireCertificatePrivateKey's
             // caller_free output) and is_invalid() (checks handle validity). Drop is called at
             // most once. The return value is intentionally ignored during cleanup.
-            let _ = unsafe { NCryptFreeObject(self.handle.0 as _) };
+            let _ = unsafe { NCryptFreeObject(NCRYPT_HANDLE(self.handle.0)) };
         }
     }
 }
@@ -559,8 +537,7 @@ fn get_padding_info(algorithm: &str) -> Result<(PaddingInfo, NCRYPT_FLAGS), Encr
             ))
         }
         _ => Err(EncryptionError::ConfigurationError(format!(
-            "Unsupported key encryption algorithm: {}. Expected RSA_OAEP, RSA_OAEP_256, or RSA1_5",
-            algorithm
+            "Unsupported key encryption algorithm: {algorithm}. Expected RSA_OAEP, RSA_OAEP_256, or RSA1_5"
         ))),
     }
 }
@@ -639,7 +616,7 @@ fn hex_to_bytes(hex: &str) -> Result<Vec<u8>, &'static str> {
 
 /// Convert bytes to hex string.
 fn bytes_to_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{:02X}", b)).collect()
+    bytes.iter().map(|b| format!("{b:02X}")).collect()
 }
 
 #[cfg(test)]

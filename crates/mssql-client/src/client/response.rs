@@ -11,6 +11,74 @@ use crate::state::ConnectionState;
 use super::{Client, ConnectionHandle};
 
 impl<S: ConnectionState> Client<S> {
+    /// Create a TokenParser with encryption awareness when configured.
+    fn create_parser(&self, payload: bytes::Bytes) -> TokenParser {
+        let parser = TokenParser::new(payload);
+        #[cfg(feature = "always-encrypted")]
+        let parser = if self.encryption_context.is_some() {
+            parser.with_encryption(true)
+        } else {
+            parser
+        };
+        parser
+    }
+
+    /// Resolve a ColumnDecryptor from ColMetaData if encryption is active.
+    ///
+    /// Returns `None` if encryption is not configured or the result set has
+    /// no encrypted columns.
+    #[cfg(feature = "always-encrypted")]
+    async fn resolve_decryptor(
+        &self,
+        meta: &ColMetaData,
+    ) -> Result<Option<crate::column_decryptor::ColumnDecryptor>> {
+        if let Some(ref ctx) = self.encryption_context {
+            if meta.cek_table.is_some() {
+                return Ok(Some(
+                    crate::column_decryptor::ColumnDecryptor::from_metadata(meta, ctx).await?,
+                ));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Build column metadata from ColMetaData, using base types for encrypted columns.
+    fn build_columns(meta: &ColMetaData) -> Vec<crate::row::Column> {
+        meta.columns
+            .iter()
+            .enumerate()
+            .map(|(i, col)| {
+                // For encrypted columns, use the base type info from CryptoMetadata
+                // so users see the real column type (e.g., NVARCHAR) instead of BigVarBinary.
+                let (effective_type_id, effective_type_info) =
+                    if let Some(ref crypto) = col.crypto_metadata {
+                        (crypto.base_type_id(), &crypto.base_type_info)
+                    } else {
+                        (col.type_id, &col.type_info)
+                    };
+
+                let type_name = format!("{effective_type_id:?}");
+                let mut column = crate::row::Column::new(&col.name, i, type_name)
+                    .with_nullable(col.flags & 0x01 != 0);
+
+                if let Some(max_len) = effective_type_info.max_length {
+                    column = column.with_max_length(max_len);
+                }
+                if let (Some(prec), Some(scale)) =
+                    (effective_type_info.precision, effective_type_info.scale)
+                {
+                    column = column.with_precision_scale(prec, scale);
+                }
+                if let Some(collation) = effective_type_info.collation {
+                    column = column.with_collation(collation);
+                }
+                column
+            })
+            .collect()
+    }
+}
+
+impl<S: ConnectionState> Client<S> {
     /// Read complete query response including columns and rows.
     pub(super) async fn read_query_response(
         &mut self,
@@ -26,10 +94,12 @@ impl<S: ConnectionState> Client<S> {
         }
         .ok_or(Error::ConnectionClosed)?;
 
-        let mut parser = TokenParser::new(message.payload);
+        let mut parser = self.create_parser(message.payload);
         let mut columns: Vec<crate::row::Column> = Vec::new();
         let mut rows: Vec<crate::row::Row> = Vec::new();
         let mut protocol_metadata: Option<ColMetaData> = None;
+        #[cfg(feature = "always-encrypted")]
+        let mut current_decryptor: Option<crate::column_decryptor::ColumnDecryptor> = None;
 
         loop {
             // Use next_token_with_metadata to properly parse Row/NbcRow tokens
@@ -45,43 +115,42 @@ impl<S: ConnectionState> Client<S> {
                     // This enables multi-statement batches to return the last result set
                     rows.clear();
 
-                    columns = meta
-                        .columns
-                        .iter()
-                        .enumerate()
-                        .map(|(i, col)| {
-                            let type_name = format!("{:?}", col.type_id);
-                            let mut column = crate::row::Column::new(&col.name, i, type_name)
-                                .with_nullable(col.flags & 0x01 != 0);
+                    columns = Self::build_columns(&meta);
 
-                            if let Some(max_len) = col.type_info.max_length {
-                                column = column.with_max_length(max_len);
-                            }
-                            if let (Some(prec), Some(scale)) =
-                                (col.type_info.precision, col.type_info.scale)
-                            {
-                                column = column.with_precision_scale(prec, scale);
-                            }
-                            // Store collation for VARCHAR/CHAR types to enable
-                            // collation-aware string decoding
-                            if let Some(collation) = col.type_info.collation {
-                                column = column.with_collation(collation);
-                            }
-                            column
-                        })
-                        .collect();
+                    #[cfg(feature = "always-encrypted")]
+                    {
+                        current_decryptor = self.resolve_decryptor(&meta).await?;
+                    }
 
                     tracing::debug!(columns = columns.len(), "received column metadata");
                     protocol_metadata = Some(meta);
                 }
                 Token::Row(raw_row) => {
                     if let Some(ref meta) = protocol_metadata {
+                        #[cfg(feature = "always-encrypted")]
+                        let row = if let Some(ref dec) = current_decryptor {
+                            crate::column_parser::convert_raw_row_decrypted(
+                                &raw_row, meta, &columns, dec,
+                            )?
+                        } else {
+                            crate::column_parser::convert_raw_row(&raw_row, meta, &columns)?
+                        };
+                        #[cfg(not(feature = "always-encrypted"))]
                         let row = crate::column_parser::convert_raw_row(&raw_row, meta, &columns)?;
                         rows.push(row);
                     }
                 }
                 Token::NbcRow(nbc_row) => {
                     if let Some(ref meta) = protocol_metadata {
+                        #[cfg(feature = "always-encrypted")]
+                        let row = if let Some(ref dec) = current_decryptor {
+                            crate::column_parser::convert_nbc_row_decrypted(
+                                &nbc_row, meta, &columns, dec,
+                            )?
+                        } else {
+                            crate::column_parser::convert_nbc_row(&nbc_row, meta, &columns)?
+                        };
+                        #[cfg(not(feature = "always-encrypted"))]
                         let row = crate::column_parser::convert_nbc_row(&nbc_row, meta, &columns)?;
                         rows.push(row);
                     }
@@ -172,11 +241,13 @@ impl<S: ConnectionState> Client<S> {
             ConnectionHandle::Tls(conn) => conn.read_message().await?,
             #[cfg(feature = "tls")]
             ConnectionHandle::TlsPrelogin(conn) => conn.read_message().await?,
+            // Note: execute() doesn't read row values, so no decryption needed.
+            // But we still need the encryption-aware parser for ColMetaData/Row token parsing.
             ConnectionHandle::Plain(conn) => conn.read_message().await?,
         }
         .ok_or(Error::ConnectionClosed)?;
 
-        let mut parser = TokenParser::new(message.payload);
+        let mut parser = self.create_parser(message.payload);
         let mut rows_affected = 0u64;
         let mut current_metadata: Option<ColMetaData> = None;
 
@@ -279,7 +350,7 @@ impl<S: ConnectionState> Client<S> {
         }
         .ok_or(Error::ConnectionClosed)?;
 
-        let mut parser = TokenParser::new(message.payload);
+        let mut parser = self.create_parser(message.payload);
         let mut transaction_descriptor: u64 = 0;
 
         loop {
@@ -373,13 +444,15 @@ impl<S: ConnectionState> Client<S> {
         }
         .ok_or(Error::ConnectionClosed)?;
 
-        let mut parser = TokenParser::new(message.payload);
+        let mut parser = self.create_parser(message.payload);
         let mut result = crate::stream::ProcedureResult::new();
 
         // State for accumulating the current result set
         let mut current_columns: Vec<crate::row::Column> = Vec::new();
         let mut current_rows: Vec<crate::row::Row> = Vec::new();
         let mut protocol_metadata: Option<ColMetaData> = None;
+        #[cfg(feature = "always-encrypted")]
+        let mut current_decryptor: Option<crate::column_decryptor::ColumnDecryptor> = None;
 
         loop {
             let token = parser.next_token_with_metadata(protocol_metadata.as_ref())?;
@@ -398,29 +471,12 @@ impl<S: ConnectionState> Client<S> {
                         ));
                     }
 
-                    current_columns = meta
-                        .columns
-                        .iter()
-                        .enumerate()
-                        .map(|(i, col)| {
-                            let type_name = format!("{:?}", col.type_id);
-                            let mut column = crate::row::Column::new(&col.name, i, type_name)
-                                .with_nullable(col.flags & 0x01 != 0);
+                    current_columns = Self::build_columns(&meta);
 
-                            if let Some(max_len) = col.type_info.max_length {
-                                column = column.with_max_length(max_len);
-                            }
-                            if let (Some(prec), Some(scale)) =
-                                (col.type_info.precision, col.type_info.scale)
-                            {
-                                column = column.with_precision_scale(prec, scale);
-                            }
-                            if let Some(collation) = col.type_info.collation {
-                                column = column.with_collation(collation);
-                            }
-                            column
-                        })
-                        .collect();
+                    #[cfg(feature = "always-encrypted")]
+                    {
+                        current_decryptor = self.resolve_decryptor(&meta).await?;
+                    }
 
                     tracing::debug!(
                         columns = current_columns.len(),
@@ -431,6 +487,18 @@ impl<S: ConnectionState> Client<S> {
                 }
                 Token::Row(raw_row) => {
                     if let Some(ref meta) = protocol_metadata {
+                        #[cfg(feature = "always-encrypted")]
+                        let row = if let Some(ref dec) = current_decryptor {
+                            crate::column_parser::convert_raw_row_decrypted(
+                                &raw_row,
+                                meta,
+                                &current_columns,
+                                dec,
+                            )?
+                        } else {
+                            crate::column_parser::convert_raw_row(&raw_row, meta, &current_columns)?
+                        };
+                        #[cfg(not(feature = "always-encrypted"))]
                         let row = crate::column_parser::convert_raw_row(
                             &raw_row,
                             meta,
@@ -441,6 +509,18 @@ impl<S: ConnectionState> Client<S> {
                 }
                 Token::NbcRow(nbc_row) => {
                     if let Some(ref meta) = protocol_metadata {
+                        #[cfg(feature = "always-encrypted")]
+                        let row = if let Some(ref dec) = current_decryptor {
+                            crate::column_parser::convert_nbc_row_decrypted(
+                                &nbc_row,
+                                meta,
+                                &current_columns,
+                                dec,
+                            )?
+                        } else {
+                            crate::column_parser::convert_nbc_row(&nbc_row, meta, &current_columns)?
+                        };
+                        #[cfg(not(feature = "always-encrypted"))]
                         let row = crate::column_parser::convert_nbc_row(
                             &nbc_row,
                             meta,
@@ -483,6 +563,7 @@ impl<S: ConnectionState> Client<S> {
                         flags: ret_val.flags,
                         user_type: ret_val.user_type,
                         type_info: ret_val.type_info.clone(),
+                        crypto_metadata: None,
                     };
                     let mut buf = ret_val.value.as_ref();
                     let sql_value = crate::column_parser::parse_column_value(&mut buf, &col_data)?;
@@ -589,11 +670,13 @@ impl Client<Ready> {
         }
         .ok_or(Error::ConnectionClosed)?;
 
-        let mut parser = TokenParser::new(message.payload);
+        let mut parser = self.create_parser(message.payload);
         let mut result_sets: Vec<crate::stream::ResultSet> = Vec::new();
         let mut current_columns: Vec<crate::row::Column> = Vec::new();
         let mut current_rows: Vec<crate::row::Row> = Vec::new();
         let mut protocol_metadata: Option<ColMetaData> = None;
+        #[cfg(feature = "always-encrypted")]
+        let mut current_decryptor: Option<crate::column_decryptor::ColumnDecryptor> = None;
 
         loop {
             let token = parser.next_token_with_metadata(protocol_metadata.as_ref())?;
@@ -613,31 +696,12 @@ impl Client<Ready> {
                     }
 
                     // Parse the new column metadata
-                    current_columns = meta
-                        .columns
-                        .iter()
-                        .enumerate()
-                        .map(|(i, col)| {
-                            let type_name = format!("{:?}", col.type_id);
-                            let mut column = crate::row::Column::new(&col.name, i, type_name)
-                                .with_nullable(col.flags & 0x01 != 0);
+                    current_columns = Self::build_columns(&meta);
 
-                            if let Some(max_len) = col.type_info.max_length {
-                                column = column.with_max_length(max_len);
-                            }
-                            if let (Some(prec), Some(scale)) =
-                                (col.type_info.precision, col.type_info.scale)
-                            {
-                                column = column.with_precision_scale(prec, scale);
-                            }
-                            // Store collation for VARCHAR/CHAR types to enable
-                            // collation-aware string decoding
-                            if let Some(collation) = col.type_info.collation {
-                                column = column.with_collation(collation);
-                            }
-                            column
-                        })
-                        .collect();
+                    #[cfg(feature = "always-encrypted")]
+                    {
+                        current_decryptor = self.resolve_decryptor(&meta).await?;
+                    }
 
                     tracing::debug!(
                         columns = current_columns.len(),
@@ -648,6 +712,18 @@ impl Client<Ready> {
                 }
                 Token::Row(raw_row) => {
                     if let Some(ref meta) = protocol_metadata {
+                        #[cfg(feature = "always-encrypted")]
+                        let row = if let Some(ref dec) = current_decryptor {
+                            crate::column_parser::convert_raw_row_decrypted(
+                                &raw_row,
+                                meta,
+                                &current_columns,
+                                dec,
+                            )?
+                        } else {
+                            crate::column_parser::convert_raw_row(&raw_row, meta, &current_columns)?
+                        };
+                        #[cfg(not(feature = "always-encrypted"))]
                         let row = crate::column_parser::convert_raw_row(
                             &raw_row,
                             meta,
@@ -658,6 +734,18 @@ impl Client<Ready> {
                 }
                 Token::NbcRow(nbc_row) => {
                     if let Some(ref meta) = protocol_metadata {
+                        #[cfg(feature = "always-encrypted")]
+                        let row = if let Some(ref dec) = current_decryptor {
+                            crate::column_parser::convert_nbc_row_decrypted(
+                                &nbc_row,
+                                meta,
+                                &current_columns,
+                                dec,
+                            )?
+                        } else {
+                            crate::column_parser::convert_nbc_row(&nbc_row, meta, &current_columns)?
+                        };
+                        #[cfg(not(feature = "always-encrypted"))]
                         let row = crate::column_parser::convert_nbc_row(
                             &nbc_row,
                             meta,

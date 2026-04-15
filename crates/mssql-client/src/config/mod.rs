@@ -13,6 +13,129 @@ use mssql_auth::Credentials;
 use mssql_tls::TlsConfig;
 use tds_protocol::version::TdsVersion;
 
+/// Parse a boolean value from a connection string keyword.
+///
+/// Per the ADO.NET specification, boolean keywords accept:
+/// `true`, `false`, `yes`, `no`, `1`, `0` (case-insensitive).
+/// Returns an error for any other value, preventing silent misconfiguration.
+fn parse_conn_bool(key: &str, value: &str) -> Result<bool, crate::error::Error> {
+    match value.to_lowercase().as_str() {
+        "true" | "yes" | "1" => Ok(true),
+        "false" | "no" | "0" => Ok(false),
+        _ => Err(crate::error::Error::Config(format!(
+            "invalid boolean value for '{key}': '{value}' (expected true/false/yes/no/1/0)"
+        ))),
+    }
+}
+
+/// Split a connection string into key-value pairs, respecting quoted values.
+///
+/// Per the ADO.NET specification:
+/// - Values containing semicolons must be enclosed in double (`"`) or single (`'`) quotes
+/// - Doubled quotes inside are escapes: `""` → `"`, `''` → `'`
+/// - Leading/trailing whitespace around values is trimmed (but preserved inside quotes)
+///
+/// Returns pairs of `(key, value)` where the value has quotes stripped and escapes resolved.
+fn split_connection_string(conn_str: &str) -> Result<Vec<(String, String)>, crate::error::Error> {
+    let mut pairs = Vec::new();
+    let chars: Vec<char> = conn_str.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        // Skip whitespace and semicolons between pairs
+        while i < len && (chars[i] == ';' || chars[i].is_whitespace()) {
+            i += 1;
+        }
+        if i >= len {
+            break;
+        }
+
+        // Read key (up to '=')
+        let key_start = i;
+        while i < len && chars[i] != '=' {
+            i += 1;
+        }
+        if i >= len {
+            // Trailing text with no '=' — skip it (could be trailing whitespace)
+            let remaining = chars[key_start..].iter().collect::<String>();
+            if remaining.trim().is_empty() {
+                break;
+            }
+            return Err(crate::error::Error::Config(format!(
+                "invalid key-value pair (missing '='): '{remaining}'"
+            )));
+        }
+        let key: String = chars[key_start..i].iter().collect();
+        i += 1; // skip '='
+
+        // Read value — may be quoted or unquoted
+        // Skip leading whitespace in value
+        while i < len && chars[i].is_whitespace() {
+            i += 1;
+        }
+
+        let value = if i < len && (chars[i] == '"' || chars[i] == '\'') {
+            // Quoted value: read until matching unescaped closing quote
+            let quote_char = chars[i];
+            i += 1; // skip opening quote
+            let mut val = String::new();
+            loop {
+                if i >= len {
+                    return Err(crate::error::Error::Config(format!(
+                        "unterminated quoted value for key '{}'",
+                        key.trim()
+                    )));
+                }
+                if chars[i] == quote_char {
+                    // Check for escaped quote (doubled: "" or '')
+                    if i + 1 < len && chars[i + 1] == quote_char {
+                        val.push(quote_char);
+                        i += 2;
+                    } else {
+                        i += 1; // skip closing quote
+                        break;
+                    }
+                } else {
+                    val.push(chars[i]);
+                    i += 1;
+                }
+            }
+            // Skip to next semicolon or end
+            while i < len && chars[i] != ';' {
+                i += 1;
+            }
+            val
+        } else {
+            // Unquoted value: read until semicolon or end
+            let val_start = i;
+            while i < len && chars[i] != ';' {
+                i += 1;
+            }
+            chars[val_start..i].iter().collect::<String>()
+        };
+
+        let key_trimmed = key.trim().to_string();
+        if !key_trimmed.is_empty() {
+            pairs.push((key_trimmed, value));
+        }
+    }
+
+    Ok(pairs)
+}
+
+/// Convert a connection string value to `Option<String>`, treating empty strings as `None`.
+///
+/// In ADO.NET, specifying a keyword with an empty value (e.g., `Database=;`) resets it
+/// to its default. We represent this as `None` for optional fields.
+fn non_empty(value: &str) -> Option<String> {
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
 /// Configuration for connecting to SQL Server.
 ///
 /// This struct is marked `#[non_exhaustive]` to allow adding new fields
@@ -108,6 +231,42 @@ pub struct Config {
     ///
     /// Note: When `strict_mode` is enabled, this is ignored and TDS 8.0 is used.
     pub tds_version: TdsVersion,
+
+    /// Application workload intent for AlwaysOn Availability Group routing.
+    ///
+    /// When set to [`ApplicationIntent::ReadOnly`], SQL Server routes the
+    /// connection to a readable secondary replica. Sent in LOGIN7 TypeFlags
+    /// as the `READONLY_INTENT` bit.
+    pub application_intent: ApplicationIntent,
+
+    /// Client workstation name sent to SQL Server in the LOGIN7 HostName field.
+    ///
+    /// Used for auditing via `sys.dm_exec_sessions.host_name`.
+    /// When `None`, the driver sends the machine hostname (from the `COMPUTERNAME`
+    /// or `HOSTNAME` environment variable). Set via `Workstation ID` or `WSID`
+    /// in connection strings.
+    pub workstation_id: Option<String>,
+
+    /// Session language for server warning/error messages.
+    ///
+    /// When set, sent in LOGIN7's Language field. The language name can be
+    /// up to 128 characters. Set via `Language` or `Current Language` in
+    /// connection strings.
+    pub language: Option<String>,
+
+    /// Always Encrypted configuration.
+    ///
+    /// When `Some`, the client will negotiate Always Encrypted support with the
+    /// server and transparently decrypt encrypted column values in result sets.
+    ///
+    /// Set via `Column Encryption Setting=Enabled` in connection strings, or
+    /// programmatically via [`Config::with_column_encryption`].
+    ///
+    /// Wrapped in `Arc` because `EncryptionConfig` contains trait objects (key store
+    /// providers) which cannot implement `Clone`. The `Arc` allows `Config` to remain
+    /// `Clone` while sharing the encryption configuration.
+    #[cfg(feature = "always-encrypted")]
+    pub column_encryption: Option<std::sync::Arc<crate::encryption::EncryptionConfig>>,
 }
 
 impl Default for Config {
@@ -134,6 +293,11 @@ impl Default for Config {
             retry: RetryPolicy::default(),
             timeouts,
             tds_version: TdsVersion::V7_4, // Default to TDS 7.4 for broad compatibility
+            application_intent: ApplicationIntent::default(),
+            workstation_id: None,
+            language: None,
+            #[cfg(feature = "always-encrypted")]
+            column_encryption: None,
         }
     }
 }
@@ -147,39 +311,56 @@ impl Config {
 
     /// Parse a connection string into configuration.
     ///
-    /// Supports ADO.NET-style connection strings:
+    /// Supports ADO.NET-style connection strings with full quoting support:
     /// ```text
-    /// Server=localhost;Database=mydb;User Id=sa;Password=secret;
+    /// Server=localhost;Database=mydb;User Id=sa;Password="complex;pass";
     /// ```
+    ///
+    /// Values containing semicolons can be enclosed in double or single quotes
+    /// per the ADO.NET specification. The `tcp:` prefix from Azure Portal
+    /// connection strings is automatically stripped.
     pub fn from_connection_string(conn_str: &str) -> Result<Self, crate::error::Error> {
         let mut config = Self::default();
+        let pairs = split_connection_string(conn_str)?;
 
-        for part in conn_str.split(';') {
-            let part = part.trim();
-            if part.is_empty() {
-                continue;
-            }
-
-            let (key, value) = part
-                .split_once('=')
-                .ok_or_else(|| crate::error::Error::Config(format!("invalid key-value: {part}")))?;
-
+        for (key, value) in &pairs {
             let key = key.trim().to_lowercase();
             let value = value.trim();
 
             match key.as_str() {
-                "server" | "data source" | "host" => {
-                    // Handle host:port or host\instance format
-                    if let Some((host, port_or_instance)) = value.split_once(',') {
+                // --- Server / Data Source (ADO.NET aliases: Addr, Address, Network Address) ---
+                "server" | "data source" | "addr" | "address" | "network address" | "host" => {
+                    // Strip tcp: prefix (common in Azure Portal connection strings).
+                    // Reject np: (Named Pipes) and lpc: (Shared Memory) — not supported.
+                    // All prefix checks are case-insensitive per ADO.NET conventions.
+                    let lower_value = value.to_lowercase();
+                    let server_value = if lower_value.starts_with("tcp:") {
+                        &value[4..]
+                    } else if lower_value.starts_with("np:") {
+                        return Err(crate::error::Error::Config(
+                            "Named Pipes connections (np:) are not supported. Use TCP connections instead."
+                                .into(),
+                        ));
+                    } else if lower_value.starts_with("lpc:") {
+                        return Err(crate::error::Error::Config(
+                            "Shared Memory connections (lpc:) are not supported. Use TCP connections instead."
+                                .into(),
+                        ));
+                    } else {
+                        value
+                    };
+
+                    // Handle host,port or host\instance format
+                    if let Some((host, port_or_instance)) = server_value.split_once(',') {
                         config.host = host.to_string();
-                        config.port = port_or_instance.parse().map_err(|_| {
+                        config.port = port_or_instance.trim().parse().map_err(|_| {
                             crate::error::Error::Config(format!("invalid port: {port_or_instance}"))
                         })?;
-                    } else if let Some((host, instance)) = value.split_once('\\') {
+                    } else if let Some((host, instance)) = server_value.split_once('\\') {
                         config.host = host.to_string();
-                        config.instance = Some(instance.to_string());
+                        config.instance = non_empty(instance);
                     } else {
-                        config.host = value.to_string();
+                        config.host = server_value.to_string();
                     }
                 }
                 "port" => {
@@ -187,27 +368,46 @@ impl Config {
                         crate::error::Error::Config(format!("invalid port: {value}"))
                     })?;
                 }
+                // --- Database ---
                 "database" | "initial catalog" => {
-                    config.database = Some(value.to_string());
+                    config.database = non_empty(value);
                 }
+                // --- Credentials ---
                 "user id" | "uid" | "user" => {
-                    // Update credentials with new username
                     if let Credentials::SqlServer { password, .. } = &config.credentials {
                         config.credentials =
                             Credentials::sql_server(value.to_string(), password.clone());
                     }
                 }
                 "password" | "pwd" => {
-                    // Update credentials with new password
                     if let Credentials::SqlServer { username, .. } = &config.credentials {
                         config.credentials =
                             Credentials::sql_server(username.clone(), value.to_string());
                     }
                 }
+                // --- Application ---
                 "application name" | "app" => {
                     config.application_name = value.to_string();
                 }
-                "connect timeout" | "connection timeout" => {
+                "applicationintent" | "application intent" => {
+                    config.application_intent = match value.to_lowercase().as_str() {
+                        "readonly" => ApplicationIntent::ReadOnly,
+                        "readwrite" => ApplicationIntent::ReadWrite,
+                        _ => {
+                            return Err(crate::error::Error::Config(format!(
+                                "invalid ApplicationIntent: '{value}' (expected ReadOnly or ReadWrite)"
+                            )));
+                        }
+                    };
+                }
+                "workstation id" | "wsid" => {
+                    config.workstation_id = non_empty(value);
+                }
+                "current language" | "language" => {
+                    config.language = non_empty(value);
+                }
+                // --- Timeouts (ADO.NET alias: Timeout) ---
+                "connect timeout" | "connection timeout" | "timeout" => {
                     let secs: u64 = value.parse().map_err(|_| {
                         crate::error::Error::Config(format!("invalid timeout: {value}"))
                     })?;
@@ -219,65 +419,43 @@ impl Config {
                     })?;
                     config.command_timeout = Duration::from_secs(secs);
                 }
+                // --- Security ---
                 "trustservercertificate" | "trust server certificate" => {
-                    config.trust_server_certificate = value.eq_ignore_ascii_case("true")
-                        || value.eq_ignore_ascii_case("yes")
-                        || value == "1";
+                    config.trust_server_certificate = parse_conn_bool(&key, value)?;
                 }
                 "encrypt" => {
-                    // Handle encryption levels: strict, true, false, yes, no, 1, 0, no_tls
+                    // Encrypt supports several non-boolean values beyond true/false:
+                    // - "strict" = TDS 8.0 strict mode (always encrypted transport)
+                    // - "mandatory" / "true" / "yes" / "1" = require TLS
+                    // - "optional" / "false" / "no" / "0" = TLS only if server requires
+                    // - "no_tls" = Tiberius-compatible plaintext mode for legacy servers
+                    //
+                    // "mandatory" and "optional" are Microsoft.Data.SqlClient v5+ aliases.
                     if value.eq_ignore_ascii_case("strict") {
                         config.strict_mode = true;
                         config.encrypt = true;
                         config.no_tls = false;
-                    } else if value.eq_ignore_ascii_case("no_tls") {
-                        // Tiberius-compatible option for truly unencrypted connections.
-                        // This is for legacy SQL Server instances that don't support TLS 1.2+.
-                        config.no_tls = true;
-                        config.encrypt = false;
-                    } else if value.eq_ignore_ascii_case("true")
-                        || value.eq_ignore_ascii_case("yes")
-                        || value == "1"
-                    {
+                    } else if value.eq_ignore_ascii_case("mandatory") {
                         config.encrypt = true;
                         config.no_tls = false;
-                    } else if value.eq_ignore_ascii_case("false")
-                        || value.eq_ignore_ascii_case("no")
-                        || value == "0"
-                    {
+                    } else if value.eq_ignore_ascii_case("optional") {
                         config.encrypt = false;
                         config.no_tls = false;
-                    }
-                }
-                "multipleactiveresultsets" | "mars" => {
-                    config.mars = value.eq_ignore_ascii_case("true")
-                        || value.eq_ignore_ascii_case("yes")
-                        || value == "1";
-                }
-                "packet size" => {
-                    config.packet_size = value.parse().map_err(|_| {
-                        crate::error::Error::Config(format!("invalid packet size: {value}"))
-                    })?;
-                }
-                "tdsversion" | "tds version" | "protocolversion" | "protocol version" => {
-                    // Parse TDS version from connection string
-                    // Supports: "7.3", "7.3A", "7.3B", "7.4", "8.0"
-                    config.tds_version = TdsVersion::parse(value).ok_or_else(|| {
-                        crate::error::Error::Config(format!(
-                            "invalid TDS version: {value}. Supported values: 7.3, 7.3A, 7.3B, 7.4, 8.0"
-                        ))
-                    })?;
-                    // If TDS 8.0 is requested, enable strict mode
-                    if config.tds_version.is_tds_8() {
-                        config.strict_mode = true;
+                    } else if value.eq_ignore_ascii_case("no_tls") {
+                        config.no_tls = true;
+                        config.encrypt = false;
+                    } else {
+                        // Standard boolean values (true/false/yes/no/1/0)
+                        let enabled = parse_conn_bool(&key, value)?;
+                        config.encrypt = enabled;
+                        config.no_tls = false;
                     }
                 }
                 "integrated security" | "trusted_connection" => {
-                    if value.eq_ignore_ascii_case("true")
-                        || value.eq_ignore_ascii_case("yes")
-                        || value.eq_ignore_ascii_case("sspi")
-                        || value == "1"
-                    {
+                    // Accepts standard booleans + "sspi" (ADO.NET strongly-recommended value)
+                    let enabled =
+                        value.eq_ignore_ascii_case("sspi") || parse_conn_bool(&key, value)?;
+                    if enabled {
                         #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
                         {
                             config.credentials = Credentials::Integrated;
@@ -292,10 +470,105 @@ impl Config {
                         }
                     }
                 }
+                // --- Always Encrypted ---
+                "column encryption setting" | "columnencryptionsetting" => {
+                    #[cfg(feature = "always-encrypted")]
+                    if value.eq_ignore_ascii_case("enabled") {
+                        config.column_encryption = Some(std::sync::Arc::new(
+                            crate::encryption::EncryptionConfig::new(),
+                        ));
+                    }
+                    #[cfg(not(feature = "always-encrypted"))]
+                    if value.eq_ignore_ascii_case("enabled") {
+                        return Err(crate::error::Error::Config(
+                            "Column Encryption Setting=Enabled requires the 'always-encrypted' feature. \
+                             Enable it in your Cargo.toml: mssql-client = { features = [\"always-encrypted\"] }"
+                                .to_string(),
+                        ));
+                    }
+                }
+                // --- Protocol ---
+                "multipleactiveresultsets" | "mars" => {
+                    config.mars = parse_conn_bool(&key, value)?;
+                }
+                "packet size" => {
+                    config.packet_size = value.parse().map_err(|_| {
+                        crate::error::Error::Config(format!("invalid packet size: {value}"))
+                    })?;
+                }
+                "tdsversion" | "tds version" | "protocolversion" | "protocol version" => {
+                    config.tds_version = TdsVersion::parse(value).ok_or_else(|| {
+                        crate::error::Error::Config(format!(
+                            "invalid TDS version: {value}. Supported values: 7.3, 7.3A, 7.3B, 7.4, 8.0"
+                        ))
+                    })?;
+                    if config.tds_version.is_tds_8() {
+                        config.strict_mode = true;
+                    }
+                }
+                // --- Connection resiliency ---
+                "connectretrycount" | "connect retry count" => {
+                    config.retry.max_retries = value.parse().map_err(|_| {
+                        crate::error::Error::Config(format!("invalid ConnectRetryCount: '{value}'"))
+                    })?;
+                }
+                "connectretryinterval" | "connect retry interval" => {
+                    let secs: u64 = value.parse().map_err(|_| {
+                        crate::error::Error::Config(format!(
+                            "invalid ConnectRetryInterval: '{value}'"
+                        ))
+                    })?;
+                    config.retry.initial_backoff = Duration::from_secs(secs);
+                }
+                // --- Pool keywords: recognized but must be set via PoolConfig ---
+                "max pool size"
+                | "min pool size"
+                | "pooling"
+                | "connection lifetime"
+                | "load balance timeout" => {
+                    tracing::info!(
+                        key = key.as_str(),
+                        value = value,
+                        "connection string keyword '{}' is recognized but pool settings \
+                         must be configured via PoolConfig, not the connection string",
+                        key,
+                    );
+                }
+                // --- Known ADO.NET keywords not supported by this driver ---
+                "failover partner"
+                | "multisubnetfailover"
+                | "multi subnet failover"
+                | "persist security info"
+                | "persistsecurityinfo"
+                | "enlist"
+                | "replication"
+                | "transaction binding"
+                | "type system version"
+                | "user instance"
+                | "attachdbfilename"
+                | "extended properties"
+                | "initial file name"
+                | "context connection"
+                | "network library"
+                | "network"
+                | "net"
+                | "asynchronous processing"
+                | "async"
+                | "transparentnetworkipresolution"
+                | "poolblockingperiod"
+                | "authentication"
+                | "hostnameincertificate"
+                | "servercertificate" => {
+                    tracing::info!(
+                        key = key.as_str(),
+                        value = value,
+                        "connection string keyword '{}' is recognized but not supported by this driver",
+                        key,
+                    );
+                }
                 _ => {
-                    // Ignore unknown options for forward compatibility
                     tracing::debug!(
-                        key = key,
+                        key = key.as_str(),
                         value = value,
                         "ignoring unknown connection string option"
                     );
@@ -466,6 +739,29 @@ impl Config {
         self
     }
 
+    /// Enable Always Encrypted with the given encryption configuration.
+    ///
+    /// When enabled, the client will negotiate Always Encrypted support during
+    /// connection and transparently decrypt encrypted column values.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use mssql_client::{Config, EncryptionConfig};
+    /// use mssql_auth::InMemoryKeyStore;
+    ///
+    /// let config = Config::new()
+    ///     .with_column_encryption(
+    ///         EncryptionConfig::new().with_provider(key_store)
+    ///     );
+    /// ```
+    #[cfg(feature = "always-encrypted")]
+    #[must_use]
+    pub fn with_column_encryption(mut self, config: crate::encryption::EncryptionConfig) -> Self {
+        self.column_encryption = Some(std::sync::Arc::new(config));
+        self
+    }
+
     /// Create a new configuration with a different host (for routing).
     #[must_use]
     pub fn with_host(mut self, host: &str) -> Self {
@@ -517,6 +813,32 @@ impl Config {
         self.timeouts = timeouts;
         self
     }
+
+    /// Set the application workload intent for AlwaysOn AG routing.
+    #[must_use]
+    pub fn application_intent(mut self, intent: ApplicationIntent) -> Self {
+        self.application_intent = intent;
+        self
+    }
+
+    /// Set the client workstation name sent to SQL Server in LOGIN7.
+    ///
+    /// This appears in `sys.dm_exec_sessions.host_name` for auditing.
+    /// When not set, the driver sends the machine hostname automatically.
+    #[must_use]
+    pub fn workstation_id(mut self, id: impl Into<String>) -> Self {
+        self.workstation_id = Some(id.into());
+        self
+    }
+
+    /// Set the session language for server messages.
+    ///
+    /// The language name can be up to 128 characters (e.g., `"us_english"`).
+    #[must_use]
+    pub fn language(mut self, lang: impl Into<String>) -> Self {
+        self.language = Some(lang.into());
+        self
+    }
 }
 
 #[cfg(test)]
@@ -550,6 +872,25 @@ mod tests {
             Config::from_connection_string("Server=localhost\\SQLEXPRESS;Database=test;").unwrap();
 
         assert_eq!(config.host, "localhost");
+        assert_eq!(config.instance, Some("SQLEXPRESS".to_string()));
+    }
+
+    #[test]
+    fn test_connection_string_dot_instance() {
+        // "." is a standard ADO.NET alias for localhost
+        let config = Config::from_connection_string("Server=.\\SQLEXPRESS;Database=test;").unwrap();
+
+        assert_eq!(config.host, ".");
+        assert_eq!(config.instance, Some("SQLEXPRESS".to_string()));
+    }
+
+    #[test]
+    fn test_connection_string_local_instance() {
+        // "(local)" is a standard ADO.NET alias for localhost
+        let config =
+            Config::from_connection_string("Server=(local)\\SQLEXPRESS;Database=test;").unwrap();
+
+        assert_eq!(config.host, "(local)");
         assert_eq!(config.instance, Some("SQLEXPRESS".to_string()));
     }
 
@@ -813,6 +1154,16 @@ mod tests {
         assert!(!config.no_tls);
         assert!(config.encrypt);
         assert!(config.strict_mode);
+
+        // Encrypt=mandatory (Microsoft.Data.SqlClient v5+ alias for true)
+        let config = Config::from_connection_string("Server=localhost;Encrypt=mandatory;").unwrap();
+        assert!(config.encrypt);
+        assert!(!config.no_tls);
+
+        // Encrypt=optional (Microsoft.Data.SqlClient v5+ alias for false)
+        let config = Config::from_connection_string("Server=localhost;Encrypt=optional;").unwrap();
+        assert!(!config.encrypt);
+        assert!(!config.no_tls);
     }
 
     #[test]
@@ -879,5 +1230,307 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("integrated-auth"));
+    }
+
+    // =======================================================================
+    // ADO.NET conformance tests (quoted values, aliases, boolean validation)
+    // =======================================================================
+
+    #[test]
+    fn test_parse_conn_bool_all_values() {
+        assert!(parse_conn_bool("test", "true").unwrap());
+        assert!(parse_conn_bool("test", "True").unwrap());
+        assert!(parse_conn_bool("test", "TRUE").unwrap());
+        assert!(parse_conn_bool("test", "yes").unwrap());
+        assert!(parse_conn_bool("test", "Yes").unwrap());
+        assert!(parse_conn_bool("test", "1").unwrap());
+
+        assert!(!parse_conn_bool("test", "false").unwrap());
+        assert!(!parse_conn_bool("test", "False").unwrap());
+        assert!(!parse_conn_bool("test", "FALSE").unwrap());
+        assert!(!parse_conn_bool("test", "no").unwrap());
+        assert!(!parse_conn_bool("test", "No").unwrap());
+        assert!(!parse_conn_bool("test", "0").unwrap());
+
+        // Invalid values should error
+        assert!(parse_conn_bool("test", "banana").is_err());
+        assert!(parse_conn_bool("test", "tru").is_err());
+        assert!(parse_conn_bool("test", "").is_err());
+    }
+
+    #[test]
+    fn test_boolean_validation_trust_server_certificate() {
+        // Valid boolean → ok
+        let config =
+            Config::from_connection_string("Server=localhost;TrustServerCertificate=true;")
+                .unwrap();
+        assert!(config.trust_server_certificate);
+
+        let config =
+            Config::from_connection_string("Server=localhost;TrustServerCertificate=no;").unwrap();
+        assert!(!config.trust_server_certificate);
+
+        // Invalid boolean → error (previously silently set to false!)
+        let result =
+            Config::from_connection_string("Server=localhost;TrustServerCertificate=banana;");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("invalid boolean"));
+    }
+
+    #[test]
+    fn test_boolean_validation_mars() {
+        let config = Config::from_connection_string("Server=localhost;MARS=true;").unwrap();
+        assert!(config.mars);
+
+        // Typo → error instead of silent false
+        let result = Config::from_connection_string("Server=localhost;MARS=tru;");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_quoted_value_semicolon() {
+        // Password with semicolons — must be quoted per ADO.NET spec
+        let config = Config::from_connection_string(
+            r#"Server=localhost;User Id=sa;Password="my;complex;pass";"#,
+        )
+        .unwrap();
+        if let mssql_auth::Credentials::SqlServer { password, .. } = &config.credentials {
+            assert_eq!(password.as_ref(), "my;complex;pass");
+        } else {
+            unreachable!("expected SqlServer credentials");
+        }
+    }
+
+    #[test]
+    fn test_quoted_value_single_quotes() {
+        let config =
+            Config::from_connection_string("Server=localhost;User Id=sa;Password='my;pass';")
+                .unwrap();
+        if let mssql_auth::Credentials::SqlServer { password, .. } = &config.credentials {
+            assert_eq!(password.as_ref(), "my;pass");
+        } else {
+            unreachable!("expected SqlServer credentials");
+        }
+    }
+
+    #[test]
+    fn test_quoted_value_escaped_double_quotes() {
+        // Doubled quotes → single quote per ADO.NET spec
+        let config = Config::from_connection_string(
+            r#"Server=localhost;User Id=sa;Password="has ""quotes""";"#,
+        )
+        .unwrap();
+        if let mssql_auth::Credentials::SqlServer { password, .. } = &config.credentials {
+            assert_eq!(password.as_ref(), r#"has "quotes""#);
+        } else {
+            unreachable!("expected SqlServer credentials");
+        }
+    }
+
+    #[test]
+    fn test_quoted_value_escaped_single_quotes() {
+        let config =
+            Config::from_connection_string("Server=localhost;User Id=sa;Password='it''s complex';")
+                .unwrap();
+        if let mssql_auth::Credentials::SqlServer { password, .. } = &config.credentials {
+            assert_eq!(password.as_ref(), "it's complex");
+        } else {
+            unreachable!("expected SqlServer credentials");
+        }
+    }
+
+    #[test]
+    fn test_quoted_value_unterminated() {
+        let result = Config::from_connection_string(r#"Server=localhost;Password="unterminated;"#);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("unterminated"));
+    }
+
+    #[test]
+    fn test_tcp_prefix_stripped() {
+        // Azure Portal format: tcp:hostname,port
+        let config = Config::from_connection_string(
+            "Server=tcp:myserver.database.windows.net,1433;Database=mydb;",
+        )
+        .unwrap();
+        assert_eq!(config.host, "myserver.database.windows.net");
+        assert_eq!(config.port, 1433);
+    }
+
+    #[test]
+    fn test_tcp_prefix_mixed_case() {
+        // Protocol prefixes are case-insensitive per ADO.NET
+        let config = Config::from_connection_string("Server=Tcp:myhost,1433;").unwrap();
+        assert_eq!(config.host, "myhost");
+
+        let config = Config::from_connection_string("Server=TCP:myhost,1433;").unwrap();
+        assert_eq!(config.host, "myhost");
+    }
+
+    #[test]
+    fn test_tcp_prefix_with_instance() {
+        let config =
+            Config::from_connection_string("Server=tcp:myhost\\INST;Database=test;").unwrap();
+        assert_eq!(config.host, "myhost");
+        assert_eq!(config.instance, Some("INST".to_string()));
+    }
+
+    #[test]
+    fn test_np_prefix_rejected() {
+        let result =
+            Config::from_connection_string(r"Server=np:\\myhost\pipe\sql\query;Database=test;");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Named Pipes"));
+
+        // Case-insensitive rejection
+        let result =
+            Config::from_connection_string(r"Server=NP:\\myhost\pipe\sql\query;Database=test;");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_lpc_prefix_rejected() {
+        let result = Config::from_connection_string("Server=lpc:myhost;Database=test;");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Shared Memory"));
+    }
+
+    #[test]
+    fn test_server_alias_addr() {
+        let config = Config::from_connection_string("Addr=myhost;").unwrap();
+        assert_eq!(config.host, "myhost");
+    }
+
+    #[test]
+    fn test_server_alias_address() {
+        let config = Config::from_connection_string("Address=myhost,1434;").unwrap();
+        assert_eq!(config.host, "myhost");
+        assert_eq!(config.port, 1434);
+    }
+
+    #[test]
+    fn test_server_alias_network_address() {
+        let config = Config::from_connection_string("Network Address=myhost;").unwrap();
+        assert_eq!(config.host, "myhost");
+    }
+
+    #[test]
+    fn test_timeout_alias() {
+        let config = Config::from_connection_string("Server=localhost;Timeout=30;").unwrap();
+        assert_eq!(config.connect_timeout, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn test_application_intent_readonly() {
+        let config =
+            Config::from_connection_string("Server=localhost;ApplicationIntent=ReadOnly;").unwrap();
+        assert_eq!(config.application_intent, ApplicationIntent::ReadOnly);
+    }
+
+    #[test]
+    fn test_application_intent_readwrite() {
+        let config =
+            Config::from_connection_string("Server=localhost;Application Intent=ReadWrite;")
+                .unwrap();
+        assert_eq!(config.application_intent, ApplicationIntent::ReadWrite);
+    }
+
+    #[test]
+    fn test_application_intent_invalid() {
+        let result = Config::from_connection_string("Server=localhost;ApplicationIntent=banana;");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("ApplicationIntent")
+        );
+    }
+
+    #[test]
+    fn test_workstation_id() {
+        let config =
+            Config::from_connection_string("Server=localhost;Workstation ID=MYPC;").unwrap();
+        assert_eq!(config.workstation_id, Some("MYPC".to_string()));
+    }
+
+    #[test]
+    fn test_wsid_alias() {
+        let config =
+            Config::from_connection_string("Server=localhost;WSID=MYWORKSTATION;").unwrap();
+        assert_eq!(config.workstation_id, Some("MYWORKSTATION".to_string()));
+    }
+
+    #[test]
+    fn test_language() {
+        let config =
+            Config::from_connection_string("Server=localhost;Language=us_english;").unwrap();
+        assert_eq!(config.language, Some("us_english".to_string()));
+    }
+
+    #[test]
+    fn test_current_language_alias() {
+        let config =
+            Config::from_connection_string("Server=localhost;Current Language=Deutsch;").unwrap();
+        assert_eq!(config.language, Some("Deutsch".to_string()));
+    }
+
+    #[test]
+    fn test_connect_retry_count() {
+        let config =
+            Config::from_connection_string("Server=localhost;ConnectRetryCount=5;").unwrap();
+        assert_eq!(config.retry.max_retries, 5);
+    }
+
+    #[test]
+    fn test_connect_retry_interval() {
+        let config =
+            Config::from_connection_string("Server=localhost;ConnectRetryInterval=15;").unwrap();
+        assert_eq!(config.retry.initial_backoff, Duration::from_secs(15));
+    }
+
+    #[test]
+    fn test_pool_keywords_accepted_without_error() {
+        // Pool keywords should be recognized (not error) but not affect Config
+        let result = Config::from_connection_string(
+            "Server=localhost;Max Pool Size=10;Min Pool Size=2;Pooling=true;",
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_known_unsupported_keywords_accepted() {
+        // Known ADO.NET keywords we don't support should not error
+        let result = Config::from_connection_string(
+            "Server=localhost;Failover Partner=backup;MultiSubnetFailover=true;",
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_application_intent_builder() {
+        let config = Config::new().application_intent(ApplicationIntent::ReadOnly);
+        assert_eq!(config.application_intent, ApplicationIntent::ReadOnly);
+    }
+
+    #[test]
+    fn test_workstation_id_builder() {
+        let config = Config::new().workstation_id("MY-PC");
+        assert_eq!(config.workstation_id, Some("MY-PC".to_string()));
+    }
+
+    #[test]
+    fn test_language_builder() {
+        let config = Config::new().language("us_english");
+        assert_eq!(config.language, Some("us_english".to_string()));
+    }
+
+    #[test]
+    fn test_empty_values_become_none() {
+        // Per ADO.NET, empty values reset optional fields to default (None)
+        let config =
+            Config::from_connection_string("Server=localhost;Database=;Language=;").unwrap();
+        assert_eq!(config.database, None);
+        assert_eq!(config.language, None);
     }
 }

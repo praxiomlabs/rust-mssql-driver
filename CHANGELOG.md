@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-04-15
+
+### Added
+
+- **Always Encrypted decryption integration** — wired CryptoMetadata parsing and AEAD_AES_256_CBC_HMAC_SHA256 decryption into query execution. Encrypted columns are transparently decrypted when `Column Encryption Setting=Enabled` is set in the connection string. Decryption is supported across all response readers: `query()`, `call_procedure()`, and `query_multiple()`. CEK resolution is performed asynchronously at ColMetaData time; per-row decryption is synchronous in the hot path.
+- **Native Windows SSPI authentication** — integrated auth (`Integrated Security=true`) now uses the native Windows SSPI subsystem (`secur32.dll`) instead of sspi-rs on Windows, supporting all account types including Microsoft Accounts, domain accounts, and local accounts without explicit credentials (closes #65)
+- **FILESTREAM BLOB access** (Windows only, `filestream` feature) — async read/write access to SQL Server FILESTREAM data via `OpenSqlFilestream`. `FileStream` implements `AsyncRead + AsyncWrite` for tokio compatibility. Accessed via `Client<InTransaction>::open_filestream()` or the low-level `FileStream::open()` API. Requires the Microsoft OLE DB Driver for SQL Server at runtime. (closes #67)
+- **34 new unit tests** for tds-protocol token parsing (ReturnValue, ReturnStatus, DoneProc, DoneInProc, ServerError, multi-token streams) and mssql-auth error/provider classification
+- **ADO.NET connection string conformance** — comprehensive parser rewrite:
+  - **Quoted value support** — `Password="my;complex;pass"` and `Password='it''s complex'` now work per ADO.NET spec. Previously, passwords with semicolons were silently truncated.
+  - **`tcp:` prefix stripping** — `Server=tcp:host.database.windows.net,1433` (Azure Portal format) now works. `np:` and `lpc:` prefixes return clear errors.
+  - **New Server aliases** — `Addr`, `Address`, `Network Address` now accepted per Microsoft docs
+  - **`Timeout` alias** for Connect Timeout per ADO.NET spec
+  - **ApplicationIntent** — `ReadOnly`/`ReadWrite` for AlwaysOn AG read-only routing, wired to LOGIN7 TypeFlags READONLY_INTENT bit
+  - **Workstation ID** / `WSID` — client machine name for audit trails via `sys.dm_exec_sessions.host_name`
+  - **Current Language** / `Language` — session language, wired to LOGIN7 Language field
+  - **ConnectRetryCount** / **ConnectRetryInterval** — wired to RetryPolicy
+  - **Pool keywords** (`Max Pool Size`, `Min Pool Size`, `Pooling`, etc.) — recognized with info-level guidance to use PoolConfig
+  - **30+ known ADO.NET keywords** recognized at info level instead of silently ignored at debug level
+  - **Boolean validation** — invalid values like `TrustServerCertificate=banana` now return errors instead of silently defaulting to false
+  - **`Encrypt=Mandatory`/`Optional`** — Microsoft.Data.SqlClient v5+ aliases for `true`/`false` now accepted
+  - **Case-insensitive protocol prefixes** — `Tcp:`, `TCP:`, `tCp:` all stripped correctly (not just `tcp:` and `TCP:`)
+  - **Empty values reset optional fields** — `Database=;` now results in `None` instead of `Some("")`, matching ADO.NET reset-to-default behavior
+
+### Changed
+
+- **unwrap() audit** — replaced ~20 production `unwrap()` calls with `expect()` containing descriptive context strings across library code
+- **panic! audit** — audited all panic-family macros (`panic!`, `unreachable!`, `unimplemented!`, `todo!`) in library code; converted one unjustified `unreachable!` to proper error propagation
+- Updated LIMITATIONS.md to reflect v0.8.0+ features (stored procedures, SQL Browser, pool health checks, Always Encrypted)
+
+### Fixed
+
+- **Always Encrypted in procedures and multi-result queries** — decryption was missing from `read_procedure_result()` and `read_multi_result_response()`, causing encrypted columns to return raw ciphertext instead of plaintext when accessed via `call_procedure()` or `query_multiple()`
+- **windows-certstore compilation errors** — resolved 9 compilation errors in the Always Encrypted Windows Certificate Store provider caused by API changes in the `windows` 0.62 crate (#83)
+- **Silent error swallowing** — replaced `filter_map(|r| r.ok())` in test code with explicit `unwrap()` so failures are visible; documented intentional best-effort parsing in bulk insert type resolution
+- **`(local)` host alias** — `Server=(local)\SQLEXPRESS` now correctly resolves to `127.0.0.1`, matching ADO.NET behavior. Previously only `.` was normalized to localhost (#66)
+- **LOGIN7 HostName field** — now sends the actual client machine hostname (or `Workstation ID` if configured) instead of the server hostname. Previously `sys.dm_exec_sessions.host_name` showed the server's own name. Per MS-TDS spec, the LOGIN7 HostName field is "the name of the client machine."
+
 ## [0.8.0] - 2026-04-13
 
 ### Added
@@ -43,7 +81,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bumped dev dependencies: testcontainers 0.25 → 0.27, criterion 0.7 → 0.8, rustls 0.23.37 → 0.23.38, tokio 1.51.0 → 1.51.1
 - Bumped CI actions: codecov-action v5 → v6, action-gh-release v2 → v3, github-script v8 → v9
 - Extracted `validate_identifier()` and `validate_qualified_identifier()` to shared `validation` module
-
 ## [0.7.0] - 2026-04-07
 
 This is a **security + API hardening release**. It resolves seven RUSTSEC

@@ -46,6 +46,17 @@ Always Encrypted is fully implemented via the `always-encrypted` feature with pr
 4. Implement the `KeyStoreProvider` trait for custom key storage
 5. **Do NOT use ENCRYPTBYKEY** - it does not provide the same security guarantees
 
+#### Decryption Wiring
+
+When `Column Encryption Setting=Enabled` is in the connection string (or `Config::column_encryption` is set programmatically), the client:
+
+1. Negotiates Always Encrypted support during login (`FeatureExt`)
+2. Parses `CryptoMetadata` and `CekTable` from `ColMetaData` tokens (in `tds-protocol::crypto`)
+3. Pre-resolves Column Encryption Keys asynchronously via `ColumnDecryptor::from_metadata()` (in `mssql-client::column_decryptor`) — this is where key store providers are called
+4. Decrypts each encrypted column value synchronously during row parsing via `AeadEncryptor::decrypt()` (AEAD_AES_256_CBC_HMAC_SHA256)
+
+Decryption is supported in all three response readers: `read_query_response()`, `read_procedure_result()`, and `read_multi_result_response()`. The pattern is symmetric across all three.
+
 ### Savepoint Name Validation
 
 All savepoint names MUST be validated before use in SQL:
@@ -61,6 +72,24 @@ fn validate_identifier(name: &str) -> Result<(), Error> {
     Ok(())
 }
 ```
+
+### Connection String Parser (ADO.NET Conformance)
+
+The `Config::from_connection_string()` parser conforms to the Microsoft ADO.NET `SqlConnection.ConnectionString` specification. Key behaviors:
+
+- **Quoted values**: `Password="my;pass"` and `Password='it''s complex'` supported per spec. Doubled quotes are escapes.
+- **Protocol prefixes**: `tcp:` stripped automatically (Azure Portal format). `np:` and `lpc:` rejected with clear errors.
+- **Boolean validation**: Invalid boolean values return errors (not silent defaults). Accepts `true/false/yes/no/1/0`.
+- **Server aliases**: `Server`, `Data Source`, `Addr`, `Address`, `Network Address`, `Host`
+- **`ApplicationIntent`**: `ReadOnly`/`ReadWrite` — wired to LOGIN7 `READONLY_INTENT` bit for AlwaysOn AG routing
+- **`Workstation ID`** / `WSID`: Sent in LOGIN7 HostName field. Defaults to machine hostname via env var.
+- **`Current Language`** / `Language`: Sent in LOGIN7 Language field.
+- **`ConnectRetryCount`** / `ConnectRetryInterval`**: Wired to `RetryPolicy`.
+- **`Encrypt`**: Supports `strict`, `mandatory`, `optional`, `no_tls`, plus standard booleans.
+- **Pool keywords** (`Max Pool Size`, etc.): Recognized with info-level log directing to `PoolConfig`.
+- **Known-but-unsupported keywords** (30+): Recognized at info level instead of silently ignored.
+
+See [`docs/CONNECTION_STRINGS.md`](docs/CONNECTION_STRINGS.md) for the full keyword reference.
 
 ## Workspace Structure
 
@@ -147,6 +176,10 @@ Returns `ProcedureResult` with `return_value`, `rows_affected`, `output_params`,
 ### SQL Browser Instance Resolution (v0.8.0)
 
 Named instances (e.g., `Server=localhost\SQLEXPRESS`) are automatically resolved via the SQL Server Browser service (UDP 1434). The `crate::browser` module implements the SSRP protocol (MC-SQLR spec). Resolution happens transparently in `Client::connect()` when `config.instance` is `Some`.
+
+### FILESTREAM BLOB Access (Windows only, `filestream` feature)
+
+Async read/write of SQL Server FILESTREAM data via `OpenSqlFilestream` from the OLE DB Driver DLL. The implementation uses runtime dynamic loading (`LoadLibraryW` + `GetProcAddress`) with a fallback chain: `msoledbsql19.dll` → `msoledbsql.dll` → `sqlncli11.dll`. The function pointer is cached via `OnceLock`. The Win32 `HANDLE` is wrapped in `tokio::fs::File` for `AsyncRead + AsyncWrite`. See [`docs/FILESTREAM.md`](docs/FILESTREAM.md) for setup and usage.
 
 ## Development Tooling
 
@@ -285,6 +318,9 @@ Primary references (in the repository):
 - `docs/DEPENDENCY_POLICY.md` — Dependency management policy
 - `docs/VERSION_REFS.md` — Release-time version reference checklist
 - `docs/MIGRATION_FROM_TIBERIUS.md` — Migration guide from Tiberius
+- `docs/CONNECTION_STRINGS.md` — ADO.NET connection string keyword reference (full spec conformance)
+- `docs/ALWAYS_ENCRYPTED.md` — Always Encrypted user guide (key providers, transparent decryption)
+- `docs/STORED_PROCEDURES.md` — Stored procedure API guide
 
 External references:
 

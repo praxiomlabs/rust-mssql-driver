@@ -76,3 +76,81 @@ impl AuthError {
         )
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_transient_errors() {
+        assert!(AuthError::Network("connection reset".into()).is_transient());
+        assert!(AuthError::TokenAcquisition("timeout".into()).is_transient());
+        assert!(AuthError::AzureIdentity("service unavailable".into()).is_transient());
+    }
+
+    #[test]
+    fn test_terminal_errors() {
+        assert!(AuthError::InvalidCredentials("bad password".into()).is_terminal());
+        assert!(AuthError::UnsupportedMethod("NTLM".into()).is_terminal());
+        assert!(AuthError::Certificate("expired cert".into()).is_terminal());
+        assert!(AuthError::Configuration("missing field".into()).is_terminal());
+    }
+
+    #[test]
+    fn test_transient_terminal_mutual_exclusion() {
+        // Transient errors should not be terminal
+        assert!(!AuthError::Network("err".into()).is_terminal());
+        assert!(!AuthError::TokenAcquisition("err".into()).is_terminal());
+        assert!(!AuthError::AzureIdentity("err".into()).is_terminal());
+
+        // Terminal errors should not be transient
+        assert!(!AuthError::InvalidCredentials("err".into()).is_transient());
+        assert!(!AuthError::UnsupportedMethod("err".into()).is_transient());
+        assert!(!AuthError::Certificate("err".into()).is_transient());
+        assert!(!AuthError::Configuration("err".into()).is_transient());
+    }
+
+    #[test]
+    fn test_ambiguous_errors_classified() {
+        // Errors that are neither transient nor terminal
+        // (i.e., require case-by-case handling)
+        let sspi = AuthError::Sspi("negotiate failed".into());
+        assert!(!sspi.is_transient());
+        assert!(!sspi.is_terminal());
+
+        let expired = AuthError::TokenExpired;
+        assert!(!expired.is_transient());
+        assert!(!expired.is_terminal());
+
+        let auth_failed = AuthError::AuthenticationFailed("bad user".into());
+        assert!(!auth_failed.is_transient());
+        assert!(!auth_failed.is_terminal());
+    }
+
+    #[test]
+    fn test_error_display() {
+        assert_eq!(
+            AuthError::InvalidCredentials("no password".into()).to_string(),
+            "invalid credentials: no password"
+        );
+        assert_eq!(
+            AuthError::TokenExpired.to_string(),
+            "token expired or invalid"
+        );
+        assert_eq!(
+            AuthError::Sspi("ctx init".into()).to_string(),
+            "SSPI error: ctx init"
+        );
+        assert_eq!(
+            AuthError::Configuration("missing host".into()).to_string(),
+            "configuration error: missing host"
+        );
+    }
+
+    #[test]
+    fn test_error_is_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<AuthError>();
+    }
+}

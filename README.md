@@ -17,7 +17,7 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 - **Pure Rust TLS** - Uses rustls, no OpenSSL dependency
 - **Modern Rust** - 2024 Edition, MSRV 1.88
 
-### Feature Status (v0.8.x)
+### Feature Status (v0.9.x)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -40,6 +40,7 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 | Collation-Aware Decoding | ✅ | 14+ character encodings |
 | Stored Procedures | ✅ | RPC-based with OUTPUT params |
 | Named Instance Resolution | ✅ | SQL Browser service (UDP 1434) |
+| FILESTREAM BLOB Access | ✅ | Windows only, via `filestream` feature |
 
 ## Installation
 
@@ -47,9 +48,11 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-mssql-client = "0.8"
+mssql-client = "0.9"
 tokio = { version = "1.48", features = ["full"] }
 ```
+
+**Windows note:** The default TLS feature requires a C compiler (`ring`/`aws-lc-sys`). Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the "Desktop development with C++" workload, or any edition of Visual Studio with that workload. This is a one-time setup — see [CONTRIBUTING.md](CONTRIBUTING.md#4-platform-specific-windows-c-build-tools) for details.
 
 ## Quick Start
 
@@ -205,6 +208,7 @@ for result in rows {
 | `tls` | Yes | TLS/SSL encryption via rustls (disable for `Encrypt=no_tls` environments) |
 | `otel` | No | OpenTelemetry tracing and metrics |
 | `zeroize` | No | Secure credential wiping |
+| `filestream` | No | FILESTREAM BLOB access (Windows only, requires OLE DB Driver) |
 
 ### Authentication Features (mssql-auth crate)
 
@@ -215,14 +219,14 @@ for result in rows {
 | `sspi-auth` | Windows SSPI (cross-platform via sspi-rs) |
 | `cert-auth` | Client certificate authentication |
 | `zeroize` | Secure credential wiping from memory |
-| `always-encrypted` | Client-side encryption with key providers |
+| `always-encrypted` | Transparent column decryption with Azure Key Vault and Windows CertStore key providers |
 
 Enable optional features:
 
 ```toml
 [dependencies]
 mssql-client = { version = "0.8", features = ["otel"] }
-mssql-auth = { version = "0.8", features = ["sspi-auth"] }
+mssql-auth = { version = "0.9", features = ["sspi-auth"] }
 ```
 
 ## SQL Server Compatibility

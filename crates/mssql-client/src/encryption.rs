@@ -136,6 +136,31 @@ pub struct EncryptionContext {
 
 #[cfg(feature = "always-encrypted")]
 impl EncryptionContext {
+    /// Create a new encryption context from an Arc-wrapped configuration.
+    ///
+    /// This attempts to unwrap the Arc to get ownership of the config.
+    /// If the Arc has been cloned (multiple references), it falls back
+    /// to creating a context with no providers (connection string-only mode
+    /// where providers must be registered separately).
+    pub fn from_arc(config: std::sync::Arc<EncryptionConfig>) -> Self {
+        match std::sync::Arc::try_unwrap(config) {
+            Ok(owned) => Self::new(owned),
+            Err(_arc) => {
+                // Config was shared — create context without providers.
+                // The caller should register providers separately.
+                tracing::warn!(
+                    "EncryptionConfig has multiple references; \
+                     creating EncryptionContext without providers"
+                );
+                Self {
+                    providers: std::collections::HashMap::new(),
+                    cek_cache: CekCache::new(),
+                    cache_enabled: true,
+                }
+            }
+        }
+    }
+
     /// Create a new encryption context from configuration.
     pub fn new(config: EncryptionConfig) -> Self {
         let providers = config
@@ -424,6 +449,9 @@ mod tests {
 
         let metadata = CryptoMetadata {
             cek_table_ordinal: 0,
+            base_user_type: 0,
+            base_col_type: 0x26,
+            base_type_info: tds_protocol::token::TypeInfo::default(),
             algorithm_id: 2,
             encryption_type: EncryptionTypeWire::Deterministic,
             normalization_version: 1,

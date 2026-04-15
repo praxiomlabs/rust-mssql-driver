@@ -2,6 +2,23 @@
 
 use std::time::Duration;
 
+/// Application workload intent for AlwaysOn Availability Group routing.
+///
+/// When set to [`ReadOnly`](ApplicationIntent::ReadOnly), SQL Server routes the
+/// connection to a readable secondary replica if one is available. This is sent
+/// in the LOGIN7 packet's TypeFlags as the `READONLY_INTENT` bit.
+///
+/// Set via `ApplicationIntent=ReadOnly` in connection strings, or
+/// programmatically via [`Config::application_intent`](super::Config::application_intent).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ApplicationIntent {
+    /// Read-write workload (default). Routes to the primary replica.
+    #[default]
+    ReadWrite,
+    /// Read-only workload. Routes to a readable secondary replica.
+    ReadOnly,
+}
+
 /// Configuration for Azure SQL redirect handling.
 ///
 /// Azure SQL Gateway may redirect connections to different backend servers.

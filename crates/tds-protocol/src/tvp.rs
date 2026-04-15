@@ -393,6 +393,11 @@ pub fn encode_tvp_bit(value: bool, buf: &mut BytesMut) {
 }
 
 /// Encode an integer value for TVP.
+///
+/// # Panics
+///
+/// Panics if `size` is not 1, 2, 4, or 8. Callers must use sizes derived
+/// from `TvpWireType::Int { size }` which are always valid.
 pub fn encode_tvp_int(value: i64, size: u8, buf: &mut BytesMut) {
     buf.put_u8(size); // Length
     match size {
@@ -400,17 +405,22 @@ pub fn encode_tvp_int(value: i64, size: u8, buf: &mut BytesMut) {
         2 => buf.put_i16_le(value as i16),
         4 => buf.put_i32_le(value as i32),
         8 => buf.put_i64_le(value),
-        _ => unreachable!("invalid int size"),
+        _ => unreachable!("encode_tvp_int called with invalid size {size}; expected 1, 2, 4, or 8"),
     }
 }
 
 /// Encode a float value for TVP.
+///
+/// # Panics
+///
+/// Panics if `size` is not 4 or 8. Callers must use sizes derived
+/// from `TvpWireType::Float { size }` which are always valid.
 pub fn encode_tvp_float(value: f64, size: u8, buf: &mut BytesMut) {
     buf.put_u8(size); // Length
     match size {
         4 => buf.put_f32_le(value as f32),
         8 => buf.put_f64_le(value),
-        _ => unreachable!("invalid float size"),
+        _ => unreachable!("encode_tvp_float called with invalid size {size}; expected 4 or 8"),
     }
 }
 

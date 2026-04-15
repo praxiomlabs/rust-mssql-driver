@@ -2380,7 +2380,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-auth"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "aes 0.8.4",
  "async-trait",
@@ -2411,7 +2411,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-client"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -2443,7 +2443,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-codec"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "bytes",
  "futures-core",
@@ -2459,7 +2459,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-derive"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2468,7 +2468,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-driver-pool"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "async-trait",
  "mssql-client",
@@ -2482,7 +2482,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-testing"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "bytes",
  "mssql-client",
@@ -2499,7 +2499,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-tls"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "rustls",
  "thiserror",
@@ -2512,7 +2512,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-types"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -3801,9 +3801,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.10"
+version = "0.103.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df33b2b81ac578cabaf06b89b0631153a3f416b0a886e8a7a1707fb51abbd1ef"
+checksum = "8279bb85272c9f10811ae6a6c547ff594d6a7f3c6c6b02ee9726d1d0dcfcdd06"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -4359,7 +4359,7 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
 name = "tds-protocol"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "bitflags 2.11.0",
  "bytes",
