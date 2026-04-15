@@ -4365,7 +4365,6 @@ dependencies = [
  "bytes",
  "criterion",
  "encoding_rs",
- "proptest",
  "thiserror",
 ]
 
