@@ -57,6 +57,10 @@ The following APIs are considered stable and covered by semver guarantees:
 | `FileStream` / `FileStreamAccess` | Stable (`filestream` feature, Windows only) |
 | `EncryptionContext` / `EncryptionConfig` | Stable (`always-encrypted` feature) |
 | `KeyStoreProvider` trait | Stable (`always-encrypted` feature) |
+| `ApplicationIntent` enum | Stable |
+| `Config::application_intent()` | Stable |
+| `Config::workstation_id()` | Stable |
+| `Config::language()` | Stable |
 
 ### mssql-driver-pool
 

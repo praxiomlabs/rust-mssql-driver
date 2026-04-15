@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Pool keywords** (`Max Pool Size`, `Min Pool Size`, `Pooling`, etc.) — recognized with info-level guidance to use PoolConfig
   - **30+ known ADO.NET keywords** recognized at info level instead of silently ignored at debug level
   - **Boolean validation** — invalid values like `TrustServerCertificate=banana` now return errors instead of silently defaulting to false
+  - **`Encrypt=Mandatory`/`Optional`** — Microsoft.Data.SqlClient v5+ aliases for `true`/`false` now accepted
+  - **Case-insensitive protocol prefixes** — `Tcp:`, `TCP:`, `tCp:` all stripped correctly (not just `tcp:` and `TCP:`)
+  - **Empty values reset optional fields** — `Database=;` now results in `None` instead of `Some("")`, matching ADO.NET reset-to-default behavior
 
 ### Changed
 

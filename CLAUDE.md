@@ -73,6 +73,24 @@ fn validate_identifier(name: &str) -> Result<(), Error> {
 }
 ```
 
+### Connection String Parser (ADO.NET Conformance)
+
+The `Config::from_connection_string()` parser conforms to the Microsoft ADO.NET `SqlConnection.ConnectionString` specification. Key behaviors:
+
+- **Quoted values**: `Password="my;pass"` and `Password='it''s complex'` supported per spec. Doubled quotes are escapes.
+- **Protocol prefixes**: `tcp:` stripped automatically (Azure Portal format). `np:` and `lpc:` rejected with clear errors.
+- **Boolean validation**: Invalid boolean values return errors (not silent defaults). Accepts `true/false/yes/no/1/0`.
+- **Server aliases**: `Server`, `Data Source`, `Addr`, `Address`, `Network Address`, `Host`
+- **`ApplicationIntent`**: `ReadOnly`/`ReadWrite` — wired to LOGIN7 `READONLY_INTENT` bit for AlwaysOn AG routing
+- **`Workstation ID`** / `WSID`: Sent in LOGIN7 HostName field. Defaults to machine hostname via env var.
+- **`Current Language`** / `Language`: Sent in LOGIN7 Language field.
+- **`ConnectRetryCount`** / `ConnectRetryInterval`**: Wired to `RetryPolicy`.
+- **`Encrypt`**: Supports `strict`, `mandatory`, `optional`, `no_tls`, plus standard booleans.
+- **Pool keywords** (`Max Pool Size`, etc.): Recognized with info-level log directing to `PoolConfig`.
+- **Known-but-unsupported keywords** (30+): Recognized at info level instead of silently ignored.
+
+See [`docs/CONNECTION_STRINGS.md`](docs/CONNECTION_STRINGS.md) for the full keyword reference.
+
 ## Workspace Structure
 
 ```

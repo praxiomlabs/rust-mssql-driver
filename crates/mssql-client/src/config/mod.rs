@@ -124,6 +124,18 @@ fn split_connection_string(conn_str: &str) -> Result<Vec<(String, String)>, crat
     Ok(pairs)
 }
 
+/// Convert a connection string value to `Option<String>`, treating empty strings as `None`.
+///
+/// In ADO.NET, specifying a keyword with an empty value (e.g., `Database=;`) resets it
+/// to its default. We represent this as `None` for optional fields.
+fn non_empty(value: &str) -> Option<String> {
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
 /// Configuration for connecting to SQL Server.
 ///
 /// This struct is marked `#[non_exhaustive]` to allow adding new fields
@@ -320,21 +332,20 @@ impl Config {
                 "server" | "data source" | "addr" | "address" | "network address" | "host" => {
                     // Strip tcp: prefix (common in Azure Portal connection strings).
                     // Reject np: (Named Pipes) and lpc: (Shared Memory) — not supported.
-                    let server_value = if let Some(stripped) = value
-                        .strip_prefix("tcp:")
-                        .or_else(|| value.strip_prefix("TCP:"))
-                    {
-                        stripped
-                    } else if value.starts_with("np:") || value.starts_with("NP:") {
+                    // All prefix checks are case-insensitive per ADO.NET conventions.
+                    let lower_value = value.to_lowercase();
+                    let server_value = if lower_value.starts_with("tcp:") {
+                        &value[4..]
+                    } else if lower_value.starts_with("np:") {
                         return Err(crate::error::Error::Config(
-                                "Named Pipes connections (np:) are not supported. Use TCP connections instead."
-                                    .into(),
-                            ));
-                    } else if value.starts_with("lpc:") || value.starts_with("LPC:") {
+                            "Named Pipes connections (np:) are not supported. Use TCP connections instead."
+                                .into(),
+                        ));
+                    } else if lower_value.starts_with("lpc:") {
                         return Err(crate::error::Error::Config(
-                                "Shared Memory connections (lpc:) are not supported. Use TCP connections instead."
-                                    .into(),
-                            ));
+                            "Shared Memory connections (lpc:) are not supported. Use TCP connections instead."
+                                .into(),
+                        ));
                     } else {
                         value
                     };
@@ -347,7 +358,7 @@ impl Config {
                         })?;
                     } else if let Some((host, instance)) = server_value.split_once('\\') {
                         config.host = host.to_string();
-                        config.instance = Some(instance.to_string());
+                        config.instance = non_empty(instance);
                     } else {
                         config.host = server_value.to_string();
                     }
@@ -359,7 +370,7 @@ impl Config {
                 }
                 // --- Database ---
                 "database" | "initial catalog" => {
-                    config.database = Some(value.to_string());
+                    config.database = non_empty(value);
                 }
                 // --- Credentials ---
                 "user id" | "uid" | "user" => {
@@ -390,10 +401,10 @@ impl Config {
                     };
                 }
                 "workstation id" | "wsid" => {
-                    config.workstation_id = Some(value.to_string());
+                    config.workstation_id = non_empty(value);
                 }
                 "current language" | "language" => {
-                    config.language = Some(value.to_string());
+                    config.language = non_empty(value);
                 }
                 // --- Timeouts (ADO.NET alias: Timeout) ---
                 "connect timeout" | "connection timeout" | "timeout" => {
@@ -413,10 +424,22 @@ impl Config {
                     config.trust_server_certificate = parse_conn_bool(&key, value)?;
                 }
                 "encrypt" => {
-                    // Encrypt has special non-boolean values: "strict" and "no_tls"
+                    // Encrypt supports several non-boolean values beyond true/false:
+                    // - "strict" = TDS 8.0 strict mode (always encrypted transport)
+                    // - "mandatory" / "true" / "yes" / "1" = require TLS
+                    // - "optional" / "false" / "no" / "0" = TLS only if server requires
+                    // - "no_tls" = Tiberius-compatible plaintext mode for legacy servers
+                    //
+                    // "mandatory" and "optional" are Microsoft.Data.SqlClient v5+ aliases.
                     if value.eq_ignore_ascii_case("strict") {
                         config.strict_mode = true;
                         config.encrypt = true;
+                        config.no_tls = false;
+                    } else if value.eq_ignore_ascii_case("mandatory") {
+                        config.encrypt = true;
+                        config.no_tls = false;
+                    } else if value.eq_ignore_ascii_case("optional") {
+                        config.encrypt = false;
                         config.no_tls = false;
                     } else if value.eq_ignore_ascii_case("no_tls") {
                         config.no_tls = true;
@@ -1131,6 +1154,16 @@ mod tests {
         assert!(!config.no_tls);
         assert!(config.encrypt);
         assert!(config.strict_mode);
+
+        // Encrypt=mandatory (Microsoft.Data.SqlClient v5+ alias for true)
+        let config = Config::from_connection_string("Server=localhost;Encrypt=mandatory;").unwrap();
+        assert!(config.encrypt);
+        assert!(!config.no_tls);
+
+        // Encrypt=optional (Microsoft.Data.SqlClient v5+ alias for false)
+        let config = Config::from_connection_string("Server=localhost;Encrypt=optional;").unwrap();
+        assert!(!config.encrypt);
+        assert!(!config.no_tls);
     }
 
     #[test]
@@ -1325,6 +1358,16 @@ mod tests {
     }
 
     #[test]
+    fn test_tcp_prefix_mixed_case() {
+        // Protocol prefixes are case-insensitive per ADO.NET
+        let config = Config::from_connection_string("Server=Tcp:myhost,1433;").unwrap();
+        assert_eq!(config.host, "myhost");
+
+        let config = Config::from_connection_string("Server=TCP:myhost,1433;").unwrap();
+        assert_eq!(config.host, "myhost");
+    }
+
+    #[test]
     fn test_tcp_prefix_with_instance() {
         let config =
             Config::from_connection_string("Server=tcp:myhost\\INST;Database=test;").unwrap();
@@ -1338,6 +1381,11 @@ mod tests {
             Config::from_connection_string(r"Server=np:\\myhost\pipe\sql\query;Database=test;");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Named Pipes"));
+
+        // Case-insensitive rejection
+        let result =
+            Config::from_connection_string(r"Server=NP:\\myhost\pipe\sql\query;Database=test;");
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1475,5 +1523,14 @@ mod tests {
     fn test_language_builder() {
         let config = Config::new().language("us_english");
         assert_eq!(config.language, Some("us_english".to_string()));
+    }
+
+    #[test]
+    fn test_empty_values_become_none() {
+        // Per ADO.NET, empty values reset optional fields to default (None)
+        let config =
+            Config::from_connection_string("Server=localhost;Database=;Language=;").unwrap();
+        assert_eq!(config.database, None);
+        assert_eq!(config.language, None);
     }
 }
