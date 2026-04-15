@@ -114,8 +114,12 @@ fn infer_sql_type(ty: &Type) -> &'static str {
                 "Decimal" => "DECIMAL(38,10)",
                 "Vec" => "VARBINARY(MAX)",
                 "Option" => {
-                    // For Option<T>, try to get the inner type
-                    // This is a simplified approach
+                    // Unwrap Option<T> and infer SQL type from the inner type T
+                    if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                        if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                            return infer_sql_type(inner_ty);
+                        }
+                    }
                     "NVARCHAR(MAX)"
                 }
                 _ => "NVARCHAR(MAX)",
