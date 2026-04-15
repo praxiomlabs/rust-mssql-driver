@@ -1302,6 +1302,128 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
                 Ok(SqlValue::Null)
             }
         }
+        0x29 => {
+            // TIME - 1 prop byte (scale)
+            let scale = if prop_count >= 1 { buf.get_u8() } else { 7 };
+            buf.advance(prop_count.saturating_sub(1));
+
+            #[cfg(feature = "chrono")]
+            {
+                if data_len == 0 {
+                    return Ok(SqlValue::Null);
+                }
+                let time_len = time_bytes_for_scale(scale);
+                if data_len < time_len {
+                    return Ok(SqlValue::Null);
+                }
+                let mut time_bytes = [0u8; 8];
+                for byte in time_bytes.iter_mut().take(time_len) {
+                    *byte = buf.get_u8();
+                }
+                // Consume any remaining data bytes beyond the time portion
+                if data_len > time_len {
+                    buf.advance(data_len - time_len);
+                }
+                let intervals = u64::from_le_bytes(time_bytes);
+                Ok(SqlValue::Time(intervals_to_time(intervals, scale)))
+            }
+            #[cfg(not(feature = "chrono"))]
+            {
+                buf.advance(data_len);
+                Ok(SqlValue::Null)
+            }
+        }
+        0x2A => {
+            // DATETIME2 - 1 prop byte (scale)
+            let scale = if prop_count >= 1 { buf.get_u8() } else { 7 };
+            buf.advance(prop_count.saturating_sub(1));
+
+            #[cfg(feature = "chrono")]
+            {
+                let time_len = time_bytes_for_scale(scale);
+                if data_len < time_len + 3 {
+                    return Ok(SqlValue::Null);
+                }
+
+                let mut time_bytes = [0u8; 8];
+                for byte in time_bytes.iter_mut().take(time_len) {
+                    *byte = buf.get_u8();
+                }
+                let intervals = u64::from_le_bytes(time_bytes);
+
+                let days = buf.get_u8() as u32
+                    | ((buf.get_u8() as u32) << 8)
+                    | ((buf.get_u8() as u32) << 16);
+
+                // Consume any remaining data bytes
+                let consumed = time_len + 3;
+                if data_len > consumed {
+                    buf.advance(data_len - consumed);
+                }
+
+                let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1)
+                    .expect("epoch 0001-01-01 is valid");
+                let date = base + chrono::Duration::days(days as i64);
+                let time = intervals_to_time(intervals, scale);
+                Ok(SqlValue::DateTime(date.and_time(time)))
+            }
+            #[cfg(not(feature = "chrono"))]
+            {
+                buf.advance(data_len);
+                Ok(SqlValue::Null)
+            }
+        }
+        0x2B => {
+            // DATETIMEOFFSET - 1 prop byte (scale)
+            let scale = if prop_count >= 1 { buf.get_u8() } else { 7 };
+            buf.advance(prop_count.saturating_sub(1));
+
+            #[cfg(feature = "chrono")]
+            {
+                let time_len = time_bytes_for_scale(scale);
+                if data_len < time_len + 3 + 2 {
+                    return Ok(SqlValue::Null);
+                }
+
+                let mut time_bytes = [0u8; 8];
+                for byte in time_bytes.iter_mut().take(time_len) {
+                    *byte = buf.get_u8();
+                }
+                let intervals = u64::from_le_bytes(time_bytes);
+
+                let days = buf.get_u8() as u32
+                    | ((buf.get_u8() as u32) << 8)
+                    | ((buf.get_u8() as u32) << 16);
+
+                let offset_minutes = buf.get_i16_le();
+
+                // Consume any remaining data bytes
+                let consumed = time_len + 3 + 2;
+                if data_len > consumed {
+                    buf.advance(data_len - consumed);
+                }
+
+                use chrono::TimeZone;
+                let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1)
+                    .expect("epoch 0001-01-01 is valid");
+                let date = base + chrono::Duration::days(days as i64);
+                let time = intervals_to_time(intervals, scale);
+                let offset = chrono::FixedOffset::east_opt((offset_minutes as i32) * 60)
+                    .unwrap_or_else(|| {
+                        chrono::FixedOffset::east_opt(0).expect("UTC offset 0 is valid")
+                    });
+                let datetime = offset
+                    .from_local_datetime(&date.and_time(time))
+                    .single()
+                    .unwrap_or_else(|| offset.from_utc_datetime(&date.and_time(time)));
+                Ok(SqlValue::DateTimeOffset(datetime))
+            }
+            #[cfg(not(feature = "chrono"))]
+            {
+                buf.advance(data_len);
+                Ok(SqlValue::Null)
+            }
+        }
         0xA7 | 0x2F | 0x27 => {
             // BigVarChar/BigChar/VarChar/Char - 7 prop bytes (collation 5 + maxlen 2)
             // Parse collation from property bytes (5 bytes: 4 LCID + 1 sort_id)
