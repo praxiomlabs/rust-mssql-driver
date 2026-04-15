@@ -318,6 +318,9 @@ Primary references (in the repository):
 - `docs/DEPENDENCY_POLICY.md` — Dependency management policy
 - `docs/VERSION_REFS.md` — Release-time version reference checklist
 - `docs/MIGRATION_FROM_TIBERIUS.md` — Migration guide from Tiberius
+- `docs/CONNECTION_STRINGS.md` — ADO.NET connection string keyword reference (full spec conformance)
+- `docs/ALWAYS_ENCRYPTED.md` — Always Encrypted user guide (key providers, transparent decryption)
+- `docs/STORED_PROCEDURES.md` — Stored procedure API guide
 
 External references:
 

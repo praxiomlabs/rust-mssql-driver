@@ -206,7 +206,7 @@ The authentication crate (`mssql-auth`) provides these features:
 | `sspi-auth` | No | Windows SSPI authentication (cross-platform via sspi-rs) |
 | `cert-auth` | No | Client certificate authentication (Azure AD with X.509) |
 | `zeroize` | No | Secure credential zeroization on drop |
-| `always-encrypted` | No | Always Encrypted client-side encryption |
+| `always-encrypted` | No | Always Encrypted transparent column decryption with key providers |
 
 ### azure-identity
 
@@ -264,20 +264,25 @@ Requires X.509 certificate and private key for authentication.
 
 **Default: Disabled**
 
-Enables Always Encrypted client-side encryption support:
+Enables Always Encrypted transparent column decryption:
 
 ```toml
-mssql-auth = { version = "0.5", features = ["always-encrypted"] }
+mssql-auth = { version = "0.8", features = ["always-encrypted"] }
 ```
 
+When `Column Encryption Setting=Enabled` is in the connection string, encrypted
+columns are transparently decrypted in all query paths (`query()`, `call_procedure()`,
+`query_multiple()`). See [`docs/ALWAYS_ENCRYPTED.md`](ALWAYS_ENCRYPTED.md) for the full guide.
+
 Provides:
+- Transparent column decryption in query results
 - AEAD_AES_256_CBC_HMAC_SHA256 encryption/decryption
 - RSA-OAEP key unwrapping for CEK decryption
 - CEK caching with TTL expiration
 - `InMemoryKeyStore` for development/testing
 - `KeyStoreProvider` trait for custom implementations
 
-**Production key providers available:**
+**Production key providers:**
 - `AzureKeyVaultProvider` - Azure Key Vault integration (`azure-identity` feature)
 - `WindowsCertStoreProvider` - Windows Certificate Store (`sspi-auth` feature, Windows only)
 
