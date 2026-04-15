@@ -176,7 +176,7 @@ When enabled:
 Enables async read/write access to SQL Server FILESTREAM BLOBs (Windows only):
 
 ```toml
-mssql-client = { version = "0.8", features = ["sspi-auth", "filestream"] }
+mssql-client = { version = "0.9", features = ["sspi-auth", "filestream"] }
 ```
 
 When enabled:
@@ -267,7 +267,7 @@ Requires X.509 certificate and private key for authentication.
 Enables Always Encrypted transparent column decryption:
 
 ```toml
-mssql-auth = { version = "0.8", features = ["always-encrypted"] }
+mssql-auth = { version = "0.9", features = ["always-encrypted"] }
 ```
 
 When `Column Encryption Setting=Enabled` is in the connection string, encrypted

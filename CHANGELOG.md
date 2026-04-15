@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-04-15
+
 ### Added
 
 - **Always Encrypted decryption integration** — wired CryptoMetadata parsing and AEAD_AES_256_CBC_HMAC_SHA256 decryption into query execution. Encrypted columns are transparently decrypted when `Column Encryption Setting=Enabled` is set in the connection string. Decryption is supported across all response readers: `query()`, `call_procedure()`, and `query_multiple()`. CEK resolution is performed asynchronously at ColMetaData time; per-row decryption is synchronous in the hot path.
