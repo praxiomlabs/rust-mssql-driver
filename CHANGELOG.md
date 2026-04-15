@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Native Windows SSPI authentication** — integrated auth (`Integrated Security=true`) now uses the native Windows SSPI subsystem (`secur32.dll`) instead of sspi-rs on Windows, supporting all account types including Microsoft Accounts, domain accounts, and local accounts without explicit credentials (closes #65)
 - **FILESTREAM BLOB access** (Windows only, `filestream` feature) — async read/write access to SQL Server FILESTREAM data via `OpenSqlFilestream`. `FileStream` implements `AsyncRead + AsyncWrite` for tokio compatibility. Accessed via `Client<InTransaction>::open_filestream()` or the low-level `FileStream::open()` API. Requires the Microsoft OLE DB Driver for SQL Server at runtime. (closes #67)
 - **34 new unit tests** for tds-protocol token parsing (ReturnValue, ReturnStatus, DoneProc, DoneInProc, ServerError, multi-token streams) and mssql-auth error/provider classification
+- **ADO.NET connection string conformance** — comprehensive parser rewrite:
+  - **Quoted value support** — `Password="my;complex;pass"` and `Password='it''s complex'` now work per ADO.NET spec. Previously, passwords with semicolons were silently truncated.
+  - **`tcp:` prefix stripping** — `Server=tcp:host.database.windows.net,1433` (Azure Portal format) now works. `np:` and `lpc:` prefixes return clear errors.
+  - **New Server aliases** — `Addr`, `Address`, `Network Address` now accepted per Microsoft docs
+  - **`Timeout` alias** for Connect Timeout per ADO.NET spec
+  - **ApplicationIntent** — `ReadOnly`/`ReadWrite` for AlwaysOn AG read-only routing, wired to LOGIN7 TypeFlags READONLY_INTENT bit
+  - **Workstation ID** / `WSID` — client machine name for audit trails via `sys.dm_exec_sessions.host_name`
+  - **Current Language** / `Language` — session language, wired to LOGIN7 Language field
+  - **ConnectRetryCount** / **ConnectRetryInterval** — wired to RetryPolicy
+  - **Pool keywords** (`Max Pool Size`, `Min Pool Size`, `Pooling`, etc.) — recognized with info-level guidance to use PoolConfig
+  - **30+ known ADO.NET keywords** recognized at info level instead of silently ignored at debug level
+  - **Boolean validation** — invalid values like `TrustServerCertificate=banana` now return errors instead of silently defaulting to false
 
 ### Changed
 
@@ -26,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **windows-certstore compilation errors** — resolved 9 compilation errors in the Always Encrypted Windows Certificate Store provider caused by API changes in the `windows` 0.62 crate (#83)
 - **Silent error swallowing** — replaced `filter_map(|r| r.ok())` in test code with explicit `unwrap()` so failures are visible; documented intentional best-effort parsing in bulk insert type resolution
 - **`(local)` host alias** — `Server=(local)\SQLEXPRESS` now correctly resolves to `127.0.0.1`, matching ADO.NET behavior. Previously only `.` was normalized to localhost (#66)
+- **LOGIN7 HostName field** — now sends the actual client machine hostname (or `Workstation ID` if configured) instead of the server hostname. Previously `sys.dm_exec_sessions.host_name` showed the server's own name. Per MS-TDS spec, the LOGIN7 HostName field is "the name of the client machine."
 
 ## [0.8.0] - 2026-04-13
 
