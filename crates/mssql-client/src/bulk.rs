@@ -170,6 +170,13 @@ impl BulkColumn {
 }
 
 /// Parse SQL type string into TDS type information.
+///
+/// Type parameters (e.g., the "100" in `VARCHAR(100)`) are parsed with
+/// `.parse().ok()` — if a parameter is malformed it falls through to the
+/// type's SQL Server default length (e.g., 8000 for VARCHAR, 4000 for
+/// NVARCHAR). This is intentional: bulk-insert column definitions come
+/// from user code, and defaulting to max length is safer than rejecting
+/// the operation when the base type is valid.
 fn parse_sql_type(sql_type: &str) -> (u8, Option<u32>, Option<u8>, Option<u8>) {
     let upper = sql_type.to_uppercase();
 

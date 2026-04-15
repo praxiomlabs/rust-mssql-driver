@@ -475,6 +475,10 @@ impl<'a> MultiResultStream<'a> {
     }
 
     /// Collect all rows from the current result set.
+    ///
+    /// Returns an empty `Vec` if the current result index is out of range
+    /// (e.g., all result sets have been consumed). The `unwrap_or_default`
+    /// below is on `Option`, not `Result` — no errors are being swallowed.
     pub fn collect_current(&mut self) -> Vec<Row> {
         self.result_sets
             .get_mut(self.current_result)
@@ -681,11 +685,12 @@ mod tests {
 
         let mut stream = QueryStream::new(columns, rows);
 
-        // Use iterator
+        // Use iterator — unwrap each Result so test failures are visible
+        // (QueryStream's Iterator impl always yields Ok, but we should
+        // not silently swallow errors if that ever changes)
         let values: Vec<i32> = stream
             .by_ref()
-            .filter_map(|r| r.ok())
-            .map(|r| r.get::<i32>(0).unwrap())
+            .map(|r| r.unwrap().get::<i32>(0).unwrap())
             .collect();
 
         assert_eq!(values, vec![10, 20, 30]);
