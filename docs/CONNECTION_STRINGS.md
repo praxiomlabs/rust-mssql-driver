@@ -45,6 +45,15 @@ Server=db.example.com,1434
 Server=db.example.com\SQLEXPRESS
 ```
 
+**Local host aliases:**
+```
+Server=.\SQLEXPRESS
+Server=(local)\SQLEXPRESS
+Server=localhost\SQLEXPRESS
+```
+
+Both `.` and `(local)` are normalized to `127.0.0.1`, matching ADO.NET behavior.
+
 **Azure SQL Database:**
 ```
 Server=yourserver.database.windows.net

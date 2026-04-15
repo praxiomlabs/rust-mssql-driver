@@ -609,6 +609,25 @@ mod tests {
     }
 
     #[test]
+    fn test_connection_string_dot_instance() {
+        // "." is a standard ADO.NET alias for localhost
+        let config = Config::from_connection_string("Server=.\\SQLEXPRESS;Database=test;").unwrap();
+
+        assert_eq!(config.host, ".");
+        assert_eq!(config.instance, Some("SQLEXPRESS".to_string()));
+    }
+
+    #[test]
+    fn test_connection_string_local_instance() {
+        // "(local)" is a standard ADO.NET alias for localhost
+        let config =
+            Config::from_connection_string("Server=(local)\\SQLEXPRESS;Database=test;").unwrap();
+
+        assert_eq!(config.host, "(local)");
+        assert_eq!(config.instance, Some("SQLEXPRESS".to_string()));
+    }
+
+    #[test]
     fn test_redirect_config_defaults() {
         let config = RedirectConfig::default();
         assert_eq!(config.max_redirects, 2);

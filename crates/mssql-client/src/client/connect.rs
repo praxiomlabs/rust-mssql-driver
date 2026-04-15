@@ -117,8 +117,9 @@ impl Client<Disconnected> {
             config.port
         };
 
-        // Normalize "." to localhost for TCP
-        let host = if config.host == "." {
+        // Normalize "." and "(local)" to localhost for TCP.
+        // These are standard ADO.NET aliases for the local machine.
+        let host = if config.host == "." || config.host.eq_ignore_ascii_case("(local)") {
             "127.0.0.1"
         } else {
             &config.host

@@ -76,8 +76,12 @@ pub(crate) async fn resolve_instance(
 ) -> Result<u16, Error> {
     let timeout_duration = browser_timeout.unwrap_or(DEFAULT_BROWSER_TIMEOUT);
 
-    // Normalize host: "." means localhost
-    let resolved_host = if host == "." { "127.0.0.1" } else { host };
+    // Normalize host: "." and "(local)" are ADO.NET aliases for localhost
+    let resolved_host = if host == "." || host.eq_ignore_ascii_case("(local)") {
+        "127.0.0.1"
+    } else {
+        host
+    };
 
     let target = format!("{resolved_host}:{BROWSER_PORT}");
 

@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Always Encrypted in procedures and multi-result queries** — decryption was missing from `read_procedure_result()` and `read_multi_result_response()`, causing encrypted columns to return raw ciphertext instead of plaintext when accessed via `call_procedure()` or `query_multiple()`
 - **windows-certstore compilation errors** — resolved 9 compilation errors in the Always Encrypted Windows Certificate Store provider caused by API changes in the `windows` 0.62 crate (#83)
 - **Silent error swallowing** — replaced `filter_map(|r| r.ok())` in test code with explicit `unwrap()` so failures are visible; documented intentional best-effort parsing in bulk insert type resolution
+- **`(local)` host alias** — `Server=(local)\SQLEXPRESS` now correctly resolves to `127.0.0.1`, matching ADO.NET behavior. Previously only `.` was normalized to localhost (#66)
 
 ## [0.8.0] - 2026-04-13
 
