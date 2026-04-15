@@ -53,6 +53,10 @@ The following APIs are considered stable and covered by semver guarantees:
 | `ProcedureBuilder::execute()` | Stable |
 | `ProcedureResult` fields | Stable |
 | `Error` enum variants | Stable |
+| `Client::open_filestream()` | Stable (`filestream` feature, Windows only) |
+| `FileStream` / `FileStreamAccess` | Stable (`filestream` feature, Windows only) |
+| `EncryptionContext` / `EncryptionConfig` | Stable (`always-encrypted` feature) |
+| `KeyStoreProvider` trait | Stable (`always-encrypted` feature) |
 
 ### mssql-driver-pool
 
@@ -204,7 +208,9 @@ We take backwards compatibility seriously and will work to resolve issues prompt
 | `integrated-auth` | No | Stable (platform-dependent) |
 | `sspi-auth` | No | Stable (platform-dependent) |
 | `cert-auth` | No | Stable |
-| `always-encrypted` | No | Stable (key providers pending) |
+| `always-encrypted` | No | Stable |
+| `filestream` | No | Stable (Windows only) |
+| `encoding` | No | Stable |
 
 ## SQL Server Compatibility
 

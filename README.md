@@ -219,7 +219,7 @@ for result in rows {
 | `sspi-auth` | Windows SSPI (cross-platform via sspi-rs) |
 | `cert-auth` | Client certificate authentication |
 | `zeroize` | Secure credential wiping from memory |
-| `always-encrypted` | Client-side encryption with key providers |
+| `always-encrypted` | Transparent column decryption with Azure Key Vault and Windows CertStore key providers |
 
 Enable optional features:
 

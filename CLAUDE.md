@@ -46,6 +46,17 @@ Always Encrypted is fully implemented via the `always-encrypted` feature with pr
 4. Implement the `KeyStoreProvider` trait for custom key storage
 5. **Do NOT use ENCRYPTBYKEY** - it does not provide the same security guarantees
 
+#### Decryption Wiring
+
+When `Column Encryption Setting=Enabled` is in the connection string (or `Config::column_encryption` is set programmatically), the client:
+
+1. Negotiates Always Encrypted support during login (`FeatureExt`)
+2. Parses `CryptoMetadata` and `CekTable` from `ColMetaData` tokens (in `tds-protocol::crypto`)
+3. Pre-resolves Column Encryption Keys asynchronously via `ColumnDecryptor::from_metadata()` (in `mssql-client::column_decryptor`) — this is where key store providers are called
+4. Decrypts each encrypted column value synchronously during row parsing via `AeadEncryptor::decrypt()` (AEAD_AES_256_CBC_HMAC_SHA256)
+
+Decryption is supported in all three response readers: `read_query_response()`, `read_procedure_result()`, and `read_multi_result_response()`. The pattern is symmetric across all three.
+
 ### Savepoint Name Validation
 
 All savepoint names MUST be validated before use in SQL:

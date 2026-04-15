@@ -9,12 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Always Encrypted decryption integration** — wired CryptoMetadata parsing and AEAD_AES_256_CBC_HMAC_SHA256 decryption into query execution. Encrypted columns are transparently decrypted when `Column Encryption Setting=Enabled` is set in the connection string. Decryption is supported across all response readers: `query()`, `call_procedure()`, and `query_multiple()`. CEK resolution is performed asynchronously at ColMetaData time; per-row decryption is synchronous in the hot path.
 - **Native Windows SSPI authentication** — integrated auth (`Integrated Security=true`) now uses the native Windows SSPI subsystem (`secur32.dll`) instead of sspi-rs on Windows, supporting all account types including Microsoft Accounts, domain accounts, and local accounts without explicit credentials (closes #65)
 - **FILESTREAM BLOB access** (Windows only, `filestream` feature) — async read/write access to SQL Server FILESTREAM data via `OpenSqlFilestream`. `FileStream` implements `AsyncRead + AsyncWrite` for tokio compatibility. Accessed via `Client<InTransaction>::open_filestream()` or the low-level `FileStream::open()` API. Requires the Microsoft OLE DB Driver for SQL Server at runtime. (closes #67)
+- **34 new unit tests** for tds-protocol token parsing (ReturnValue, ReturnStatus, DoneProc, DoneInProc, ServerError, multi-token streams) and mssql-auth error/provider classification
+
+### Changed
+
+- **unwrap() audit** — replaced ~20 production `unwrap()` calls with `expect()` containing descriptive context strings across library code
+- **panic! audit** — audited all panic-family macros (`panic!`, `unreachable!`, `unimplemented!`, `todo!`) in library code; converted one unjustified `unreachable!` to proper error propagation
+- Updated LIMITATIONS.md to reflect v0.8.0+ features (stored procedures, SQL Browser, pool health checks, Always Encrypted)
 
 ### Fixed
 
+- **Always Encrypted in procedures and multi-result queries** — decryption was missing from `read_procedure_result()` and `read_multi_result_response()`, causing encrypted columns to return raw ciphertext instead of plaintext when accessed via `call_procedure()` or `query_multiple()`
 - **windows-certstore compilation errors** — resolved 9 compilation errors in the Always Encrypted Windows Certificate Store provider caused by API changes in the `windows` 0.62 crate (#83)
+- **Silent error swallowing** — replaced `filter_map(|r| r.ok())` in test code with explicit `unwrap()` so failures are visible; documented intentional best-effort parsing in bulk insert type resolution
 
 ## [0.8.0] - 2026-04-13
 
