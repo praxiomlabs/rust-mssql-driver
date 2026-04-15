@@ -810,6 +810,24 @@ impl Client<Disconnected> {
         prelogin
     }
 
+    /// Resolve the workstation ID for the LOGIN7 HostName field.
+    ///
+    /// Per MS-TDS, the LOGIN7 HostName field contains the client machine name
+    /// (not the server name). Priority:
+    /// 1. `Config::workstation_id` (explicit override)
+    /// 2. Machine hostname from environment (`COMPUTERNAME` on Windows, `HOSTNAME` on Linux)
+    /// 3. Empty string (fallback)
+    fn resolve_workstation_id(config: &Config) -> String {
+        if let Some(ref id) = config.workstation_id {
+            return id.clone();
+        }
+        // COMPUTERNAME is set on Windows; HOSTNAME is set on most Linux systems.
+        // This avoids adding a dependency for a simple lookup.
+        std::env::var("COMPUTERNAME")
+            .or_else(|_| std::env::var("HOSTNAME"))
+            .unwrap_or_default()
+    }
+
     /// Build a Login7 packet.
     ///
     /// When `sspi_token` is provided (integrated auth), the Login7 packet is
@@ -827,10 +845,20 @@ impl Client<Disconnected> {
             .with_packet_size(config.packet_size as u32)
             .with_app_name(&config.application_name)
             .with_server_name(&config.host)
-            .with_hostname(&config.host);
+            .with_hostname(Self::resolve_workstation_id(config));
 
         if let Some(ref database) = config.database {
             login = login.with_database(database);
+        }
+
+        // ApplicationIntent → LOGIN7 TypeFlags READONLY_INTENT bit
+        if config.application_intent == crate::config::ApplicationIntent::ReadOnly {
+            login = login.with_read_only_intent(true);
+        }
+
+        // Session language → LOGIN7 Language field
+        if let Some(ref lang) = config.language {
+            login = login.with_language(lang);
         }
 
         // Set credentials

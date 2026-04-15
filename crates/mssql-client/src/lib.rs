@@ -117,7 +117,7 @@ pub(crate) mod validation;
 pub use bulk::{BulkColumn, BulkInsert, BulkInsertBuilder, BulkInsertResult, BulkOptions};
 pub use cancel::CancelHandle;
 pub use client::Client;
-pub use config::{Config, RedirectConfig, RetryPolicy, TimeoutConfig};
+pub use config::{ApplicationIntent, Config, RedirectConfig, RetryPolicy, TimeoutConfig};
 pub use error::{Error, SharedIoError};
 
 // Re-export TDS version for configuration
