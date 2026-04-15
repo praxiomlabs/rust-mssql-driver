@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1776124858866,
+  "lastUpdate": 1776287686925,
   "repoUrl": "https://github.com/praxiomlabs/rust-mssql-driver",
   "entries": {
     "Rust Benchmarks": [
@@ -5039,6 +5039,366 @@ window.BENCHMARK_DATA = {
             "name": "sql_batch_encode/large",
             "value": 2567,
             "range": "± 3",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "jkindrix@gmail.com",
+            "name": "Justin Kindrix",
+            "username": "jkindrix"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7760f0c6892cb451d67eb2b3a00c3dde7179815d",
+          "message": "Release v0.9.0 (#84)\n\n* ci: run on dev branch, add workflow_dispatch, add token health check\n\nPost-v0.7.0 release hygiene improvements addressing three pain points\nsurfaced during the 0.7.0 release cycle:\n\n## 1. CI on dev branch\n\nci.yml and benchmarks.yml now trigger on pushes to dev, not just main.\nThe 42-commit backlog that shipped in v0.7.0 had zero CI coverage between\nthe last main-branch CI run (2026-01-13) and the release PR (#69). That's\nhow the mock_server TLS test failure on macOS/Windows and the xtask\n--no-dev-deps bug were both latent for months before surfacing at release\ntime. Running CI on every dev push ensures cross-platform and feature-flag\nissues are caught within minutes of landing.\n\nsecurity-audit.yml also now triggers on dev pushes (not just main) when\nCargo.toml, Cargo.lock, deny.toml, or .cargo/audit.toml change. This\nmeans transitive security advisories are caught as soon as a dep bump\nlands on dev, not only after it reaches main.\n\nBoth workflows use concurrency cancel-in-progress for non-main branches\nto avoid wasted CI cycles when multiple commits land in quick succession.\nMain always runs to completion to preserve the full audit trail per\ncommit.\n\n## 2. Manual workflow dispatch\n\nAdded workflow_dispatch to ci.yml and benchmarks.yml. The\nsecurity-audit.yml workflow already had it. This allows maintainers to\nmanually retrigger a workflow from the Actions tab without needing to\npush a dummy commit, which was awkward during the v0.7.0 release when\nwe needed to re-run after the token was updated.\n\n## 3. Token health check workflow\n\nNew .github/workflows/token-health.yml that runs weekly (Monday 09:15\nUTC, staggered after Security Audit) and verifies the\nCARGO_REGISTRY_TOKEN secret still authenticates against\nhttps://crates.io/api/v1/me. On failure, opens (or updates) a tracking\nissue labelled `security` with rotation instructions.\n\nThis directly prevents the exact failure mode hit during the v0.7.0\nrelease: the token had silently expired between v0.6.0 and v0.7.0 and\nthe release workflow only discovered this when it tried to upload\ntds-protocol and was rejected with HTTP 403. A weekly health check\nwould have surfaced the problem up to 7 days earlier, giving plenty\nof time to rotate before a real release attempt.\n\nThe check uses curl against the /api/v1/me endpoint (not\n`cargo publish --dry-run`, which does not actually authenticate\nunless it reaches the upload step). The call is cheap, non-destructive,\nand unambiguous: 200 means the token works, anything else means it\ndoesn't.\n\nRefs #63 (security audit reliability)\nRefs #64 (v0.7.0 release pain)\n\n* feat(tooling): add release-status, release-preflight, and xtask release-notes\n\nThree new release-observability tools that directly address pain points\nfrom the 0.7.0 release cycle:\n\n## just release-status\n\nDashboard recipe that reports everything you need to know before cutting\na release, in one command:\n- Current branch and workspace version\n- Last tag, date, days elapsed\n- dev vs main divergence (detects release candidates AND drift)\n- Latest run status for CI, Security Audit, Benchmarks, and the new\n  Token Health Check workflow\n- Open dependabot PRs with per-PR failing-check counts\n- Open contributor PRs (uses author.is_bot filter, not login name, so\n  \"app/dependabot\" is correctly excluded)\n- Open issue count\n- Local working-copy cleanliness and unpushed commits\n\nThis answers the question \"should I release?\" at a glance. Before 0.7.0\nwe walked into the release with 42 accumulated commits and no visibility\ninto the size of the backlog.\n\n## just release-preflight\n\nSequential gate check that runs every Cardinal Rule from RELEASING.md:\nworking-copy clean, version refs consistent, cargo audit clean, cargo\ndeny clean, no WIP markers, metadata valid, URLs valid, tier-0 package\ndry-run succeeds. Captures the full verification checklist that we\npreviously had to remember to run manually.\n\nIntegrates with the upcoming scripts/check-doc-consistency.sh linter\n(conditional — only runs if the script is present and executable).\n\n## cargo xtask release-notes\n\nGenerates a CHANGELOG draft from git log. Reads conventional commits\nbetween the last v*.*.* tag and HEAD, parses headers of the form\n\"type(scope)?!?: subject\", groups by bucket (feat → Added, fix → Fixed,\netc.), detects breaking changes via \"!\" suffix or \"BREAKING CHANGE\"\nfooter, and emits markdown suitable for pasting into CHANGELOG.md.\n\nNon-conforming commits are placed under an \"Other\" bucket with a\nreview prompt rather than being dropped silently. Merge commits are\nskipped.\n\nTested against the v0.6.0..v0.7.0 range — correctly identifies both\nbreaking changes (d4ef523 \"remove deprecated items before 1.0\" and\n7722158 \"add #[non_exhaustive] to 33 public enums\"), categorizes ~42\ncommits across Added / Fixed / Changed / Documentation / CI / Chores\nsections, and produces a draft that's ~80% ready to commit.\n\nUses the system 'date' command for \"today's date\" to avoid adding\nchrono as a new xtask dependency.\n\n* docs(community): add issue/PR templates, CoC, CODEOWNERS, MAINTAINERS.md\n\nRaise the contributor-facing surface area of the project. For a repo\nwith 13 stars and three real contributors (@VincentMeilinger, @tracker1,\n@c5soft) showing up organically, having none of these files was a real\nfriction point.\n\n## Issue templates (.github/ISSUE_TEMPLATE/)\n\n- config.yml: disables blank issues, adds contact_links pointing at\n  Security Advisories (private security reports), Discussions\n  (conversational questions), docs.rs (API reference), and the\n  Tiberius migration guide.\n- bug_report.yml: structured YAML form with required fields for driver\n  version, feature flags (multi-select of every feature in the workspace),\n  Rust version, OS, SQL Server version, TDS version, logs, and repro\n  code. Matches the kind of detail we actually need to debug TDS-level\n  issues.\n- feature_request.yml: use case first, API proposal second, alternatives\n  considered, area of codebase (multi-select of workspace crates),\n  breaking-change assessment.\n- question.yml: routes to docs.rs, connection strings, migration guide,\n  Discussions first; falls back to a minimal structured form.\n\nAll templates use YAML form format (not markdown) so required fields\nare actually enforced and the resulting issues are well-structured.\n\n## Pull request template (.github/pull_request_template.md)\n\nSections:\n- Summary and linked issues (with \"Closes #\" pattern)\n- Type of change checklist\n- Test plan (fmt/clippy/test commands + integration test hook)\n- Documentation updates checklist (rustdoc, CHANGELOG, README, docs/, ARCHITECTURE)\n- **Breaking changes section with explicit MSRV note**:\n  \"MSRV bumps are NOT a breaking change per STABILITY.md § MSRV\n  Increase Policy\". This prevents the exact confusion that caused\n  the CONTRIBUTING.md ↔ STABILITY.md contradiction we fixed during\n  the 0.7.0 cycle.\n- Security considerations (for auth/TLS/SQL-gen PRs)\n- Pre-1.0 policy reference link\n\n## CODE_OF_CONDUCT.md\n\nCONTRIBUTING.md already referenced \"the Rust Code of Conduct\" by URL\nbut the repo had no CoC file. Added the full Rust CoC text with\nproject-specific contact info pointing at the private Security\nAdvisory channel for CoC violations.\n\n## .github/CODEOWNERS\n\nAuto-requests review from the primary maintainer for PRs touching\nspecific areas. Today this is all @jkindrix, but the file is\nstructured so that adding future maintainers (as described in\nMAINTAINERS.md) is a one-line change per area. Ownership is granular:\nprotocol layer, auth, TLS, pool, client, types, derive, testing,\nxtask, workflows, release policy docs, security policy docs, and\ndependency/supply-chain files each get their own entry.\n\n## MAINTAINERS.md\n\nDocuments:\n- Who the current maintainers are\n- What maintainers are responsible for (review, triage, releases,\n  stewardship, continuity)\n- How to contact maintainers for different purposes (issues,\n  discussions, security reports, CoC reports)\n- How to become a maintainer (criteria, trial process)\n- Current decision-making model with a pointer to ARCHITECTURE.md ADRs\n  for architectural decisions\n- An empty Emeritus section for eventual use\n\nIncludes language around the \"correctness-first, quality-over-speed\"\nphilosophy so new maintainers know what they're signing up for.\n\n* fix(testing): fix mock server TLS close_notify (closes #70) + add doc linter\n\nTwo related fixes that both address pre-existing latent bugs surfaced\nduring the v0.7.0 release cycle.\n\n## Mock server TLS close_notify (closes #70)\n\n`handle_connection` now explicitly calls `tls_stream.shutdown().await`\nbefore the stream goes out of scope. Without this, dropping the\n`TlsStream` closes the underlying TCP half abruptly, and rustls on\nstricter platforms (macOS, Windows) reports\n\"peer closed connection without sending TLS close_notify\" on whatever\nread was in flight, even if the server had already written the\nresponse. Linux's rustls build tolerated this silently, which is why\nthe bug was latent until the full CI matrix ran on the v0.7.0\nrelease PR.\n\nThe shutdown call is wrapped in `let _ =` because the session is\nalready over at that point — we only care about best-effort clean\nclose. A real driver would log the error; the mock server is\ntest-only infrastructure.\n\nRemoved the `#[cfg(target_os = \"linux\")]` gate on\n`test_mock_server_tls_full_connection` — it now runs on all three\nplatforms in CI. Local `cargo test -p mssql-testing --test mock_fidelity`\npasses with 13 tests (1 ignored as before).\n\n## Documentation consistency linter\n\nNew `scripts/check-doc-consistency.sh` validates invariants across the\nproject's documentation and config files. This codifies a class of bug\nthat produced the CONTRIBUTING.md ↔ STABILITY.md MSRV-policy\ncontradiction discovered during the 0.7.0 release.\n\nChecks (22 total on the current tree):\n\n- **MSRV consistency**: rust-toolchain.toml, xtask/Cargo.toml,\n  README.md badge, CLAUDE.md, ARCHITECTURE.md, STABILITY.md,\n  CONTRIBUTING.md prerequisites table, RELEASING.md header,\n  Justfile variable — all must reference the same MSRV value\n  that workspace Cargo.toml declares.\n- **CHANGELOG ↔ workspace version**: latest non-[Unreleased] entry\n  must match workspace.package.version.\n- **MSRV policy agreement**: STABILITY.md must explicitly state\n  that MSRV bumps are non-breaking, AND CONTRIBUTING.md must NOT\n  list 'Increasing MSRV' under 'Definitely Breaking'. This prevents\n  the specific contradiction that was discovered post-v0.6.0.\n- **Workspace crate version inheritance**: every crate in crates/\n  must either inherit workspace version or explicitly pin the same\n  workspace version (no silent drift).\n- **deny.toml ↔ .cargo/audit.toml sync**: advisory ignore lists in\n  the two files must be identical. cargo-deny reads deny.toml,\n  cargo-audit reads audit.toml, and they must stay in sync or\n  we end up with different results in CI vs locally.\n\nThe linter is pure bash, uses only standard tools (grep, awk, sed,\ncomm), and runs in <100ms. No new dependencies.\n\nAdded `just doc-consistency` recipe that invokes the script with\na graceful no-op if the script is missing, and wired it into\n`just release-check` as an additional gate.\n\nOutput supports `--verbose` for full per-check reporting and is\ncolor-coded via ANSI escapes (suppressed when NO_COLOR is set or\nnot running on a TTY).\n\n* docs: update RELEASING, CONTRIBUTING, README, CLAUDE; add DEPENDENCY_POLICY\n\nComprehensive documentation refresh that captures everything learned\nduring the v0.7.0 release cycle and the post-release hygiene sprint.\n\n## RELEASING.md\n\nAdded a new \"Lesson 12: The v0.7.0 Incidents\" section documenting\nthree distinct problems that surfaced during the 0.7.0 release —\nCARGO_REGISTRY_TOKEN expiry discovered at publish time, pre-existing\nlatent bugs surfaced at release PR time due to dev-branch CI gap,\nand the CONTRIBUTING.md ↔ STABILITY.md MSRV policy contradiction.\n\nEach incident is written up with \"What went wrong\", \"Result\", and\n\"Solution\" subsections naming the concrete mitigations we put in\nplace in this release hygiene sprint.\n\nAdded a new \"Token Health\" top-level section explaining:\n- How the weekly token-health.yml workflow works\n- Step-by-step manual rotation procedure\n- What to do if a release is in flight when the token fails\n  (the exact recovery path used during v0.7.0)\n- Why the worst-case failure mode is \"zero crates published, rerun\n  after rotation\" rather than a partial publish\n\n## CONTRIBUTING.md\n\n- Added \"First Contribution (Quick Path)\" section with 7-step\n  recipe from clone to green CI\n- Added \"When Your PR Needs Review\" section explaining CODEOWNERS\n  auto-routing, expected response times, the draft-PR-for-big-changes\n  pattern, and why large feature PRs take longer\n- Updated Pull Request Process to reference the new PR template\n  and require `cargo test --all-features`, `cargo clippy --all-features`,\n  and `just doc-consistency` as mandatory pre-submit gates\n- Extended the \"Build Automation\" section with the new xtask\n  subcommand (`release-notes`) and a dedicated \"Release-Adjacent\n  Just Recipes\" table covering release-status, release-preflight,\n  release-check, doc-consistency, ci-status-all, and tag\n- Updated Code of Conduct section to link to the new\n  CODE_OF_CONDUCT.md file (previously the reference was to a URL\n  with no local file)\n\n## README.md\n\n- Rewrote the Contributing section with bullet pointers to:\n  first-contribution path, issue templates, PR template, ADR process,\n  CoC, and MAINTAINERS.md\n- Added a new Community section with links to Discussions, Issues,\n  and the private Security Advisory channel\n\n## CLAUDE.md\n\nTwo new sections:\n\n1. **Process and Governance** — enumerates every contributor-facing\n   document (README, CONTRIBUTING, CODE_OF_CONDUCT, MAINTAINERS,\n   CODEOWNERS, issue/PR templates), every release and policy document\n   (RELEASING, STABILITY, SECURITY, VERSION_REFS, DEPENDENCY_POLICY),\n   and the full list of release observability tooling (just recipes\n   and xtask commands) added post-v0.7.0. Also lists all CI/CD\n   workflows with their triggers.\n\n2. **Conventions for AI Assistants** — explicit notes that MSRV\n   bumps are NOT breaking changes (STABILITY.md is authoritative,\n   the linter catches contradictions), that fixing beats ignoring\n   for security advisories (with the v0.7.0 MSRV-bump precedent),\n   that the release recipes exist to prevent the exact mistakes\n   that caused past incidents, that the Cardinal Rules in RELEASING.md\n   are non-negotiable, that dev-branch CI now exists so push\n   confidently, and that future AI sessions must update CLAUDE.md\n   when they add new infrastructure.\n\nUpdated the Development Tooling section to list all actually-required\ntools (just, gh, cargo-deny, cargo-hack, cargo-nextest, cargo-audit,\ncargo-machete, cargo-semver-checks) and point at `just setup-tools`.\n\nRemoved the now-obsolete cargo-hakari section (the workspace-hack\ncrate was removed in v0.7.0 — see commit ce2852a).\n\nUpdated the Document References section with the full list of\nprimary references including the new DEPENDENCY_POLICY.md.\n\n## docs/DEPENDENCY_POLICY.md (new)\n\nCaptures tribal knowledge about dependency management decisions into\ndiscoverable documentation. Sections:\n\n- **Philosophy** — 5 principles (minimize surface area, correctness\n  over convenience, modern Rust not cutting-edge, pure Rust where\n  it matters, minimize feature flags)\n- **Adding a new dependency** — 8-criterion checklist\n- **Taking a dependency upgrade** — patch/minor/major handling,\n  when to defer, bundled bumps (OpenTelemetry, Tokio)\n- **Handling security advisories** — three cases with explicit\n  guidance and the v0.7.0 MSRV-bump precedent documented as\n  Case B. Explains the MSRV-vs-ignore tradeoff we actually made\n  for the time crate.\n- **deny.toml and .cargo/audit.toml sync** — how the linter\n  enforces this\n- **Removing a dependency** — 5-step cleanup workflow\n- **New license requirements** — how we evaluate unfamiliar\n  SPDX license strings, with the MIT-0 precedent from v0.7.0\n- **Maintenance schedule** — weekly dependabot, weekly security\n  audit, weekly token health, per-release cargo update cadence,\n  quarterly major-version review\n\nReferenced from CLAUDE.md, CONTRIBUTING.md, and RELEASING.md.\n\n* fix(testing): re-gate mock TLS full connection test to Linux only\n\nThe explicit tls_stream.shutdown().await added in cee9751 did not fix\nthe macOS/Windows failure. CI confirmed: same \"peer closed connection\nwithout sending TLS close_notify\" error on both platforms.\n\nRoot cause analysis (updated in #70): the error occurs during the\nLoginAck header read, meaning the client sees EOF BEFORE the server's\nresponse arrives. The shutdown() fix only addresses connection-close\ntime; the actual issue is a timing/buffering race in the mock server's\nTLS path where the TCP buffer flush doesn't reach the client before\nthe read polls on macOS/Windows.\n\nThe production driver is NOT affected — it uses a different connection\narchitecture (Connection<T> with framed I/O) that doesn't have this\ntiming dependency.\n\nRe-gating with comprehensive investigation notes in the test doc\ncomment so the next person who picks this up (#70) knows exactly what\nwas tried and why it didn't work.\n\nThe shutdown() call is kept in the mock server — it's correct for\nclean TLS close even though it doesn't fix this particular race.\n\n* fix(deps): resolve security audit + bump dev dependencies and CI actions\n\nAdvisory handling:\n- Add RUSTSEC-2026-0097 (rand 0.8.5 unsoundness) ignore — Case C per\n  DEPENDENCY_POLICY: no stable fix available, log feature not enabled,\n  unsoundness conditions unmet. Blocked on rsa 0.10 stable (#21).\n- Remove stale RUSTSEC-2026-0066 ignore — resolved by testcontainers\n  0.27 (pulls astral-tokio-tar 0.6.0 which includes the fix).\n- Update RUSTSEC-2025-0134 ignore reason — rustls-pemfile is a direct\n  dep of mssql-auth, not just transitive via bollard.\n\nDependency bumps (all dev-only or patch-level):\n- rustls 0.23.37 → 0.23.38 (patch)\n- tokio 1.51.0 → 1.51.1 (patch)\n- testcontainers 0.25.2 → 0.27.2 (dev-only, drops rustls-pemfile\n  from bollard path, fixes astral-tokio-tar advisory)\n- criterion 0.7.0 → 0.8.2 (dev-only benchmarks)\n- bollard 0.19.4 → 0.20.2 (transitive via testcontainers)\n\nCI action bumps:\n- codecov/codecov-action v5 → v6 (Node 24 runtime)\n- softprops/action-gh-release v2 → v3 (Node 24 runtime)\n- actions/github-script v8 → v9 (both security-audit.yml and\n  token-health.yml, for consistency)\n\n* fix(testing): use multi-thread runtime for TLS full connection test (#70)\n\nThe test_mock_server_tls_full_connection test was gated to Linux only\ndue to a timing race: the mock server's raw write_all() + flush() on\nthe TLS-over-PreLogin stream didn't reliably deliver data before the\nsingle-thread runtime's cooperative scheduler yielded on macOS/Windows.\n\nFix: Use #[tokio::test(flavor = \"multi_thread\", worker_threads = 2)]\nwhich matches production usage and eliminates the scheduling dependency\nbetween server and client tasks. Remove the #[cfg(target_os = \"linux\")]\ngate so the test runs on all CI platforms.\n\nCloses #70\n\n* fix(testing): fix mock TLS cross-platform race in TlsPreloginWrapper (#70)\n\nRoot cause: the client completes the TLS handshake and sends Login7 as\nraw TLS (ApplicationData 0x17) before the server-side TlsPreloginWrapper\nhas switched to pass-through mode. On macOS/Windows, TCP coalesces these\nbytes into one read, so the server's wrapper (still in handshake mode)\ninterprets the raw TLS record header as a TDS PreLogin header and fails\nwith InvalidContentType.\n\nFix: auto-detect non-PreLogin bytes during handshake mode. When the\nwrapper reads a header byte that isn't 0x12 (PreLogin), it means the\npeer has already switched to raw TLS. The wrapper auto-transitions to\npass-through mode and feeds the already-read header bytes back to the\ncaller via a prefix buffer, so rustls can process them as the TLS record\nthey actually are.\n\nThe production client-side wrapper (mssql-tls) is NOT affected because\nthe client always finishes the handshake first — the server never sends\nraw TLS before the client's wrapper has switched.\n\nDiagnosed with targeted experiments on macOS and Windows machines that\nrevealed the server never reached send_login_response — it failed during\nread_packet for Login7 because the TLS stream received corrupted data\nfrom the wrapper.\n\nRemove the #[cfg(target_os = \"linux\")] gate so the test runs on all CI\nplatforms.\n\nCloses #70\n\n* feat(auth): bump Azure SDK to azure_core/identity 0.34, keyvault_keys 0.13\n\nUnified bump of all three coupled Azure SDK crates:\n- azure_core 0.30 → 0.34\n- azure_identity 0.30 → 0.34\n- azure_security_keyvault_keys 0.9 → 0.13\n\nAPI adaptations in mssql-auth:\n- cert_auth.rs: ClientCertificateCredential::new() now takes SecretBytes\n  instead of Secret for the certificate parameter\n- azure_keyvault.rs: key_version moved from options structs to a required\n  method parameter on unwrap_key(), sign(), verify(). CMK paths must now\n  include the key version (which Always Encrypted paths always do).\n  RequestContent<T> is now used for request bodies instead of .try_into()\n  conversion.\n- azure_identity_auth.rs: No changes needed — TokenCredential trait,\n  ManagedIdentityCredential, and ClientSecretCredential APIs unchanged.\n\nSupersedes dependabot PRs #76, #79, #81 which could not be merged\nindividually because the three crates share trait types.\n\n* refactor(client): extract validation to shared module (stored proc prep)\n\nMove validate_identifier() and validate_qualified_identifier() from\nclient/mod.rs and bulk.rs to a shared crate::validation module. Both\ncall sites now use the shared implementation, eliminating duplication.\n\nThis prepares for stored procedure support, which needs\nvalidate_qualified_identifier() for procedure name validation (same\nsecurity requirement as savepoint and bulk insert identifier validation).\n\n* feat(protocol): add col_type to ReturnValue and ProcedureResult type\n\nAdd `col_type: u8` field to ReturnValue struct so downstream code can\nconstruct a ColumnData for parse_column_value() without re-parsing.\nAdd `#[non_exhaustive]` to ReturnValue since it's a protocol-layer struct.\n\nAdd ProcedureResult type in stream.rs with return_value, rows_affected,\noutput_params, and result_sets fields. Includes accessor methods:\nget_output() (case-insensitive, @-prefix tolerant), get_return_value(),\nfirst_result_set(), has_result_sets().\n\nPart of stored procedure support (Step 4b).\n\n* feat(client): implement stored procedure support\n\nAdd complete stored procedure API with two-tier design:\n\n1. Simple convenience method for input-only calls:\n   client.call_procedure(\"dbo.MyProc\", &[&1i32, &\"hello\"]).await?\n\n2. Full builder for named/output parameters:\n   client.procedure(\"dbo.CalculateSum\")?\n       .input(\"@a\", &10i32)\n       .output_int(\"@result\")\n       .execute().await?\n\nImplementation details:\n- ProcedureBuilder with typed output methods (output_int, output_bigint,\n  output_nvarchar, output_bit, output_float, output_decimal, output_raw)\n- read_procedure_result() parser handles all TDS tokens: ColMetaData,\n  Row, NbcRow, DoneInProc, ReturnValue, ReturnStatus, DoneProc\n- ReturnValue decoding reuses parse_column_value() via ColumnData bridge\n- Extract convert_single_param() from convert_params() to share\n  SqlValue->RpcParam logic between query params and procedure builder\n- Methods on impl<S: ConnectionState> — works in both Ready and\n  InTransaction states with zero duplication\n- All procedure names validated via validate_qualified_identifier()\n- Send+Sync compile-time assertions for ProcedureResult and ProcedureBuilder\n- Visibility: send_rpc() and read_procedure_result() promoted to pub(crate)\n\nPart of stored procedure support (Steps 4c-4f).\n\n* docs(stored-procs): add tests, docs, and CHANGELOG entry\n\n- Integration tests: 11 tests covering simple calls, input params,\n  return values, multiple result sets, rows_affected, OUTPUT params\n  (int, nvarchar), builder with result sets and output, transactions,\n  error handling, and schema-qualified names\n- Unit tests: ProcedureResult defaults, get_output case-insensitive\n  and @-prefix stripping, result sets with return value\n- ARCHITECTURE.md: add section 4.7 covering RPC flow, token handling,\n  ReturnValue decoding, and security\n- docs/STORED_PROCEDURES.md: user guide with quick start, API reference,\n  transaction support, output types, security, and error handling\n- CHANGELOG.md: add stored procedure feature under [Unreleased], credit\n  @c5soft for PR #71's influence on API design\n\nPart of stored procedure support (Step 4g).\n\n* fix(docs): resolve broken ProcedureBuilder rustdoc link\n\nUse fully qualified path `crate::procedure::ProcedureBuilder` in the\ndoc comment for `Client::procedure()` so rustdoc can resolve it across\nmodule boundaries.\n\n* fix(client): add Clone derive to ProcedureResult and ResultSet\n\nProcedureResult was missing Clone, which the plan specified. ResultSet\nalso lacked Clone despite all its fields (Vec<Column>, VecDeque<Row>)\nbeing Clone. Both now derive Clone for consistency with OutputParam and\nExecuteResult.\n\n* feat(client): add SQL Browser instance resolution (#66)\n\nAdd automatic TCP port resolution for named SQL Server instances via\nthe SQL Server Browser service (SSRP protocol, MC-SQLR spec).\n\nWhen connecting with a named instance (e.g., Server=localhost\\SQLEXPRESS),\nthe driver now queries the Browser service on UDP 1434 to discover the\nTCP port before establishing the TCP connection. This is transparent to\nthe user — no API changes needed.\n\nNew module: crate::browser — implements CLNT_UCAST_INST request and\nSVR_RESP response parsing per the MC-SQLR specification. Handles:\n- \".\" as localhost (common for .\\SQLEXPRESS)\n- Timeout when Browser service is not running\n- Missing TCP port (instance may only support Named Pipes)\n- Malformed responses\n\nNew error variant: Error::BrowserResolution with instance name and\nreason for clear diagnostics.\n\nIntegration point: Client::try_connect() resolves the instance port\nbefore TCP connect when config.instance is Some.\n\nRequested by @tracker1 in #66.\n\nCloses #66\n\n* feat(auth): add native Windows SSPI for integrated authentication (#65)\n\nThe sspi-rs crate (pure Rust SSPI) cannot acquire credentials from the\ncurrent Windows logon session without explicit username/password. This\nmeans integrated auth (`Integrated Security=true`) was silently broken\non Windows for all account types — domain, local, and Microsoft\nAccounts.\n\nAdd a `NativeSspiAuth` provider that calls the actual Windows SSPI APIs\n(AcquireCredentialsHandleW / InitializeSecurityContextW from\nsecur32.dll) via the `windows` crate. The native SSPI subsystem has\ndirect access to LSASS cached credentials, supporting all account types\ntransparently — including Microsoft Accounts on Windows 11, which is\nthe specific scenario reported in #65.\n\nOn Windows with `sspi-auth` enabled, `Client::connect()` now uses\n`NativeSspiAuth` for integrated auth. On non-Windows, the existing\nsspi-rs path is preserved. `SspiAuth` (sspi-rs) remains available for\nexplicit credential scenarios on all platforms.\n\nCloses #65\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\n\n* fix(auth): resolve windows-certstore compilation errors with windows 0.62 (#83)\n\nThe windows-certstore module had 9 compilation errors due to API\nchanges in the windows crate 0.62. This went undetected because the\nmodule is behind #[cfg(windows)] and CI runs on Linux.\n\nFixes applied:\n- BOOL: moved from Win32::Foundation to windows::core (now a newtype\n  struct in windows-result, re-exported through windows-core)\n- CRYPT_HASH_BLOB: replaced with CRYPT_INTEGER_BLOB (same layout,\n  renamed in windows 0.62)\n- CryptAcquireCertificatePrivateKey: params changed from &mut refs to\n  raw pointers with dedicated types (HCRYPTPROV_OR_NCRYPT_KEY_HANDLE,\n  CERT_KEY_SPEC, BOOL)\n- NCryptSignHash/NCryptVerifySignature: flags param type changed from\n  BCRYPT_FLAGS to NCRYPT_FLAGS (wrap via NCRYPT_FLAGS(BCRYPT_PAD_*.0))\n- CertCloseStore: first param now Option<HCERTSTORE>\n- NCryptFreeObject: use NCRYPT_HANDLE constructor instead of primitive\n  cast from NCRYPT_KEY_HANDLE\n- CertFreeCertificateContext: return type changed to must-use BOOL\n\nCloses #83\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\n\n* feat(client): add FILESTREAM BLOB access support (#67)\n\nAdd async read/write access to SQL Server FILESTREAM BLOBs via the\nWin32 OpenSqlFilestream API. This enables Rust applications to stream\nlarge binary data stored in SQL Server FILESTREAM columns using\ntokio-compatible async I/O.\n\nThe implementation uses runtime dynamic loading (LoadLibrary +\nGetProcAddress) to find OpenSqlFilestream in the OLE DB driver DLLs:\n  - msoledbsql19.dll (OLE DB Driver 19, newest)\n  - msoledbsql.dll (OLE DB Driver 18)\n  - sqlncli11.dll (SQL Server Native Client, deprecated fallback)\n\nThis avoids a compile-time dependency on any specific DLL and provides\na clear error when no FILESTREAM driver is installed.\n\nThe returned Win32 HANDLE is wrapped in tokio::fs::File for\nAsyncRead + AsyncWrite support.\n\nAPI:\n  - FileStream::open(path, access, txn_context) — low-level open\n  - Client<InTransaction>::open_filestream(path, access) — convenience\n    method that automatically fetches the transaction context\n  - FileStreamAccess enum: Read, Write, ReadWrite\n\nGated behind `#[cfg(all(windows, feature = \"filestream\"))]`. The\n`filestream` feature enables `tokio/fs` for the async file wrapper.\n\nCloses #67\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\n\n* test(client): add integration tests for SSPI and FILESTREAM (#65, #67)\n\nAdd end-to-end integration tests that verify both Windows-only features\nagainst a real SQL Server instance:\n\nSSPI tests (windows_sspi.rs):\n- Connect with integrated auth, verify NTLM/Kerberos auth_scheme\n- Execute query and transaction within SSPI session\n- Verify SQL Server version string\n\nFILESTREAM tests (windows_filestream.rs):\n- Read a FILESTREAM BLOB and verify content matches\n- Write to a FILESTREAM BLOB and read back to verify\n- Verify DLL loading produces OpenSqlFilestream error (not DLL error)\n\nAlso improves FILESTREAM error messages: OpenSqlFilestream failures now\ninclude the human-readable Win32 error message via FormatMessageW\ninstead of just the numeric error code.\n\nAll tests are gated with #[ignore] and require a Windows machine with\nSQL Server configured for Windows Authentication and FILESTREAM.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\n\n* docs(filestream): add documentation, CHANGELOG, and API improvements (#67)\n\nComplete the remaining work items from #67:\n\nDocumentation:\n- Add docs/FILESTREAM.md with full setup guide, usage examples,\n  troubleshooting, and API reference\n- Add CHANGELOG entry under [Unreleased] for FILESTREAM and\n  windows-certstore fix\n- Add filestream to README feature status and feature flags tables\n- Add filestream section to docs/FEATURES.md\n- Add FILESTREAM section to CLAUDE.md\n\nAPI improvements:\n- Add open_options module (NONE, SEQUENTIAL_SCAN, ASYNC) exposing\n  Win32 open flags for advanced users\n- Add FileStream::open_with_options() for custom open flags\n- Add #[non_exhaustive] to FileStreamAccess enum\n- Re-export open_options as filestream_options from lib.rs\n- Document async I/O strategy and future IOCP optimization path\n\nCode fixes:\n- Fix module doc: secur32.dll -> OLE DB Driver (was incorrect)\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\n\n* docs: document Windows C++ build tools requirement\n\nThe default TLS feature depends on ring/aws-lc-sys which require a C\ncompiler. This is standard for Rust projects using rustls, but not\nobvious to developers on a fresh Windows machine without Visual Studio.\n\n- Add Windows C++ Build Tools section to CONTRIBUTING.md prerequisites\n  and step-by-step setup\n- Add installation note to README.md pointing to the setup docs\n- Note that sspi-auth and filestream features work without C++ tools\n  when TLS is disabled\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\n\n* style: fix formatting in Windows-specific modules\n\ncargo fmt on the test files and modules authored on Windows,\nwhich had minor formatting differences from the CI linter.\n\n* docs: update LIMITATIONS.md for v0.8.0+ features\n\nUpdate \"Last updated\" date from January 2026 to April 2026.\nCorrect the \"Cross-Platform\" design principle to reflect that\nWindows-specific features (SSPI, FILESTREAM, CertStore) are now\nsupported behind feature flags, not excluded.\n\n* refactor: replace unwrap() with expect() in library code\n\nSystematic audit of all unwrap() calls in non-test library code.\nReplaced with expect() containing context strings that document\nthe invariant being relied upon.\n\nChanges:\n- column_parser.rs: 16 chrono date/time construction unwraps →\n  expect() with context (e.g., \"epoch 1900-01-01 is valid\",\n  \"SMALLDATETIME minutes should be 0-1439\")\n- params.rs: 3 chrono epoch date unwraps → expect()\n- mock_server.rs: 1 TLS acceptor unwrap → expect()\n\nRemaining unwrap() calls (3) are in mssql-derive proc macros\nwhere clippy::expect_used is denied at the crate level. These\nare field.ident.as_ref().unwrap() on named struct fields, which\nis a guaranteed invariant in proc macro context.\n\nAddresses the code quality concern from the external project review.\n\n* test(protocol,auth): add unit tests for safety-critical token and auth paths\n\ntds-protocol (18 new tests):\n- ReturnValue: INT output, NVARCHAR output, NULL, UDF status (0x02)\n- ReturnStatus: success (0), negative return codes\n- DoneProc: roundtrip, parser, error flag\n- DoneInProc: roundtrip, parser with MORE|COUNT flags\n- ServerError: realistic decode, severity helpers, parser integration\n- Multi-token streams: stored proc response, error mid-stream,\n  ReturnValue->ReturnStatus->DoneProc sequence\n- EOF/truncation edge cases for ReturnStatus, DoneProc, ServerError\n\nmssql-auth (16 new tests):\n- AuthError: transient/terminal classification, mutual exclusion,\n  ambiguous error classification, Display output, Send+Sync bounds\n- AuthMethod: all-variants classification, Certificate variant\n- AuthData: SqlServer, FedAuth, Sspi, None variants, Debug output\n- AuthProvider trait: default method coverage via mock provider\n\n* refactor: audit panic-family macros in library code\n\nSystematic audit of all unreachable!() calls in non-test library code\n(5 total). No panic!, todo!, or unimplemented! macros were found.\n\nConverted to error (1):\n- params.rs: TvpColumnType wildcard arm now returns\n  TypeError::UnsupportedConversion instead of panicking. TvpColumnType\n  is #[non_exhaustive], so a new upstream variant would previously crash;\n  it now returns a descriptive error. Changed convert_tvp_column_type to\n  return Result<TvpWireType> with fallible collect at the call site.\n\nDocumented as justified (4):\n- column_parser.rs: inner match on Money|Money4|MoneyN is bounded by\n  the outer match arm — genuinely unreachable.\n- params.rs: inner match on chrono types is bounded by the outer match\n  arm — genuinely unreachable.\n- tvp.rs (2): encode_tvp_int and encode_tvp_float size parameters are\n  always derived from TvpWireType enum variants (1/2/4/8 and 4/8).\n  Added # Panics doc sections and descriptive messages.\n\n* feat(client): wire Always Encrypted decryption into query execution\n\nIntegrate the existing Always Encrypted cryptographic infrastructure\ninto the query execution flow, enabling transparent decryption of\nencrypted column values when Column Encryption Setting=Enabled.\n\nProtocol layer (tds-protocol):\n- Extended CryptoMetadata with base_user_type, base_col_type, and\n  base_type_info fields per MS-TDS 2.2.7.4\n- Added ColMetaData.cek_table and ColumnData.crypto_metadata fields\n- Added decode_encrypted() and decode_column_encrypted() for parsing\n  encrypted column metadata from the wire\n- Extracted decode_type_info/decode_collation as pub(crate) for reuse\n\nClient layer (mssql-client):\n- New column_decryptor module: async-to-sync bridge that pre-resolves\n  CEK encryptors at ColMetaData time, then decrypts synchronously per row\n- Updated read_query_response() with full decryption support\n- Added convert_raw_row_decrypted() and decrypt_column() to column_parser\n- User-facing column metadata shows base type, not wire type (BigVarBinary)\n- Connection string: Column Encryption Setting=Enabled parsing\n- Login7: COLUMNENCRYPTION feature extension (0x04) sent when enabled\n- EncryptionContext stored on Client struct\n\nSecurity:\n- Key material never logged in error messages\n- AEAD decryption verifies HMAC (constant-time) before decrypting\n- Corrupted/tampered ciphertext returns Err, never garbled data\n\nStill deferred:\n- Parameter encryption (requires sp_describe_parameter_encryption)\n- Procedure/multi-result decryption wiring (follow-up using same pattern)\n- Enclave computations (COLUMNENCRYPTION_VERSION 2/3)\n\n* fix(client): wire Always Encrypted decryption into procedure and multi-result readers\n\nread_procedure_result() and read_multi_result_response() were missing\nthe decryption branch that read_query_response() already had. This meant\nencrypted columns returned raw ciphertext (silent data corruption) when\naccessed via call_procedure() or query_multiple().\n\nApplied the same pattern from read_query_response(): pre-resolve a\nColumnDecryptor at ColMetaData time, then branch on it for each\nRow/NbcRow token to call convert_raw_row_decrypted() or the plain\nvariant. All three response readers now have symmetric decryption\nsupport.\n\n* fix(client): address silent error swallowing in stream and bulk modules\n\nstream.rs: Replace filter_map(|r| r.ok()) in test with explicit unwrap()\nso test failures surface instead of being silently dropped. Add comment\nto collect_current() clarifying that unwrap_or_default() is on Option,\nnot Result — no errors are being swallowed.\n\nbulk.rs: Document that .parse().ok() chains in parse_sql_type() are\nintentional best-effort parsing. When a type parameter like \"VARCHAR(100)\"\nhas a malformed length, falling through to the SQL Server default (8000)\nis safer than rejecting the operation when the base type is valid.\n\n* docs: update CHANGELOG, STABILITY, CLAUDE, README for v0.9.0 release prep\n\nCHANGELOG: Add missing Unreleased items — Always Encrypted decryption\nintegration, unwrap/panic audits, 34 new unit tests, LIMITATIONS.md\nupdate, procedure/multi-result decryption fix, silent error swallowing\nfix.\n\nSTABILITY: Add FILESTREAM, Always Encrypted, and KeyStoreProvider APIs\nto the stable surface table. Add filestream and encoding feature flags\nto the feature stability table.\n\nCLAUDE.md: Document the Always Encrypted decryption wiring — the\ncolumn_decryptor module, the CEK pre-resolution pattern, and how\ndecryption flows through all three response readers.\n\nREADME: Update always-encrypted feature description to mention\ntransparent column decryption.\n\nNew: docs/ALWAYS_ENCRYPTED.md user guide covering quick start, key store\nproviders, connection string keywords, encryption types, and security\nconsiderations.\n\n* fix(client): normalize (local) host alias to 127.0.0.1 for named instances\n\nServer=(local)\\SQLEXPRESS is a standard ADO.NET connection string format.\nPreviously only \".\" was normalized to localhost — \"(local)\" was passed\nthrough as-is, causing DNS resolution failure.\n\nNow both \".\" and \"(local)\" are normalized to 127.0.0.1 in both the\nSQL Browser resolver and the TCP connect path.\n\nReported by @tracker1 in #66.\n\n* feat(client): ADO.NET connection string conformance and LOGIN7 wire fixes\n\nRewrite the connection string parser to conform to the Microsoft\nADO.NET SqlConnection.ConnectionString specification:\n\nParser correctness:\n- Quoted value support: Password=\"my;pass\" and Password='it''s complex'\n  now work per spec. Previously semicolons in passwords were silently\n  truncated, causing misleading login failures.\n- tcp: prefix stripping: Server=tcp:host.database.windows.net,1433\n  (Azure Portal format) now works. np: and lpc: prefixes return errors.\n- Boolean validation: invalid values like TrustServerCertificate=banana\n  now error instead of silently defaulting to false.\n\nNew keywords (with LOGIN7 wire integration):\n- ApplicationIntent (ReadOnly/ReadWrite) wired to READONLY_INTENT bit\n- Workstation ID / WSID wired to LOGIN7 HostName field\n- Current Language / Language wired to LOGIN7 Language field\n- ConnectRetryCount/Interval wired to RetryPolicy\n- Server aliases: Addr, Address, Network Address\n- Timeout alias for Connect Timeout\n\nKnown keyword handling:\n- Pool keywords (Max Pool Size, etc.) logged at info with guidance\n- 30+ ADO.NET keywords recognized at info instead of silent debug\n\nLOGIN7 bug fix:\n- HostName field now sends actual client machine name instead of\n  server hostname. The MS-TDS spec defines this as \"the name of\n  the client machine\" — we were sending config.host (the server).\n\n* docs: document connection string conformance improvements\n\nUpdate CONNECTION_STRINGS.md:\n- Add quoted value syntax section with examples\n- Add tcp: prefix and unsupported protocol documentation\n- Add Addr, Address, Network Address as Server aliases\n- Add Timeout alias for Connect Timeout\n- Add ApplicationIntent, Workstation ID, Language keywords\n- Add ConnectRetryCount/Interval section\n- Add \"Recognized but Not Supported\" table for known ADO.NET keywords\n\nUpdate CHANGELOG.md with full feature list and LOGIN7 HostName fix.\n\n* fix(client): address remaining connection string conformance gaps\n\nFive issues identified during post-implementation review:\n\n1. Protocol prefix case sensitivity: tcp:/np:/lpc: checks now fully\n   case-insensitive via lowercase comparison. Previously only exact\n   \"tcp:\" and \"TCP:\" were handled — \"Tcp:\" would not be stripped.\n\n2. CLAUDE.md updated with connection string parser documentation per\n   convention #6 (\"Update CLAUDE.md when you add new infrastructure\").\n\n3. STABILITY.md: ApplicationIntent, Config::workstation_id(), and\n   Config::language() added to the stable API surface table.\n\n4. Empty value handling: Database=; now stores None instead of\n   Some(\"\"), matching ADO.NET reset-to-default semantics. Applied\n   to all Option<String> fields (database, instance, workstation_id,\n   language) via new non_empty() helper.\n\n5. Encrypt=Mandatory and Encrypt=Optional now recognized as aliases\n   for true/false, matching Microsoft.Data.SqlClient v5+ behavior.\n\n* docs: cross-reference ALWAYS_ENCRYPTED.md, update FEATURES.md and milestones\n\n- CLAUDE.md Document References: add CONNECTION_STRINGS.md,\n  ALWAYS_ENCRYPTED.md, and STORED_PROCEDURES.md\n- PRODUCTION_READINESS.md: add v0.9.0 milestone entry\n- docs/FEATURES.md: update always-encrypted description to mention\n  transparent column decryption and link to the user guide\n\n* fix(deps): resolve RUSTSEC-2026-0098 and RUSTSEC-2026-0099 (rustls-webpki)\n\ncargo update -p rustls-webpki: 0.103.10 → 0.103.12\n\n- RUSTSEC-2026-0098: Name constraints for URI names were incorrectly accepted\n- RUSTSEC-2026-0099: Name constraints accepted for wildcard certificates\n\nBoth are X.509 name constraint validation bugs. While exploitation requires\ncertificate misissuance (low practical risk), they block release preflight.\n\n* chore: release v0.9.0\n\n- Bump workspace version 0.8.0 → 0.9.0\n- CHANGELOG.md: rename [Unreleased] → [0.9.0] - 2026-04-15\n- Update version references in README.md, RELEASING.md, docs/FEATURES.md,\n  docs/FILESTREAM.md\n- typos.toml: add secur32.dll and \"tru\" test value to exceptions\n\n---------\n\nCo-authored-by: Justin Kindrix <justin.kindrix@nuby.com>\nCo-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+          "timestamp": "2026-04-15T16:02:05-05:00",
+          "tree_id": "2073e283ff34772872df0519398f92118bad9a7b",
+          "url": "https://github.com/praxiomlabs/rust-mssql-driver/commit/7760f0c6892cb451d67eb2b3a00c3dde7179815d"
+        },
+        "date": 1776287686635,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "connection_string/simple",
+            "value": 869,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "connection_string/with_port",
+            "value": 912,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "connection_string/with_instance",
+            "value": 994,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "connection_string/azure_full",
+            "value": 1815,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/i32_from_int",
+            "value": 9,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/i64_from_bigint",
+            "value": 9,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/string_from_string",
+            "value": 22,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/option_i32_some",
+            "value": 5,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/option_i32_none",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/f64_from_double",
+            "value": 9,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/bool_from_bool",
+            "value": 12,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arc_bytes/clone_small",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arc_bytes/clone_medium",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arc_bytes/clone_large",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arc_bytes/slice_medium",
+            "value": 6,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "config_builder/minimal",
+            "value": 97,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "config_builder/full",
+            "value": 124,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_int",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_bigint",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_string",
+            "value": 14,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_null",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/null_check_iter",
+            "value": 0,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/is_null_check",
+            "value": 0,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_encode/short",
+            "value": 76,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_encode/medium",
+            "value": 508,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_encode/long",
+            "value": 3619,
+            "range": "± 199",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_encode/unicode",
+            "value": 258,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_decode/short",
+            "value": 41,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_decode/medium",
+            "value": 140,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_decode/long",
+            "value": 648,
+            "range": "± 10",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/i32",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/i64",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/f64",
+            "value": 7,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/bool",
+            "value": 7,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/String",
+            "value": 38,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/str",
+            "value": 26,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/Option_i32_Some",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/Option_i32_None",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/i32",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/i64",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/f64",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/bool",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/String",
+            "value": 24,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/Option_i32_Some",
+            "value": 7,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/Option_i32_None",
+            "value": 5,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_int",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_string",
+            "value": 14,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_null",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/is_null_check",
+            "value": 0,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "packet_header_encode",
+            "value": 43,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "packet_header_decode",
+            "value": 11,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "prelogin_encode",
+            "value": 147,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "prelogin_decode",
+            "value": 67,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_batch_encode/simple",
+            "value": 93,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_batch_encode/medium",
+            "value": 856,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_batch_encode/large",
+            "value": 2813,
+            "range": "± 137",
             "unit": "ns/iter"
           }
         ]
