@@ -55,6 +55,9 @@ pub struct Client<S: ConnectionState> {
     /// OpenTelemetry instrumentation context (when otel feature is enabled)
     #[cfg(feature = "otel")]
     instrumentation: InstrumentationContext,
+    /// Always Encrypted context for column decryption (when always-encrypted feature is enabled)
+    #[cfg(feature = "always-encrypted")]
+    pub(crate) encryption_context: Option<std::sync::Arc<crate::encryption::EncryptionContext>>,
 }
 
 /// Internal connection handle wrapping the actual connection.
@@ -566,6 +569,8 @@ impl Client<Ready> {
             needs_reset: self.needs_reset,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
+            #[cfg(feature = "always-encrypted")]
+            encryption_context: self.encryption_context,
         })
     }
 
@@ -630,6 +635,8 @@ impl Client<Ready> {
             needs_reset: self.needs_reset,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
+            #[cfg(feature = "always-encrypted")]
+            encryption_context: self.encryption_context,
         })
     }
 
@@ -1006,6 +1013,8 @@ impl Client<InTransaction> {
             needs_reset: self.needs_reset,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
+            #[cfg(feature = "always-encrypted")]
+            encryption_context: self.encryption_context,
         })
     }
 
@@ -1050,6 +1059,8 @@ impl Client<InTransaction> {
             needs_reset: self.needs_reset,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
+            #[cfg(feature = "always-encrypted")]
+            encryption_context: self.encryption_context,
         })
     }
 

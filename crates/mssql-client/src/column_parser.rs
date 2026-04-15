@@ -69,6 +69,112 @@ pub(crate) fn convert_nbc_row(
     Ok(crate::row::Row::from_values(columns.to_vec(), values))
 }
 
+/// Convert a RawRow to a client Row with Always Encrypted decryption.
+///
+/// For encrypted columns (identified by the decryptor), this:
+/// 1. Parses the column value as raw bytes (BigVarBinary on the wire)
+/// 2. Decrypts the ciphertext using the pre-resolved encryptor
+/// 3. Re-parses the decrypted plaintext using the base column type
+///
+/// For unencrypted columns, this delegates to `parse_column_value` as normal.
+#[cfg(feature = "always-encrypted")]
+pub(crate) fn convert_raw_row_decrypted(
+    raw: &RawRow,
+    meta: &ColMetaData,
+    columns: &[crate::row::Column],
+    decryptor: &crate::column_decryptor::ColumnDecryptor,
+) -> Result<crate::row::Row> {
+    let mut values = Vec::with_capacity(meta.columns.len());
+    let mut buf = raw.data.as_ref();
+
+    for (i, col) in meta.columns.iter().enumerate() {
+        let value = if decryptor.is_encrypted(i) {
+            decrypt_column(&mut buf, col, decryptor, i)?
+        } else {
+            parse_column_value(&mut buf, col)?
+        };
+        values.push(value);
+    }
+
+    Ok(crate::row::Row::from_values(columns.to_vec(), values))
+}
+
+/// Convert an NbcRow to a client Row with Always Encrypted decryption.
+///
+/// Same as `convert_raw_row_decrypted` but handles the null bitmap.
+#[cfg(feature = "always-encrypted")]
+pub(crate) fn convert_nbc_row_decrypted(
+    nbc: &NbcRow,
+    meta: &ColMetaData,
+    columns: &[crate::row::Column],
+    decryptor: &crate::column_decryptor::ColumnDecryptor,
+) -> Result<crate::row::Row> {
+    let mut values = Vec::with_capacity(meta.columns.len());
+    let mut buf = nbc.data.as_ref();
+
+    for (i, col) in meta.columns.iter().enumerate() {
+        if nbc.is_null(i) {
+            values.push(SqlValue::Null);
+        } else {
+            let value = if decryptor.is_encrypted(i) {
+                decrypt_column(&mut buf, col, decryptor, i)?
+            } else {
+                parse_column_value(&mut buf, col)?
+            };
+            values.push(value);
+        }
+    }
+
+    Ok(crate::row::Row::from_values(columns.to_vec(), values))
+}
+
+/// Decrypt an encrypted column value and re-parse it as the plaintext type.
+///
+/// Encrypted columns are transmitted as BigVarBinary (2-byte length prefix).
+/// This function reads the ciphertext, decrypts it, then re-parses the
+/// plaintext bytes using the base column type from CryptoMetadata.
+#[cfg(feature = "always-encrypted")]
+fn decrypt_column(
+    buf: &mut &[u8],
+    _col: &ColumnData,
+    decryptor: &crate::column_decryptor::ColumnDecryptor,
+    ordinal: usize,
+) -> Result<SqlValue> {
+    // Encrypted column wire type is BigVarBinary: 2-byte length prefix.
+    // 0xFFFF = NULL, otherwise length followed by ciphertext bytes.
+    if buf.remaining() < 2 {
+        return Err(Error::Protocol(
+            "unexpected EOF reading encrypted column length".to_string(),
+        ));
+    }
+
+    let length = buf.get_u16_le();
+
+    if length == 0xFFFF {
+        // NULL encrypted value
+        return Ok(SqlValue::Null);
+    }
+
+    let length = length as usize;
+    if buf.remaining() < length {
+        return Err(Error::Protocol(format!(
+            "unexpected EOF reading encrypted column data: need {length} bytes, have {}",
+            buf.remaining()
+        )));
+    }
+
+    // Extract ciphertext bytes
+    let ciphertext = &buf[..length];
+    buf.advance(length);
+
+    // Decrypt and get the base column metadata
+    let (plaintext, base_col) = decryptor.decrypt_column_value(ordinal, ciphertext)?;
+
+    // Re-parse the decrypted plaintext using the base column's type info
+    let mut pt_buf: &[u8] = &plaintext;
+    parse_column_value(&mut pt_buf, base_col)
+}
+
 /// Parse money value from buffer and convert to appropriate type.
 ///
 /// Money is stored as fixed-point with 4 decimal places.
@@ -1484,6 +1590,7 @@ mod tests {
                 scale: None,
                 collation: None,
             },
+            crypto_metadata: None,
         };
 
         let col1 = ColumnData {
@@ -1498,6 +1605,7 @@ mod tests {
                 scale: None,
                 collation: None,
             },
+            crypto_metadata: None,
         };
 
         let mut buf: &[u8] = &raw_data;
@@ -1555,6 +1663,7 @@ mod tests {
                 scale: None,
                 collation: None,
             },
+            crypto_metadata: None,
         };
         let col1 = ColumnData {
             name: "col1".to_string(),
@@ -1568,6 +1677,7 @@ mod tests {
                 scale: None,
                 collation: None,
             },
+            crypto_metadata: None,
         };
         let col2 = col0.clone();
         let col3 = col1.clone();
@@ -1623,6 +1733,7 @@ mod tests {
                 scale: None,
                 collation: None,
             },
+            crypto_metadata: None,
         };
         let col1 = ColumnData {
             name: "num".to_string(),
@@ -1636,6 +1747,7 @@ mod tests {
                 scale: None,
                 collation: None,
             },
+            crypto_metadata: None,
         };
 
         let mut buf: &[u8] = &data;

@@ -158,6 +158,9 @@ pub enum Token {
 pub struct ColMetaData {
     /// Column definitions.
     pub columns: Vec<ColumnData>,
+    /// CEK table for Always Encrypted result sets.
+    /// Present only when the server sends encrypted column metadata.
+    pub cek_table: Option<crate::crypto::CekTable>,
 }
 
 /// Column definition within metadata.
@@ -175,6 +178,9 @@ pub struct ColumnData {
     pub user_type: u32,
     /// Type-specific metadata.
     pub type_info: TypeInfo,
+    /// Per-column encryption metadata (Always Encrypted).
+    /// Present only for columns with the encrypted flag (0x0800) set.
+    pub crypto_metadata: Option<crate::crypto::CryptoMetadata>,
 }
 
 /// Type-specific metadata.
@@ -552,6 +558,244 @@ pub struct FedAuthInfo {
 // ColMetaData and Row Parsing Implementation
 // =============================================================================
 
+/// Decode collation information (5 bytes).
+///
+/// Shared by ColMetaData column parsing and CryptoMetadata base type parsing.
+pub(crate) fn decode_collation(src: &mut impl Buf) -> Result<Collation, ProtocolError> {
+    if src.remaining() < 5 {
+        return Err(ProtocolError::UnexpectedEof);
+    }
+    // Collation: LCID (4 bytes) + Sort ID (1 byte)
+    let lcid = src.get_u32_le();
+    let sort_id = src.get_u8();
+    Ok(Collation { lcid, sort_id })
+}
+
+/// Decode type-specific metadata for a column based on its TypeId.
+///
+/// Shared by ColMetaData column parsing and CryptoMetadata base type parsing.
+pub(crate) fn decode_type_info(
+    src: &mut impl Buf,
+    type_id: TypeId,
+    col_type: u8,
+) -> Result<TypeInfo, ProtocolError> {
+    match type_id {
+        // Fixed-length types have no additional metadata
+        TypeId::Null => Ok(TypeInfo::default()),
+        TypeId::Int1 | TypeId::Bit => Ok(TypeInfo::default()),
+        TypeId::Int2 => Ok(TypeInfo::default()),
+        TypeId::Int4 => Ok(TypeInfo::default()),
+        TypeId::Int8 => Ok(TypeInfo::default()),
+        TypeId::Float4 => Ok(TypeInfo::default()),
+        TypeId::Float8 => Ok(TypeInfo::default()),
+        TypeId::Money => Ok(TypeInfo::default()),
+        TypeId::Money4 => Ok(TypeInfo::default()),
+        TypeId::DateTime => Ok(TypeInfo::default()),
+        TypeId::DateTime4 => Ok(TypeInfo::default()),
+
+        // Variable length integer/float/money (1-byte max length)
+        TypeId::IntN | TypeId::BitN | TypeId::FloatN | TypeId::MoneyN | TypeId::DateTimeN => {
+            if src.remaining() < 1 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u8() as u32;
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                ..Default::default()
+            })
+        }
+
+        // GUID has 1-byte length
+        TypeId::Guid => {
+            if src.remaining() < 1 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u8() as u32;
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                ..Default::default()
+            })
+        }
+
+        // Decimal/Numeric types (1-byte length + precision + scale)
+        TypeId::Decimal | TypeId::Numeric | TypeId::DecimalN | TypeId::NumericN => {
+            if src.remaining() < 3 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u8() as u32;
+            let precision = src.get_u8();
+            let scale = src.get_u8();
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                precision: Some(precision),
+                scale: Some(scale),
+                ..Default::default()
+            })
+        }
+
+        // Old-style byte-length strings (Char, VarChar, Binary, VarBinary)
+        TypeId::Char | TypeId::VarChar | TypeId::Binary | TypeId::VarBinary => {
+            if src.remaining() < 1 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u8() as u32;
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                ..Default::default()
+            })
+        }
+
+        // Big varchar/binary with 2-byte length + collation for strings
+        TypeId::BigVarChar | TypeId::BigChar => {
+            if src.remaining() < 7 {
+                // 2 (length) + 5 (collation)
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u16_le() as u32;
+            let collation = decode_collation(src)?;
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                collation: Some(collation),
+                ..Default::default()
+            })
+        }
+
+        // Big binary (2-byte length, no collation)
+        TypeId::BigVarBinary | TypeId::BigBinary => {
+            if src.remaining() < 2 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u16_le() as u32;
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                ..Default::default()
+            })
+        }
+
+        // Unicode strings (NChar, NVarChar) - 2-byte length + collation
+        TypeId::NChar | TypeId::NVarChar => {
+            if src.remaining() < 7 {
+                // 2 (length) + 5 (collation)
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u16_le() as u32;
+            let collation = decode_collation(src)?;
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                collation: Some(collation),
+                ..Default::default()
+            })
+        }
+
+        // Date type (no additional metadata)
+        TypeId::Date => Ok(TypeInfo::default()),
+
+        // Time, DateTime2, DateTimeOffset have scale
+        TypeId::Time | TypeId::DateTime2 | TypeId::DateTimeOffset => {
+            if src.remaining() < 1 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let scale = src.get_u8();
+            Ok(TypeInfo {
+                scale: Some(scale),
+                ..Default::default()
+            })
+        }
+
+        // Text/NText/Image (deprecated LOB types)
+        TypeId::Text | TypeId::NText | TypeId::Image => {
+            // These have complex metadata: length (4) + collation (5) + table name parts
+            if src.remaining() < 4 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u32_le();
+
+            // For Text/NText, read collation
+            let collation = if type_id == TypeId::Text || type_id == TypeId::NText {
+                if src.remaining() < 5 {
+                    return Err(ProtocolError::UnexpectedEof);
+                }
+                Some(decode_collation(src)?)
+            } else {
+                None
+            };
+
+            // Skip table name parts (variable length)
+            // Format: numParts (1 byte) followed by us_varchar for each part
+            if src.remaining() < 1 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let num_parts = src.get_u8();
+            for _ in 0..num_parts {
+                // Read and discard table name part
+                let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?;
+            }
+
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                collation,
+                ..Default::default()
+            })
+        }
+
+        // XML type
+        TypeId::Xml => {
+            if src.remaining() < 1 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let schema_present = src.get_u8();
+
+            if schema_present != 0 {
+                // Read schema info (3 us_varchar strings)
+                let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // db name
+                let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // owning schema
+                let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // xml schema collection
+            }
+
+            Ok(TypeInfo::default())
+        }
+
+        // UDT (User-defined type) - complex metadata
+        TypeId::Udt => {
+            // Max length (2 bytes)
+            if src.remaining() < 2 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u16_le() as u32;
+
+            // UDT metadata: db name, schema name, type name, assembly qualified name
+            let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // db name
+            let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // schema name
+            let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // type name
+            let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // assembly qualified name
+
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                ..Default::default()
+            })
+        }
+
+        // Table-valued parameter - complex metadata (skip for now)
+        TypeId::Tvp => {
+            // TVP has very complex metadata, not commonly used
+            // For now, we can't properly parse this
+            Err(ProtocolError::InvalidTokenType(col_type))
+        }
+
+        // SQL Variant - 4-byte length
+        TypeId::Variant => {
+            if src.remaining() < 4 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let max_length = src.get_u32_le();
+            Ok(TypeInfo {
+                max_length: Some(max_length),
+                ..Default::default()
+            })
+        }
+    }
+}
+
 impl ColMetaData {
     /// Special value indicating no metadata.
     pub const NO_METADATA: u16 = 0xFFFF;
@@ -568,6 +812,7 @@ impl ColMetaData {
         if column_count == Self::NO_METADATA {
             return Ok(Self {
                 columns: Vec::new(),
+                cek_table: None,
             });
         }
 
@@ -578,7 +823,10 @@ impl ColMetaData {
             columns.push(column);
         }
 
-        Ok(Self { columns })
+        Ok(Self {
+            columns,
+            cek_table: None,
+        })
     }
 
     /// Decode a single column from the metadata.
@@ -595,7 +843,7 @@ impl ColMetaData {
         let type_id = TypeId::from_u8(col_type).unwrap_or(TypeId::Null); // Default to Null for unknown types
 
         // Parse type-specific metadata
-        let type_info = Self::decode_type_info(src, type_id, col_type)?;
+        let type_info = decode_type_info(src, type_id, col_type)?;
 
         // Read column name (B_VARCHAR format - 1 byte length in characters)
         let name = read_b_varchar(src).ok_or(ProtocolError::UnexpectedEof)?;
@@ -607,241 +855,88 @@ impl ColMetaData {
             flags,
             user_type,
             type_info,
+            crypto_metadata: None,
         })
     }
 
-    /// Decode type-specific metadata based on the type ID.
-    fn decode_type_info(
-        src: &mut impl Buf,
-        type_id: TypeId,
-        col_type: u8,
-    ) -> Result<TypeInfo, ProtocolError> {
-        match type_id {
-            // Fixed-length types have no additional metadata
-            TypeId::Null => Ok(TypeInfo::default()),
-            TypeId::Int1 | TypeId::Bit => Ok(TypeInfo::default()),
-            TypeId::Int2 => Ok(TypeInfo::default()),
-            TypeId::Int4 => Ok(TypeInfo::default()),
-            TypeId::Int8 => Ok(TypeInfo::default()),
-            TypeId::Float4 => Ok(TypeInfo::default()),
-            TypeId::Float8 => Ok(TypeInfo::default()),
-            TypeId::Money => Ok(TypeInfo::default()),
-            TypeId::Money4 => Ok(TypeInfo::default()),
-            TypeId::DateTime => Ok(TypeInfo::default()),
-            TypeId::DateTime4 => Ok(TypeInfo::default()),
-
-            // Variable length integer/float/money (1-byte max length)
-            TypeId::IntN | TypeId::BitN | TypeId::FloatN | TypeId::MoneyN | TypeId::DateTimeN => {
-                if src.remaining() < 1 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u8() as u32;
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    ..Default::default()
-                })
-            }
-
-            // GUID has 1-byte length
-            TypeId::Guid => {
-                if src.remaining() < 1 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u8() as u32;
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    ..Default::default()
-                })
-            }
-
-            // Decimal/Numeric types (1-byte length + precision + scale)
-            TypeId::Decimal | TypeId::Numeric | TypeId::DecimalN | TypeId::NumericN => {
-                if src.remaining() < 3 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u8() as u32;
-                let precision = src.get_u8();
-                let scale = src.get_u8();
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    precision: Some(precision),
-                    scale: Some(scale),
-                    ..Default::default()
-                })
-            }
-
-            // Old-style byte-length strings (Char, VarChar, Binary, VarBinary)
-            TypeId::Char | TypeId::VarChar | TypeId::Binary | TypeId::VarBinary => {
-                if src.remaining() < 1 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u8() as u32;
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    ..Default::default()
-                })
-            }
-
-            // Big varchar/binary with 2-byte length + collation for strings
-            TypeId::BigVarChar | TypeId::BigChar => {
-                if src.remaining() < 7 {
-                    // 2 (length) + 5 (collation)
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u16_le() as u32;
-                let collation = Self::decode_collation(src)?;
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    collation: Some(collation),
-                    ..Default::default()
-                })
-            }
-
-            // Big binary (2-byte length, no collation)
-            TypeId::BigVarBinary | TypeId::BigBinary => {
-                if src.remaining() < 2 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u16_le() as u32;
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    ..Default::default()
-                })
-            }
-
-            // Unicode strings (NChar, NVarChar) - 2-byte length + collation
-            TypeId::NChar | TypeId::NVarChar => {
-                if src.remaining() < 7 {
-                    // 2 (length) + 5 (collation)
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u16_le() as u32;
-                let collation = Self::decode_collation(src)?;
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    collation: Some(collation),
-                    ..Default::default()
-                })
-            }
-
-            // Date type (no additional metadata)
-            TypeId::Date => Ok(TypeInfo::default()),
-
-            // Time, DateTime2, DateTimeOffset have scale
-            TypeId::Time | TypeId::DateTime2 | TypeId::DateTimeOffset => {
-                if src.remaining() < 1 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let scale = src.get_u8();
-                Ok(TypeInfo {
-                    scale: Some(scale),
-                    ..Default::default()
-                })
-            }
-
-            // Text/NText/Image (deprecated LOB types)
-            TypeId::Text | TypeId::NText | TypeId::Image => {
-                // These have complex metadata: length (4) + collation (5) + table name parts
-                if src.remaining() < 4 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u32_le();
-
-                // For Text/NText, read collation
-                let collation = if type_id == TypeId::Text || type_id == TypeId::NText {
-                    if src.remaining() < 5 {
-                        return Err(ProtocolError::UnexpectedEof);
-                    }
-                    Some(Self::decode_collation(src)?)
-                } else {
-                    None
-                };
-
-                // Skip table name parts (variable length)
-                // Format: numParts (1 byte) followed by us_varchar for each part
-                if src.remaining() < 1 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let num_parts = src.get_u8();
-                for _ in 0..num_parts {
-                    // Read and discard table name part
-                    let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?;
-                }
-
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    collation,
-                    ..Default::default()
-                })
-            }
-
-            // XML type
-            TypeId::Xml => {
-                if src.remaining() < 1 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let schema_present = src.get_u8();
-
-                if schema_present != 0 {
-                    // Read schema info (3 us_varchar strings)
-                    let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // db name
-                    let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // owning schema
-                    let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // xml schema collection
-                }
-
-                Ok(TypeInfo::default())
-            }
-
-            // UDT (User-defined type) - complex metadata
-            TypeId::Udt => {
-                // Max length (2 bytes)
-                if src.remaining() < 2 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u16_le() as u32;
-
-                // UDT metadata: db name, schema name, type name, assembly qualified name
-                let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // db name
-                let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // schema name
-                let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // type name
-                let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // assembly qualified name
-
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    ..Default::default()
-                })
-            }
-
-            // Table-valued parameter - complex metadata (skip for now)
-            TypeId::Tvp => {
-                // TVP has very complex metadata, not commonly used
-                // For now, we can't properly parse this
-                Err(ProtocolError::InvalidTokenType(col_type))
-            }
-
-            // SQL Variant - 4-byte length
-            TypeId::Variant => {
-                if src.remaining() < 4 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let max_length = src.get_u32_le();
-                Ok(TypeInfo {
-                    max_length: Some(max_length),
-                    ..Default::default()
-                })
-            }
-        }
-    }
-
-    /// Decode collation information (5 bytes).
-    fn decode_collation(src: &mut impl Buf) -> Result<Collation, ProtocolError> {
-        if src.remaining() < 5 {
+    /// Decode a COLMETADATA token with Always Encrypted support.
+    ///
+    /// When column encryption was negotiated in Login7, the server sends a CekTable
+    /// before column definitions and per-column CryptoMetadata for encrypted columns.
+    ///
+    /// # Wire Format (with encryption)
+    ///
+    /// ```text
+    /// column_count: USHORT
+    /// cek_table: CekTable (always present when encryption negotiated)
+    /// columns: ColumnData[column_count] (with CryptoMetadata for encrypted columns)
+    /// ```
+    pub fn decode_encrypted(src: &mut impl Buf) -> Result<Self, ProtocolError> {
+        if src.remaining() < 2 {
             return Err(ProtocolError::UnexpectedEof);
         }
-        // Collation: LCID (4 bytes) + Sort ID (1 byte)
-        let lcid = src.get_u32_le();
-        let sort_id = src.get_u8();
-        Ok(Collation { lcid, sort_id })
+
+        let column_count = src.get_u16_le();
+
+        if column_count == Self::NO_METADATA {
+            return Ok(Self {
+                columns: Vec::new(),
+                cek_table: None,
+            });
+        }
+
+        // Parse CEK table (always present when encryption was negotiated)
+        let cek_table = crate::crypto::CekTable::decode(src)?;
+
+        let mut columns = Vec::with_capacity(column_count as usize);
+
+        for _ in 0..column_count {
+            let column = Self::decode_column_encrypted(src)?;
+            columns.push(column);
+        }
+
+        Ok(Self {
+            columns,
+            cek_table: Some(cek_table),
+        })
+    }
+
+    /// Decode a single column definition with Always Encrypted support.
+    ///
+    /// For encrypted columns (flags & 0x0800), parses CryptoMetadata after the type info.
+    fn decode_column_encrypted(src: &mut impl Buf) -> Result<ColumnData, ProtocolError> {
+        if src.remaining() < 7 {
+            return Err(ProtocolError::UnexpectedEof);
+        }
+
+        let user_type = src.get_u32_le();
+        let flags = src.get_u16_le();
+        let col_type = src.get_u8();
+
+        let type_id = TypeId::from_u8(col_type).unwrap_or(TypeId::Null);
+
+        // Parse type-specific metadata (for encrypted columns, this is the transport type)
+        let type_info = decode_type_info(src, type_id, col_type)?;
+
+        // Parse CryptoMetadata if the column is encrypted
+        let crypto_metadata = if crate::crypto::is_column_encrypted(flags) {
+            Some(crate::crypto::CryptoMetadata::decode(src)?)
+        } else {
+            None
+        };
+
+        // Read column name
+        let name = read_b_varchar(src).ok_or(ProtocolError::UnexpectedEof)?;
+
+        Ok(ColumnData {
+            name,
+            type_id,
+            col_type,
+            flags,
+            user_type,
+            type_info,
+            crypto_metadata,
+        })
     }
 
     /// Get the number of columns.
@@ -1362,7 +1457,7 @@ impl ReturnValue {
         let type_id = TypeId::from_u8(col_type).unwrap_or(TypeId::Null);
 
         // Parse type info
-        let type_info = ColMetaData::decode_type_info(src, type_id, col_type)?;
+        let type_info = decode_type_info(src, type_id, col_type)?;
 
         // Read the value data
         let mut value_buf = bytes::BytesMut::new();
@@ -1375,6 +1470,7 @@ impl ReturnValue {
             flags,
             user_type,
             type_info: type_info.clone(),
+            crypto_metadata: None,
         };
 
         RawRow::decode_column_value(src, &temp_col, &mut value_buf)?;
@@ -2068,13 +2164,30 @@ impl FedAuthInfo {
 pub struct TokenParser {
     data: Bytes,
     position: usize,
+    /// Whether Always Encrypted was negotiated for this connection.
+    /// When true, ColMetaData tokens are parsed with CekTable and per-column CryptoMetadata.
+    encryption_enabled: bool,
 }
 
 impl TokenParser {
     /// Create a new token parser from bytes.
     #[must_use]
     pub fn new(data: Bytes) -> Self {
-        Self { data, position: 0 }
+        Self {
+            data,
+            position: 0,
+            encryption_enabled: false,
+        }
+    }
+
+    /// Enable Always Encrypted metadata parsing.
+    ///
+    /// When enabled, ColMetaData tokens are parsed using the encrypted format
+    /// which includes a CekTable and per-column CryptoMetadata.
+    #[must_use]
+    pub fn with_encryption(mut self, enabled: bool) -> Self {
+        self.encryption_enabled = enabled;
+        self
     }
 
     /// Get remaining bytes in the buffer.
@@ -2183,7 +2296,11 @@ impl TokenParser {
                 Token::ReturnStatus(status)
             }
             Some(TokenType::ColMetaData) => {
-                let col_meta = ColMetaData::decode(&mut buf)?;
+                let col_meta = if self.encryption_enabled {
+                    ColMetaData::decode_encrypted(&mut buf)?
+                } else {
+                    ColMetaData::decode(&mut buf)?
+                };
                 Token::ColMetaData(col_meta)
             }
             Some(TokenType::Row) => {
@@ -2490,6 +2607,7 @@ mod tests {
     fn test_raw_row_decode_int() {
         // Create metadata for a single INT column
         let metadata = ColMetaData {
+            cek_table: None,
             columns: vec![ColumnData {
                 name: "id".to_string(),
                 type_id: TypeId::Int4,
@@ -2497,6 +2615,7 @@ mod tests {
                 flags: 0,
                 user_type: 0,
                 type_info: TypeInfo::default(),
+                crypto_metadata: None,
             }],
         };
 
@@ -2514,6 +2633,7 @@ mod tests {
     fn test_raw_row_decode_nullable_int() {
         // Create metadata for a nullable INT column (IntN)
         let metadata = ColMetaData {
+            cek_table: None,
             columns: vec![ColumnData {
                 name: "id".to_string(),
                 type_id: TypeId::IntN,
@@ -2524,6 +2644,7 @@ mod tests {
                     max_length: Some(4),
                     ..Default::default()
                 },
+                crypto_metadata: None,
             }],
         };
 
@@ -2541,6 +2662,7 @@ mod tests {
     fn test_raw_row_decode_null_value() {
         // Create metadata for a nullable INT column (IntN)
         let metadata = ColMetaData {
+            cek_table: None,
             columns: vec![ColumnData {
                 name: "id".to_string(),
                 type_id: TypeId::IntN,
@@ -2551,6 +2673,7 @@ mod tests {
                     max_length: Some(4),
                     ..Default::default()
                 },
+                crypto_metadata: None,
             }],
         };
 
@@ -2605,6 +2728,7 @@ mod tests {
     fn test_token_parser_row_with_metadata() {
         // Build metadata
         let metadata = ColMetaData {
+            cek_table: None,
             columns: vec![ColumnData {
                 name: "id".to_string(),
                 type_id: TypeId::Int4,
@@ -2612,6 +2736,7 @@ mod tests {
                 flags: 0,
                 user_type: 0,
                 type_info: TypeInfo::default(),
+                crypto_metadata: None,
             }],
         };
 
@@ -2669,6 +2794,7 @@ mod tests {
             flags: 0,
             user_type: 0,
             type_info: TypeInfo::default(),
+            crypto_metadata: None,
         };
         assert_eq!(col.fixed_size(), Some(4));
 
@@ -2679,6 +2805,7 @@ mod tests {
             flags: 0,
             user_type: 0,
             type_info: TypeInfo::default(),
+            crypto_metadata: None,
         };
         assert_eq!(col2.fixed_size(), None);
     }
@@ -2713,6 +2840,7 @@ mod tests {
 
         // Build column metadata
         let metadata = ColMetaData {
+            cek_table: None,
             columns: vec![
                 ColumnData {
                     name: "greeting".to_string(),
@@ -2726,6 +2854,7 @@ mod tests {
                         scale: None,
                         collation: None,
                     },
+                    crypto_metadata: None,
                 },
                 ColumnData {
                     name: "number".to_string(),
@@ -2739,6 +2868,7 @@ mod tests {
                         scale: None,
                         collation: None,
                     },
+                    crypto_metadata: None,
                 },
             ],
         };
@@ -2824,6 +2954,7 @@ mod tests {
 
         // Build metadata with MAX type
         let metadata = ColMetaData {
+            cek_table: None,
             columns: vec![
                 ColumnData {
                     name: "text".to_string(),
@@ -2837,6 +2968,7 @@ mod tests {
                         scale: None,
                         collation: None,
                     },
+                    crypto_metadata: None,
                 },
                 ColumnData {
                     name: "num".to_string(),
@@ -2850,6 +2982,7 @@ mod tests {
                         scale: None,
                         collation: None,
                     },
+                    crypto_metadata: None,
                 },
             ],
         };

@@ -257,7 +257,11 @@ impl Client<Disconnected> {
             needs_reset: false,        // Fresh connection, no reset needed
             #[cfg(feature = "otel")]
             instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
-                .with_database(current_database.unwrap_or_default()),
+                .with_database(current_database.clone().unwrap_or_default()),
+            #[cfg(feature = "always-encrypted")]
+            encryption_context: config.column_encryption.clone().map(|cfg| {
+                std::sync::Arc::new(crate::encryption::EncryptionContext::from_arc(cfg))
+            }),
         })
     }
 
@@ -526,7 +530,11 @@ impl Client<Disconnected> {
                     needs_reset: false,        // Fresh connection, no reset needed
                     #[cfg(feature = "otel")]
                     instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
-                        .with_database(current_database.unwrap_or_default()),
+                        .with_database(current_database.clone().unwrap_or_default()),
+                    #[cfg(feature = "always-encrypted")]
+                    encryption_context: config.column_encryption.clone().map(|cfg| {
+                        std::sync::Arc::new(crate::encryption::EncryptionContext::from_arc(cfg))
+                    }),
                 })
             } else {
                 // Full Encryption (ENCRYPT_ON per MS-TDS spec):
@@ -579,7 +587,11 @@ impl Client<Disconnected> {
                     needs_reset: false,        // Fresh connection, no reset needed
                     #[cfg(feature = "otel")]
                     instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
-                        .with_database(current_database.unwrap_or_default()),
+                        .with_database(current_database.clone().unwrap_or_default()),
+                    #[cfg(feature = "always-encrypted")]
+                    encryption_context: config.column_encryption.clone().map(|cfg| {
+                        std::sync::Arc::new(crate::encryption::EncryptionContext::from_arc(cfg))
+                    }),
                 })
             }
         } else {
@@ -637,7 +649,11 @@ impl Client<Disconnected> {
                 needs_reset: false,        // Fresh connection, no reset needed
                 #[cfg(feature = "otel")]
                 instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
-                    .with_database(current_database.unwrap_or_default()),
+                    .with_database(current_database.clone().unwrap_or_default()),
+                #[cfg(feature = "always-encrypted")]
+                encryption_context: config.column_encryption.clone().map(|cfg| {
+                    std::sync::Arc::new(crate::encryption::EncryptionContext::from_arc(cfg))
+                }),
             })
         }
     }
@@ -761,7 +777,11 @@ impl Client<Disconnected> {
             needs_reset: false,
             #[cfg(feature = "otel")]
             instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
-                .with_database(current_database.unwrap_or_default()),
+                .with_database(current_database.clone().unwrap_or_default()),
+            #[cfg(feature = "always-encrypted")]
+            encryption_context: config.column_encryption.clone().map(|cfg| {
+                std::sync::Arc::new(crate::encryption::EncryptionContext::from_arc(cfg))
+            }),
         })
     }
 
@@ -820,6 +840,17 @@ impl Client<Disconnected> {
             &config.credentials
         {
             login = login.with_sql_auth(username.as_ref(), password.as_ref());
+        }
+
+        // When Always Encrypted is configured, add the ColumnEncryption feature extension.
+        // Version 1 = client supports column encryption without enclave computations.
+        #[cfg(feature = "always-encrypted")]
+        if config.column_encryption.is_some() {
+            login = login.with_feature(tds_protocol::login7::FeatureExtension {
+                feature_id: tds_protocol::login7::FeatureId::ColumnEncryption,
+                data: bytes::Bytes::from_static(&[0x01]), // Version 1
+            });
+            tracing::debug!("Login7: adding ColumnEncryption feature extension (version 1)");
         }
 
         login

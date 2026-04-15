@@ -91,6 +91,8 @@ pub mod bulk;
 pub mod cancel;
 pub mod change_tracking;
 pub mod client;
+#[cfg(feature = "always-encrypted")]
+pub(crate) mod column_decryptor;
 pub(crate) mod column_parser;
 pub mod config;
 pub mod encryption;

@@ -106,11 +106,24 @@ pub struct CekValue {
 /// Per-column encryption metadata.
 ///
 /// This metadata is present for each encrypted column and describes
-/// how to decrypt the column data.
+/// how to decrypt the column data. Per MS-TDS 2.2.7.4, the wire format is:
+///
+/// ```text
+/// ordinal(2) + base_user_type(4) + base_col_type(1) + base_type_info(var) + algo_id(1) + enc_type(1) + norm_ver(1)
+/// ```
+///
+/// The `base_col_type` and `base_type_info` describe the plaintext column type.
+/// The outer column metadata describes the ciphertext transport type (always BigVarBinary).
 #[derive(Debug, Clone)]
 pub struct CryptoMetadata {
     /// Index into the CEK table (0-based).
     pub cek_table_ordinal: u16,
+    /// Base user type of the plaintext column.
+    pub base_user_type: u32,
+    /// Base column type byte of the plaintext column.
+    pub base_col_type: u8,
+    /// Type-specific metadata for the plaintext column type.
+    pub base_type_info: crate::token::TypeInfo,
     /// Encryption algorithm ID.
     pub algorithm_id: u8,
     /// Encryption type (deterministic or randomized).
@@ -296,16 +309,38 @@ impl CekValue {
 }
 
 impl CryptoMetadata {
-    /// Size of crypto metadata in bytes.
-    pub const SIZE: usize = 5; // ordinal (2) + algorithm (1) + enc_type (1) + norm_version (1)
-
     /// Decode crypto metadata from the wire format.
+    ///
+    /// Per MS-TDS 2.2.7.4, the wire format is:
+    /// ```text
+    /// cek_table_ordinal: USHORT (2 bytes)
+    /// base_user_type: ULONG (4 bytes)
+    /// base_col_type: BYTE (1 byte)
+    /// base_type_info: TYPE_INFO (variable, depends on base_col_type)
+    /// algorithm_id: BYTE (1 byte)
+    /// encryption_type: BYTE (1 byte)
+    /// normalization_version: BYTE (1 byte)
+    /// ```
     pub fn decode(src: &mut impl Buf) -> Result<Self, ProtocolError> {
-        if src.remaining() < Self::SIZE {
+        // ordinal (2) + base_user_type (4) + base_col_type (1) = 7 minimum
+        if src.remaining() < 7 {
             return Err(ProtocolError::UnexpectedEof);
         }
 
         let cek_table_ordinal = src.get_u16_le();
+        let base_user_type = src.get_u32_le();
+        let base_col_type = src.get_u8();
+
+        // Parse base type info using the shared decoder from token.rs
+        let base_type_id =
+            crate::types::TypeId::from_u8(base_col_type).unwrap_or(crate::types::TypeId::Null);
+        let base_type_info = crate::token::decode_type_info(src, base_type_id, base_col_type)?;
+
+        // algorithm_id (1) + encryption_type (1) + normalization_version (1) = 3
+        if src.remaining() < 3 {
+            return Err(ProtocolError::UnexpectedEof);
+        }
+
         let algorithm_id = src.get_u8();
         let encryption_type_byte = src.get_u8();
         let normalization_version = src.get_u8();
@@ -319,6 +354,9 @@ impl CryptoMetadata {
 
         Ok(Self {
             cek_table_ordinal,
+            base_user_type,
+            base_col_type,
+            base_type_info,
             algorithm_id,
             encryption_type,
             normalization_version,
@@ -341,6 +379,12 @@ impl CryptoMetadata {
     #[must_use]
     pub fn is_randomized(&self) -> bool {
         self.encryption_type == EncryptionTypeWire::Randomized
+    }
+
+    /// Get the TypeId of the base (plaintext) column type.
+    #[must_use]
+    pub fn base_type_id(&self) -> crate::types::TypeId {
+        crate::types::TypeId::from_u8(self.base_col_type).unwrap_or(crate::types::TypeId::Null)
     }
 }
 
@@ -411,6 +455,9 @@ mod tests {
     fn test_crypto_metadata_decode() {
         let data = [
             0x00, 0x00, // cek_table_ordinal = 0
+            0x00, 0x00, 0x00, 0x00, // base_user_type = 0
+            0x26, // base_col_type = IntN (0x26)
+            0x04, // base_type_info: IntN max_length = 4 (INT)
             0x02, // algorithm_id = AEAD_AES_256_CBC_HMAC_SHA256
             0x01, // encryption_type = Deterministic
             0x01, // normalization_version = 1
@@ -420,6 +467,9 @@ mod tests {
         let metadata = CryptoMetadata::decode(&mut cursor).unwrap();
 
         assert_eq!(metadata.cek_table_ordinal, 0);
+        assert_eq!(metadata.base_user_type, 0);
+        assert_eq!(metadata.base_col_type, 0x26); // IntN
+        assert_eq!(metadata.base_type_info.max_length, Some(4));
         assert_eq!(
             metadata.algorithm_id,
             ALGORITHM_AEAD_AES_256_CBC_HMAC_SHA256
@@ -429,6 +479,9 @@ mod tests {
         assert!(metadata.is_aead_aes_256());
         assert!(metadata.is_deterministic());
         assert!(!metadata.is_randomized());
+
+        // Test base_type_id helper
+        assert_eq!(metadata.base_type_id(), crate::types::TypeId::IntN);
     }
 
     #[test]
@@ -545,6 +598,9 @@ mod tests {
 
         let metadata = CryptoMetadata {
             cek_table_ordinal: 0,
+            base_user_type: 0,
+            base_col_type: 0x26, // IntN
+            base_type_info: crate::token::TypeInfo::default(),
             algorithm_id: 2,
             encryption_type: EncryptionTypeWire::Randomized,
             normalization_version: 1,

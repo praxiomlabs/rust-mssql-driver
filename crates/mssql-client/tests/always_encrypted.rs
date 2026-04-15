@@ -84,6 +84,9 @@ fn test_cek_entry_primary_value() {
 fn test_crypto_metadata_methods() {
     let meta = CryptoMetadata {
         cek_table_ordinal: 0,
+        base_user_type: 0,
+        base_col_type: 0x26,
+        base_type_info: tds_protocol::token::TypeInfo::default(),
         algorithm_id: 2, // AEAD_AES_256_CBC_HMAC_SHA256
         encryption_type: EncryptionTypeWire::Deterministic,
         normalization_version: 1,
@@ -95,6 +98,9 @@ fn test_crypto_metadata_methods() {
 
     let meta_random = CryptoMetadata {
         cek_table_ordinal: 1,
+        base_user_type: 0,
+        base_col_type: 0x26,
+        base_type_info: tds_protocol::token::TypeInfo::default(),
         algorithm_id: 2,
         encryption_type: EncryptionTypeWire::Randomized,
         normalization_version: 1,
@@ -152,6 +158,9 @@ fn test_result_set_encryption_info_column_tracking() {
     // Mark column 2 as encrypted
     let metadata = CryptoMetadata {
         cek_table_ordinal: 0,
+        base_user_type: 0,
+        base_col_type: 0x26,
+        base_type_info: tds_protocol::token::TypeInfo::default(),
         algorithm_id: 2,
         encryption_type: EncryptionTypeWire::Deterministic,
         normalization_version: 1,

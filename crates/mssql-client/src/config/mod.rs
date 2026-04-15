@@ -108,6 +108,20 @@ pub struct Config {
     ///
     /// Note: When `strict_mode` is enabled, this is ignored and TDS 8.0 is used.
     pub tds_version: TdsVersion,
+
+    /// Always Encrypted configuration.
+    ///
+    /// When `Some`, the client will negotiate Always Encrypted support with the
+    /// server and transparently decrypt encrypted column values in result sets.
+    ///
+    /// Set via `Column Encryption Setting=Enabled` in connection strings, or
+    /// programmatically via [`Config::with_column_encryption`].
+    ///
+    /// Wrapped in `Arc` because `EncryptionConfig` contains trait objects (key store
+    /// providers) which cannot implement `Clone`. The `Arc` allows `Config` to remain
+    /// `Clone` while sharing the encryption configuration.
+    #[cfg(feature = "always-encrypted")]
+    pub column_encryption: Option<std::sync::Arc<crate::encryption::EncryptionConfig>>,
 }
 
 impl Default for Config {
@@ -134,6 +148,8 @@ impl Default for Config {
             retry: RetryPolicy::default(),
             timeouts,
             tds_version: TdsVersion::V7_4, // Default to TDS 7.4 for broad compatibility
+            #[cfg(feature = "always-encrypted")]
+            column_encryption: None,
         }
     }
 }
@@ -247,6 +263,22 @@ impl Config {
                     {
                         config.encrypt = false;
                         config.no_tls = false;
+                    }
+                }
+                "column encryption setting" | "columnencryptionsetting" => {
+                    #[cfg(feature = "always-encrypted")]
+                    if value.eq_ignore_ascii_case("enabled") {
+                        config.column_encryption = Some(std::sync::Arc::new(
+                            crate::encryption::EncryptionConfig::new(),
+                        ));
+                    }
+                    #[cfg(not(feature = "always-encrypted"))]
+                    if value.eq_ignore_ascii_case("enabled") {
+                        return Err(crate::error::Error::Config(
+                            "Column Encryption Setting=Enabled requires the 'always-encrypted' feature. \
+                             Enable it in your Cargo.toml: mssql-client = { features = [\"always-encrypted\"] }"
+                                .to_string(),
+                        ));
                     }
                 }
                 "multipleactiveresultsets" | "mars" => {
@@ -463,6 +495,29 @@ impl Config {
         if enabled {
             self.encrypt = false;
         }
+        self
+    }
+
+    /// Enable Always Encrypted with the given encryption configuration.
+    ///
+    /// When enabled, the client will negotiate Always Encrypted support during
+    /// connection and transparently decrypt encrypted column values.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use mssql_client::{Config, EncryptionConfig};
+    /// use mssql_auth::InMemoryKeyStore;
+    ///
+    /// let config = Config::new()
+    ///     .with_column_encryption(
+    ///         EncryptionConfig::new().with_provider(key_store)
+    ///     );
+    /// ```
+    #[cfg(feature = "always-encrypted")]
+    #[must_use]
+    pub fn with_column_encryption(mut self, config: crate::encryption::EncryptionConfig) -> Self {
+        self.column_encryption = Some(std::sync::Arc::new(config));
         self
     }
 
