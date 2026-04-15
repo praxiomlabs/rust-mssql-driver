@@ -1071,4 +1071,257 @@ mod tests {
         let result = decode_value(&mut buf, &type_info).unwrap();
         assert_eq!(result, SqlValue::Null);
     }
+
+    // ========================================================================
+    // Targeted round-trip tests for negative decimals (work-item 1.3)
+    // ========================================================================
+
+    #[cfg(feature = "decimal")]
+    mod decimal_roundtrip {
+        use super::*;
+        use bytes::{BufMut, BytesMut};
+        use rust_decimal::Decimal;
+
+        /// Encode a Decimal, prepend TDS length byte, then decode — verifying round-trip.
+        fn roundtrip_decimal(value: Decimal, precision: u8, scale: u8) -> Decimal {
+            // Encode
+            let mut encode_buf = BytesMut::new();
+            crate::encode::encode_decimal(value, &mut encode_buf);
+            let encoded_len = encode_buf.len() as u8; // 17 bytes (1 sign + 16 mantissa)
+
+            // Build decode buffer: length prefix + encoded data
+            let mut decode_buf = BytesMut::with_capacity(1 + encoded_len as usize);
+            decode_buf.put_u8(encoded_len);
+            decode_buf.extend_from_slice(&encode_buf);
+
+            let mut bytes = decode_buf.freeze();
+            let type_info = TypeInfo::decimal(precision, scale);
+            match decode_value(&mut bytes, &type_info).unwrap() {
+                SqlValue::Decimal(d) => d,
+                other => panic!("expected Decimal, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn test_negative_decimal_17_80() {
+            let d = Decimal::new(-1780, 2); // -17.80
+            let result = roundtrip_decimal(d, 18, 2);
+            assert_eq!(result, d, "round-trip of -17.80 must be exact");
+        }
+
+        #[test]
+        fn test_negative_decimal_0_01() {
+            let d = Decimal::new(-1, 2); // -0.01
+            let result = roundtrip_decimal(d, 18, 2);
+            assert_eq!(result, d, "round-trip of -0.01 must be exact");
+        }
+
+        #[test]
+        fn test_negative_decimal_large() {
+            let d = Decimal::new(-9999999999, 2); // -99999999.99
+            let result = roundtrip_decimal(d, 18, 2);
+            assert_eq!(result, d, "round-trip of -99999999.99 must be exact");
+        }
+
+        #[test]
+        fn test_positive_decimal() {
+            let d = Decimal::new(1780, 2); // 17.80
+            let result = roundtrip_decimal(d, 18, 2);
+            assert_eq!(result, d, "round-trip of 17.80 must be exact");
+        }
+
+        #[test]
+        fn test_decimal_zero() {
+            let d = Decimal::ZERO;
+            let result = roundtrip_decimal(d, 18, 0);
+            assert_eq!(result, d, "round-trip of 0 must be exact");
+        }
+
+        #[test]
+        fn test_decimal_max_precision() {
+            // Large value that fits in 38-digit precision
+            let d = Decimal::new(i64::MAX, 0);
+            let result = roundtrip_decimal(d, 38, 0);
+            assert_eq!(result, d, "round-trip of large positive must be exact");
+        }
+
+        #[test]
+        fn test_decimal_min_precision() {
+            let d = Decimal::new(i64::MIN + 1, 0);
+            let result = roundtrip_decimal(d, 38, 0);
+            assert_eq!(result, d, "round-trip of large negative must be exact");
+        }
+    }
+
+    // ========================================================================
+    // Date encoding tests (work-item 3.7)
+    // ========================================================================
+
+    #[cfg(feature = "chrono")]
+    mod date_tests {
+        use bytes::{BufMut, BytesMut};
+        use chrono::NaiveDate;
+
+        #[test]
+        fn test_encode_date_pre_1900() {
+            // This is the scenario where Tiberius panics
+            let mut buf = BytesMut::new();
+            let date = NaiveDate::from_ymd_opt(1753, 1, 1).unwrap();
+            crate::encode::encode_date(date, &mut buf);
+            assert_eq!(buf.len(), 3, "DATE encoding is always 3 bytes");
+        }
+
+        #[test]
+        fn test_encode_date_epoch() {
+            // The DATE epoch: 0001-01-01
+            let mut buf = BytesMut::new();
+            let date = NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
+            crate::encode::encode_date(date, &mut buf);
+            // Days since 0001-01-01 = 0
+            assert_eq!(&buf[..], &[0, 0, 0]);
+        }
+
+        #[test]
+        fn test_encode_date_max() {
+            // SQL Server max DATE: 9999-12-31
+            let mut buf = BytesMut::new();
+            let date = NaiveDate::from_ymd_opt(9999, 12, 31).unwrap();
+            crate::encode::encode_date(date, &mut buf);
+            assert_eq!(buf.len(), 3, "DATE encoding is always 3 bytes");
+            // 3652058 days from 0001-01-01 — fits in 3 bytes (max ~16M)
+            let days =
+                buf[0] as u32 | ((buf[1] as u32) << 8) | ((buf[2] as u32) << 16);
+            assert_eq!(days, 3_652_058);
+        }
+
+        #[test]
+        fn test_decode_datetime_pre_1900() {
+            // DATETIME uses i32 days from 1900-01-01 epoch.
+            // 1753-01-01 is ~53690 days before 1900-01-01.
+            use super::*;
+
+            let base = NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
+            let target = NaiveDate::from_ymd_opt(1753, 1, 1).unwrap();
+            let days = target.signed_duration_since(base).num_days() as i32;
+
+            // Build DATETIME buffer: i32 days + u32 time_300ths
+            let mut raw = BytesMut::new();
+            raw.put_i32_le(days);
+            raw.put_u32_le(0); // midnight
+
+            let mut buf = raw.freeze();
+            let result = decode_datetime(&mut buf).unwrap();
+
+            match result {
+                SqlValue::DateTime(dt) => {
+                    assert_eq!(dt.date(), target);
+                }
+                other => panic!("expected DateTime, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn test_decode_smalldatetime_1900() {
+            // SMALLDATETIME: u16 days from 1900-01-01 + u16 minutes
+            use super::*;
+
+            // Day 0, minute 0 = 1900-01-01 00:00:00
+            let mut raw = BytesMut::new();
+            raw.put_u16_le(0);
+            raw.put_u16_le(0);
+
+            let mut buf = raw.freeze();
+            let result = decode_smalldatetime(&mut buf).unwrap();
+
+            match result {
+                SqlValue::DateTime(dt) => {
+                    assert_eq!(
+                        dt,
+                        NaiveDate::from_ymd_opt(1900, 1, 1)
+                            .unwrap()
+                            .and_hms_opt(0, 0, 0)
+                            .unwrap()
+                    );
+                }
+                other => panic!("expected DateTime, got {other:?}"),
+            }
+        }
+    }
+
+    // ========================================================================
+    // Property-based tests (work-item 5.2)
+    // ========================================================================
+
+    #[cfg(feature = "decimal")]
+    mod proptest_decimal {
+        use super::*;
+        use bytes::{BufMut, BytesMut};
+        use proptest::prelude::*;
+        use rust_decimal::Decimal;
+
+        /// Encode a Decimal, prepend TDS length byte, then decode.
+        fn roundtrip_decimal(value: Decimal, scale: u8) -> Decimal {
+            let mut encode_buf = BytesMut::new();
+            crate::encode::encode_decimal(value, &mut encode_buf);
+            let encoded_len = encode_buf.len() as u8;
+
+            let mut decode_buf = BytesMut::with_capacity(1 + encoded_len as usize);
+            decode_buf.put_u8(encoded_len);
+            decode_buf.extend_from_slice(&encode_buf);
+
+            let mut bytes = decode_buf.freeze();
+            let type_info = TypeInfo::decimal(38, scale);
+            match decode_value(&mut bytes, &type_info).unwrap() {
+                SqlValue::Decimal(d) => d,
+                other => panic!("expected Decimal, got {other:?}"),
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn decimal_roundtrip_scale0(mantissa in -999_999_999_999i64..=999_999_999_999i64) {
+                let d = Decimal::new(mantissa, 0);
+                let result = roundtrip_decimal(d, 0);
+                prop_assert_eq!(result, d);
+            }
+
+            #[test]
+            fn decimal_roundtrip_scale2(mantissa in -999_999_999_999i64..=999_999_999_999i64) {
+                let d = Decimal::new(mantissa, 2);
+                let result = roundtrip_decimal(d, 2);
+                prop_assert_eq!(result, d);
+            }
+
+            #[test]
+            fn decimal_roundtrip_various_scales(
+                mantissa in -999_999_999i64..=999_999_999i64,
+                scale in 0u8..=10u8,
+            ) {
+                let d = Decimal::new(mantissa, scale as u32);
+                let result = roundtrip_decimal(d, scale);
+                prop_assert_eq!(result, d);
+            }
+        }
+    }
+
+    #[cfg(feature = "chrono")]
+    mod proptest_date {
+        use bytes::BytesMut;
+        use chrono::NaiveDate;
+        use proptest::prelude::*;
+
+        proptest! {
+            #[test]
+            fn date_encode_never_panics(
+                year in 1i32..=9999i32,
+                month in 1u32..=12u32,
+                day in 1u32..=28u32, // 28 is always valid
+            ) {
+                let date = NaiveDate::from_ymd_opt(year, month, day).unwrap();
+                let mut buf = BytesMut::new();
+                crate::encode::encode_date(date, &mut buf);
+                prop_assert_eq!(buf.len(), 3);
+            }
+        }
+    }
 }
