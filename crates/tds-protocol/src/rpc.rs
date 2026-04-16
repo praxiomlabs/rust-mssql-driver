@@ -311,10 +311,34 @@ impl TypeInfo {
         }
     }
 
+    /// Create type info for TIME.
+    pub fn time(scale: u8) -> Self {
+        Self {
+            type_id: 0x29, // TIMETYPE
+            max_length: None,
+            precision: None,
+            scale: Some(scale),
+            collation: None,
+            tvp_type_name: None,
+        }
+    }
+
     /// Create type info for DATETIME2.
     pub fn datetime2(scale: u8) -> Self {
         Self {
             type_id: 0x2A, // DATETIME2TYPE
+            max_length: None,
+            precision: None,
+            scale: Some(scale),
+            collation: None,
+            tvp_type_name: None,
+        }
+    }
+
+    /// Create type info for DATETIMEOFFSET.
+    pub fn datetimeoffset(scale: u8) -> Self {
+        Self {
+            type_id: 0x2B, // DATETIMEOFFSETTYPE
             max_length: None,
             precision: None,
             scale: Some(scale),
@@ -527,12 +551,8 @@ impl RpcParam {
                     buf.put_u8(value.len() as u8);
                     buf.put_slice(value);
                 }
-                0x28 => {
-                    // DATETYPE (fixed 3 bytes)
-                    buf.put_slice(value);
-                }
-                0x2A => {
-                    // DATETIME2TYPE
+                0x28 | 0x29 | 0x2A | 0x2B => {
+                    // DATE, TIME, DATETIME2, DATETIMEOFFSET
                     buf.put_u8(value.len() as u8);
                     buf.put_slice(value);
                 }
@@ -689,9 +709,17 @@ impl RpcRequest {
                     }
                     0x24 => "uniqueidentifier".to_string(),
                     0x28 => "date".to_string(),
+                    0x29 => {
+                        let scale = p.type_info.scale.unwrap_or(7);
+                        format!("time({scale})")
+                    }
                     0x2A => {
                         let scale = p.type_info.scale.unwrap_or(7);
                         format!("datetime2({scale})")
+                    }
+                    0x2B => {
+                        let scale = p.type_info.scale.unwrap_or(7);
+                        format!("datetimeoffset({scale})")
                     }
                     0x6C => {
                         let precision = p.type_info.precision.unwrap_or(18);

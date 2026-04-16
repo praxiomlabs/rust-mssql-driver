@@ -80,19 +80,28 @@ impl<S: ConnectionState> Client<S> {
             #[cfg(feature = "decimal")]
             SqlValue::Decimal(d) => RpcParam::nvarchar(name, &d.to_string()),
             #[cfg(feature = "chrono")]
-            SqlValue::Date(_)
-            | SqlValue::Time(_)
-            | SqlValue::DateTime(_)
-            | SqlValue::DateTimeOffset(_) => {
-                let s = match &sql_value {
-                    SqlValue::Date(d) => d.to_string(),
-                    SqlValue::Time(t) => t.to_string(),
-                    SqlValue::DateTime(dt) => dt.to_string(),
-                    SqlValue::DateTimeOffset(dto) => dto.to_rfc3339(),
-                    // The outer arm restricts sql_value to Date|Time|DateTime|DateTimeOffset.
-                    _ => unreachable!("inner match is bounded by outer chrono type arm"),
-                };
-                RpcParam::nvarchar(name, &s)
+            SqlValue::Date(d) => {
+                let mut buf = BytesMut::with_capacity(3);
+                mssql_types::encode::encode_date(d, &mut buf);
+                RpcParam::new(name, RpcTypeInfo::date(), buf.freeze())
+            }
+            #[cfg(feature = "chrono")]
+            SqlValue::Time(t) => {
+                let mut buf = BytesMut::with_capacity(5);
+                mssql_types::encode::encode_time(t, &mut buf);
+                RpcParam::new(name, RpcTypeInfo::time(7), buf.freeze())
+            }
+            #[cfg(feature = "chrono")]
+            SqlValue::DateTime(dt) => {
+                let mut buf = BytesMut::with_capacity(8);
+                mssql_types::encode::encode_datetime2(dt, &mut buf);
+                RpcParam::new(name, RpcTypeInfo::datetime2(7), buf.freeze())
+            }
+            #[cfg(feature = "chrono")]
+            SqlValue::DateTimeOffset(dto) => {
+                let mut buf = BytesMut::with_capacity(10);
+                mssql_types::encode::encode_datetimeoffset(dto, &mut buf);
+                RpcParam::new(name, RpcTypeInfo::datetimeoffset(7), buf.freeze())
             }
             #[cfg(feature = "json")]
             SqlValue::Json(ref j) => RpcParam::nvarchar(name, &j.to_string()),
