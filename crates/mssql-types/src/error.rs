@@ -59,6 +59,15 @@ pub enum TypeError {
         to: &'static str,
     },
 
+    /// SQL type rejected as unsupported in this context (e.g. deprecated types).
+    #[error("unsupported SQL type {sql_type}: {reason}")]
+    UnsupportedType {
+        /// The rejected SQL type name.
+        sql_type: String,
+        /// Explanation and suggested alternative.
+        reason: String,
+    },
+
     /// Buffer too small for value.
     #[error("buffer too small: need {needed} bytes, have {available}")]
     BufferTooSmall {

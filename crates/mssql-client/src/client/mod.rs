@@ -284,8 +284,8 @@ impl<S: ConnectionState> Client<S> {
     ///
     /// let builder = BulkInsertBuilder::new("dbo.Users")
     ///     .with_typed_columns(vec![
-    ///         BulkColumn::new("id", "INT", 0),
-    ///         BulkColumn::new("name", "NVARCHAR(100)", 1),
+    ///         BulkColumn::new("id", "INT", 0)?,
+    ///         BulkColumn::new("name", "NVARCHAR(100)", 1)?,
     ///     ]);
     ///
     /// let mut writer = client.bulk_insert(&builder).await?;
@@ -344,6 +344,34 @@ impl<S: ConnectionState> Client<S> {
                 }
                 Token::Done(_) => break,
                 _ => {}
+            }
+        }
+
+        // Reject deprecated TEXT/NTEXT columns reported by the server. These
+        // types require a legacy TEXTPTR wire format that this driver does not
+        // support — users should migrate the column to VARCHAR(MAX) / NVARCHAR(MAX).
+        if let Some(ref meta) = server_metadata {
+            use tds_protocol::types::TypeId;
+            for col in meta.columns.iter() {
+                let (rejected, replacement) = match col.type_id {
+                    TypeId::Text => (Some("TEXT"), "VARCHAR(MAX)"),
+                    TypeId::NText => (Some("NTEXT"), "NVARCHAR(MAX)"),
+                    _ => (None, ""),
+                };
+                if let Some(sql_type) = rejected {
+                    return Err(Error::from(mssql_types::TypeError::UnsupportedType {
+                        sql_type: sql_type.to_string(),
+                        reason: format!(
+                            "column `{}` in table `{}` is {} — TEXT/NTEXT are not \
+                             supported. Alter the column to {} instead (Microsoft \
+                             deprecated TEXT/NTEXT in SQL Server 2005).",
+                            col.name,
+                            builder.table_name(),
+                            sql_type,
+                            replacement,
+                        ),
+                    }));
+                }
             }
         }
 

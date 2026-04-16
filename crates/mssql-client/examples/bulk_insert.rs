@@ -51,9 +51,9 @@ async fn main() -> Result<(), Error> {
 
     // Define columns for bulk insert
     let columns = vec![
-        BulkColumn::new("id", "INT", 0),
-        BulkColumn::new("name", "NVARCHAR(100)", 1),
-        BulkColumn::new("value", "DECIMAL(18,2)", 2),
+        BulkColumn::new("id", "INT", 0)?,
+        BulkColumn::new("name", "NVARCHAR(100)", 1)?,
+        BulkColumn::new("value", "DECIMAL(18,2)", 2)?,
     ];
 
     // Configure and build the bulk insert operation

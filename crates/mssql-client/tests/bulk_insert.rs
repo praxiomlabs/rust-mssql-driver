@@ -60,8 +60,8 @@ async fn test_bulk_insert_int_and_nvarchar() {
         .expect("Failed to create table");
 
     let builder = BulkInsertBuilder::new("#BulkTest1").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0),
-        BulkColumn::new("name", "NVARCHAR(100)", 1),
+        BulkColumn::new("id", "INT", 0).unwrap(),
+        BulkColumn::new("name", "NVARCHAR(100)", 1).unwrap(),
     ]);
 
     let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
@@ -110,7 +110,7 @@ async fn test_bulk_insert_zero_rows() {
         .expect("Failed to create table");
 
     let builder = BulkInsertBuilder::new("#BulkEmpty")
-        .with_typed_columns(vec![BulkColumn::new("id", "INT", 0)]);
+        .with_typed_columns(vec![BulkColumn::new("id", "INT", 0).unwrap()]);
 
     let writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
     let result = writer.finish().await.expect("Failed to finish bulk insert");
@@ -148,8 +148,8 @@ async fn test_bulk_insert_large_batch() {
         .expect("Failed to create table");
 
     let builder = BulkInsertBuilder::new("#BulkLarge").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0),
-        BulkColumn::new("value", "NVARCHAR(200)", 1),
+        BulkColumn::new("id", "INT", 0).unwrap(),
+        BulkColumn::new("value", "NVARCHAR(200)", 1).unwrap(),
     ]);
 
     let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
@@ -223,9 +223,9 @@ async fn test_bulk_insert_null_values() {
         .expect("Failed to create table");
 
     let builder = BulkInsertBuilder::new("#BulkNulls").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0).with_nullable(false),
-        BulkColumn::new("name", "NVARCHAR(100)", 1),
-        BulkColumn::new("age", "INT", 2),
+        BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+        BulkColumn::new("name", "NVARCHAR(100)", 1).unwrap(),
+        BulkColumn::new("age", "INT", 2).unwrap(),
     ]);
 
     let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
@@ -317,15 +317,15 @@ async fn test_bulk_insert_multiple_types() {
         .expect("Failed to create table");
 
     let builder = BulkInsertBuilder::new("#BulkTypes").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0),
-        BulkColumn::new("tiny", "TINYINT", 1),
-        BulkColumn::new("small", "SMALLINT", 2),
-        BulkColumn::new("big", "BIGINT", 3),
-        BulkColumn::new("flag", "BIT", 4),
-        BulkColumn::new("price", "DECIMAL(10,2)", 5),
-        BulkColumn::new("ratio", "FLOAT", 6),
-        BulkColumn::new("label", "NVARCHAR(50)", 7),
-        BulkColumn::new("created", "DATE", 8),
+        BulkColumn::new("id", "INT", 0).unwrap(),
+        BulkColumn::new("tiny", "TINYINT", 1).unwrap(),
+        BulkColumn::new("small", "SMALLINT", 2).unwrap(),
+        BulkColumn::new("big", "BIGINT", 3).unwrap(),
+        BulkColumn::new("flag", "BIT", 4).unwrap(),
+        BulkColumn::new("price", "DECIMAL(10,2)", 5).unwrap(),
+        BulkColumn::new("ratio", "FLOAT", 6).unwrap(),
+        BulkColumn::new("label", "NVARCHAR(50)", 7).unwrap(),
+        BulkColumn::new("created", "DATE", 8).unwrap(),
     ]);
 
     let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
@@ -427,9 +427,9 @@ async fn test_bulk_insert_binary_and_guid() {
         .expect("Failed to create table");
 
     let builder = BulkInsertBuilder::new("#BulkBin").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0),
-        BulkColumn::new("uid", "UNIQUEIDENTIFIER", 1),
-        BulkColumn::new("data", "VARBINARY(200)", 2),
+        BulkColumn::new("id", "INT", 0).unwrap(),
+        BulkColumn::new("uid", "UNIQUEIDENTIFIER", 1).unwrap(),
+        BulkColumn::new("data", "VARBINARY(200)", 2).unwrap(),
     ]);
 
     let test_uuid = Uuid::parse_str("12345678-1234-5678-1234-567812345678").unwrap();
@@ -481,8 +481,8 @@ async fn test_bulk_insert_nvarchar_max() {
         .expect("Failed to create table");
 
     let builder = BulkInsertBuilder::new("#BulkMax").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0),
-        BulkColumn::new("content", "NVARCHAR(MAX)", 1),
+        BulkColumn::new("id", "INT", 0).unwrap(),
+        BulkColumn::new("content", "NVARCHAR(MAX)", 1).unwrap(),
     ]);
 
     // Large string covers multi-packet PLP framing (each packet is 4096 bytes
@@ -551,8 +551,8 @@ async fn test_bulk_insert_varbinary_max() {
         .expect("Failed to create table");
 
     let builder = BulkInsertBuilder::new("#BulkVbMax").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0),
-        BulkColumn::new("payload", "VARBINARY(MAX)", 1).with_nullable(true),
+        BulkColumn::new("id", "INT", 0).unwrap(),
+        BulkColumn::new("payload", "VARBINARY(MAX)", 1).unwrap().with_nullable(true),
     ]);
 
     let big_blob: Vec<u8> = (0u8..=255).cycle().take(10_000).collect();
@@ -630,8 +630,8 @@ async fn test_bulk_insert_with_table_lock() {
 
     let builder = BulkInsertBuilder::new("#BulkLock")
         .with_typed_columns(vec![
-            BulkColumn::new("id", "INT", 0),
-            BulkColumn::new("val", "NVARCHAR(50)", 1),
+            BulkColumn::new("id", "INT", 0).unwrap(),
+            BulkColumn::new("val", "NVARCHAR(50)", 1).unwrap(),
         ])
         .table_lock(true);
 
@@ -679,8 +679,8 @@ async fn test_bulk_insert_with_check_constraints() {
 
     // Insert valid data with CHECK_CONSTRAINTS enabled (default)
     let builder = BulkInsertBuilder::new("#BulkCheck").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0),
-        BulkColumn::new("age", "INT", 1),
+        BulkColumn::new("id", "INT", 0).unwrap(),
+        BulkColumn::new("age", "INT", 1).unwrap(),
     ]);
 
     let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
@@ -695,8 +695,8 @@ async fn test_bulk_insert_with_check_constraints() {
     // Now try to insert invalid data — should fail because CHECK_CONSTRAINTS is on
     let builder = BulkInsertBuilder::new("#BulkCheck")
         .with_typed_columns(vec![
-            BulkColumn::new("id", "INT", 0),
-            BulkColumn::new("age", "INT", 1),
+            BulkColumn::new("id", "INT", 0).unwrap(),
+            BulkColumn::new("age", "INT", 1).unwrap(),
         ])
         .with_options(BulkOptions {
             check_constraints: true,
@@ -748,8 +748,8 @@ async fn test_bulk_insert_schema_qualified() {
         .expect("Failed to create table");
 
     let builder = BulkInsertBuilder::new("dbo.BulkSchemaTest").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0),
-        BulkColumn::new("name", "NVARCHAR(50)", 1),
+        BulkColumn::new("id", "INT", 0).unwrap(),
+        BulkColumn::new("name", "NVARCHAR(50)", 1).unwrap(),
     ]);
 
     let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
@@ -792,8 +792,8 @@ async fn test_bulk_insert_in_transaction() {
     let mut client = client.begin_transaction().await.expect("Failed to begin txn");
 
     let builder = BulkInsertBuilder::new("#BulkTxn").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0),
-        BulkColumn::new("val", "NVARCHAR(50)", 1),
+        BulkColumn::new("id", "INT", 0).unwrap(),
+        BulkColumn::new("val", "NVARCHAR(50)", 1).unwrap(),
     ]);
 
     let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
@@ -842,8 +842,8 @@ async fn test_bulk_insert_transaction_rollback() {
     let mut client = client.begin_transaction().await.expect("Failed to begin txn");
 
     let builder = BulkInsertBuilder::new("#BulkRollback").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0),
-        BulkColumn::new("val", "NVARCHAR(50)", 1),
+        BulkColumn::new("id", "INT", 0).unwrap(),
+        BulkColumn::new("val", "NVARCHAR(50)", 1).unwrap(),
     ]);
 
     let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
@@ -938,8 +938,8 @@ async fn test_bulk_insert_fire_triggers() {
     // Bulk insert WITH fire_triggers
     let builder = BulkInsertBuilder::new("dbo.BulkTriggerSrc")
         .with_typed_columns(vec![
-            BulkColumn::new("id", "INT", 0),
-            BulkColumn::new("name", "NVARCHAR(50)", 1),
+            BulkColumn::new("id", "INT", 0).unwrap(),
+            BulkColumn::new("name", "NVARCHAR(50)", 1).unwrap(),
         ])
         .fire_triggers(true);
 
@@ -1055,7 +1055,7 @@ async fn test_bulk_insert_triggers_not_fired_by_default() {
 
     // Bulk insert WITHOUT fire_triggers (default: false)
     let builder = BulkInsertBuilder::new("dbo.BulkNoTrigSrc")
-        .with_typed_columns(vec![BulkColumn::new("id", "INT", 0)]);
+        .with_typed_columns(vec![BulkColumn::new("id", "INT", 0).unwrap()]);
 
     let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
 
@@ -1111,7 +1111,7 @@ async fn test_connection_usable_after_bulk_insert() {
 
     // First bulk insert
     let builder = BulkInsertBuilder::new("#BulkReuse")
-        .with_typed_columns(vec![BulkColumn::new("id", "INT", 0)]);
+        .with_typed_columns(vec![BulkColumn::new("id", "INT", 0).unwrap()]);
 
     let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
     writer
@@ -1183,10 +1183,10 @@ async fn test_bulk_insert_without_schema_discovery() {
         .expect("Failed to create table");
 
     let builder = BulkInsertBuilder::new("#BulkNoDiscovery").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0).with_nullable(false),
-        BulkColumn::new("name", "NVARCHAR(100)", 1).with_nullable(false),
-        BulkColumn::new("amount", "DECIMAL(18,2)", 2),
-        BulkColumn::new("flag", "BIT", 3).with_nullable(false),
+        BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+        BulkColumn::new("name", "NVARCHAR(100)", 1).unwrap().with_nullable(false),
+        BulkColumn::new("amount", "DECIMAL(18,2)", 2).unwrap(),
+        BulkColumn::new("flag", "BIT", 3).unwrap().with_nullable(false),
     ]);
 
     let mut writer = client
@@ -1271,10 +1271,10 @@ async fn test_bulk_insert_money_and_smallmoney() {
         .expect("Failed to create table");
 
     let builder = BulkInsertBuilder::new("#BulkMoney").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0).with_nullable(false),
-        BulkColumn::new("price", "MONEY", 1).with_nullable(false),
-        BulkColumn::new("tip", "SMALLMONEY", 2).with_nullable(false),
-        BulkColumn::new("adjustment", "MONEY", 3),
+        BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+        BulkColumn::new("price", "MONEY", 1).unwrap().with_nullable(false),
+        BulkColumn::new("tip", "SMALLMONEY", 2).unwrap().with_nullable(false),
+        BulkColumn::new("adjustment", "MONEY", 3).unwrap(),
     ]);
 
     let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
@@ -1382,9 +1382,9 @@ async fn test_bulk_insert_smalldatetime() {
         .expect("Failed to create table");
 
     let builder = BulkInsertBuilder::new("#BulkSmallDt").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0).with_nullable(false),
-        BulkColumn::new("ts", "SMALLDATETIME", 1).with_nullable(false),
-        BulkColumn::new("maybe", "SMALLDATETIME", 2),
+        BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+        BulkColumn::new("ts", "SMALLDATETIME", 1).unwrap().with_nullable(false),
+        BulkColumn::new("maybe", "SMALLDATETIME", 2).unwrap(),
     ]);
 
     let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
@@ -1457,10 +1457,10 @@ async fn test_bulk_insert_datetime_vs_datetime2_precision() {
         .expect("Failed to create table");
 
     let builder = BulkInsertBuilder::new("#BulkDtPrecision").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0).with_nullable(false),
-        BulkColumn::new("dt", "DATETIME", 1).with_nullable(false),
-        BulkColumn::new("dt2", "DATETIME2(7)", 2).with_nullable(false),
-        BulkColumn::new("dt2_3", "DATETIME2(3)", 3).with_nullable(false),
+        BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+        BulkColumn::new("dt", "DATETIME", 1).unwrap().with_nullable(false),
+        BulkColumn::new("dt2", "DATETIME2(7)", 2).unwrap().with_nullable(false),
+        BulkColumn::new("dt2_3", "DATETIME2(3)", 3).unwrap().with_nullable(false),
     ]);
 
     let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
@@ -1554,14 +1554,14 @@ async fn test_bulk_insert_mixed_column_ordering() {
         .expect("Failed to create table");
 
     let builder = BulkInsertBuilder::new("#BulkMixedOrder").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0).with_nullable(false),
-        BulkColumn::new("d", "DATE", 1).with_nullable(false),
-        BulkColumn::new("label", "NVARCHAR(50)", 2).with_nullable(false),
-        BulkColumn::new("t", "TIME(3)", 3).with_nullable(false),
-        BulkColumn::new("flag", "BIT", 4).with_nullable(false),
-        BulkColumn::new("dt2", "DATETIME2(5)", 5).with_nullable(false),
-        BulkColumn::new("qty", "INT", 6).with_nullable(false),
-        BulkColumn::new("dto", "DATETIMEOFFSET(4)", 7).with_nullable(false),
+        BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+        BulkColumn::new("d", "DATE", 1).unwrap().with_nullable(false),
+        BulkColumn::new("label", "NVARCHAR(50)", 2).unwrap().with_nullable(false),
+        BulkColumn::new("t", "TIME(3)", 3).unwrap().with_nullable(false),
+        BulkColumn::new("flag", "BIT", 4).unwrap().with_nullable(false),
+        BulkColumn::new("dt2", "DATETIME2(5)", 5).unwrap().with_nullable(false),
+        BulkColumn::new("qty", "INT", 6).unwrap().with_nullable(false),
+        BulkColumn::new("dto", "DATETIMEOFFSET(4)", 7).unwrap().with_nullable(false),
     ]);
 
     let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
@@ -1661,27 +1661,27 @@ async fn test_bulk_insert_all_types_null() {
         .expect("Failed to create table");
 
     let builder = BulkInsertBuilder::new("#BulkAllNulls").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0).with_nullable(false),
-        BulkColumn::new("b", "BIT", 1),
-        BulkColumn::new("ti", "TINYINT", 2),
-        BulkColumn::new("si", "SMALLINT", 3),
-        BulkColumn::new("i", "INT", 4),
-        BulkColumn::new("bi", "BIGINT", 5),
-        BulkColumn::new("rl", "REAL", 6),
-        BulkColumn::new("fl", "FLOAT", 7),
-        BulkColumn::new("dec_c", "DECIMAL(10,2)", 8),
-        BulkColumn::new("mny", "MONEY", 9),
-        BulkColumn::new("smny", "SMALLMONEY", 10),
-        BulkColumn::new("vc", "VARCHAR(50)", 11),
-        BulkColumn::new("nvc", "NVARCHAR(50)", 12),
-        BulkColumn::new("vb", "VARBINARY(50)", 13),
-        BulkColumn::new("d", "DATE", 14),
-        BulkColumn::new("t", "TIME(3)", 15),
-        BulkColumn::new("dt", "DATETIME", 16),
-        BulkColumn::new("sdt", "SMALLDATETIME", 17),
-        BulkColumn::new("dt2", "DATETIME2(7)", 18),
-        BulkColumn::new("dto", "DATETIMEOFFSET(7)", 19),
-        BulkColumn::new("g", "UNIQUEIDENTIFIER", 20),
+        BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+        BulkColumn::new("b", "BIT", 1).unwrap(),
+        BulkColumn::new("ti", "TINYINT", 2).unwrap(),
+        BulkColumn::new("si", "SMALLINT", 3).unwrap(),
+        BulkColumn::new("i", "INT", 4).unwrap(),
+        BulkColumn::new("bi", "BIGINT", 5).unwrap(),
+        BulkColumn::new("rl", "REAL", 6).unwrap(),
+        BulkColumn::new("fl", "FLOAT", 7).unwrap(),
+        BulkColumn::new("dec_c", "DECIMAL(10,2)", 8).unwrap(),
+        BulkColumn::new("mny", "MONEY", 9).unwrap(),
+        BulkColumn::new("smny", "SMALLMONEY", 10).unwrap(),
+        BulkColumn::new("vc", "VARCHAR(50)", 11).unwrap(),
+        BulkColumn::new("nvc", "NVARCHAR(50)", 12).unwrap(),
+        BulkColumn::new("vb", "VARBINARY(50)", 13).unwrap(),
+        BulkColumn::new("d", "DATE", 14).unwrap(),
+        BulkColumn::new("t", "TIME(3)", 15).unwrap(),
+        BulkColumn::new("dt", "DATETIME", 16).unwrap(),
+        BulkColumn::new("sdt", "SMALLDATETIME", 17).unwrap(),
+        BulkColumn::new("dt2", "DATETIME2(7)", 18).unwrap(),
+        BulkColumn::new("dto", "DATETIMEOFFSET(7)", 19).unwrap(),
+        BulkColumn::new("g", "UNIQUEIDENTIFIER", 20).unwrap(),
     ]);
 
     let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
@@ -1793,9 +1793,9 @@ async fn test_bulk_insert_datetime_legacy_edge_cases() {
         .expect("Failed to create table");
 
     let builder = BulkInsertBuilder::new("#BulkDtLegacy").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0).with_nullable(false),
-        BulkColumn::new("dt", "DATETIME", 1).with_nullable(false),
-        BulkColumn::new("dtn", "DATETIME", 2),
+        BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+        BulkColumn::new("dt", "DATETIME", 1).unwrap().with_nullable(false),
+        BulkColumn::new("dtn", "DATETIME", 2).unwrap(),
     ]);
 
     let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
@@ -1877,10 +1877,10 @@ async fn test_bulk_insert_varchar_ascii() {
         .expect("Failed to create table");
 
     let builder = BulkInsertBuilder::new("#BulkVc").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0).with_nullable(false),
-        BulkColumn::new("vc", "VARCHAR(100)", 1).with_nullable(false),
-        BulkColumn::new("ch", "CHAR(5)", 2).with_nullable(false),
-        BulkColumn::new("vcm", "VARCHAR(MAX)", 3).with_nullable(false),
+        BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+        BulkColumn::new("vc", "VARCHAR(100)", 1).unwrap().with_nullable(false),
+        BulkColumn::new("ch", "CHAR(5)", 2).unwrap().with_nullable(false),
+        BulkColumn::new("vcm", "VARCHAR(MAX)", 3).unwrap().with_nullable(false),
     ]);
 
     // A multi-packet VARCHAR(MAX) exercise: 5000 ASCII bytes spans two 4096-byte
@@ -1967,8 +1967,8 @@ async fn test_bulk_insert_varchar_latin1_extended() {
         .expect("Failed to create table");
 
     let builder = BulkInsertBuilder::new("#BulkVcExt").with_typed_columns(vec![
-        BulkColumn::new("id", "INT", 0).with_nullable(false),
-        BulkColumn::new("vc", "VARCHAR(50)", 1).with_nullable(false),
+        BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+        BulkColumn::new("vc", "VARCHAR(50)", 1).unwrap().with_nullable(false),
     ]);
 
     // "café" — 4 chars, 4 bytes in Windows-1252, 5 bytes in UTF-8, 8 bytes in UTF-16.
@@ -2009,6 +2009,80 @@ async fn test_bulk_insert_varchar_latin1_extended() {
     assert_eq!(data[1].get::<i32>(2).unwrap(), 5, "'grüße' is 5 bytes in Windows-1252");
     assert_eq!(data[2].get::<String>(1).unwrap(), mixed);
     assert_eq!(data[2].get::<i32>(2).unwrap(), 12, "'naïve résumé' is 12 bytes in Windows-1252");
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_rejects_text_column_from_server_metadata() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client
+        .execute(
+            "CREATE TABLE #BulkRejText (id INT NOT NULL, body TEXT NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkRejText").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+        BulkColumn::new("body", "VARCHAR(MAX)", 1).unwrap(),
+    ]);
+
+    let msg = match client.bulk_insert(&builder).await {
+        Ok(_writer) => panic!("bulk_insert should reject TEXT column reported by the server"),
+        Err(e) => e.to_string(),
+    };
+    assert!(
+        msg.contains("TEXT"),
+        "error should mention TEXT, got: {msg}"
+    );
+    assert!(
+        msg.contains("VARCHAR(MAX)"),
+        "error should redirect to VARCHAR(MAX), got: {msg}"
+    );
+    assert!(
+        msg.contains("deprecated"),
+        "error should mention deprecation, got: {msg}"
+    );
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_rejects_ntext_column_from_server_metadata() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client
+        .execute(
+            "CREATE TABLE #BulkRejNtext (id INT NOT NULL, body NTEXT NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkRejNtext").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+        BulkColumn::new("body", "NVARCHAR(MAX)", 1).unwrap(),
+    ]);
+
+    let msg = match client.bulk_insert(&builder).await {
+        Ok(_writer) => panic!("bulk_insert should reject NTEXT column reported by the server"),
+        Err(e) => e.to_string(),
+    };
+    assert!(
+        msg.contains("NTEXT"),
+        "error should mention NTEXT, got: {msg}"
+    );
+    assert!(
+        msg.contains("NVARCHAR(MAX)"),
+        "error should redirect to NVARCHAR(MAX), got: {msg}"
+    );
 
     client.close().await.expect("Failed to close");
 }

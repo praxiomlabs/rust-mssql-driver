@@ -160,6 +160,23 @@ Returns raw binary without CLR interpretation. Cast to standard types in queries
 
 Returned as base data type. Query `COLUMN_SET` explicitly if needed.
 
+### TEXT / NTEXT (deprecated since SQL Server 2005)
+
+Not supported in bulk insert. Microsoft deprecated `TEXT` / `NTEXT` (and `IMAGE`)
+in SQL Server 2005 and recommends `VARCHAR(MAX)` / `NVARCHAR(MAX)` (and
+`VARBINARY(MAX)`) for all new development. Attempting to construct a
+`BulkColumn` with `"TEXT"` or `"NTEXT"`, or running `Client::bulk_insert` against
+a table whose server metadata reports `TEXT` / `NTEXT` columns, returns
+`TypeError::UnsupportedType` with a message naming the correct replacement.
+Reading `TEXT` / `NTEXT` columns in ordinary queries is still supported.
+
+To migrate:
+
+```sql
+ALTER TABLE MyTable ALTER COLUMN Body VARCHAR(MAX);   -- was TEXT
+ALTER TABLE MyTable ALTER COLUMN Body NVARCHAR(MAX);  -- was NTEXT
+```
+
 ---
 
 ## Explicit Non-Goals

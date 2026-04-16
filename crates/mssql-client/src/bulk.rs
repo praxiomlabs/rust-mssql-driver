@@ -18,9 +18,9 @@
 //!
 //! let builder = BulkInsertBuilder::new("dbo.Users")
 //!     .with_typed_columns(vec![
-//!         BulkColumn::new("id", "INT", 0),
-//!         BulkColumn::new("name", "NVARCHAR(100)", 1),
-//!         BulkColumn::new("email", "NVARCHAR(200)", 2),
+//!         BulkColumn::new("id", "INT", 0)?,
+//!         BulkColumn::new("name", "NVARCHAR(100)", 1)?,
+//!         BulkColumn::new("email", "NVARCHAR(200)", 2)?,
 //!     ])
 //!     .with_options(BulkOptions {
 //!         batch_size: 1000,
@@ -151,11 +151,19 @@ pub struct BulkColumn {
 
 impl BulkColumn {
     /// Create a new bulk column definition.
-    pub fn new<S: Into<String>>(name: S, sql_type: S, ordinal: usize) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TypeError::UnsupportedType`] when `sql_type` names a deprecated
+    /// large object type (`TEXT`, `NTEXT`). Use `VARCHAR(MAX)` / `NVARCHAR(MAX)`
+    /// instead — Microsoft deprecated `TEXT` / `NTEXT` in SQL Server 2005 and
+    /// recommends the `MAX` types for all new development.
+    pub fn new<S: Into<String>>(name: S, sql_type: S, ordinal: usize) -> Result<Self, TypeError> {
         let sql_type_str: String = sql_type.into();
+        reject_unsupported_bulk_type(&sql_type_str)?;
         let (type_id, max_length, precision, scale) = parse_sql_type(&sql_type_str);
 
-        Self {
+        Ok(Self {
             name: name.into(),
             sql_type: sql_type_str,
             nullable: true,
@@ -165,7 +173,7 @@ impl BulkColumn {
             precision,
             scale,
             collation: None,
-        }
+        })
     }
 
     /// Set whether this column allows NULL values.
@@ -286,10 +294,31 @@ fn parse_sql_type(sql_type: &str) -> (u8, Option<u32>, Option<u8>, Option<u8>) {
         "MONEY" => (0x6E, Some(8), None, None),         // MONEYN(8)
         "SMALLMONEY" => (0x6E, Some(4), None, None),    // MONEYN(4)
         "XML" => (0xF1, Some(0xFFFF), None, None),
-        "TEXT" => (0x23, Some(0x7FFF_FFFF), None, None),
-        "NTEXT" => (0x63, Some(0x7FFF_FFFF), None, None),
         "IMAGE" => (0x22, Some(0x7FFF_FFFF), None, None),
         _ => (0xE7, Some(8000), None, None), // Default to NVARCHAR(4000)
+    }
+}
+
+/// Reject deprecated large object types that this driver does not support in
+/// bulk insert. `TEXT` / `NTEXT` have been deprecated since SQL Server 2005 and
+/// use a legacy TEXTPTR wire format. Users should use `VARCHAR(MAX)` /
+/// `NVARCHAR(MAX)` which the driver supports end-to-end.
+fn reject_unsupported_bulk_type(sql_type: &str) -> Result<(), TypeError> {
+    let base = sql_type
+        .split('(')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_uppercase();
+    match base.as_str() {
+        "TEXT" | "NTEXT" => Err(TypeError::UnsupportedType {
+            sql_type: base,
+            reason: "TEXT/NTEXT are not supported. Use VARCHAR(MAX) / \
+                     NVARCHAR(MAX) instead (Microsoft deprecated TEXT/NTEXT in \
+                     SQL Server 2005)."
+                .to_string(),
+        }),
+        _ => Ok(()),
     }
 }
 
@@ -331,7 +360,10 @@ impl BulkInsertBuilder {
         self.columns = column_names
             .iter()
             .enumerate()
-            .map(|(i, name)| BulkColumn::new(*name, "NVARCHAR(MAX)", i))
+            .map(|(i, name)| {
+                BulkColumn::new(*name, "NVARCHAR(MAX)", i)
+                    .expect("NVARCHAR(MAX) is always a supported type")
+            })
             .collect();
         self
     }
@@ -1271,8 +1303,8 @@ impl BulkInsert {
 /// ```rust,ignore
 /// let builder = BulkInsertBuilder::new("dbo.Users")
 ///     .with_typed_columns(vec![
-///         BulkColumn::new("id", "INT", 0),
-///         BulkColumn::new("name", "NVARCHAR(100)", 1),
+///         BulkColumn::new("id", "INT", 0)?,
+///         BulkColumn::new("name", "NVARCHAR(100)", 1)?,
 ///     ]);
 ///
 /// let mut writer = client.bulk_insert(&builder).await?;
@@ -1414,11 +1446,61 @@ mod tests {
 
     #[test]
     fn test_bulk_column_creation() {
-        let col = BulkColumn::new("id", "INT", 0);
+        let col = BulkColumn::new("id", "INT", 0).unwrap();
         assert_eq!(col.name, "id");
         assert_eq!(col.type_id, 0x26); // INTN
         assert_eq!(col.max_length, Some(4));
         assert!(col.nullable);
+    }
+
+    #[test]
+    fn test_bulk_column_rejects_text() {
+        let err = BulkColumn::new("body", "TEXT", 0).unwrap_err();
+        match err {
+            TypeError::UnsupportedType { sql_type, reason } => {
+                assert_eq!(sql_type, "TEXT");
+                assert!(
+                    reason.contains("VARCHAR(MAX)"),
+                    "error should redirect to VARCHAR(MAX), got: {reason}"
+                );
+                assert!(
+                    reason.contains("deprecated"),
+                    "error should mention deprecation, got: {reason}"
+                );
+            }
+            other => panic!("expected UnsupportedType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_bulk_column_rejects_ntext() {
+        let err = BulkColumn::new("body", "NTEXT", 0).unwrap_err();
+        match err {
+            TypeError::UnsupportedType { sql_type, reason } => {
+                assert_eq!(sql_type, "NTEXT");
+                assert!(
+                    reason.contains("NVARCHAR(MAX)"),
+                    "error should redirect to NVARCHAR(MAX), got: {reason}"
+                );
+                assert!(
+                    reason.contains("deprecated"),
+                    "error should mention deprecation, got: {reason}"
+                );
+            }
+            other => panic!("expected UnsupportedType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_bulk_column_rejects_text_case_insensitive() {
+        assert!(matches!(
+            BulkColumn::new("body", "text", 0),
+            Err(TypeError::UnsupportedType { .. })
+        ));
+        assert!(matches!(
+            BulkColumn::new("body", "Ntext", 0),
+            Err(TypeError::UnsupportedType { .. })
+        ));
     }
 
     #[test]
@@ -1451,8 +1533,8 @@ mod tests {
     fn test_insert_bulk_statement() {
         let builder = BulkInsertBuilder::new("dbo.Users")
             .with_typed_columns(vec![
-                BulkColumn::new("id", "INT", 0),
-                BulkColumn::new("name", "NVARCHAR(100)", 1),
+                BulkColumn::new("id", "INT", 0).unwrap(),
+                BulkColumn::new("name", "NVARCHAR(100)", 1).unwrap(),
             ])
             .table_lock(true);
 
@@ -1464,7 +1546,7 @@ mod tests {
     #[test]
     fn test_bulk_insert_rejects_injection() {
         let builder = BulkInsertBuilder::new("table;DROP TABLE users")
-            .with_typed_columns(vec![BulkColumn::new("id", "INT", 0)]);
+            .with_typed_columns(vec![BulkColumn::new("id", "INT", 0).unwrap()]);
 
         assert!(builder.build_insert_bulk_statement().is_err());
     }
@@ -1475,7 +1557,8 @@ mod tests {
             "col;DROP TABLE x",
             "INT",
             0,
-        )]);
+        )
+        .unwrap()]);
 
         assert!(builder.build_insert_bulk_statement().is_err());
     }
@@ -1483,7 +1566,7 @@ mod tests {
     #[test]
     fn test_bulk_insert_accepts_qualified_names() {
         let builder = BulkInsertBuilder::new("catalog.dbo.Users")
-            .with_typed_columns(vec![BulkColumn::new("id", "INT", 0)]);
+            .with_typed_columns(vec![BulkColumn::new("id", "INT", 0).unwrap()]);
 
         assert!(builder.build_insert_bulk_statement().is_ok());
     }
@@ -1491,8 +1574,8 @@ mod tests {
     #[test]
     fn test_bulk_insert_creation() {
         let columns = vec![
-            BulkColumn::new("id", "INT", 0),
-            BulkColumn::new("name", "NVARCHAR(100)", 1),
+            BulkColumn::new("id", "INT", 0).unwrap(),
+            BulkColumn::new("name", "NVARCHAR(100)", 1).unwrap(),
         ];
 
         let bulk = BulkInsert::new(columns, 1000);
@@ -1609,29 +1692,29 @@ mod tests {
         use tds_protocol::token::ColMetaData;
 
         let columns = vec![
-            BulkColumn::new("id", "INT", 0),
-            BulkColumn::new("tiny", "TINYINT", 1),
-            BulkColumn::new("small", "SMALLINT", 2),
-            BulkColumn::new("big", "BIGINT", 3),
-            BulkColumn::new("flag", "BIT", 4),
-            BulkColumn::new("r", "REAL", 5),
-            BulkColumn::new("f", "FLOAT", 6),
-            BulkColumn::new("name", "NVARCHAR(100)", 7),
-            BulkColumn::new("code", "VARCHAR(50)", 8),
-            BulkColumn::new("data", "VARBINARY(200)", 9),
-            BulkColumn::new("d", "DATE", 10),
-            BulkColumn::new("t", "TIME(3)", 11),
-            BulkColumn::new("dt", "DATETIME", 12),
-            BulkColumn::new("dt2", "DATETIME2(7)", 13),
-            BulkColumn::new("dto", "DATETIMEOFFSET(7)", 14),
-            BulkColumn::new("sdt", "SMALLDATETIME", 15),
-            BulkColumn::new("uid", "UNIQUEIDENTIFIER", 16),
-            BulkColumn::new("amt", "DECIMAL(18,2)", 17),
-            BulkColumn::new("price", "MONEY", 18),
-            BulkColumn::new("smoney", "SMALLMONEY", 19),
-            BulkColumn::new("nmax", "NVARCHAR(MAX)", 20),
-            BulkColumn::new("vmax", "VARCHAR(MAX)", 21),
-            BulkColumn::new("bmax", "VARBINARY(MAX)", 22),
+            BulkColumn::new("id", "INT", 0).unwrap(),
+            BulkColumn::new("tiny", "TINYINT", 1).unwrap(),
+            BulkColumn::new("small", "SMALLINT", 2).unwrap(),
+            BulkColumn::new("big", "BIGINT", 3).unwrap(),
+            BulkColumn::new("flag", "BIT", 4).unwrap(),
+            BulkColumn::new("r", "REAL", 5).unwrap(),
+            BulkColumn::new("f", "FLOAT", 6).unwrap(),
+            BulkColumn::new("name", "NVARCHAR(100)", 7).unwrap(),
+            BulkColumn::new("code", "VARCHAR(50)", 8).unwrap(),
+            BulkColumn::new("data", "VARBINARY(200)", 9).unwrap(),
+            BulkColumn::new("d", "DATE", 10).unwrap(),
+            BulkColumn::new("t", "TIME(3)", 11).unwrap(),
+            BulkColumn::new("dt", "DATETIME", 12).unwrap(),
+            BulkColumn::new("dt2", "DATETIME2(7)", 13).unwrap(),
+            BulkColumn::new("dto", "DATETIMEOFFSET(7)", 14).unwrap(),
+            BulkColumn::new("sdt", "SMALLDATETIME", 15).unwrap(),
+            BulkColumn::new("uid", "UNIQUEIDENTIFIER", 16).unwrap(),
+            BulkColumn::new("amt", "DECIMAL(18,2)", 17).unwrap(),
+            BulkColumn::new("price", "MONEY", 18).unwrap(),
+            BulkColumn::new("smoney", "SMALLMONEY", 19).unwrap(),
+            BulkColumn::new("nmax", "NVARCHAR(MAX)", 20).unwrap(),
+            BulkColumn::new("vmax", "VARCHAR(MAX)", 21).unwrap(),
+            BulkColumn::new("bmax", "VARBINARY(MAX)", 22).unwrap(),
         ];
 
         let bulk = BulkInsert::new(columns.clone(), 0);
@@ -1770,17 +1853,17 @@ mod tests {
         use tds_protocol::types::TypeId;
 
         let columns = vec![
-            BulkColumn::new("id", "INT", 0).with_nullable(false),
-            BulkColumn::new("tiny", "TINYINT", 1).with_nullable(false),
-            BulkColumn::new("small", "SMALLINT", 2).with_nullable(false),
-            BulkColumn::new("big", "BIGINT", 3).with_nullable(false),
-            BulkColumn::new("flag", "BIT", 4).with_nullable(false),
-            BulkColumn::new("r", "REAL", 5).with_nullable(false),
-            BulkColumn::new("f", "FLOAT", 6).with_nullable(false),
-            BulkColumn::new("dt", "DATETIME", 7).with_nullable(false),
-            BulkColumn::new("sdt", "SMALLDATETIME", 8).with_nullable(false),
-            BulkColumn::new("mny", "MONEY", 9).with_nullable(false),
-            BulkColumn::new("smny", "SMALLMONEY", 10).with_nullable(false),
+            BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+            BulkColumn::new("tiny", "TINYINT", 1).unwrap().with_nullable(false),
+            BulkColumn::new("small", "SMALLINT", 2).unwrap().with_nullable(false),
+            BulkColumn::new("big", "BIGINT", 3).unwrap().with_nullable(false),
+            BulkColumn::new("flag", "BIT", 4).unwrap().with_nullable(false),
+            BulkColumn::new("r", "REAL", 5).unwrap().with_nullable(false),
+            BulkColumn::new("f", "FLOAT", 6).unwrap().with_nullable(false),
+            BulkColumn::new("dt", "DATETIME", 7).unwrap().with_nullable(false),
+            BulkColumn::new("sdt", "SMALLDATETIME", 8).unwrap().with_nullable(false),
+            BulkColumn::new("mny", "MONEY", 9).unwrap().with_nullable(false),
+            BulkColumn::new("smny", "SMALLMONEY", 10).unwrap().with_nullable(false),
         ];
 
         let bulk = BulkInsert::new(columns.clone(), 0);
