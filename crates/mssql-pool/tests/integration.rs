@@ -67,6 +67,40 @@ async fn test_pool_create_and_close() {
 
 #[tokio::test]
 #[ignore = "Requires SQL Server"]
+async fn test_pool_with_otel_name() {
+    // Exercises the OTel metric hooks end-to-end: create, warmup, checkout,
+    // checkin, close. When built without the `otel` feature this calls the
+    // no-op DatabaseMetrics; with the feature it emits real gauges/counters/
+    // histograms. This test only verifies the hooks don't panic on any path.
+    let client_config = get_test_config().expect("SQL Server config required");
+
+    let pool = Pool::builder()
+        .client_config(client_config)
+        .min_connections(1)
+        .max_connections(3)
+        .pool_name("integration-test-pool")
+        .build()
+        .await
+        .expect("Failed to create pool");
+
+    // Checkout/checkin cycle — exercises record_connection_wait + record_pool_status.
+    let mut conn = pool.get().await.expect("Failed to get connection");
+    let rows = conn
+        .query("SELECT 1", &[])
+        .await
+        .expect("Query failed");
+    for _ in rows {}
+    drop(conn);
+
+    // Second checkout exercises idle reuse path.
+    let conn2 = pool.get().await.expect("Failed to get connection");
+    drop(conn2);
+
+    pool.close().await;
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
 async fn test_pool_get_connection() {
     let client_config = get_test_config().expect("SQL Server config required");
 
