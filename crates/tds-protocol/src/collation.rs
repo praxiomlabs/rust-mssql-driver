@@ -39,6 +39,9 @@
 #[cfg(feature = "encoding")]
 use encoding_rs::Encoding;
 
+// Re-export Vec from the internal prelude for no_std + alloc builds.
+use crate::prelude::*;
+
 /// Flag bit indicating UTF-8 collation (SQL Server 2019+).
 /// This is bit 27 (0x0800_0000) in the collation info field.
 pub const COLLATION_FLAG_UTF8: u32 = 0x0800_0000;
