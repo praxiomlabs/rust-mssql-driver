@@ -256,14 +256,30 @@ fn decimal_to_money_cents(value: rust_decimal::Decimal) -> Result<i128, TypeErro
     }
 }
 
+/// Convert a decimal to the scaled i64 used on the MONEY wire.
+///
+/// This is the shared pre-encoding step for both RPC parameter encoding and
+/// TVP column encoding — each path knows how to frame the payload, but they
+/// agree on how to derive the scaled integer from the decimal.
+#[cfg(feature = "decimal")]
+pub fn decimal_to_money_cents_i64(value: rust_decimal::Decimal) -> Result<i64, TypeError> {
+    let cents_i128 = decimal_to_money_cents(value)?;
+    i64::try_from(cents_i128).map_err(|_| TypeError::OutOfRange { target_type: "MONEY" })
+}
+
+/// Convert a decimal to the scaled i32 used on the SMALLMONEY wire.
+#[cfg(feature = "decimal")]
+pub fn decimal_to_smallmoney_cents_i32(value: rust_decimal::Decimal) -> Result<i32, TypeError> {
+    let cents_i128 = decimal_to_money_cents(value)?;
+    i32::try_from(cents_i128).map_err(|_| TypeError::OutOfRange { target_type: "SMALLMONEY" })
+}
+
 /// Encode a decimal as MONEY (8 bytes): the signed 64-bit scaled integer is
 /// written as the high 32 bits LE followed by the low 32 bits LE, per
 /// MS-TDS §2.2.5.5.1.2.
 #[cfg(feature = "decimal")]
 pub fn encode_money(value: rust_decimal::Decimal, buf: &mut BytesMut) -> Result<(), TypeError> {
-    let cents_i128 = decimal_to_money_cents(value)?;
-    let cents = i64::try_from(cents_i128)
-        .map_err(|_| TypeError::OutOfRange { target_type: "MONEY" })?;
+    let cents = decimal_to_money_cents_i64(value)?;
     let high = (cents >> 32) as i32;
     let low = (cents & 0xFFFF_FFFF) as u32;
     buf.put_i32_le(high);
@@ -278,17 +294,18 @@ pub fn encode_smallmoney(
     value: rust_decimal::Decimal,
     buf: &mut BytesMut,
 ) -> Result<(), TypeError> {
-    let cents_i128 = decimal_to_money_cents(value)?;
-    let cents = i32::try_from(cents_i128)
-        .map_err(|_| TypeError::OutOfRange { target_type: "SMALLMONEY" })?;
+    let cents = decimal_to_smallmoney_cents_i32(value)?;
     buf.put_i32_le(cents);
     Ok(())
 }
 
-/// Encode a DATETIME value (8 bytes): days since 1900 (`i32` LE) + time units
-/// since midnight (`u32` LE) where each unit is 1/300 of a second.
+/// Convert a NaiveDateTime to the DATETIME wire representation.
+///
+/// Returns `(days_since_1900_i32, ticks_u32)` where each tick is 1/300 second.
+/// This is the shared pre-encoding step for both RPC parameter encoding and
+/// TVP column encoding.
 #[cfg(feature = "chrono")]
-pub fn encode_datetime_legacy(dt: chrono::NaiveDateTime, buf: &mut BytesMut) {
+pub fn datetime_to_legacy_days_ticks(dt: chrono::NaiveDateTime) -> (i32, u32) {
     use chrono::Timelike;
     let epoch = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("epoch 1900-01-01 is valid");
     let days = (dt.date() - epoch).num_days() as i32;
@@ -297,9 +314,56 @@ pub fn encode_datetime_legacy(dt: chrono::NaiveDateTime, buf: &mut BytesMut) {
         + u64::from(dt.time().nanosecond()) / 1_000_000;
     // Convert ms → 1/300s ticks: ticks = round(ms * 300 / 1000) = round(ms * 3 / 10)
     let ticks = ((since_midnight * 3 + 5) / 10) as u32;
+    (days, ticks)
+}
 
+/// Encode a DATETIME value (8 bytes): days since 1900 (`i32` LE) + time units
+/// since midnight (`u32` LE) where each unit is 1/300 of a second.
+#[cfg(feature = "chrono")]
+pub fn encode_datetime_legacy(dt: chrono::NaiveDateTime, buf: &mut BytesMut) {
+    let (days, ticks) = datetime_to_legacy_days_ticks(dt);
     buf.put_i32_le(days);
     buf.put_u32_le(ticks);
+}
+
+/// Convert a NaiveDateTime to the SMALLDATETIME wire representation.
+///
+/// Returns `(days_since_1900_u16, minutes_since_midnight_u16)`. Seconds are
+/// rounded to the nearest minute (30s rounds up per SQL Server semantics); when
+/// that rounding lands on or past 24:00 the carry propagates into the next day
+/// — e.g. 23:59:45 → next day 00:00 — so the result stays within SQL Server's
+/// valid minute range of 0..1439. Returns `Err` if the resulting date is
+/// outside the SMALLDATETIME range (1900-01-01 through 2079-06-06).
+#[cfg(feature = "chrono")]
+pub fn datetime_to_smalldatetime_days_minutes(
+    dt: chrono::NaiveDateTime,
+) -> Result<(u16, u16), TypeError> {
+    use chrono::Timelike;
+    let epoch = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("epoch 1900-01-01 is valid");
+
+    let total_seconds = u32::from(dt.time().hour()) * 3600
+        + u32::from(dt.time().minute()) * 60
+        + u32::from(dt.time().second());
+    let minutes_raw = (total_seconds + 30) / 60;
+    // Carry over into the next day when seconds round up past 24:00 so that
+    // the returned minute count stays within SQL Server's valid 0..1439 range.
+    // SQL Server itself does the same thing when casting 23:59:45 to
+    // SMALLDATETIME — sending minutes=1440 directly on the wire is rejected
+    // as "invalid instance of data type smalldatetime".
+    let (day_carry, minutes) = if minutes_raw >= 1440 {
+        (1i64, 0u16)
+    } else {
+        (0i64, minutes_raw as u16)
+    };
+
+    let days_i64 = (dt.date() - epoch).num_days() + day_carry;
+    let days: u16 = u16::try_from(days_i64).map_err(|_| {
+        TypeError::InvalidDateTime(format!(
+            "SMALLDATETIME year must be 1900-2079, got date with {days_i64} days since 1900-01-01"
+        ))
+    })?;
+
+    Ok((days, minutes))
 }
 
 /// Encode a SMALLDATETIME value (4 bytes): days since 1900 (`u16` LE) +
@@ -313,20 +377,7 @@ pub fn encode_smalldatetime(
     dt: chrono::NaiveDateTime,
     buf: &mut BytesMut,
 ) -> Result<(), TypeError> {
-    use chrono::Timelike;
-    let epoch = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("epoch 1900-01-01 is valid");
-    let days_i64 = (dt.date() - epoch).num_days();
-    let days: u16 = u16::try_from(days_i64).map_err(|_| {
-        TypeError::InvalidDateTime(format!(
-            "SMALLDATETIME year must be 1900-2079, got date with {days_i64} days since 1900-01-01"
-        ))
-    })?;
-
-    let total_seconds = u32::from(dt.time().hour()) * 3600
-        + u32::from(dt.time().minute()) * 60
-        + u32::from(dt.time().second());
-    let minutes = ((total_seconds + 30) / 60) as u16;
-
+    let (days, minutes) = datetime_to_smalldatetime_days_minutes(dt)?;
     buf.put_u16_le(days);
     buf.put_u16_le(minutes);
     Ok(())
