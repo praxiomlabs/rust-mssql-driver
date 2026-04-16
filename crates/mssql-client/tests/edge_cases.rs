@@ -439,10 +439,10 @@ fn test_numeric_string_conversion() {
 // =============================================================================
 
 fn get_test_config() -> Option<Config> {
-    let host = std::env::var("MSSQL_TEST_HOST").ok()?;
-    let port = std::env::var("MSSQL_TEST_PORT").unwrap_or_else(|_| "1433".into());
-    let user = std::env::var("MSSQL_TEST_USER").unwrap_or_else(|_| "sa".into());
-    let password = std::env::var("MSSQL_TEST_PASSWORD").ok()?;
+    let host = std::env::var("MSSQL_HOST").ok()?;
+    let port = std::env::var("MSSQL_PORT").unwrap_or_else(|_| "1433".into());
+    let user = std::env::var("MSSQL_USER").unwrap_or_else(|_| "sa".into());
+    let password = std::env::var("MSSQL_PASSWORD").ok()?;
 
     let conn_str = format!(
         "Server={host},{port};Database=master;User Id={user};Password={password};TrustServerCertificate=true"
