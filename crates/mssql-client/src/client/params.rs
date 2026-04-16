@@ -87,7 +87,12 @@ impl<S: ConnectionState> Client<S> {
                 RpcParam::new(name, RpcTypeInfo::uniqueidentifier(), buf.freeze())
             }
             #[cfg(feature = "decimal")]
-            SqlValue::Decimal(d) => RpcParam::nvarchar(name, &d.to_string()),
+            SqlValue::Decimal(d) => {
+                let mut buf = BytesMut::with_capacity(17);
+                mssql_types::encode::encode_decimal(*d, &mut buf);
+                let scale = d.scale() as u8;
+                RpcParam::new(name, RpcTypeInfo::decimal(38, scale), buf.freeze())
+            }
             #[cfg(feature = "chrono")]
             SqlValue::Date(d) => {
                 let mut buf = BytesMut::with_capacity(3);
