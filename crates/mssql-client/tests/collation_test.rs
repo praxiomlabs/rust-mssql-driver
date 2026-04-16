@@ -212,3 +212,172 @@ async fn test_nvarchar_unicode() -> Result<(), Error> {
     client.close().await?;
     Ok(())
 }
+
+/// Verify VARCHAR RPC param round-trip when the server's default collation
+/// is NOT the hardcoded Latin1_General_CI_AS fallback.
+///
+/// Regression pin for item 3.9: when `SendStringParametersAsUnicode=false` is
+/// active, the driver must encode VARCHAR parameters via the collation captured
+/// from the SqlCollation ENVCHANGE during login, not the hardcoded
+/// Latin1_General_CI_AS / Windows-1252 default. If the fix regresses, Chinese
+/// input chars get Windows-1252-encoded with '?' replacements and the readback
+/// contains "????" instead of the original characters.
+///
+/// This test: (1) creates a fresh database with `COLLATE Chinese_PRC_CI_AS`
+/// (LCID 0x0804 → GB18030 / CP936), (2) connects to it with
+/// `SendStringParametersAsUnicode=false`, (3) sends a VARCHAR RPC param
+/// containing simplified Chinese characters, (4) reads it back, (5) asserts
+/// bit-exact round-trip. The setup/teardown uses the `sa` login and cleans up
+/// whether or not the main assertions pass.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_varchar_param_chinese_prc_collation_round_trip() -> Result<(), Error> {
+    let host = std::env::var("MSSQL_HOST").unwrap_or_else(|_| "localhost".into());
+    let user = std::env::var("MSSQL_USER").unwrap_or_else(|_| "sa".into());
+    let password = std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "YourStrong@Passw0rd".into());
+
+    // Unique DB name per run so parallel or interrupted runs don't collide.
+    let db_name = format!(
+        "mssql_driver_test_chinese_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+
+    // Build a setup client on master so we can CREATE / DROP DATABASE.
+    let setup_conn = format!(
+        "Server={host};Database=master;User Id={user};Password={password};\
+         TrustServerCertificate=true;Encrypt=true"
+    );
+    let setup_config = Config::from_connection_string(&setup_conn)?;
+
+    // Create the DB with Chinese_PRC_CI_AS (LCID 0x0804 → GB18030 / CP936).
+    {
+        let mut setup = Client::connect(setup_config.clone()).await?;
+        setup
+            .execute(
+                &format!("CREATE DATABASE {db_name} COLLATE Chinese_PRC_CI_AS"),
+                &[],
+            )
+            .await?;
+        setup.close().await?;
+    }
+
+    // Run the main scenario inside a closure so we always get to the cleanup
+    // block, even on failure.
+    let run = async {
+        let conn = format!(
+            "Server={host};Database={db_name};User Id={user};Password={password};\
+             SendStringParametersAsUnicode=false;\
+             TrustServerCertificate=true;Encrypt=true"
+        );
+        let config = Config::from_connection_string(&conn)?;
+        assert!(
+            !config.send_string_parameters_as_unicode,
+            "SendStringParametersAsUnicode=false must parse correctly"
+        );
+
+        let mut client = Client::connect(config).await?;
+
+        // VARCHAR column inherits the DB's default collation (Chinese_PRC_CI_AS).
+        client
+            .execute(
+                "CREATE TABLE dbo.chinese_round_trip (id INT, txt VARCHAR(100))",
+                &[],
+            )
+            .await?;
+
+        // "Hello world" in Simplified Chinese — four CJK code points.
+        // UTF-8: 12 bytes, GB18030: 8 bytes, Windows-1252 with '?' fallback: 4 bytes.
+        let chinese = "你好世界";
+
+        // Send via RPC parameter: under SendStringParametersAsUnicode=false the
+        // driver must route through VARCHAR + the captured server collation.
+        // If it regresses to the hardcoded Latin1_General_CI_AS default, these
+        // characters get transcoded to '?' and the round-trip compares "????"
+        // against "你好世界".
+        client
+            .execute(
+                "INSERT INTO dbo.chinese_round_trip (id, txt) VALUES (@p1, @p2)",
+                &[&1i32, &chinese],
+            )
+            .await?;
+
+        // Read back via SELECT — the decode path uses the column collation, which
+        // is the same Chinese_PRC_CI_AS we wrote with, so a clean round-trip.
+        let rows = client
+            .query(
+                "SELECT txt, DATALENGTH(txt) FROM dbo.chinese_round_trip WHERE id = @p1",
+                &[&1i32],
+            )
+            .await?;
+
+        let mut iter = rows.into_iter();
+        let row = iter.next().expect("expected one row")?;
+        let txt: String = row.get(0)?;
+        let byte_len: i32 = row.get(1)?;
+
+        assert_eq!(
+            txt, chinese,
+            "VARCHAR param with non-Latin collation must round-trip verbatim; \
+             got {txt:?} — if this is \"????\", the driver regressed to the \
+             hardcoded Latin1 collation instead of using the captured server collation"
+        );
+        // GB18030 encodes each of these four code points as exactly 2 bytes.
+        assert_eq!(
+            byte_len, 8,
+            "Chinese_PRC_CI_AS column should store {chinese:?} as 8 bytes (GB18030 / CP936)"
+        );
+
+        // Also exercise the query_named path — it shares `convert_named_params` /
+        // `sql_value_to_rpc_param` with the positional path.
+        use mssql_client::NamedParam;
+        use mssql_types::SqlValue;
+        let extra = "数据";
+        client
+            .execute_named(
+                "INSERT INTO dbo.chinese_round_trip (id, txt) VALUES (@id, @txt)",
+                &[
+                    NamedParam::new("id", SqlValue::Int(2)),
+                    NamedParam::new("txt", SqlValue::String(extra.into())),
+                ],
+            )
+            .await?;
+
+        let rows = client
+            .query(
+                "SELECT txt FROM dbo.chinese_round_trip WHERE id = 2",
+                &[],
+            )
+            .await?;
+        let mut iter = rows.into_iter();
+        let row = iter.next().expect("expected one row from named insert")?;
+        let got: String = row.get(0)?;
+        assert_eq!(got, extra);
+
+        client.close().await?;
+        Ok::<_, Error>(())
+    }
+    .await;
+
+    // Cleanup: always drop the test DB regardless of assertion outcome.
+    {
+        let mut cleanup = Client::connect(setup_config).await?;
+        // Put DB in single-user to kick any lingering connections, then drop.
+        let _ = cleanup
+            .execute(
+                &format!(
+                    "IF DB_ID('{db_name}') IS NOT NULL BEGIN \
+                        ALTER DATABASE {db_name} SET SINGLE_USER WITH ROLLBACK IMMEDIATE; \
+                        DROP DATABASE {db_name}; \
+                     END"
+                ),
+                &[],
+            )
+            .await;
+        cleanup.close().await?;
+    }
+
+    run
+}
