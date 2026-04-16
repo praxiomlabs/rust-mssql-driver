@@ -346,6 +346,99 @@ impl<S: ConnectionState> Client<S> {
         // Read the server's Done response with row count
         self.read_execute_result().await
     }
+
+    /// Execute a query with named parameters and return a streaming result set.
+    ///
+    /// This method accepts [`NamedParam`](crate::to_params::NamedParam) values,
+    /// making it compatible with the [`ToParams`](crate::to_params::ToParams) trait
+    /// and the `#[derive(ToParams)]` macro.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use mssql_client::{NamedParam, ToParams};
+    ///
+    /// // With derive macro:
+    /// #[derive(ToParams)]
+    /// struct UserQuery { name: String }
+    ///
+    /// let q = UserQuery { name: "Alice".into() };
+    /// let rows = client.query_named(
+    ///     "SELECT * FROM users WHERE name = @name",
+    ///     &q.to_params()?,
+    /// ).await?;
+    ///
+    /// // Or manually:
+    /// let params = vec![NamedParam::from_value("name", &"Alice")?];
+    /// let rows = client.query_named(
+    ///     "SELECT * FROM users WHERE name = @name",
+    ///     &params,
+    /// ).await?;
+    /// ```
+    pub async fn query_named<'a>(
+        &'a mut self,
+        sql: &str,
+        params: &[crate::to_params::NamedParam],
+    ) -> Result<QueryStream<'a>> {
+        tracing::debug!(
+            sql = sql,
+            params_count = params.len(),
+            "executing query with named parameters"
+        );
+
+        if params.is_empty() {
+            self.send_sql_batch(sql).await?;
+        } else {
+            let rpc_params = Self::convert_named_params(params)?;
+            let rpc = RpcRequest::execute_sql(sql, rpc_params);
+            self.send_rpc(&rpc).await?;
+        }
+
+        let (columns, rows) = self.read_query_response().await?;
+        Ok(QueryStream::new(columns, rows))
+    }
+
+    /// Execute a statement with named parameters.
+    ///
+    /// Returns the number of affected rows. This is the named-parameter
+    /// counterpart of [`execute()`](Client::execute), compatible with the
+    /// [`ToParams`](crate::to_params::ToParams) trait.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use mssql_client::NamedParam;
+    ///
+    /// let params = vec![
+    ///     NamedParam::from_value("name", &"Alice")?,
+    ///     NamedParam::from_value("email", &"alice@example.com")?,
+    /// ];
+    /// let rows_affected = client.execute_named(
+    ///     "INSERT INTO users (name, email) VALUES (@name, @email)",
+    ///     &params,
+    /// ).await?;
+    /// ```
+    pub async fn execute_named(
+        &mut self,
+        sql: &str,
+        params: &[crate::to_params::NamedParam],
+    ) -> Result<u64> {
+        tracing::debug!(
+            sql = sql,
+            params_count = params.len(),
+            "executing statement with named parameters"
+        );
+
+        if params.is_empty() {
+            self.send_sql_batch(sql).await?;
+        } else {
+            let rpc_params = Self::convert_named_params(params)?;
+            let rpc = RpcRequest::execute_sql(sql, rpc_params);
+            self.send_rpc(&rpc).await?;
+        }
+
+        self.read_execute_result().await
+    }
 }
 
 impl Client<Ready> {

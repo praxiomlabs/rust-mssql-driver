@@ -18,54 +18,52 @@ use crate::state::ConnectionState;
 use super::Client;
 
 impl<S: ConnectionState> Client<S> {
-    /// Convert a single `ToSql` value into an `RpcParam` with the given name.
+    /// Convert a `SqlValue` into an `RpcParam` with the given name.
     ///
-    /// This is the shared conversion logic used by both `convert_params()`
-    /// (for positional query parameters) and `ProcedureBuilder::input()`
-    /// (for named procedure parameters).
-    pub(crate) fn convert_single_param(
+    /// This is the core conversion logic shared by positional parameters
+    /// (`convert_params`), named procedure parameters (`ProcedureBuilder::input`),
+    /// and named query parameters (`convert_named_params`).
+    pub(crate) fn sql_value_to_rpc_param(
         name: &str,
-        value: &(dyn crate::ToSql + Sync),
+        sql_value: &mssql_types::SqlValue,
     ) -> Result<RpcParam> {
         use bytes::{BufMut, BytesMut};
         use mssql_types::SqlValue;
-
-        let sql_value = value.to_sql()?;
 
         Ok(match sql_value {
             SqlValue::Null => RpcParam::null(name, RpcTypeInfo::nvarchar(1)),
             SqlValue::Bool(v) => {
                 let mut buf = BytesMut::with_capacity(1);
-                buf.put_u8(if v { 1 } else { 0 });
+                buf.put_u8(if *v { 1 } else { 0 });
                 RpcParam::new(name, RpcTypeInfo::bit(), buf.freeze())
             }
             SqlValue::TinyInt(v) => {
                 let mut buf = BytesMut::with_capacity(1);
-                buf.put_u8(v);
+                buf.put_u8(*v);
                 RpcParam::new(name, RpcTypeInfo::tinyint(), buf.freeze())
             }
             SqlValue::SmallInt(v) => {
                 let mut buf = BytesMut::with_capacity(2);
-                buf.put_i16_le(v);
+                buf.put_i16_le(*v);
                 RpcParam::new(name, RpcTypeInfo::smallint(), buf.freeze())
             }
-            SqlValue::Int(v) => RpcParam::int(name, v),
-            SqlValue::BigInt(v) => RpcParam::bigint(name, v),
+            SqlValue::Int(v) => RpcParam::int(name, *v),
+            SqlValue::BigInt(v) => RpcParam::bigint(name, *v),
             SqlValue::Float(v) => {
                 let mut buf = BytesMut::with_capacity(4);
-                buf.put_f32_le(v);
+                buf.put_f32_le(*v);
                 RpcParam::new(name, RpcTypeInfo::real(), buf.freeze())
             }
             SqlValue::Double(v) => {
                 let mut buf = BytesMut::with_capacity(8);
-                buf.put_f64_le(v);
+                buf.put_f64_le(*v);
                 RpcParam::new(name, RpcTypeInfo::float(), buf.freeze())
             }
-            SqlValue::String(ref s) => RpcParam::nvarchar(name, s),
-            SqlValue::Binary(ref b) => {
+            SqlValue::String(s) => RpcParam::nvarchar(name, s),
+            SqlValue::Binary(b) => {
                 RpcParam::new(name, RpcTypeInfo::varbinary(b.len() as u16), b.clone())
             }
-            SqlValue::Xml(ref s) => RpcParam::nvarchar(name, s),
+            SqlValue::Xml(s) => RpcParam::nvarchar(name, s),
             #[cfg(feature = "uuid")]
             SqlValue::Uuid(u) => {
                 let bytes = u.as_bytes();
@@ -82,30 +80,30 @@ impl<S: ConnectionState> Client<S> {
             #[cfg(feature = "chrono")]
             SqlValue::Date(d) => {
                 let mut buf = BytesMut::with_capacity(3);
-                mssql_types::encode::encode_date(d, &mut buf);
+                mssql_types::encode::encode_date(*d, &mut buf);
                 RpcParam::new(name, RpcTypeInfo::date(), buf.freeze())
             }
             #[cfg(feature = "chrono")]
             SqlValue::Time(t) => {
                 let mut buf = BytesMut::with_capacity(5);
-                mssql_types::encode::encode_time(t, &mut buf);
+                mssql_types::encode::encode_time(*t, &mut buf);
                 RpcParam::new(name, RpcTypeInfo::time(7), buf.freeze())
             }
             #[cfg(feature = "chrono")]
             SqlValue::DateTime(dt) => {
                 let mut buf = BytesMut::with_capacity(8);
-                mssql_types::encode::encode_datetime2(dt, &mut buf);
+                mssql_types::encode::encode_datetime2(*dt, &mut buf);
                 RpcParam::new(name, RpcTypeInfo::datetime2(7), buf.freeze())
             }
             #[cfg(feature = "chrono")]
             SqlValue::DateTimeOffset(dto) => {
                 let mut buf = BytesMut::with_capacity(10);
-                mssql_types::encode::encode_datetimeoffset(dto, &mut buf);
+                mssql_types::encode::encode_datetimeoffset(*dto, &mut buf);
                 RpcParam::new(name, RpcTypeInfo::datetimeoffset(7), buf.freeze())
             }
             #[cfg(feature = "json")]
-            SqlValue::Json(ref j) => RpcParam::nvarchar(name, &j.to_string()),
-            SqlValue::Tvp(ref tvp_data) => Self::encode_tvp_param(name, tvp_data)?,
+            SqlValue::Json(j) => RpcParam::nvarchar(name, &j.to_string()),
+            SqlValue::Tvp(tvp_data) => Self::encode_tvp_param(name, tvp_data)?,
             _ => {
                 return Err(Error::Type(mssql_types::TypeError::UnsupportedConversion {
                     from: sql_value.type_name().to_string(),
@@ -113,6 +111,19 @@ impl<S: ConnectionState> Client<S> {
                 }));
             }
         })
+    }
+
+    /// Convert a single `ToSql` value into an `RpcParam` with the given name.
+    ///
+    /// This is the shared conversion logic used by both `convert_params()`
+    /// (for positional query parameters) and `ProcedureBuilder::input()`
+    /// (for named procedure parameters).
+    pub(crate) fn convert_single_param(
+        name: &str,
+        value: &(dyn crate::ToSql + Sync),
+    ) -> Result<RpcParam> {
+        let sql_value = value.to_sql()?;
+        Self::sql_value_to_rpc_param(name, &sql_value)
     }
 
     /// Convert ToSql parameters to RPC parameters with auto-generated names.
@@ -123,6 +134,26 @@ impl<S: ConnectionState> Client<S> {
             .map(|(i, p)| {
                 let name = format!("@p{}", i + 1);
                 Self::convert_single_param(&name, *p)
+            })
+            .collect()
+    }
+
+    /// Convert named parameters to RPC parameters.
+    ///
+    /// Ensures each parameter name has an `@` prefix as required by
+    /// `sp_executesql` parameter declarations.
+    pub(crate) fn convert_named_params(
+        params: &[crate::to_params::NamedParam],
+    ) -> Result<Vec<RpcParam>> {
+        params
+            .iter()
+            .map(|p| {
+                let name = if p.name.starts_with('@') {
+                    p.name.clone()
+                } else {
+                    format!("@{}", p.name)
+                };
+                Self::sql_value_to_rpc_param(&name, &p.value)
             })
             .collect()
     }
