@@ -103,6 +103,32 @@ Cached statements are evicted by LRU policy, not time-based expiration.
 
 ---
 
+### Always Encrypted Parameter Encryption (Write Path)
+
+**Status:** Read path fully supported; write path supports `NULL` only
+
+Transparent decryption of encrypted columns works end-to-end: login-time
+feature negotiation, `ColMetaData` / `CekTable` / `CryptoMetadata` parsing,
+async CEK resolution through key store providers, and AEAD_AES_256_CBC_HMAC_SHA256
+decryption in the row hot path. Writing `NULL` into a nullable encrypted
+column also works.
+
+What is not yet implemented is the *encrypt-before-send* logic for
+non-`NULL` parameters bound to encrypted columns. Sending plaintext will
+be rejected by SQL Server with *"Operand type clash: varchar is
+incompatible with varchar(n) encrypted with (…)."*
+
+**Workaround:** Pre-encrypt values out-of-band (e.g., via .NET SqlClient
+or `sqlcmd` with Always Encrypted enabled) and insert the resulting
+ciphertext as a `VARBINARY` parameter bound to the base column type.
+Reads are unaffected — queries with `Column Encryption Setting=Enabled`
+decrypt transparently.
+
+See [docs/ALWAYS_ENCRYPTED.md](docs/ALWAYS_ENCRYPTED.md#limitations) for
+the full rationale.
+
+---
+
 ## SQL Server Compatibility
 
 ### Supported Versions
@@ -244,4 +270,4 @@ If you need a feature not listed here:
 
 ---
 
-*Last updated: April 2026 (v0.8.0+)*
+*Last updated: April 2026 (v0.10.0)*

@@ -141,6 +141,22 @@ Transparent decryption is supported in all query paths:
 - `client.call_procedure()` / `client.procedure().execute()`
 - `client.query_multiple()`
 
+Live-server validation (SQL Server 2022) covers:
+
+- LOGIN7 `FEATURE_EXT_COLUMNENCRYPTION` negotiation succeeds with any number
+  of `Config` clones in the retry/redirect path. (Fixes two critical bugs
+  that prevented any AE connection from succeeding in v0.5.x – v0.9.x — see
+  CHANGELOG.md for v0.10.0.)
+- `ColMetaData` parsing of `CekTable` + per-column `CryptoMetadata`
+- Async CEK resolution through registered `KeyStoreProvider`s
+- AEAD_AES_256_CBC_HMAC_SHA256 decryption in the row-parsing hot path
+- `NULL` encrypted column values surface as `Option<T>::None` without
+  attempting AEAD decryption
+
+Plaintext ciphertext round-trip (non-NULL writes into encrypted columns)
+is blocked on the parameter encryption write path — see
+[Limitations](#limitations) below.
+
 ## Security Considerations
 
 - **Key material never reaches SQL Server.** CEKs are decrypted client-side
@@ -153,9 +169,34 @@ Transparent decryption is supported in all query paths:
 
 ## Limitations
 
-- Parameter encryption (encrypting input parameters for INSERT/UPDATE) is
-  not yet implemented. Use parameterized queries with plaintext values and
-  let SQL Server's Always Encrypted driver-side logic handle encryption
-  in a future release.
+- **Parameter encryption (write path) is not yet implemented.**
+  Sending a non-`NULL` plaintext value into an encrypted column via an
+  RPC parameter is rejected by SQL Server with
+  *"Operand type clash: varchar is incompatible with varchar(n) encrypted
+  with (…)."* This affects `INSERT`, `UPDATE`, and any `WHERE`-clause
+  equality comparison against a deterministic-encrypted column.
+
+  What this release *does* support:
+
+  - Reading encrypted columns and decrypting them transparently.
+  - Writing `NULL` into a nullable encrypted column.
+  - Writing ciphertext that was produced by a different client (e.g.,
+    .NET SqlClient) — decryption on read works the same.
+
+  The missing piece is the client-side *encrypt-before-send* logic:
+  the driver needs to call `sp_describe_parameter_encryption` (or accept
+  caller-supplied `CryptoMetadata`), encrypt the plaintext parameter
+  value with `AeadEncryptor`, and send it with `fStatusFlags.encrypted = 1`
+  along with a CEK table referencing the column encryption key. The
+  low-level primitives (`AeadEncryptor::encrypt`, `CekTable`, the
+  `encrypted` param flag) are all implemented; the orchestration layer
+  is not.
+
+  Workaround for now: pre-encrypt values client-side using a separate
+  tool (e.g., .NET SqlClient or `sqlcmd`) and insert the resulting
+  ciphertext directly as a `VARBINARY` parameter bound to the base
+  column type. This is not transparent — the column must be queried
+  with `Column Encryption Setting=Enabled` to decrypt on read.
+
 - Key rotation requires restarting the connection (CEKs are cached per
   result set, not globally).

@@ -17,7 +17,7 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 - **Pure Rust TLS** - Uses rustls, no OpenSSL dependency
 - **Modern Rust** - 2024 Edition, MSRV 1.88
 
-### Feature Status (v0.9.x)
+### Feature Status (v0.10.x)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -26,20 +26,24 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 | Queries & Parameters | ✅ | Full support |
 | Transactions | ✅ | Commit, rollback, savepoints |
 | Connection Pooling | ✅ | Built-in via `mssql-driver-pool` |
-| Bulk Insert | ✅ | High-performance batch loading |
-| `#[derive(FromRow)]` | ✅ | Row-to-struct mapping |
+| Bulk Insert | ✅ | High-performance batch loading via `Client::bulk_insert()` |
+| `#[derive(FromRow)]` / `#[derive(ToParams)]` | ✅ | Row-to-struct and struct-to-params mapping |
 | TDS 7.3 (Legacy) | ✅ | SQL Server 2008/2008 R2 |
 | TDS 8.0 Strict Mode | ✅ | SQL Server 2022+ |
 | Azure Managed Identity | ✅ | Via `azure-identity` |
 | Kerberos/GSSAPI | ✅ | Unix via `libgssapi` |
 | Windows SSPI | ✅ | Via `sspi-auth` feature |
 | Table-Valued Parameters | ✅ | Via `Tvp` type |
-| OpenTelemetry Metrics | ✅ | Via `otel` feature |
-| Always Encrypted | ✅ | Full support with Azure Key Vault and Windows CertStore providers |
-| Query Cancellation | ✅ | ATTENTION signal support |
+| OpenTelemetry Metrics | ✅ | Query + pool lifecycle via `otel` feature |
+| Always Encrypted (read) | ✅ | Transparent decryption with Azure Key Vault and Windows CertStore providers |
+| Always Encrypted (write) | ⚠️ | `NULL` writes only; ciphertext write path pending — see [docs/ALWAYS_ENCRYPTED.md](docs/ALWAYS_ENCRYPTED.md#limitations) |
+| Query Cancellation | ✅ | ATTENTION signal + in-flight pool discard |
 | Collation-Aware Decoding | ✅ | 14+ character encodings |
-| Stored Procedures | ✅ | RPC-based with OUTPUT params |
+| Collation-Aware VARCHAR Params | ✅ | Via `SendStringParametersAsUnicode=false` |
+| Stored Procedures | ✅ | RPC-based with OUTPUT params and RETURN value |
 | Named Instance Resolution | ✅ | SQL Browser service (UDP 1434) |
+| MultiSubnetFailover (AG) | ✅ | Parallel TCP connect for listener failover |
+| Connection Retry | ✅ | `ConnectRetryCount` / `ConnectRetryInterval` |
 | FILESTREAM BLOB Access | ✅ | Windows only, via `filestream` feature |
 
 ## Installation
@@ -105,6 +109,12 @@ Server=hostname,port;Database=dbname;User Id=user;Password=pass;Encrypt=strict;
 | `Application Name` | | Application identifier |
 | `Connect Timeout` | | Connection timeout in seconds |
 | `Command Timeout` | | Default command timeout |
+| `SendStringParametersAsUnicode` | | `true`/`false` — when `false`, `String` params send as VARCHAR under the server collation (for index seeks) |
+| `MultiSubnetFailover` | | `true` to race parallel TCP connects across all resolved addresses (Always On AG) |
+| `ConnectRetryCount` | | Transient connect failures retried with exponential backoff |
+| `Column Encryption Setting` | | `Enabled`/`Disabled` — transparent decryption of encrypted columns |
+
+See [docs/CONNECTION_STRINGS.md](docs/CONNECTION_STRINGS.md) for the full ADO.NET-compatible keyword reference.
 
 ## Connection Pooling
 
@@ -225,7 +235,7 @@ Enable optional features:
 
 ```toml
 [dependencies]
-mssql-client = { version = "0.8", features = ["otel"] }
+mssql-client = { version = "0.9", features = ["otel"] }
 mssql-auth = { version = "0.9", features = ["sspi-auth"] }
 ```
 

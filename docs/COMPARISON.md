@@ -7,7 +7,8 @@ This page compares `mssql-driver` with the other Rust options for SQL Server con
 | Feature | mssql-driver | Tiberius | odbc-api | sqlx-oldapi |
 |---|---|---|---|---|
 | TDS 8.0 (strict TLS) | Yes | No (Tiberius [#412]) | N/A | No |
-| Always Encrypted | Yes | No (Tiberius [#54], 6yr open) | Via ODBC driver | No |
+| Always Encrypted (read) | Yes | No (Tiberius [#54], 6yr open) | Via ODBC driver | No |
+| Always Encrypted (write) | Partial — NULL writes only; ciphertext write pending (see [ALWAYS_ENCRYPTED.md]) | No | Via ODBC driver | No |
 | Built-in connection pool | Yes | No (Tiberius [#146]) | No | No |
 | Prepared statement cache | Yes (LRU) | No (Tiberius [#30], 6yr open) | Via ODBC | Yes |
 | Table-valued parameters | Yes | No | Via ODBC driver | No (sqlx-oldapi [#46]) |
@@ -91,3 +92,5 @@ sqlx-oldapi's lack of Windows authentication was called a "blocker" by enterpris
 - **Smaller ecosystem** — no ORM integrations yet
 
 See [LIMITATIONS.md](../LIMITATIONS.md) for the complete list.
+
+[ALWAYS_ENCRYPTED.md]: ALWAYS_ENCRYPTED.md#limitations
