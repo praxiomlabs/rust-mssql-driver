@@ -680,11 +680,17 @@ impl BulkInsert {
                         buf.put_u16_le(max_len as u16);
                     }
 
-                    // Collation for string types (5 bytes)
+                    // Collation for string types (5 bytes). Use the caller-
+                    // supplied collation when present (via `with_collation()`),
+                    // otherwise fall back to Latin1_General_CI_AS.
                     if col.type_id == 0xE7 || col.type_id == 0xA7 {
-                        // Default collation: Latin1_General_CI_AS
-                        // Bytes: LCID(0x0409) + flags(0xD000) + SortId(0x34)
-                        buf.put_slice(&[0x09, 0x04, 0xD0, 0x00, 0x34]);
+                        if let Some(coll) = col.collation.as_ref() {
+                            buf.put_slice(&coll.to_bytes());
+                        } else {
+                            // Default collation: Latin1_General_CI_AS
+                            // Bytes: LCID(0x0409) + flags(0xD000) + SortId(0x34)
+                            buf.put_slice(&[0x09, 0x04, 0xD0, 0x00, 0x34]);
+                        }
                     }
                 }
 
@@ -1940,6 +1946,58 @@ mod tests {
                 "column {i} ({name}) should not have Nullable flag set"
             );
         }
+    }
+
+    /// Verify that `with_collation()` on a VARCHAR column propagates into
+    /// the COLMETADATA token — the hand-crafted path previously hardcoded
+    /// Latin1_General_CI_AS regardless of the caller-supplied collation.
+    #[test]
+    fn test_write_colmetadata_uses_caller_collation() {
+        use tds_protocol::token::{ColMetaData, Collation};
+
+        // Chinese_PRC_CI_AS: LCID 0x0804, sort_id 0x52 (just a non-default pair)
+        let chinese = Collation {
+            lcid: 0x0804,
+            sort_id: 0x52,
+        };
+
+        let columns = vec![
+            BulkColumn::new("s", "VARCHAR(50)", 0).unwrap().with_collation(chinese.clone()),
+            // NVARCHAR also writes 5 collation bytes — should honor caller too
+            BulkColumn::new("n", "NVARCHAR(50)", 1).unwrap().with_collation(chinese.clone()),
+            // VARCHAR without with_collation should keep the Latin1 default
+            BulkColumn::new("d", "VARCHAR(10)", 2).unwrap(),
+        ];
+        let bulk = BulkInsert::new(columns, 0);
+
+        let buf = &bulk.buffer[1..];
+        let mut cursor = bytes::Bytes::copy_from_slice(buf);
+        let meta = ColMetaData::decode(&mut cursor).expect("parseable");
+
+        let c0 = meta.columns[0]
+            .type_info
+            .collation
+            .as_ref()
+            .expect("VARCHAR has collation");
+        assert_eq!(c0.lcid, chinese.lcid, "VARCHAR caller LCID");
+        assert_eq!(c0.sort_id, chinese.sort_id, "VARCHAR caller sort_id");
+
+        let c1 = meta.columns[1]
+            .type_info
+            .collation
+            .as_ref()
+            .expect("NVARCHAR has collation");
+        assert_eq!(c1.lcid, chinese.lcid, "NVARCHAR caller LCID");
+        assert_eq!(c1.sort_id, chinese.sort_id, "NVARCHAR caller sort_id");
+
+        // Default collation: Latin1_General_CI_AS wire bytes
+        // [0x09, 0x04, 0xD0, 0x00, 0x34] → lcid u32 LE = 0x00D0_0409, sort_id = 0x34
+        let default = meta.columns[2]
+            .type_info
+            .collation
+            .as_ref()
+            .expect("VARCHAR has default collation");
+        assert_eq!(default.to_bytes(), [0x09, 0x04, 0xD0, 0x00, 0x34]);
     }
 
     #[test]

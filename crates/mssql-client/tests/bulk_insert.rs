@@ -1243,6 +1243,508 @@ async fn test_bulk_insert_without_schema_discovery() {
     client.close().await.expect("Failed to close");
 }
 
+/// MONEY / SMALLMONEY / DATETIME / SMALLDATETIME through the hand-crafted
+/// COLMETADATA path. Exercises the nullable→fixed-type-ID mapping for each of
+/// these types (item 1.9):
+/// - MONEY NOT NULL   → 0x6E w/ length 8 collapses to 0x3C
+/// - SMALLMONEY NOT NULL → 0x6E w/ length 4 collapses to 0x7A
+/// - DATETIME NOT NULL   → 0x6F w/ length 8 collapses to 0x3D
+/// - SMALLDATETIME NOT NULL → 0x6F w/ length 4 collapses to 0x3A
+/// Plus a nullable column for each type to exercise the non-fixed path.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_without_schema_discovery_money_datetime() {
+    use chrono::{NaiveDate, NaiveDateTime};
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client
+        .execute(
+            "CREATE TABLE #BulkNoDiscMoney (\
+                id INT NOT NULL, \
+                price MONEY NOT NULL, \
+                tip SMALLMONEY NOT NULL, \
+                ts DATETIME NOT NULL, \
+                ts_short SMALLDATETIME NOT NULL, \
+                price_nullable MONEY NULL, \
+                ts_nullable DATETIME NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkNoDiscMoney").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+        BulkColumn::new("price", "MONEY", 1).unwrap().with_nullable(false),
+        BulkColumn::new("tip", "SMALLMONEY", 2).unwrap().with_nullable(false),
+        BulkColumn::new("ts", "DATETIME", 3).unwrap().with_nullable(false),
+        BulkColumn::new("ts_short", "SMALLDATETIME", 4).unwrap().with_nullable(false),
+        BulkColumn::new("price_nullable", "MONEY", 5).unwrap(),
+        BulkColumn::new("ts_nullable", "DATETIME", 6).unwrap(),
+    ]);
+
+    let mut writer = client
+        .bulk_insert_without_schema_discovery(&builder)
+        .await
+        .expect("Failed to start bulk insert");
+
+    let dt = NaiveDate::from_ymd_opt(2026, 4, 16)
+        .unwrap()
+        .and_hms_milli_opt(12, 34, 56, 789)
+        .unwrap();
+    let dt_short = NaiveDate::from_ymd_opt(2026, 4, 16)
+        .unwrap()
+        .and_hms_opt(12, 30, 0)
+        .unwrap();
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(1),
+            SqlValue::Decimal(Decimal::from_str("123.4500").unwrap()),
+            SqlValue::Decimal(Decimal::from_str("-7.8900").unwrap()),
+            SqlValue::DateTime(dt),
+            SqlValue::DateTime(dt_short),
+            SqlValue::Decimal(Decimal::from_str("999.9900").unwrap()),
+            SqlValue::DateTime(dt),
+        ])
+        .expect("row 1");
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(2),
+            SqlValue::Decimal(Decimal::from_str("0").unwrap()),
+            SqlValue::Decimal(Decimal::from_str("0").unwrap()),
+            SqlValue::DateTime(dt),
+            SqlValue::DateTime(dt_short),
+            SqlValue::Null,
+            SqlValue::Null,
+        ])
+        .expect("row 2");
+
+    let result = writer.finish().await.expect("Failed to finish bulk insert");
+    assert_eq!(result.rows_affected, 2);
+
+    let rows = client
+        .query(
+            "SELECT id, price, tip, ts, ts_short, price_nullable, ts_nullable \
+             FROM #BulkNoDiscMoney ORDER BY id",
+            &[],
+        )
+        .await
+        .expect("Query failed");
+
+    let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    assert_eq!(data.len(), 2);
+
+    assert_eq!(data[0].get::<i32>(0).unwrap(), 1);
+    assert_eq!(
+        data[0].get::<Decimal>(1).unwrap(),
+        Decimal::from_str("123.4500").unwrap()
+    );
+    assert_eq!(
+        data[0].get::<Decimal>(2).unwrap(),
+        Decimal::from_str("-7.8900").unwrap()
+    );
+    // DATETIME rounds to nearest 1/300th second (~3.33ms), so 789ms → 790ms
+    let dt_read = data[0].get::<NaiveDateTime>(3).unwrap();
+    let delta = (dt_read - dt).num_milliseconds().abs();
+    assert!(delta <= 4, "DATETIME rounding >4ms: got delta={delta}");
+    assert_eq!(data[0].get::<NaiveDateTime>(4).unwrap(), dt_short);
+    assert_eq!(
+        data[0].get::<Decimal>(5).unwrap(),
+        Decimal::from_str("999.9900").unwrap()
+    );
+    let dt_null_read = data[0].get::<Option<NaiveDateTime>>(6).unwrap().unwrap();
+    let delta_null = (dt_null_read - dt).num_milliseconds().abs();
+    assert!(delta_null <= 4, "nullable DATETIME rounding >4ms: got delta={delta_null}");
+
+    assert_eq!(data[1].get::<Option<Decimal>>(5).unwrap(), None);
+    assert_eq!(data[1].get::<Option<NaiveDateTime>>(6).unwrap(), None);
+
+    client.close().await.expect("Failed to close");
+}
+
+/// DATE / TIME / DATETIME2 / DATETIMEOFFSET through the hand-crafted COLMETADATA
+/// path (item 1.9). These types have no fixed-width variant in
+/// `nullable_to_fixed_type`, so NOT NULL columns stay on the nullable type IDs
+/// (0x28, 0x29, 0x2A, 0x2B) in COLMETADATA — verify the server accepts that.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_without_schema_discovery_temporal() {
+    use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
+
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client
+        .execute(
+            "CREATE TABLE #BulkNoDiscTemporal (\
+                id INT NOT NULL, \
+                d DATE NOT NULL, \
+                t TIME(7) NOT NULL, \
+                dt2 DATETIME2(7) NOT NULL, \
+                dto DATETIMEOFFSET(7) NOT NULL, \
+                d_null DATE NULL, \
+                dt2_null DATETIME2(3) NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkNoDiscTemporal").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+        BulkColumn::new("d", "DATE", 1).unwrap().with_nullable(false),
+        BulkColumn::new("t", "TIME(7)", 2).unwrap().with_nullable(false),
+        BulkColumn::new("dt2", "DATETIME2(7)", 3).unwrap().with_nullable(false),
+        BulkColumn::new("dto", "DATETIMEOFFSET(7)", 4).unwrap().with_nullable(false),
+        BulkColumn::new("d_null", "DATE", 5).unwrap(),
+        BulkColumn::new("dt2_null", "DATETIME2(3)", 6).unwrap(),
+    ]);
+
+    let mut writer = client
+        .bulk_insert_without_schema_discovery(&builder)
+        .await
+        .expect("Failed to start bulk insert");
+
+    let date = NaiveDate::from_ymd_opt(2026, 4, 16).unwrap();
+    let time = NaiveTime::from_hms_nano_opt(12, 34, 56, 123_456_700).unwrap();
+    let dt2 = NaiveDateTime::new(date, time);
+    let offset = FixedOffset::east_opt(5 * 3600).unwrap();
+    let dto: DateTime<FixedOffset> = DateTime::from_naive_utc_and_offset(dt2, offset);
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(1),
+            SqlValue::Date(date),
+            SqlValue::Time(time),
+            SqlValue::DateTime(dt2),
+            SqlValue::DateTimeOffset(dto),
+            SqlValue::Date(date),
+            SqlValue::DateTime(dt2),
+        ])
+        .expect("row 1");
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(2),
+            SqlValue::Date(NaiveDate::from_ymd_opt(1753, 1, 1).unwrap()),
+            SqlValue::Time(NaiveTime::from_hms_opt(0, 0, 0).unwrap()),
+            SqlValue::DateTime(
+                NaiveDate::from_ymd_opt(1, 1, 1)
+                    .unwrap()
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
+            ),
+            SqlValue::DateTimeOffset(DateTime::from_naive_utc_and_offset(
+                NaiveDateTime::new(
+                    NaiveDate::from_ymd_opt(9999, 12, 31).unwrap(),
+                    NaiveTime::from_hms_nano_opt(23, 59, 59, 999_999_900).unwrap(),
+                ),
+                FixedOffset::east_opt(0).unwrap(),
+            )),
+            SqlValue::Null,
+            SqlValue::Null,
+        ])
+        .expect("row 2");
+
+    let result = writer.finish().await.expect("Failed to finish bulk insert");
+    assert_eq!(result.rows_affected, 2);
+
+    let rows = client
+        .query(
+            "SELECT id, d, t, dt2, dto, d_null, dt2_null \
+             FROM #BulkNoDiscTemporal ORDER BY id",
+            &[],
+        )
+        .await
+        .expect("Query failed");
+
+    let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    assert_eq!(data.len(), 2);
+
+    assert_eq!(data[0].get::<NaiveDate>(1).unwrap(), date);
+    assert_eq!(data[0].get::<NaiveTime>(2).unwrap(), time);
+    assert_eq!(data[0].get::<NaiveDateTime>(3).unwrap(), dt2);
+    assert_eq!(data[0].get::<DateTime<FixedOffset>>(4).unwrap(), dto);
+    assert_eq!(data[0].get::<Option<NaiveDate>>(5).unwrap(), Some(date));
+
+    assert_eq!(
+        data[1].get::<NaiveDate>(1).unwrap(),
+        NaiveDate::from_ymd_opt(1753, 1, 1).unwrap()
+    );
+    assert_eq!(data[1].get::<Option<NaiveDate>>(5).unwrap(), None);
+    assert_eq!(data[1].get::<Option<NaiveDateTime>>(6).unwrap(), None);
+
+    client.close().await.expect("Failed to close");
+}
+
+/// UNIQUEIDENTIFIER through the hand-crafted COLMETADATA path (item 1.9).
+/// Uses an asymmetric-bytes UUID to detect the mixed-endian byte-swap bug
+/// class caught in item 1.8. Covers NOT NULL + nullable paths.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_without_schema_discovery_uuid() {
+    use uuid::Uuid;
+
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client
+        .execute(
+            "CREATE TABLE #BulkNoDiscUuid (\
+                id INT NOT NULL, \
+                ident UNIQUEIDENTIFIER NOT NULL, \
+                ident_null UNIQUEIDENTIFIER NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkNoDiscUuid").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+        BulkColumn::new("ident", "UNIQUEIDENTIFIER", 1).unwrap().with_nullable(false),
+        BulkColumn::new("ident_null", "UNIQUEIDENTIFIER", 2).unwrap(),
+    ]);
+
+    let mut writer = client
+        .bulk_insert_without_schema_discovery(&builder)
+        .await
+        .expect("Failed to start bulk insert");
+
+    // Asymmetric bytes across all 16 positions — catches mixed-endian swap bugs
+    let uid = Uuid::parse_str("12345678-1234-5678-9abc-def012345678").unwrap();
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(1),
+            SqlValue::Uuid(uid),
+            SqlValue::Uuid(uid),
+        ])
+        .expect("row 1");
+
+    writer
+        .send_row_values(&[SqlValue::Int(2), SqlValue::Uuid(Uuid::nil()), SqlValue::Null])
+        .expect("row 2");
+
+    let result = writer.finish().await.expect("Failed to finish bulk insert");
+    assert_eq!(result.rows_affected, 2);
+
+    let rows = client
+        .query(
+            "SELECT id, ident, ident_null FROM #BulkNoDiscUuid ORDER BY id",
+            &[],
+        )
+        .await
+        .expect("Query failed");
+
+    let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    assert_eq!(data.len(), 2);
+
+    assert_eq!(data[0].get::<Uuid>(1).unwrap(), uid);
+    assert_eq!(data[0].get::<Option<Uuid>>(2).unwrap(), Some(uid));
+    assert_eq!(data[1].get::<Uuid>(1).unwrap(), Uuid::nil());
+    assert_eq!(data[1].get::<Option<Uuid>>(2).unwrap(), None);
+
+    client.close().await.expect("Failed to close");
+}
+
+/// VARBINARY through the hand-crafted COLMETADATA path (item 1.9). Tests:
+/// - VARBINARY(100) NOT NULL — small payload (100 bytes) and near-boundary (1000 bytes)
+/// - VARBINARY(MAX) NULL — empty, medium (100 bytes), large 10,000 bytes (multi-packet PLP)
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_without_schema_discovery_varbinary() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client
+        .execute(
+            "CREATE TABLE #BulkNoDiscVarbin (\
+                id INT NOT NULL, \
+                data_small VARBINARY(1000) NOT NULL, \
+                data_max VARBINARY(MAX) NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkNoDiscVarbin").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+        BulkColumn::new("data_small", "VARBINARY(1000)", 1).unwrap().with_nullable(false),
+        BulkColumn::new("data_max", "VARBINARY(MAX)", 2).unwrap(),
+    ]);
+
+    let mut writer = client
+        .bulk_insert_without_schema_discovery(&builder)
+        .await
+        .expect("Failed to start bulk insert");
+
+    let small: Vec<u8> = (0u8..100u8).collect();
+    let medium: Vec<u8> = (0u8..100u8).cycle().take(100).collect();
+    let large: Vec<u8> = (0u8..=255u8).cycle().take(10_000).collect();
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(1),
+            SqlValue::Binary(small.clone().into()),
+            SqlValue::Binary(medium.clone().into()),
+        ])
+        .expect("row 1");
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(2),
+            SqlValue::Binary(vec![0xFF; 1000].into()), // boundary
+            SqlValue::Binary(large.clone().into()),    // PLP multi-chunk
+        ])
+        .expect("row 2");
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(3),
+            SqlValue::Binary(vec![0x00].into()),
+            SqlValue::Binary(Vec::<u8>::new().into()), // empty PLP
+        ])
+        .expect("row 3");
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(4),
+            SqlValue::Binary(vec![0xAA; 42].into()),
+            SqlValue::Null,
+        ])
+        .expect("row 4");
+
+    let result = writer.finish().await.expect("Failed to finish bulk insert");
+    assert_eq!(result.rows_affected, 4);
+
+    // DATALENGTH returns INT for VARBINARY(n), BIGINT for VARBINARY(MAX)
+    let rows = client
+        .query(
+            "SELECT id, data_small, data_max, \
+                DATALENGTH(data_small) AS len_small, \
+                CAST(DATALENGTH(data_max) AS INT) AS len_max \
+             FROM #BulkNoDiscVarbin ORDER BY id",
+            &[],
+        )
+        .await
+        .expect("Query failed");
+
+    let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    assert_eq!(data.len(), 4);
+
+    assert_eq!(data[0].get::<Vec<u8>>(1).unwrap(), small);
+    assert_eq!(data[0].get::<Vec<u8>>(2).unwrap(), medium);
+    assert_eq!(data[0].get::<i32>(3).unwrap(), 100);
+    assert_eq!(data[0].get::<i32>(4).unwrap(), 100);
+
+    assert_eq!(data[1].get::<Vec<u8>>(1).unwrap(), vec![0xFF; 1000]);
+    assert_eq!(data[1].get::<Vec<u8>>(2).unwrap(), large);
+    assert_eq!(data[1].get::<i32>(4).unwrap(), 10_000);
+
+    assert_eq!(data[2].get::<Vec<u8>>(1).unwrap(), vec![0x00]);
+    assert_eq!(data[2].get::<Vec<u8>>(2).unwrap(), Vec::<u8>::new());
+    assert_eq!(data[2].get::<i32>(4).unwrap(), 0);
+
+    assert_eq!(data[3].get::<Vec<u8>>(1).unwrap(), vec![0xAA; 42]);
+    assert_eq!(data[3].get::<Option<Vec<u8>>>(2).unwrap(), None);
+
+    client.close().await.expect("Failed to close");
+}
+
+/// VARCHAR through the hand-crafted COLMETADATA path (item 1.9). Hand-crafted
+/// COLMETADATA writes the default Latin1_General_CI_AS collation bytes —
+/// verify ASCII / Latin-1 extended characters round-trip on a server whose
+/// default collation is Latin-compatible. Non-Latin collation coverage belongs
+/// to item 3.9's schema-discovery path; the hand-crafted path does not yet
+/// propagate `with_collation()` into the COLMETADATA token (see remaining
+/// work in item 1.9).
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_without_schema_discovery_varchar_latin() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client
+        .execute(
+            "CREATE TABLE #BulkNoDiscVarchar (\
+                id INT NOT NULL, \
+                name VARCHAR(100) NOT NULL, \
+                note VARCHAR(MAX) NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkNoDiscVarchar").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+        BulkColumn::new("name", "VARCHAR(100)", 1).unwrap().with_nullable(false),
+        BulkColumn::new("note", "VARCHAR(MAX)", 2).unwrap(),
+    ]);
+
+    let mut writer = client
+        .bulk_insert_without_schema_discovery(&builder)
+        .await
+        .expect("Failed to start bulk insert");
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(1),
+            SqlValue::String("Alice".into()),
+            SqlValue::String("ascii only".into()),
+        ])
+        .expect("row 1");
+
+    // Latin-1 extended (é, ñ, ü, ß all present in Windows-1252)
+    writer
+        .send_row_values(&[
+            SqlValue::Int(2),
+            SqlValue::String("naïve résumé".into()),
+            SqlValue::String("grüße über straße".repeat(200)),
+        ])
+        .expect("row 2");
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(3),
+            SqlValue::String("".into()),
+            SqlValue::Null,
+        ])
+        .expect("row 3");
+
+    let result = writer.finish().await.expect("Failed to finish bulk insert");
+    assert_eq!(result.rows_affected, 3);
+
+    let rows = client
+        .query(
+            "SELECT id, name, note, DATALENGTH(name) AS name_len \
+             FROM #BulkNoDiscVarchar ORDER BY id",
+            &[],
+        )
+        .await
+        .expect("Query failed");
+
+    let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    assert_eq!(data.len(), 3);
+
+    assert_eq!(data[0].get::<String>(1).unwrap(), "Alice");
+    assert_eq!(data[0].get::<String>(2).unwrap(), "ascii only");
+    assert_eq!(data[0].get::<i32>(3).unwrap(), 5);
+
+    assert_eq!(data[1].get::<String>(1).unwrap(), "naïve résumé");
+    // "naïve résumé" is 12 bytes in Windows-1252 (each of é, ï is 1 byte)
+    assert_eq!(data[1].get::<i32>(3).unwrap(), 12);
+
+    assert_eq!(data[2].get::<String>(1).unwrap(), "");
+    assert_eq!(data[2].get::<Option<String>>(2).unwrap(), None);
+    assert_eq!(data[2].get::<i32>(3).unwrap(), 0);
+
+    client.close().await.expect("Failed to close");
+}
+
 // =============================================================================
 // Expanded Type Coverage (work item 3.5)
 // =============================================================================
