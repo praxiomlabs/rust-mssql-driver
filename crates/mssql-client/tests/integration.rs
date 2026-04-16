@@ -2226,6 +2226,458 @@ async fn test_tvp_multi_column() {
     client.close().await.expect("Failed to close");
 }
 
+/// TVP round-trip for MONEY, SMALLMONEY, DATETIME, SMALLDATETIME, and UNIQUEIDENTIFIER
+/// columns.
+///
+/// Pins the wire-format dispatch added for item 1.11: `encode_tvp_value` must
+/// route `SqlValue::Money`/`SmallMoney` through MONEYN (0x6E, scaled-integer
+/// high/low words) — not DECIMAL — and route `SqlValue::DateTime`/`SmallDateTime`
+/// through DATETIMEN (0x6F, 8-byte days+ticks or 4-byte days+minutes) — not
+/// DATETIME2 — when the column's wire type says so. If the routing regresses,
+/// SQL Server either rejects the RPC with a type-mismatch error or silently
+/// stores a transmogrified value (e.g. DECIMAL→MONEY cast or DATETIME2→DATETIME
+/// rounding that drops our submitted precision) and the exact-equality assertion
+/// catches it.
+///
+/// Also pins the 1.8 class UUID byte-swap: the asymmetric UUID literal cannot
+/// round-trip cleanly unless `encode_tvp_guid` applies the mixed-endian swap.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_tvp_money_datetime_uuid_round_trip() {
+    use chrono::NaiveDate;
+    use mssql_client::{Tvp, TvpColumn, TvpRow, TvpValue};
+    use mssql_types::{ToSql, TypeError};
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+    use uuid::Uuid;
+
+    struct CurrencyRow {
+        id: i32,
+        amount: mssql_types::Money,
+        petty_cash: mssql_types::SmallMoney,
+        created_at: chrono::NaiveDateTime,
+        scheduled_for: mssql_types::SmallDateTime,
+        txn_id: Uuid,
+    }
+
+    impl Tvp for CurrencyRow {
+        fn type_name() -> &'static str {
+            "dbo.CurrencyTvpList"
+        }
+
+        fn columns() -> Vec<TvpColumn> {
+            vec![
+                TvpColumn::new("Id", "INT", 0),
+                TvpColumn::new("Amount", "MONEY", 1),
+                TvpColumn::new("PettyCash", "SMALLMONEY", 2),
+                TvpColumn::new("CreatedAt", "DATETIME", 3),
+                TvpColumn::new("ScheduledFor", "SMALLDATETIME", 4),
+                TvpColumn::new("TxnId", "UNIQUEIDENTIFIER", 5),
+            ]
+        }
+
+        fn to_row(&self) -> Result<TvpRow, TypeError> {
+            Ok(TvpRow::new(vec![
+                self.id.to_sql()?,
+                self.amount.to_sql()?,
+                self.petty_cash.to_sql()?,
+                self.created_at.to_sql()?,
+                self.scheduled_for.to_sql()?,
+                self.txn_id.to_sql()?,
+            ]))
+        }
+    }
+
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Create (or reuse) the TVP type. Must be a real type — temp table types
+    // can't back a TVP.
+    let create_type = r#"
+        IF TYPE_ID('dbo.CurrencyTvpList') IS NULL
+        BEGIN
+            CREATE TYPE dbo.CurrencyTvpList AS TABLE (
+                Id INT NOT NULL,
+                Amount MONEY NULL,
+                PettyCash SMALLMONEY NULL,
+                CreatedAt DATETIME NULL,
+                ScheduledFor SMALLDATETIME NULL,
+                TxnId UNIQUEIDENTIFIER NULL
+            );
+        END
+    "#;
+    if let Err(e) = client.execute(create_type, &[]).await {
+        panic!("Could not create TVP type: {e:?}");
+    }
+
+    client
+        .execute(
+            "CREATE TABLE #CurrencyDest (
+                Id INT PRIMARY KEY,
+                Amount MONEY NULL,
+                PettyCash SMALLMONEY NULL,
+                CreatedAt DATETIME NULL,
+                ScheduledFor SMALLDATETIME NULL,
+                TxnId UNIQUEIDENTIFIER NULL
+            )",
+            &[],
+        )
+        .await
+        .expect("Failed to create destination table");
+
+    // Asymmetric UUID — first three groups are byte-swapped on the wire, so a
+    // wrongly-endian encoder swaps them back to something other than the
+    // original bytes. Using a palindromic UUID would mask the bug.
+    let txn_id = Uuid::parse_str("12345678-1234-5678-9abc-def012345678").unwrap();
+    // Seconds (23) are within the 30s-rounds-up zone for SMALLDATETIME, letting
+    // the 30-up rule be exercised.
+    let created_at = NaiveDate::from_ymd_opt(2020, 6, 15)
+        .unwrap()
+        .and_hms_milli_opt(13, 14, 15, 333)
+        .unwrap();
+    let scheduled_for = NaiveDate::from_ymd_opt(2020, 6, 15)
+        .unwrap()
+        .and_hms_opt(13, 14, 23)
+        .unwrap();
+
+    let rows = vec![
+        CurrencyRow {
+            id: 1,
+            amount: mssql_types::Money(Decimal::from_str("12345.6789").unwrap()),
+            petty_cash: mssql_types::SmallMoney(Decimal::from_str("-9.0100").unwrap()),
+            created_at,
+            scheduled_for: mssql_types::SmallDateTime(scheduled_for),
+            txn_id,
+        },
+        // Negative MONEY, positive SMALLMONEY, zero-time DATETIME.
+        CurrencyRow {
+            id: 2,
+            amount: mssql_types::Money(Decimal::from_str("-98765432.1000").unwrap()),
+            petty_cash: mssql_types::SmallMoney(Decimal::from_str("214748.3647").unwrap()),
+            created_at: NaiveDate::from_ymd_opt(1900, 1, 1)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap(),
+            scheduled_for: mssql_types::SmallDateTime(
+                NaiveDate::from_ymd_opt(1900, 1, 1)
+                    .unwrap()
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
+            ),
+            txn_id: Uuid::nil(),
+        },
+    ];
+
+    let tvp = TvpValue::new(&rows).expect("Failed to create TVP");
+
+    let affected = client
+        .execute(
+            "INSERT INTO #CurrencyDest (Id, Amount, PettyCash, CreatedAt, ScheduledFor, TxnId)
+             SELECT Id, Amount, PettyCash, CreatedAt, ScheduledFor, TxnId FROM @p1",
+            &[&tvp],
+        )
+        .await
+        .expect("TVP bulk insert failed");
+
+    assert_eq!(affected, 2, "should have inserted 2 rows");
+
+    // Read back. Use CAST(Amount AS BIGINT) * 10000 trick is overkill — the
+    // driver's existing Decimal/Uuid/NaiveDateTime decoders handle these
+    // columns directly.
+    let read = client
+        .query(
+            "SELECT Id, Amount, PettyCash, CreatedAt, ScheduledFor, TxnId
+             FROM #CurrencyDest ORDER BY Id",
+            &[],
+        )
+        .await
+        .expect("Read-back query failed");
+
+    let mut out: Vec<(
+        i32,
+        Decimal,
+        Decimal,
+        chrono::NaiveDateTime,
+        chrono::NaiveDateTime,
+        Uuid,
+    )> = Vec::new();
+    for r in read {
+        let row = r.expect("row parse");
+        out.push((
+            row.get(0).unwrap(),
+            row.get(1).unwrap(),
+            row.get(2).unwrap(),
+            row.get(3).unwrap(),
+            row.get(4).unwrap(),
+            row.get(5).unwrap(),
+        ));
+    }
+    assert_eq!(out.len(), 2);
+
+    // Row 1 — MONEY preserves 4 decimal places; SMALLMONEY preserves 4.
+    assert_eq!(out[0].0, 1);
+    assert_eq!(
+        out[0].1,
+        Decimal::from_str("12345.6789").unwrap(),
+        "MONEY round-trip must match the scaled integer written by encode_tvp_money"
+    );
+    assert_eq!(
+        out[0].2,
+        Decimal::from_str("-9.0100").unwrap(),
+        "SMALLMONEY negative value must round-trip bit-exact"
+    );
+    // DATETIME rounds to 1/300s ticks — 333ms in → 333ms ± 3ms out. Our
+    // encoder uses rounding (ms * 3 + 5) / 10 which makes 333ms → 100 ticks
+    // (99.9 → 100), which decodes back as 333ms. Assert exact.
+    assert_eq!(
+        out[0].3, created_at,
+        "DATETIME 13:14:15.333 must round-trip through 1/300s ticks"
+    );
+    // SMALLDATETIME rounds seconds-to-minutes with 30s-up: 13:14:23 → 13:14:00.
+    assert_eq!(
+        out[0].4,
+        NaiveDate::from_ymd_opt(2020, 6, 15)
+            .unwrap()
+            .and_hms_opt(13, 14, 0)
+            .unwrap(),
+        "SMALLDATETIME 13:14:23 rounds down to 13:14:00 (seconds<30)"
+    );
+    assert_eq!(
+        out[0].5, txn_id,
+        "UUID must round-trip verbatim — asymmetric bytes catch endianness bugs"
+    );
+
+    // Row 2 — negative MONEY, max-ish SMALLMONEY, epoch datetimes, nil UUID.
+    assert_eq!(out[1].0, 2);
+    assert_eq!(out[1].1, Decimal::from_str("-98765432.1000").unwrap());
+    assert_eq!(
+        out[1].2,
+        Decimal::from_str("214748.3647").unwrap(),
+        "SMALLMONEY at i32::MAX cents (21474836.47 × 10_000 wait — \
+         SMALLMONEY max is 214748.3647) must round-trip"
+    );
+    assert_eq!(
+        out[1].3,
+        NaiveDate::from_ymd_opt(1900, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap(),
+        "DATETIME epoch 1900-01-01 00:00:00"
+    );
+    assert_eq!(
+        out[1].4,
+        NaiveDate::from_ymd_opt(1900, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+    );
+    assert_eq!(out[1].5, Uuid::nil());
+
+    client.close().await.expect("Failed to close");
+}
+
+/// Exact round-trip for a SMALLDATETIME value where the seconds-to-minutes
+/// rounding must round UP (30s boundary).
+///
+/// SMALLDATETIME's wire format stores minutes (u16), so 12:34:30 rounds to
+/// 12:35 and 12:34:29 rounds to 12:34. This pins the rounding implementation
+/// to the "round half up" rule shared by `encode_smalldatetime` and the
+/// TVP path.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_tvp_smalldatetime_seconds_rounding_boundary() {
+    use chrono::NaiveDate;
+    use mssql_client::{Tvp, TvpColumn, TvpRow, TvpValue};
+    use mssql_types::{ToSql, TypeError};
+
+    struct Row {
+        id: i32,
+        ts: mssql_types::SmallDateTime,
+    }
+
+    impl Tvp for Row {
+        fn type_name() -> &'static str {
+            "dbo.SmallDTRoundList"
+        }
+
+        fn columns() -> Vec<TvpColumn> {
+            vec![
+                TvpColumn::new("Id", "INT", 0),
+                TvpColumn::new("Ts", "SMALLDATETIME", 1),
+            ]
+        }
+
+        fn to_row(&self) -> Result<TvpRow, TypeError> {
+            Ok(TvpRow::new(vec![self.id.to_sql()?, self.ts.to_sql()?]))
+        }
+    }
+
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    if let Err(e) = client
+        .execute(
+            "IF TYPE_ID('dbo.SmallDTRoundList') IS NULL
+             CREATE TYPE dbo.SmallDTRoundList AS TABLE (Id INT NOT NULL, Ts SMALLDATETIME NULL)",
+            &[],
+        )
+        .await
+    {
+        panic!("Could not create TVP type: {e:?}");
+    }
+
+    client
+        .execute(
+            "CREATE TABLE #SDT (Id INT PRIMARY KEY, Ts SMALLDATETIME NULL)",
+            &[],
+        )
+        .await
+        .unwrap();
+
+    let base = NaiveDate::from_ymd_opt(2050, 12, 31).unwrap();
+    let rows = vec![
+        Row {
+            id: 1,
+            ts: mssql_types::SmallDateTime(base.and_hms_opt(12, 34, 29).unwrap()),
+        },
+        Row {
+            id: 2,
+            ts: mssql_types::SmallDateTime(base.and_hms_opt(12, 34, 30).unwrap()),
+        },
+        Row {
+            id: 3,
+            ts: mssql_types::SmallDateTime(base.and_hms_opt(23, 59, 45).unwrap()),
+        },
+    ];
+
+    let tvp = TvpValue::new(&rows).unwrap();
+    client
+        .execute("INSERT INTO #SDT (Id, Ts) SELECT Id, Ts FROM @p1", &[&tvp])
+        .await
+        .unwrap();
+
+    let read = client
+        .query("SELECT Id, Ts FROM #SDT ORDER BY Id", &[])
+        .await
+        .unwrap();
+    let got: Vec<(i32, chrono::NaiveDateTime)> = read
+        .filter_map(|r| r.ok())
+        .map(|row| (row.get(0).unwrap(), row.get(1).unwrap()))
+        .collect();
+
+    assert_eq!(got.len(), 3);
+    // 29s → round down to 12:34
+    assert_eq!(got[0].1, base.and_hms_opt(12, 34, 0).unwrap());
+    // 30s → round up to 12:35
+    assert_eq!(got[1].1, base.and_hms_opt(12, 35, 0).unwrap());
+    // 45s → round up to 24:00, which is 2051-01-01 00:00
+    assert_eq!(
+        got[2].1,
+        NaiveDate::from_ymd_opt(2051, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap(),
+        "23:59:45 rolls over to next day"
+    );
+
+    client.close().await.unwrap();
+}
+
+/// NULL round-trip for every TVP variant with a new wire encoder.
+///
+/// Pins that `encode_tvp_null` emits the right NULL marker for MONEYN / DATETIMEN
+/// columns — a single length-zero byte — so SQL Server parses the row and stores
+/// SQL NULL (not some zero value or a parse error).
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_tvp_money_datetime_null_round_trip() {
+    use mssql_client::{Tvp, TvpColumn, TvpRow, TvpValue};
+    use mssql_types::{SqlValue, TypeError};
+
+    struct Row {
+        id: i32,
+    }
+
+    impl Tvp for Row {
+        fn type_name() -> &'static str {
+            "dbo.CurrencyNullList"
+        }
+
+        fn columns() -> Vec<TvpColumn> {
+            vec![
+                TvpColumn::new("Id", "INT", 0),
+                TvpColumn::new("M", "MONEY", 1),
+                TvpColumn::new("SM", "SMALLMONEY", 2),
+                TvpColumn::new("DT", "DATETIME", 3),
+                TvpColumn::new("SDT", "SMALLDATETIME", 4),
+            ]
+        }
+
+        fn to_row(&self) -> Result<TvpRow, TypeError> {
+            use mssql_types::ToSql;
+            Ok(TvpRow::new(vec![
+                self.id.to_sql()?,
+                SqlValue::Null,
+                SqlValue::Null,
+                SqlValue::Null,
+                SqlValue::Null,
+            ]))
+        }
+    }
+
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    if let Err(e) = client
+        .execute(
+            "IF TYPE_ID('dbo.CurrencyNullList') IS NULL
+             CREATE TYPE dbo.CurrencyNullList AS TABLE (
+                Id INT NOT NULL, M MONEY NULL, SM SMALLMONEY NULL,
+                DT DATETIME NULL, SDT SMALLDATETIME NULL)",
+            &[],
+        )
+        .await
+    {
+        panic!("Could not create TVP type: {e:?}");
+    }
+
+    client
+        .execute(
+            "CREATE TABLE #NullDest (Id INT PRIMARY KEY, M MONEY NULL, SM SMALLMONEY NULL,
+             DT DATETIME NULL, SDT SMALLDATETIME NULL)",
+            &[],
+        )
+        .await
+        .unwrap();
+
+    let rows = vec![Row { id: 1 }, Row { id: 2 }];
+    let tvp = TvpValue::new(&rows).unwrap();
+
+    client
+        .execute(
+            "INSERT INTO #NullDest (Id, M, SM, DT, SDT) SELECT Id, M, SM, DT, SDT FROM @p1",
+            &[&tvp],
+        )
+        .await
+        .expect("NULL TVP insert failed");
+
+    let read = client
+        .query(
+            "SELECT COUNT(*) FROM #NullDest WHERE M IS NULL AND SM IS NULL AND DT IS NULL AND SDT IS NULL",
+            &[],
+        )
+        .await
+        .unwrap();
+    let null_count: i32 = read
+        .filter_map(|r| r.ok())
+        .next()
+        .map(|row| row.get(0).unwrap())
+        .unwrap_or(0);
+    assert_eq!(null_count, 2, "all MONEY/SMALLMONEY/DATETIME/SMALLDATETIME values must be SQL NULL");
+
+    client.close().await.unwrap();
+}
+
 #[tokio::test]
 #[ignore = "Requires SQL Server"]
 async fn test_tvp_bulk_insert() {

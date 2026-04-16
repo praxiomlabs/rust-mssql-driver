@@ -11,6 +11,10 @@ use tds_protocol::tvp::{
     TvpColumnDef as TvpWireColumnDef, TvpEncoder, TvpWireType, encode_tvp_bit, encode_tvp_float,
     encode_tvp_int, encode_tvp_null, encode_tvp_nvarchar, encode_tvp_varbinary, encode_tvp_varchar,
 };
+#[cfg(feature = "chrono")]
+use tds_protocol::tvp::{encode_tvp_datetime, encode_tvp_smalldatetime};
+#[cfg(feature = "decimal")]
+use tds_protocol::tvp::{encode_tvp_money, encode_tvp_smallmoney};
 
 use crate::error::{Error, Result};
 use crate::state::ConnectionState;
@@ -326,6 +330,10 @@ impl<S: ConnectionState> Client<S> {
             mssql_types::TvpColumnType::DateTimeOffset { scale } => {
                 TvpWireType::DateTimeOffset { scale: *scale }
             }
+            mssql_types::TvpColumnType::Money => TvpWireType::Money,
+            mssql_types::TvpColumnType::SmallMoney => TvpWireType::SmallMoney,
+            mssql_types::TvpColumnType::DateTime => TvpWireType::DateTime,
+            mssql_types::TvpColumnType::SmallDateTime => TvpWireType::SmallDateTime,
             mssql_types::TvpColumnType::Xml => TvpWireType::Xml,
             _ => {
                 return Err(Error::Type(mssql_types::TypeError::UnsupportedConversion {
@@ -391,13 +399,44 @@ impl<S: ConnectionState> Client<S> {
             }
             #[cfg(feature = "decimal")]
             SqlValue::Decimal(d) | SqlValue::Money(d) | SqlValue::SmallMoney(d) => {
-                // TVP MONEY encoding isn't currently distinguished from DECIMAL
-                // on the wire here — the existing encode_tvp_decimal treats
-                // them uniformly. The Money/SmallMoney arms exist so these
-                // variants don't fall through to the NULL wildcard.
-                let sign = if d.is_sign_negative() { 0u8 } else { 1u8 };
-                let mantissa = d.mantissa().unsigned_abs();
-                encode_tvp_decimal(sign, mantissa, buf);
+                // Dispatch on the column wire type so that MONEY columns receive
+                // the scaled-integer MONEYN format (not DECIMAL), DATETIME2-backed
+                // columns get DECIMAL, etc. `SqlValue::Money` coming into a
+                // DECIMAL column (or vice versa) still needs to match the column
+                // metadata, so `wire_type` — not the variant tag — is the
+                // authoritative dispatch key.
+                match wire_type {
+                    TvpWireType::Money => {
+                        let scaled =
+                            match mssql_types::encode::decimal_to_money_cents_i64(*d) {
+                                Ok(v) => v,
+                                Err(_) => {
+                                    // Out-of-range values write NULL so the row
+                                    // structure stays intact; the caller can
+                                    // pre-validate to reject.
+                                    encode_tvp_null(wire_type, buf);
+                                    return;
+                                }
+                            };
+                        encode_tvp_money(scaled, buf);
+                    }
+                    TvpWireType::SmallMoney => {
+                        let scaled =
+                            match mssql_types::encode::decimal_to_smallmoney_cents_i32(*d) {
+                                Ok(v) => v,
+                                Err(_) => {
+                                    encode_tvp_null(wire_type, buf);
+                                    return;
+                                }
+                            };
+                        encode_tvp_smallmoney(scaled, buf);
+                    }
+                    _ => {
+                        let sign = if d.is_sign_negative() { 0u8 } else { 1u8 };
+                        let mantissa = d.mantissa().unsigned_abs();
+                        encode_tvp_decimal(sign, mantissa, buf);
+                    }
+                }
             }
             #[cfg(feature = "uuid")]
             SqlValue::Uuid(u) => {
@@ -426,23 +465,45 @@ impl<S: ConnectionState> Client<S> {
             }
             #[cfg(feature = "chrono")]
             SqlValue::DateTime(dt) | SqlValue::SmallDateTime(dt) => {
-                // TVP SMALLDATETIME isn't currently distinguished on the wire
-                // from DATETIME2 here — the SmallDateTime arm exists so the
-                // variant doesn't fall through to the NULL wildcard.
-                use chrono::Timelike;
-                // Time component
-                let nanos = dt.time().num_seconds_from_midnight() as u64 * 1_000_000_000
-                    + dt.time().nanosecond() as u64;
-                let intervals = nanos / 100;
-                // Date component
-                let base =
-                    chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
-                let days = dt.date().signed_duration_since(base).num_days() as u32;
-                let scale = match wire_type {
-                    TvpWireType::DateTime2 { scale } => *scale,
-                    _ => 7,
-                };
-                tds_protocol::tvp::encode_tvp_datetime2(intervals, days, scale, buf);
+                // Dispatch on the column wire type. DATETIME columns use the
+                // legacy days+ticks wire format; SMALLDATETIME uses the
+                // 4-byte days+minutes format; anything else (DATETIME2 column)
+                // gets the DATETIME2 time+date format.
+                match wire_type {
+                    TvpWireType::DateTime => {
+                        let (days, ticks) =
+                            mssql_types::encode::datetime_to_legacy_days_ticks(*dt);
+                        encode_tvp_datetime(days, ticks, buf);
+                    }
+                    TvpWireType::SmallDateTime => {
+                        match mssql_types::encode::datetime_to_smalldatetime_days_minutes(*dt) {
+                            Ok((days, minutes)) => {
+                                encode_tvp_smalldatetime(days, minutes, buf);
+                            }
+                            Err(_) => {
+                                encode_tvp_null(wire_type, buf);
+                                return;
+                            }
+                        }
+                    }
+                    _ => {
+                        use chrono::Timelike;
+                        // Time component
+                        let nanos = dt.time().num_seconds_from_midnight() as u64
+                            * 1_000_000_000
+                            + dt.time().nanosecond() as u64;
+                        let intervals = nanos / 100;
+                        // Date component
+                        let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1)
+                            .expect("epoch 0001-01-01 is valid");
+                        let days = dt.date().signed_duration_since(base).num_days() as u32;
+                        let scale = match wire_type {
+                            TvpWireType::DateTime2 { scale } => *scale,
+                            _ => 7,
+                        };
+                        tds_protocol::tvp::encode_tvp_datetime2(intervals, days, scale, buf);
+                    }
+                }
             }
             #[cfg(feature = "chrono")]
             SqlValue::DateTimeOffset(dto) => {

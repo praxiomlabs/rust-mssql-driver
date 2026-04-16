@@ -80,6 +80,14 @@ pub enum TvpColumnType {
         /// Fractional seconds precision (0-7).
         scale: u8,
     },
+    /// MONEY type (8-byte scaled integer).
+    Money,
+    /// SMALLMONEY type (4-byte scaled integer).
+    SmallMoney,
+    /// Legacy DATETIME type (8 bytes: days + 1/300s ticks).
+    DateTime,
+    /// SMALLDATETIME type (4 bytes: days + minutes).
+    SmallDateTime,
     /// XML type.
     Xml,
 }
@@ -137,8 +145,12 @@ impl TvpColumnType {
             "BIGINT" => Some(Self::BigInt),
             "REAL" => Some(Self::Real),
             "FLOAT" => Some(Self::Float),
+            "MONEY" => Some(Self::Money),
+            "SMALLMONEY" => Some(Self::SmallMoney),
             "UNIQUEIDENTIFIER" => Some(Self::UniqueIdentifier),
             "DATE" => Some(Self::Date),
+            "DATETIME" => Some(Self::DateTime),
+            "SMALLDATETIME" => Some(Self::SmallDateTime),
             "XML" => Some(Self::Xml),
             _ => None,
         }
@@ -185,23 +197,25 @@ impl TvpColumnType {
     #[must_use]
     pub const fn type_id(&self) -> u8 {
         match self {
-            Self::Bit => 0x68,                   // BITNTYPE
-            Self::TinyInt => 0x26,               // INTNTYPE (len 1)
-            Self::SmallInt => 0x26,              // INTNTYPE (len 2)
-            Self::Int => 0x26,                   // INTNTYPE (len 4)
-            Self::BigInt => 0x26,                // INTNTYPE (len 8)
-            Self::Real => 0x6D,                  // FLTNTYPE (len 4)
-            Self::Float => 0x6D,                 // FLTNTYPE (len 8)
-            Self::Decimal { .. } => 0x6C,        // DECIMALNTYPE
-            Self::NVarChar { .. } => 0xE7,       // NVARCHARTYPE
-            Self::VarChar { .. } => 0xA7,        // BIGVARCHARTYPE
-            Self::VarBinary { .. } => 0xA5,      // BIGVARBINTYPE
-            Self::UniqueIdentifier => 0x24,      // GUIDTYPE
-            Self::Date => 0x28,                  // DATETYPE
-            Self::Time { .. } => 0x29,           // TIMETYPE
-            Self::DateTime2 { .. } => 0x2A,      // DATETIME2TYPE
-            Self::DateTimeOffset { .. } => 0x2B, // DATETIMEOFFSETTYPE
-            Self::Xml => 0xF1,                   // XMLTYPE
+            Self::Bit => 0x68,                            // BITNTYPE
+            Self::TinyInt => 0x26,                        // INTNTYPE (len 1)
+            Self::SmallInt => 0x26,                       // INTNTYPE (len 2)
+            Self::Int => 0x26,                            // INTNTYPE (len 4)
+            Self::BigInt => 0x26,                         // INTNTYPE (len 8)
+            Self::Real => 0x6D,                           // FLTNTYPE (len 4)
+            Self::Float => 0x6D,                          // FLTNTYPE (len 8)
+            Self::Decimal { .. } => 0x6C,                 // DECIMALNTYPE
+            Self::NVarChar { .. } => 0xE7,                // NVARCHARTYPE
+            Self::VarChar { .. } => 0xA7,                 // BIGVARCHARTYPE
+            Self::VarBinary { .. } => 0xA5,               // BIGVARBINTYPE
+            Self::UniqueIdentifier => 0x24,               // GUIDTYPE
+            Self::Date => 0x28,                           // DATETYPE
+            Self::Time { .. } => 0x29,                    // TIMETYPE
+            Self::DateTime2 { .. } => 0x2A,               // DATETIME2TYPE
+            Self::DateTimeOffset { .. } => 0x2B,          // DATETIMEOFFSETTYPE
+            Self::Money | Self::SmallMoney => 0x6E,       // MONEYNTYPE
+            Self::DateTime | Self::SmallDateTime => 0x6F, // DATETIMENTYPE
+            Self::Xml => 0xF1,                            // XMLTYPE
         }
     }
 
@@ -229,6 +243,8 @@ impl TvpColumnType {
             Self::Time { .. } => None,
             Self::DateTime2 { .. } => None,
             Self::DateTimeOffset { .. } => None,
+            Self::Money | Self::DateTime => Some(8),
+            Self::SmallMoney | Self::SmallDateTime => Some(4),
             Self::Xml => Some(0xFFFF), // MAX
         }
     }

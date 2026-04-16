@@ -110,6 +110,14 @@ pub enum TvpWireType {
         /// Fractional seconds precision (0-7).
         scale: u8,
     },
+    /// MONEY type (8-byte scaled integer, scale 4 implicit, via MONEYN / 0x6E).
+    Money,
+    /// SMALLMONEY type (4-byte scaled integer, scale 4 implicit, via MONEYN / 0x6E).
+    SmallMoney,
+    /// Legacy DATETIME type (8 bytes: days since 1900 + 1/300s ticks, via DATETIMEN / 0x6F).
+    DateTime,
+    /// SMALLDATETIME type (4 bytes: days since 1900 + minutes, via DATETIMEN / 0x6F).
+    SmallDateTime,
     /// XML type.
     Xml,
 }
@@ -119,19 +127,21 @@ impl TvpWireType {
     #[must_use]
     pub const fn type_id(&self) -> u8 {
         match self {
-            Self::Bit => 0x68,                   // BITNTYPE
-            Self::Int { .. } => 0x26,            // INTNTYPE
-            Self::Float { .. } => 0x6D,          // FLTNTYPE
-            Self::Decimal { .. } => 0x6C,        // DECIMALNTYPE
-            Self::NVarChar { .. } => 0xE7,       // NVARCHARTYPE
-            Self::VarChar { .. } => 0xA7,        // BIGVARCHARTYPE
-            Self::VarBinary { .. } => 0xA5,      // BIGVARBINTYPE
-            Self::Guid => 0x24,                  // GUIDTYPE
-            Self::Date => 0x28,                  // DATETYPE
-            Self::Time { .. } => 0x29,           // TIMETYPE
-            Self::DateTime2 { .. } => 0x2A,      // DATETIME2TYPE
-            Self::DateTimeOffset { .. } => 0x2B, // DATETIMEOFFSETTYPE
-            Self::Xml => 0xF1,                   // XMLTYPE
+            Self::Bit => 0x68,                          // BITNTYPE
+            Self::Int { .. } => 0x26,                   // INTNTYPE
+            Self::Float { .. } => 0x6D,                 // FLTNTYPE
+            Self::Decimal { .. } => 0x6C,               // DECIMALNTYPE
+            Self::NVarChar { .. } => 0xE7,              // NVARCHARTYPE
+            Self::VarChar { .. } => 0xA7,               // BIGVARCHARTYPE
+            Self::VarBinary { .. } => 0xA5,             // BIGVARBINTYPE
+            Self::Guid => 0x24,                         // GUIDTYPE
+            Self::Date => 0x28,                         // DATETYPE
+            Self::Time { .. } => 0x29,                  // TIMETYPE
+            Self::DateTime2 { .. } => 0x2A,             // DATETIME2TYPE
+            Self::DateTimeOffset { .. } => 0x2B,        // DATETIMEOFFSETTYPE
+            Self::Money | Self::SmallMoney => 0x6E,     // MONEYNTYPE
+            Self::DateTime | Self::SmallDateTime => 0x6F, // DATETIMNTYPE
+            Self::Xml => 0xF1,                          // XMLTYPE
         }
     }
 
@@ -170,6 +180,12 @@ impl TvpWireType {
             }
             Self::Time { scale } | Self::DateTime2 { scale } | Self::DateTimeOffset { scale } => {
                 buf.put_u8(*scale);
+            }
+            Self::Money | Self::DateTime => {
+                buf.put_u8(8); // Fixed 8 bytes
+            }
+            Self::SmallMoney | Self::SmallDateTime => {
+                buf.put_u8(4); // Fixed 4 bytes
             }
             Self::Xml => {
                 // XML schema info - we use no schema
@@ -608,6 +624,50 @@ pub fn encode_tvp_decimal(sign: u8, mantissa: u128, buf: &mut BytesMut) {
     buf.put_u128_le(mantissa);
 }
 
+/// Encode a MONEY value for TVP (8 bytes).
+///
+/// The MONEY wire format is a 64-bit signed integer scaled by 10_000, written
+/// as the high 32 bits little-endian followed by the low 32 bits little-endian
+/// (MS-TDS §2.2.5.5.1.2). `scaled` is the already-scaled cents value — callers
+/// that hold a `Decimal` should multiply by 10_000 and truncate to `i64` before
+/// calling this (see `mssql_types::encode::encode_money`).
+pub fn encode_tvp_money(scaled: i64, buf: &mut BytesMut) {
+    buf.put_u8(8); // Length
+    let high = (scaled >> 32) as i32;
+    let low = (scaled & 0xFFFF_FFFF) as u32;
+    buf.put_i32_le(high);
+    buf.put_u32_le(low);
+}
+
+/// Encode a SMALLMONEY value for TVP (4 bytes).
+///
+/// `scaled` is the 32-bit signed integer scaled by 10_000, written
+/// little-endian.
+pub fn encode_tvp_smallmoney(scaled: i32, buf: &mut BytesMut) {
+    buf.put_u8(4); // Length
+    buf.put_i32_le(scaled);
+}
+
+/// Encode a legacy DATETIME value for TVP (8 bytes).
+///
+/// DATETIME wire format: days since 1900-01-01 (i32 LE) + time units since
+/// midnight (u32 LE) where each unit is 1/300 of a second.
+pub fn encode_tvp_datetime(days: i32, ticks: u32, buf: &mut BytesMut) {
+    buf.put_u8(8); // Length
+    buf.put_i32_le(days);
+    buf.put_u32_le(ticks);
+}
+
+/// Encode a SMALLDATETIME value for TVP (4 bytes).
+///
+/// SMALLDATETIME wire format: days since 1900-01-01 (u16 LE) + minutes since
+/// midnight (u16 LE). Sub-minute precision is discarded by the caller.
+pub fn encode_tvp_smalldatetime(days: u16, minutes: u16, buf: &mut BytesMut) {
+    buf.put_u8(4); // Length
+    buf.put_u16_le(days);
+    buf.put_u16_le(minutes);
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -667,5 +727,160 @@ mod tests {
         assert_eq!(buf.len(), 5);
         assert_eq!(buf[0], 4);
         assert_eq!(buf[1], 42);
+    }
+
+    #[test]
+    fn test_tvp_money_encoding_matches_rpc_layout() {
+        // $12.3400 → 123_400 cents (10_000 per unit)
+        let mut buf = BytesMut::new();
+        encode_tvp_money(123_400, &mut buf);
+
+        assert_eq!(buf.len(), 9, "length byte + 8-byte payload");
+        assert_eq!(buf[0], 8, "MONEYN length byte is 8 for MONEY");
+        // High 32 bits LE then low 32 bits LE, per MS-TDS §2.2.5.5.1.2.
+        assert_eq!(&buf[1..5], &[0, 0, 0, 0], "high word zero for small value");
+        assert_eq!(&buf[5..9], &123_400i32.to_le_bytes());
+    }
+
+    #[test]
+    fn test_tvp_money_encoding_negative_value() {
+        // -$1.2300 → -12_300 cents
+        let mut buf = BytesMut::new();
+        encode_tvp_money(-12_300, &mut buf);
+
+        assert_eq!(buf.len(), 9);
+        assert_eq!(buf[0], 8);
+        // Verify the whole 8-byte payload reconstructs to -12_300
+        let high = i32::from_le_bytes(buf[1..5].try_into().unwrap());
+        let low = u32::from_le_bytes(buf[5..9].try_into().unwrap());
+        let reconstructed = ((high as i64) << 32) | (low as i64 & 0xFFFF_FFFF);
+        assert_eq!(reconstructed, -12_300i64);
+    }
+
+    #[test]
+    fn test_tvp_money_encoding_max_value() {
+        // MONEY max: ~922_337_203_685_477.5807 → i64::MAX cents
+        let mut buf = BytesMut::new();
+        encode_tvp_money(i64::MAX, &mut buf);
+
+        assert_eq!(buf.len(), 9);
+        let high = i32::from_le_bytes(buf[1..5].try_into().unwrap());
+        let low = u32::from_le_bytes(buf[5..9].try_into().unwrap());
+        let reconstructed = ((high as i64) << 32) | (low as i64 & 0xFFFF_FFFF);
+        assert_eq!(reconstructed, i64::MAX);
+    }
+
+    #[test]
+    fn test_tvp_smallmoney_encoding() {
+        // $1.2345 → 12_345 cents (10_000 per unit)
+        let mut buf = BytesMut::new();
+        encode_tvp_smallmoney(12_345, &mut buf);
+
+        assert_eq!(buf.len(), 5, "length byte + 4-byte payload");
+        assert_eq!(buf[0], 4);
+        assert_eq!(&buf[1..5], &12_345i32.to_le_bytes());
+    }
+
+    #[test]
+    fn test_tvp_smallmoney_encoding_negative() {
+        let mut buf = BytesMut::new();
+        encode_tvp_smallmoney(-1, &mut buf);
+
+        assert_eq!(buf.len(), 5);
+        assert_eq!(buf[0], 4);
+        assert_eq!(
+            i32::from_le_bytes(buf[1..5].try_into().unwrap()),
+            -1,
+            "SMALLMONEY wraps as signed 32-bit LE"
+        );
+    }
+
+    #[test]
+    fn test_tvp_datetime_encoding() {
+        // 2020-01-01 00:00:00 (41_275 days since 1900-01-01, 0 ticks)
+        let mut buf = BytesMut::new();
+        encode_tvp_datetime(41_275, 0, &mut buf);
+
+        assert_eq!(buf.len(), 9, "length byte + 8-byte payload");
+        assert_eq!(buf[0], 8);
+        assert_eq!(&buf[1..5], &41_275i32.to_le_bytes());
+        assert_eq!(&buf[5..9], &0u32.to_le_bytes());
+    }
+
+    #[test]
+    fn test_tvp_datetime_encoding_pre_1900() {
+        // 1899-12-31 = -1 days since 1900-01-01
+        let mut buf = BytesMut::new();
+        encode_tvp_datetime(-1, 0, &mut buf);
+
+        assert_eq!(buf.len(), 9);
+        assert_eq!(
+            i32::from_le_bytes(buf[1..5].try_into().unwrap()),
+            -1,
+            "pre-1900 DATETIME uses negative days"
+        );
+    }
+
+    #[test]
+    fn test_tvp_smalldatetime_encoding() {
+        // 2020-01-01 00:00:00 = 43_830 days since 1900-01-01, 0 minutes
+        let mut buf = BytesMut::new();
+        encode_tvp_smalldatetime(43_830, 0, &mut buf);
+
+        assert_eq!(buf.len(), 5, "length byte + 4-byte payload");
+        assert_eq!(buf[0], 4);
+        assert_eq!(&buf[1..3], &43_830u16.to_le_bytes());
+        assert_eq!(&buf[3..5], &0u16.to_le_bytes());
+    }
+
+    #[test]
+    fn test_tvp_money_type_info_encoding() {
+        let mut buf = BytesMut::new();
+        TvpWireType::Money.encode_type_info(&mut buf);
+        assert_eq!(&buf[..], &[0x6E, 8], "MONEY = MONEYN type_id with max_length 8");
+    }
+
+    #[test]
+    fn test_tvp_smallmoney_type_info_encoding() {
+        let mut buf = BytesMut::new();
+        TvpWireType::SmallMoney.encode_type_info(&mut buf);
+        assert_eq!(
+            &buf[..],
+            &[0x6E, 4],
+            "SMALLMONEY = MONEYN type_id with max_length 4"
+        );
+    }
+
+    #[test]
+    fn test_tvp_datetime_type_info_encoding() {
+        let mut buf = BytesMut::new();
+        TvpWireType::DateTime.encode_type_info(&mut buf);
+        assert_eq!(
+            &buf[..],
+            &[0x6F, 8],
+            "DATETIME = DATETIMEN type_id with max_length 8"
+        );
+    }
+
+    #[test]
+    fn test_tvp_smalldatetime_type_info_encoding() {
+        let mut buf = BytesMut::new();
+        TvpWireType::SmallDateTime.encode_type_info(&mut buf);
+        assert_eq!(
+            &buf[..],
+            &[0x6F, 4],
+            "SMALLDATETIME = DATETIMEN type_id with max_length 4"
+        );
+    }
+
+    #[test]
+    fn test_tvp_null_for_money_is_length_zero() {
+        let mut buf = BytesMut::new();
+        encode_tvp_null(&TvpWireType::Money, &mut buf);
+        assert_eq!(&buf[..], &[0], "MONEYN NULL is a single length-zero byte");
+
+        let mut buf = BytesMut::new();
+        encode_tvp_null(&TvpWireType::SmallDateTime, &mut buf);
+        assert_eq!(&buf[..], &[0], "DATETIMEN NULL is a single length-zero byte");
     }
 }
