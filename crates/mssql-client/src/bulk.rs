@@ -14,27 +14,31 @@
 //! ## Usage
 //!
 //! ```rust,ignore
-//! use mssql_client::{Client, BulkInsert, BulkOptions};
+//! use mssql_client::{BulkInsertBuilder, BulkColumn, BulkOptions};
 //!
-//! let mut bulk = client
-//!     .bulk_insert("dbo.Users")
-//!     .with_columns(&["id", "name", "email"])
+//! let builder = BulkInsertBuilder::new("dbo.Users")
+//!     .with_typed_columns(vec![
+//!         BulkColumn::new("id", "INT", 0),
+//!         BulkColumn::new("name", "NVARCHAR(100)", 1),
+//!         BulkColumn::new("email", "NVARCHAR(200)", 2),
+//!     ])
 //!     .with_options(BulkOptions {
 //!         batch_size: 1000,
 //!         check_constraints: true,
 //!         fire_triggers: false,
 //!         keep_nulls: true,
 //!         table_lock: true,
-//!     })
-//!     .build()
-//!     .await?;
+//!         order_hint: None,
+//!     });
 //!
-//! // Send rows
+//! let mut writer = client.bulk_insert(&builder).await?;
+//!
+//! // Send rows — buffered in memory, sent on finish()
 //! for user in users {
-//!     bulk.send_row(&[&user.id, &user.name, &user.email]).await?;
+//!     writer.send_row(&[&user.id, &user.name, &user.email])?;
 //! }
 //!
-//! let result = bulk.finish().await?;
+//! let result = writer.finish().await?;
 //! println!("Inserted {} rows", result.rows_affected);
 //! ```
 //!
@@ -1027,6 +1031,82 @@ impl BulkInsert {
             batches_committed: self.batches_committed,
             has_errors: false,
         }
+    }
+}
+
+/// Active streaming writer for bulk insert operations.
+///
+/// Created via [`crate::client::Client::bulk_insert()`]. Rows are buffered in
+/// memory as they are added with [`send_row()`](BulkWriter::send_row), then
+/// transmitted to the server when [`finish()`](BulkWriter::finish) is called.
+///
+/// The writer holds a mutable reference to the [`Client`], preventing other
+/// operations on the connection while the bulk insert is in progress.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let builder = BulkInsertBuilder::new("dbo.Users")
+///     .with_typed_columns(vec![
+///         BulkColumn::new("id", "INT", 0),
+///         BulkColumn::new("name", "NVARCHAR(100)", 1),
+///     ]);
+///
+/// let mut writer = client.bulk_insert(&builder).await?;
+/// writer.send_row(&[&1i32, &"Alice"])?;
+/// writer.send_row(&[&2i32, &"Bob"])?;
+/// let result = writer.finish().await?;
+/// ```
+pub struct BulkWriter<'a, S: crate::state::ConnectionState> {
+    client: &'a mut crate::client::Client<S>,
+    bulk: BulkInsert,
+}
+
+impl<'a, S: crate::state::ConnectionState> BulkWriter<'a, S> {
+    /// Create a new bulk writer.
+    pub(crate) fn new(client: &'a mut crate::client::Client<S>, bulk: BulkInsert) -> Self {
+        Self { client, bulk }
+    }
+
+    /// Add a row to the bulk insert buffer.
+    ///
+    /// Values are encoded immediately but not sent to the server until
+    /// [`finish()`](BulkWriter::finish) is called. The number of values must
+    /// match the number of columns defined for this bulk insert.
+    pub fn send_row<T: ToSql>(&mut self, values: &[T]) -> Result<(), Error> {
+        self.bulk.send_row(values)
+    }
+
+    /// Add a row of pre-converted SQL values to the buffer.
+    pub fn send_row_values(&mut self, values: &[SqlValue]) -> Result<(), Error> {
+        self.bulk.send_row_values(values)
+    }
+
+    /// Get the number of rows buffered so far.
+    pub fn total_rows(&self) -> u64 {
+        self.bulk.total_rows()
+    }
+
+    /// Finish the bulk insert operation and send all buffered data to the server.
+    ///
+    /// Writes the DONE token, sends the accumulated row data as a BulkLoad
+    /// (0x07) message, and reads the server's response.
+    pub async fn finish(mut self) -> Result<BulkInsertResult, Error> {
+        let total_rows = self.bulk.total_rows();
+        tracing::debug!(total_rows = total_rows, "finishing bulk insert");
+
+        // Write DONE token and freeze the payload
+        self.bulk.write_done();
+        let payload = self.bulk.buffer.split().freeze();
+
+        // Send BulkLoad data and read server response
+        let rows_affected = self.client.send_and_read_bulk_load(payload).await?;
+
+        Ok(BulkInsertResult {
+            rows_affected,
+            batches_committed: 1,
+            has_errors: false,
+        })
     }
 }
 

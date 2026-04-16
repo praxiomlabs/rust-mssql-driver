@@ -114,7 +114,7 @@ pub mod tvp;
 pub(crate) mod validation;
 
 // Re-export commonly used types
-pub use bulk::{BulkColumn, BulkInsert, BulkInsertBuilder, BulkInsertResult, BulkOptions};
+pub use bulk::{BulkColumn, BulkInsert, BulkInsertBuilder, BulkInsertResult, BulkOptions, BulkWriter};
 pub use cancel::CancelHandle;
 pub use client::Client;
 pub use config::{ApplicationIntent, Config, RedirectConfig, RetryPolicy, TimeoutConfig};

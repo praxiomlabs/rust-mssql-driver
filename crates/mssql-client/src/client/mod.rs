@@ -264,6 +264,88 @@ impl<S: ConnectionState> Client<S> {
         self.send_rpc(&rpc).await?;
         self.read_procedure_result().await
     }
+
+    /// Start a bulk insert operation for the specified table.
+    ///
+    /// Sends the `INSERT BULK` statement to the server and returns a
+    /// [`crate::bulk::BulkWriter`] for streaming rows. The writer holds
+    /// a mutable borrow on the client, preventing other operations while
+    /// the bulk insert is in progress.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use mssql_client::{BulkInsertBuilder, BulkColumn};
+    ///
+    /// let builder = BulkInsertBuilder::new("dbo.Users")
+    ///     .with_typed_columns(vec![
+    ///         BulkColumn::new("id", "INT", 0),
+    ///         BulkColumn::new("name", "NVARCHAR(100)", 1),
+    ///     ]);
+    ///
+    /// let mut writer = client.bulk_insert(&builder).await?;
+    /// writer.send_row(&[&1i32, &"Alice"])?;
+    /// writer.send_row(&[&2i32, &"Bob"])?;
+    /// let result = writer.finish().await?;
+    /// println!("Inserted {} rows", result.rows_affected);
+    /// ```
+    pub async fn bulk_insert(
+        &mut self,
+        builder: &crate::bulk::BulkInsertBuilder,
+    ) -> Result<crate::bulk::BulkWriter<'_, S>> {
+        let stmt = builder.build_insert_bulk_statement()?;
+
+        tracing::debug!(
+            table = builder.table_name(),
+            columns = builder.columns().len(),
+            "starting bulk insert"
+        );
+
+        // Send INSERT BULK statement to put server in bulk load mode
+        self.send_sql_batch(&stmt).await?;
+
+        // Read server acknowledgment
+        self.read_execute_result().await?;
+
+        // Create bulk writer with column definitions from the builder
+        let bulk = crate::bulk::BulkInsert::new(
+            builder.columns().to_vec(),
+            builder.options().batch_size,
+        );
+
+        Ok(crate::bulk::BulkWriter::new(self, bulk))
+    }
+
+    /// Send bulk load data as a BulkLoad (0x07) message and read the server response.
+    ///
+    /// Used internally by [`crate::bulk::BulkWriter::finish()`] to transmit accumulated
+    /// row data after the `INSERT BULK` statement has been acknowledged.
+    pub(crate) async fn send_and_read_bulk_load(&mut self, payload: bytes::Bytes) -> Result<u64> {
+        let max_packet = self.config.packet_size as usize;
+
+        self.in_flight = true;
+        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
+
+        match connection {
+            #[cfg(feature = "tls")]
+            ConnectionHandle::Tls(conn) => {
+                conn.send_message(PacketType::BulkLoad, payload, max_packet)
+                    .await?;
+            }
+            #[cfg(feature = "tls")]
+            ConnectionHandle::TlsPrelogin(conn) => {
+                conn.send_message(PacketType::BulkLoad, payload, max_packet)
+                    .await?;
+            }
+            ConnectionHandle::Plain(conn) => {
+                conn.send_message(PacketType::BulkLoad, payload, max_packet)
+                    .await?;
+            }
+        }
+
+        // Read the server's Done response with row count
+        self.read_execute_result().await
+    }
 }
 
 impl Client<Ready> {

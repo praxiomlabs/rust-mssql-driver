@@ -11,7 +11,7 @@ This page compares `mssql-driver` with the other Rust options for SQL Server con
 | Built-in connection pool | Yes | No (Tiberius [#146]) | No | No |
 | Prepared statement cache | Yes (LRU) | No (Tiberius [#30], 6yr open) | Via ODBC | Yes |
 | Table-valued parameters | Yes | No | Via ODBC driver | No (sqlx-oldapi [#46]) |
-| Bulk insert (BCP) | Partial (packet encoding; transport pending) | Partial (Tiberius [#322], [#358]) | Yes | No |
+| Bulk insert (BCP) | Yes | Partial (Tiberius [#322], [#358]) | Yes | No |
 | Query cancellation | Yes (attention) | No (Tiberius [#79], [#300]) | Via ODBC | No |
 | Azure AD / Managed Identity | Yes | No (Tiberius [#175], 32 comments) | Via ODBC driver | No |
 | Cross-platform NTLM | Yes | Windows only (Tiberius [#97]) | Via ODBC driver | No (sqlx-oldapi [#13]) |
