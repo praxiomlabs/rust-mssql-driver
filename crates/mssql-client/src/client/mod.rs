@@ -1033,6 +1033,20 @@ impl Client<Ready> {
         self.in_flight
     }
 
+    /// Report whether an Always Encrypted key-store provider with the given
+    /// name is currently reachable through this client's encryption context.
+    ///
+    /// Returns `false` when the `always-encrypted` feature isn't enabled, when
+    /// the connection was opened without `column_encryption` configured, or
+    /// when no matching provider was registered.
+    #[cfg(feature = "always-encrypted")]
+    #[must_use]
+    pub fn has_encryption_provider(&self, name: &str) -> bool {
+        self.encryption_context
+            .as_ref()
+            .is_some_and(|ctx| ctx.has_provider(name))
+    }
+
     /// Get a handle for cancelling the current query.
     ///
     /// The cancel handle can be cloned and sent to other tasks, enabling
