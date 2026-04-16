@@ -325,6 +325,18 @@ impl TypeInfo {
         }
     }
 
+    /// Create type info for VARBINARY(MAX).
+    pub fn varbinary_max() -> Self {
+        Self {
+            type_id: 0xA5,            // BIGVARBINTYPE
+            max_length: Some(0xFFFF), // MAX indicator — triggers PLP encoding
+            precision: None,
+            scale: None,
+            collation: None,
+            tvp_type_name: None,
+        }
+    }
+
     /// Create type info for UNIQUEIDENTIFIER.
     pub fn uniqueidentifier() -> Self {
         Self {

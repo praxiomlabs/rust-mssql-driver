@@ -9,7 +9,7 @@ use tds_protocol::rpc::{RpcParam, TypeInfo as RpcTypeInfo};
 use tds_protocol::tvp::encode_tvp_decimal;
 use tds_protocol::tvp::{
     TvpColumnDef as TvpWireColumnDef, TvpEncoder, TvpWireType, encode_tvp_bit, encode_tvp_float,
-    encode_tvp_int, encode_tvp_null, encode_tvp_nvarchar, encode_tvp_varbinary,
+    encode_tvp_int, encode_tvp_null, encode_tvp_nvarchar, encode_tvp_varbinary, encode_tvp_varchar,
 };
 
 use crate::error::{Error, Result};
@@ -75,7 +75,16 @@ impl<S: ConnectionState> Client<S> {
                 }
             }
             SqlValue::Binary(b) => {
-                RpcParam::new(name, RpcTypeInfo::varbinary(b.len() as u16), b.clone())
+                // VARBINARY(n) accepts 1..=8000 — `varbinary(0)` is rejected by the
+                // server ("Data type 0xA5 has an invalid data length or metadata
+                // length") and anything larger must be VARBINARY(MAX) / PLP. Mirrors
+                // the NVARCHAR / VARCHAR size handling in `RpcParam::{nvarchar,varchar}`.
+                let type_info = if b.len() > 8000 {
+                    RpcTypeInfo::varbinary_max()
+                } else {
+                    RpcTypeInfo::varbinary(b.len().max(1) as u16)
+                };
+                RpcParam::new(name, type_info, b.clone())
             }
             SqlValue::Xml(s) => RpcParam::nvarchar(name, s),
             #[cfg(feature = "uuid")]
@@ -343,11 +352,17 @@ impl<S: ConnectionState> Client<S> {
                 encode_tvp_float(*v, 8, buf);
             }
             SqlValue::String(s) => {
-                let max_len = match wire_type {
-                    TvpWireType::NVarChar { max_length } => *max_length,
-                    _ => 4000,
-                };
-                encode_tvp_nvarchar(s, max_len, buf);
+                match wire_type {
+                    TvpWireType::NVarChar { max_length } => {
+                        encode_tvp_nvarchar(s, *max_length, buf);
+                    }
+                    TvpWireType::VarChar { max_length } => {
+                        encode_tvp_varchar(s, *max_length, buf);
+                    }
+                    _ => {
+                        encode_tvp_nvarchar(s, 4000, buf);
+                    }
+                }
             }
             SqlValue::Binary(b) => {
                 let max_len = match wire_type {
