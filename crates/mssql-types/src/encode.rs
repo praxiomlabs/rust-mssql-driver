@@ -345,8 +345,7 @@ pub fn datetime_to_smalldatetime_days_minutes(
     use chrono::Timelike;
     let epoch = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("epoch 1900-01-01 is valid");
 
-    let total_seconds =
-        dt.time().hour() * 3600 + dt.time().minute() * 60 + dt.time().second();
+    let total_seconds = dt.time().hour() * 3600 + dt.time().minute() * 60 + dt.time().second();
     let minutes_raw = (total_seconds + 30) / 60;
     // Carry over into the next day when seconds round up past 24:00 so that
     // the returned minute count stays within SQL Server's valid 0..1439 range.
