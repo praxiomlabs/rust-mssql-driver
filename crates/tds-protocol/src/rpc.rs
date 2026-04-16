@@ -705,7 +705,7 @@ impl RpcParam {
                     buf.put_u8(value.len() as u8);
                     buf.put_slice(value);
                 }
-                0x28 | 0x29 | 0x2A | 0x2B => {
+                0x28..=0x2B => {
                     // DATE, TIME, DATETIME2, DATETIMEOFFSET
                     buf.put_u8(value.len() as u8);
                     buf.put_slice(value);

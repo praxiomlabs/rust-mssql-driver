@@ -1024,7 +1024,7 @@ fn intervals_to_time(intervals: u64, scale: u8) -> chrono::NaiveTime {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 

@@ -363,6 +363,7 @@ impl BulkInsertBuilder {
     /// Columns will be queried from the server if not specified,
     /// but providing them explicitly is more efficient.
     #[must_use]
+    #[allow(clippy::expect_used)] // NVARCHAR(MAX) is always a supported bulk type
     pub fn with_columns(mut self, column_names: &[&str]) -> Self {
         self.columns = column_names
             .iter()
@@ -1460,7 +1461,7 @@ fn time_scale_divisor(scale: u8) -> u64 {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -1991,11 +1992,11 @@ mod tests {
         let columns = vec![
             BulkColumn::new("s", "VARCHAR(50)", 0)
                 .unwrap()
-                .with_collation(chinese.clone()),
+                .with_collation(chinese),
             // NVARCHAR also writes 5 collation bytes — should honor caller too
             BulkColumn::new("n", "NVARCHAR(50)", 1)
                 .unwrap()
-                .with_collation(chinese.clone()),
+                .with_collation(chinese),
             // VARCHAR without with_collation should keep the Latin1 default
             BulkColumn::new("d", "VARCHAR(10)", 2).unwrap(),
         ];

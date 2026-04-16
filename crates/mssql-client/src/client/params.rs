@@ -478,7 +478,6 @@ impl<S: ConnectionState> Client<S> {
                             }
                             Err(_) => {
                                 encode_tvp_null(wire_type, buf);
-                                return;
                             }
                         }
                     }

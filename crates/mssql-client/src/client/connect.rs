@@ -287,10 +287,7 @@ impl Client<Disconnected> {
                 }
                 Err(join_err) => {
                     tracing::debug!(error = %join_err, "MultiSubnetFailover: task failed");
-                    last_error = Some(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        join_err.to_string(),
-                    ));
+                    last_error = Some(std::io::Error::other(join_err.to_string()));
                 }
             }
         }

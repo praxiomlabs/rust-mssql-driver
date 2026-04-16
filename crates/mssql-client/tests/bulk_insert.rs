@@ -16,7 +16,9 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    clippy::manual_flatten
+    clippy::manual_flatten,
+    clippy::approx_constant,
+    clippy::bool_assert_comparison
 )]
 
 use mssql_client::{BulkColumn, BulkInsertBuilder, BulkOptions, Client, Config, SqlValue};
