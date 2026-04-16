@@ -38,46 +38,79 @@ impl Client<Disconnected> {
     /// let client = Client::connect(config).await?;
     /// ```
     pub async fn connect(config: Config) -> Result<Client<Ready>> {
+        let retry = config.retry.clone();
         let max_redirects = config.redirect.max_redirects;
         let follow_redirects = config.redirect.follow_redirects;
-        // Overall timeout: sum of per-attempt timeouts × max attempts, capped at 5 minutes.
-        // Each attempt can take up to connect_timeout + tls_timeout + login_timeout.
+        // Overall timeout accounts for retries + redirects per attempt, capped at 5 min.
         let per_attempt = config.timeouts.connect_timeout
             + config.timeouts.tls_timeout
             + config.timeouts.login_timeout;
-        let overall = per_attempt * (max_redirects as u32 + 1);
-        let overall = overall.min(std::time::Duration::from_secs(300));
-        let mut attempts = 0;
+        let total_attempts = (retry.max_retries + 1) * (max_redirects as u32 + 1);
+        let overall = (per_attempt * total_attempts).min(std::time::Duration::from_secs(300));
         let initial_host = config.host.clone();
         let initial_port = config.port;
-        let mut current_config = config;
 
         let result = timeout(overall, async {
-            loop {
-                attempts += 1;
-                if attempts > max_redirects + 1 {
-                    return Err(Error::TooManyRedirects { max: max_redirects });
+            let mut last_error: Option<Error> = None;
+
+            for retry_attempt in 0..=retry.max_retries {
+                if retry_attempt > 0 {
+                    let backoff = retry.backoff_for_attempt(retry_attempt);
+                    tracing::info!(
+                        retry_attempt,
+                        backoff_ms = backoff.as_millis() as u64,
+                        "retrying connection after transient error"
+                    );
+                    tokio::time::sleep(backoff).await;
                 }
 
-                match Self::try_connect(&current_config).await {
-                    Ok(client) => return Ok(client),
-                    Err(Error::Routing { host, port }) => {
-                        if !follow_redirects {
-                            return Err(Error::Routing { host, port });
+                // Each retry starts fresh with original host/port
+                let mut current_config = config.clone();
+                let mut redirect_count: u8 = 0;
+
+                let attempt_result = loop {
+                    redirect_count += 1;
+                    if redirect_count > max_redirects + 1 {
+                        break Err(Error::TooManyRedirects { max: max_redirects });
+                    }
+
+                    match Self::try_connect(&current_config).await {
+                        Ok(client) => break Ok(client),
+                        Err(Error::Routing { host, port }) => {
+                            if !follow_redirects {
+                                break Err(Error::Routing { host, port });
+                            }
+                            tracing::info!(
+                                host = %host,
+                                port = port,
+                                redirect = redirect_count,
+                                max_redirects = max_redirects,
+                                "following Azure SQL routing redirect"
+                            );
+                            current_config = current_config.with_host(&host).with_port(port);
+                            continue;
                         }
-                        tracing::info!(
-                            host = %host,
-                            port = port,
-                            attempt = attempts,
-                            max_redirects = max_redirects,
-                            "following Azure SQL routing redirect"
+                        Err(e) => break Err(e),
+                    }
+                };
+
+                match attempt_result {
+                    Ok(client) => return Ok(client),
+                    Err(ref e) if e.is_transient() && retry.should_retry(retry_attempt) => {
+                        tracing::warn!(
+                            retry_attempt,
+                            max_retries = retry.max_retries,
+                            error = %e,
+                            "transient connection error, will retry"
                         );
-                        current_config = current_config.with_host(&host).with_port(port);
-                        continue;
+                        last_error = Some(attempt_result.unwrap_err());
                     }
                     Err(e) => return Err(e),
                 }
             }
+
+            // All retries exhausted — return last error
+            Err(last_error.expect("at least one attempt was made"))
         })
         .await;
 
