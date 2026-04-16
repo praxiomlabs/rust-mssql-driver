@@ -467,7 +467,7 @@ async fn test_bulk_insert_binary_and_guid() {
 }
 
 #[tokio::test]
-#[ignore = "Requires SQL Server — NVARCHAR(MAX) PLP encoding not yet supported in BulkLoad"]
+#[ignore = "Requires SQL Server"]
 async fn test_bulk_insert_nvarchar_max() {
     let config = get_test_config().expect("SQL Server config required");
     let mut client = Client::connect(config).await.expect("Failed to connect");
@@ -485,10 +485,9 @@ async fn test_bulk_insert_nvarchar_max() {
         BulkColumn::new("content", "NVARCHAR(MAX)", 1),
     ]);
 
-    // Use a moderately large string that fits within standard encoding
-    // Note: very large strings (>4000 chars) use PLP encoding which has a
-    // known issue with BulkLoad multi-packet framing — tracked separately.
-    let large_string: String = "ABCDEFGHIJ".repeat(200); // 2,000 chars
+    // Large string covers multi-packet PLP framing (each packet is 4096 bytes
+    // by default; a 4,000-char UTF-16 string is 8,000 bytes and spans two).
+    let large_string: String = "ABCDEFGHIJ".repeat(400); // 4,000 chars
 
     let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
 
@@ -501,9 +500,15 @@ async fn test_bulk_insert_nvarchar_max() {
         .send_row_values(&[SqlValue::Int(2), SqlValue::String("short".into())])
         .expect("Failed to send row");
 
-    let result = writer.finish().await.expect("Failed to finish bulk insert");
-    assert_eq!(result.rows_affected, 2);
+    // And an empty string — exercises the zero-chunk PLP path
+    writer
+        .send_row_values(&[SqlValue::Int(3), SqlValue::String(String::new())])
+        .expect("Failed to send row");
 
+    let result = writer.finish().await.expect("Failed to finish bulk insert");
+    assert_eq!(result.rows_affected, 3);
+
+    // LEN() on NVARCHAR(MAX) returns BIGINT, not INT.
     let rows = client
         .query(
             "SELECT id, LEN(content), content FROM #BulkMax ORDER BY id",
@@ -512,17 +517,95 @@ async fn test_bulk_insert_nvarchar_max() {
         .await
         .expect("Query failed");
 
-    let data: Vec<(i32, i32, String)> = rows
+    let data: Vec<(i32, i64, String)> = rows
         .filter_map(|r| r.ok())
         .map(|row| (row.get(0).unwrap(), row.get(1).unwrap(), row.get(2).unwrap()))
         .collect();
 
-    assert_eq!(data.len(), 2);
+    assert_eq!(data.len(), 3);
     assert_eq!(data[0].0, 1);
-    assert_eq!(data[0].1, 2_000);
+    assert_eq!(data[0].1, 4_000);
     assert_eq!(data[0].2, large_string);
     assert_eq!(data[1].0, 2);
+    assert_eq!(data[1].1, 5);
     assert_eq!(data[1].2, "short");
+    assert_eq!(data[2].0, 3);
+    assert_eq!(data[2].1, 0);
+    assert_eq!(data[2].2, "");
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_varbinary_max() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client
+        .execute(
+            "CREATE TABLE #BulkVbMax (id INT NOT NULL, payload VARBINARY(MAX) NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkVbMax").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0),
+        BulkColumn::new("payload", "VARBINARY(MAX)", 1).with_nullable(true),
+    ]);
+
+    let big_blob: Vec<u8> = (0u8..=255).cycle().take(10_000).collect();
+    let small_blob: Vec<u8> = vec![0xAA, 0xBB, 0xCC, 0xDD];
+
+    let mut writer = client
+        .bulk_insert(&builder)
+        .await
+        .expect("Failed to start bulk insert");
+
+    writer
+        .send_row_values(&[SqlValue::Int(1), SqlValue::Binary(big_blob.clone().into())])
+        .expect("send row 1");
+    writer
+        .send_row_values(&[SqlValue::Int(2), SqlValue::Binary(small_blob.clone().into())])
+        .expect("send row 2");
+    writer
+        .send_row_values(&[SqlValue::Int(3), SqlValue::Binary(Vec::<u8>::new().into())])
+        .expect("send empty row");
+    writer
+        .send_row_values(&[SqlValue::Int(4), SqlValue::Null])
+        .expect("send null row");
+
+    let result = writer.finish().await.expect("Failed to finish bulk insert");
+    assert_eq!(result.rows_affected, 4);
+
+    // DATALENGTH on VARBINARY(MAX) returns BIGINT.
+    let rows = client
+        .query(
+            "SELECT id, DATALENGTH(payload), payload FROM #BulkVbMax ORDER BY id",
+            &[],
+        )
+        .await
+        .expect("Query failed");
+
+    let data: Vec<(i32, Option<i64>, Option<Vec<u8>>)> = rows
+        .filter_map(|r| r.ok())
+        .map(|row| (row.get(0).unwrap(), row.get(1).unwrap(), row.get(2).unwrap()))
+        .collect();
+
+    assert_eq!(data.len(), 4);
+    assert_eq!(data[0].0, 1);
+    assert_eq!(data[0].1, Some(10_000));
+    assert_eq!(data[0].2.as_deref(), Some(big_blob.as_slice()));
+    assert_eq!(data[1].0, 2);
+    assert_eq!(data[1].1, Some(4));
+    assert_eq!(data[1].2.as_deref(), Some(small_blob.as_slice()));
+    assert_eq!(data[2].0, 3);
+    assert_eq!(data[2].1, Some(0));
+    assert_eq!(data[2].2.as_deref(), Some(&[][..]));
+    assert_eq!(data[3].0, 4);
+    assert_eq!(data[3].1, None);
+    assert_eq!(data[3].2, None);
 
     client.close().await.expect("Failed to close");
 }

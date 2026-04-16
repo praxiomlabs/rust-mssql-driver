@@ -1095,52 +1095,49 @@ fn encode_nvarchar_value(s: &str, buf: &mut BytesMut) -> Result<(), TypeError> {
     Ok(())
 }
 
+/// PLP marker for an unknown total length (MS-TDS 2.2.5.2.3).
+/// When the client doesn't know or doesn't wish to compute the total in advance,
+/// the 8-byte ULONGLONGLEN is set to this value and the server relies on chunk
+/// framing + the 4-byte terminator to detect the end.
+const PLP_UNKNOWN_LEN: u64 = 0xFFFFFFFFFFFFFFFE;
+
 /// Encode a UTF-16 string using PLP (Partially Length-Prefixed) format.
 ///
-/// PLP format (per MS-TDS specification):
-/// - 8 bytes: total length in bytes (little-endian)
-/// - Chunks: 4-byte chunk length + data, repeated
-/// - Terminator: 4 bytes of zero
+/// PLP format (per MS-TDS 2.2.5.2.3):
+/// - 8 bytes: ULONGLONGLEN — PLP_UNKNOWN_LEN or actual total byte count
+/// - One or more chunks: 4-byte chunk length + chunk bytes
+/// - Terminator: 4-byte zero
 ///
-/// For simplicity, we send the entire value as a single chunk.
-/// This is efficient for bulk operations where we already have the complete data.
+/// We emit `PLP_UNKNOWN_LEN` for compatibility with SQL Server's BulkLoad
+/// parser. Empirically, some server versions reject a concrete total length
+/// in the BulkLoad (0x07) path even though the token-stream spec allows it
+/// ("premature end-of-message" errors for NVARCHAR(MAX) bulk inserts).
+/// Tiberius uses the same approach.
 fn encode_plp_string(utf16: &[u16], buf: &mut BytesMut) {
     let byte_len = utf16.len() * 2;
 
-    // Total length (8 bytes)
-    buf.put_u64_le(byte_len as u64);
+    buf.put_u64_le(PLP_UNKNOWN_LEN);
 
     if byte_len > 0 {
-        // Single chunk: length (4 bytes) + data
         buf.put_u32_le(byte_len as u32);
         for code_unit in utf16 {
             buf.put_u16_le(*code_unit);
         }
     }
 
-    // Terminator chunk (length = 0)
     buf.put_u32_le(0);
 }
 
 /// Encode binary data using PLP (Partially Length-Prefixed) format.
-///
-/// PLP format (per MS-TDS specification):
-/// - 8 bytes: total length in bytes (little-endian)
-/// - Chunks: 4-byte chunk length + data, repeated
-/// - Terminator: 4 bytes of zero
-///
-/// For simplicity, we send the entire value as a single chunk.
+/// See [`encode_plp_string`] for the format specification.
 fn encode_plp_binary(data: &[u8], buf: &mut BytesMut) {
-    // Total length (8 bytes)
-    buf.put_u64_le(data.len() as u64);
+    buf.put_u64_le(PLP_UNKNOWN_LEN);
 
     if !data.is_empty() {
-        // Single chunk: length (4 bytes) + data
         buf.put_u32_le(data.len() as u32);
         buf.put_slice(data);
     }
 
-    // Terminator chunk (length = 0)
     buf.put_u32_le(0);
 }
 
@@ -1523,14 +1520,14 @@ mod tests {
         encode_plp_string(&utf16, &mut buf);
 
         // Verify structure:
-        // - 8 bytes total length
+        // - 8 bytes PLP_UNKNOWN_LEN marker
         // - 4 bytes chunk length
         // - data (5 chars * 2 bytes = 10 bytes)
         // - 4 bytes terminator (0)
         assert_eq!(buf.len(), 8 + 4 + 10 + 4);
 
-        // Check total length
-        assert_eq!(&buf[0..8], &10u64.to_le_bytes());
+        // Check total length marker (PLP_UNKNOWN_LEN)
+        assert_eq!(&buf[0..8], &PLP_UNKNOWN_LEN.to_le_bytes());
 
         // Check chunk length
         assert_eq!(&buf[8..12], &10u32.to_le_bytes());
@@ -1547,14 +1544,14 @@ mod tests {
         encode_plp_binary(data, &mut buf);
 
         // Verify structure:
-        // - 8 bytes total length
+        // - 8 bytes PLP_UNKNOWN_LEN marker
         // - 4 bytes chunk length
         // - data (16 bytes)
         // - 4 bytes terminator (0)
         assert_eq!(buf.len(), 8 + 4 + 16 + 4);
 
-        // Check total length
-        assert_eq!(&buf[0..8], &16u64.to_le_bytes());
+        // Check total length marker
+        assert_eq!(&buf[0..8], &PLP_UNKNOWN_LEN.to_le_bytes());
 
         // Check chunk length
         assert_eq!(&buf[8..12], &16u32.to_le_bytes());
@@ -1573,11 +1570,11 @@ mod tests {
 
         encode_plp_string(&utf16, &mut buf);
 
-        // Empty string: total length (8) + terminator (4)
+        // Empty string: PLP_UNKNOWN_LEN (8) + terminator (4)
         assert_eq!(buf.len(), 8 + 4);
 
-        // Check total length is 0
-        assert_eq!(&buf[0..8], &0u64.to_le_bytes());
+        // Check total length marker
+        assert_eq!(&buf[0..8], &PLP_UNKNOWN_LEN.to_le_bytes());
 
         // Check terminator
         assert_eq!(&buf[8..12], &0u32.to_le_bytes());
@@ -1589,11 +1586,11 @@ mod tests {
 
         encode_plp_binary(&[], &mut buf);
 
-        // Empty binary: total length (8) + terminator (4)
+        // Empty binary: PLP_UNKNOWN_LEN (8) + terminator (4)
         assert_eq!(buf.len(), 8 + 4);
 
-        // Check total length is 0
-        assert_eq!(&buf[0..8], &0u64.to_le_bytes());
+        // Check total length marker
+        assert_eq!(&buf[0..8], &PLP_UNKNOWN_LEN.to_le_bytes());
 
         // Check terminator
         assert_eq!(&buf[8..12], &0u32.to_le_bytes());
