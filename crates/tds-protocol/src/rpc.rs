@@ -275,6 +275,31 @@ impl TypeInfo {
         }
     }
 
+    /// Create type info for VARCHAR with max length (in bytes).
+    pub fn varchar(max_len: u16) -> Self {
+        Self {
+            type_id: 0xA7,                 // BIGVARCHARTYPE
+            max_length: Some(max_len),
+            precision: None,
+            scale: None,
+            // Default collation (Latin1_General_CI_AS equivalent)
+            collation: Some([0x09, 0x04, 0xD0, 0x00, 0x34]),
+            tvp_type_name: None,
+        }
+    }
+
+    /// Create type info for VARCHAR(MAX).
+    pub fn varchar_max() -> Self {
+        Self {
+            type_id: 0xA7,            // BIGVARCHARTYPE
+            max_length: Some(0xFFFF), // MAX indicator
+            precision: None,
+            scale: None,
+            collation: Some([0x09, 0x04, 0xD0, 0x00, 0x34]),
+            tvp_type_name: None,
+        }
+    }
+
     /// Create type info for VARBINARY with max length.
     pub fn varbinary(max_len: u16) -> Self {
         Self {
@@ -390,8 +415,8 @@ impl TypeInfo {
                     buf.put_u8(len as u8);
                 }
             }
-            0xE7 | 0xA5 | 0xEF => {
-                // NVARCHARTYPE, BIGVARBINTYPE, NCHARTYPE
+            0xE7 | 0xA7 | 0xA5 | 0xEF => {
+                // NVARCHARTYPE, BIGVARCHARTYPE, BIGVARBINTYPE, NCHARTYPE
                 if let Some(len) = self.max_length {
                     buf.put_u16_le(len);
                 }
@@ -493,6 +518,49 @@ impl RpcParam {
         Self::new(name, type_info, buf.freeze())
     }
 
+    /// Create a VARCHAR parameter.
+    ///
+    /// Encodes the string as single-byte characters using Windows-1252 encoding
+    /// (when the `encoding` feature is enabled) or Latin-1 fallback. Characters
+    /// not representable in the target encoding are replaced with `?`.
+    ///
+    /// Use this instead of [`nvarchar`](Self::nvarchar) when
+    /// `SendStringParametersAsUnicode=false` to allow SQL Server to use
+    /// index seeks on VARCHAR columns.
+    pub fn varchar(name: impl Into<String>, value: &str) -> Self {
+        let encoded = Self::encode_varchar_bytes(value);
+        let byte_len = encoded.len();
+        let type_info = if byte_len > 8000 {
+            TypeInfo::varchar_max()
+        } else {
+            TypeInfo::varchar(byte_len.max(1) as u16)
+        };
+        Self::new(name, type_info, Bytes::from(encoded))
+    }
+
+    /// Encode a string as single-byte VARCHAR data.
+    fn encode_varchar_bytes(value: &str) -> Vec<u8> {
+        #[cfg(feature = "encoding")]
+        {
+            let (encoded, _, _) = encoding_rs::WINDOWS_1252.encode(value);
+            encoded.into_owned()
+        }
+        #[cfg(not(feature = "encoding"))]
+        {
+            // Latin-1 fallback: chars ≤ 0xFF pass through, others become '?'
+            value
+                .chars()
+                .map(|ch| {
+                    if (ch as u32) <= 0xFF {
+                        ch as u8
+                    } else {
+                        b'?'
+                    }
+                })
+                .collect()
+        }
+    }
+
     /// Mark as output parameter.
     #[must_use]
     pub fn as_output(mut self) -> Self {
@@ -531,8 +599,8 @@ impl RpcParam {
                     buf.put_u8(value.len() as u8);
                     buf.put_slice(value);
                 }
-                0xE7 | 0xA5 => {
-                    // NVARCHARTYPE, BIGVARBINTYPE
+                0xE7 | 0xA7 | 0xA5 => {
+                    // NVARCHARTYPE, BIGVARCHARTYPE, BIGVARBINTYPE
                     if self.type_info.max_length == Some(0xFFFF) {
                         // MAX type - use PLP format
                         // For simplicity, send as single chunk
@@ -576,7 +644,7 @@ impl RpcParam {
         } else {
             // NULL value
             match self.type_info.type_id {
-                0xE7 | 0xA5 => {
+                0xE7 | 0xA7 | 0xA5 => {
                     // Variable-length types use 0xFFFF for NULL
                     if self.type_info.max_length == Some(0xFFFF) {
                         buf.put_u64_le(0xFFFFFFFFFFFFFFFF); // PLP NULL
@@ -697,6 +765,14 @@ impl RpcRequest {
                         } else {
                             let len = p.type_info.max_length.unwrap_or(4000) / 2;
                             format!("nvarchar({len})")
+                        }
+                    }
+                    0xA7 => {
+                        if p.type_info.max_length == Some(0xFFFF) {
+                            "varchar(max)".to_string()
+                        } else {
+                            let len = p.type_info.max_length.unwrap_or(8000);
+                            format!("varchar({len})")
                         }
                     }
                     0xA5 => {
@@ -967,5 +1043,54 @@ mod tests {
 
         assert_eq!(rpc.proc_id, Some(ProcId::Unprepare));
         assert_eq!(rpc.params.len(), 1); // just the handle
+    }
+
+    #[test]
+    fn test_varchar_param() {
+        let param = RpcParam::varchar("@name", "Alice");
+        assert_eq!(param.name, "@name");
+        assert_eq!(param.type_info.type_id, 0xA7);
+        // Single-byte encoded "Alice" = 5 bytes
+        assert_eq!(param.value.as_ref().unwrap().len(), 5);
+        assert_eq!(&param.value.as_ref().unwrap()[..], b"Alice");
+    }
+
+    #[test]
+    fn test_varchar_param_max() {
+        // String > 8000 bytes should use VARCHAR(MAX)
+        let long_str = "a".repeat(9000);
+        let param = RpcParam::varchar("@big", &long_str);
+        assert_eq!(param.type_info.type_id, 0xA7);
+        assert_eq!(param.type_info.max_length, Some(0xFFFF));
+        assert_eq!(param.value.as_ref().unwrap().len(), 9000);
+    }
+
+    #[test]
+    fn test_varchar_param_declarations() {
+        let params = vec![
+            RpcParam::int("@p1", 42),
+            RpcParam::varchar("@name", "Alice"),
+        ];
+
+        let decls = RpcRequest::build_param_declarations(&params);
+        assert!(decls.contains("@p1 int"));
+        assert!(decls.contains("@name varchar(5)"));
+    }
+
+    #[test]
+    fn test_varchar_type_info_has_collation() {
+        let ti = TypeInfo::varchar(100);
+        assert_eq!(ti.type_id, 0xA7);
+        assert_eq!(ti.max_length, Some(100));
+        assert!(ti.collation.is_some());
+    }
+
+    #[test]
+    fn test_varchar_encode_round_trip() {
+        // Verify the encoded param can be serialized without panics
+        let param = RpcParam::varchar("@val", "test value");
+        let mut buf = bytes::BytesMut::new();
+        param.encode(&mut buf);
+        assert!(!buf.is_empty());
     }
 }

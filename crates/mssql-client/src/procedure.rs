@@ -78,7 +78,7 @@ impl<'a, S: ConnectionState> ProcedureBuilder<'a, S> {
     pub fn input(&mut self, name: &str, value: &(dyn crate::ToSql + Sync)) -> &mut Self {
         // Use the shared conversion logic from params.rs.
         // If conversion fails, the error is deferred to execute().
-        match Client::<S>::convert_single_param(name, value) {
+        match Client::<S>::convert_single_param(name, value, self.client.send_unicode()) {
             Ok(param) => self.params.push(param),
             Err(e) => {
                 tracing::warn!(name = name, error = %e, "failed to convert input parameter");

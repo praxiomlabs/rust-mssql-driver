@@ -23,9 +23,14 @@ impl<S: ConnectionState> Client<S> {
     /// This is the core conversion logic shared by positional parameters
     /// (`convert_params`), named procedure parameters (`ProcedureBuilder::input`),
     /// and named query parameters (`convert_named_params`).
+    ///
+    /// When `send_unicode` is `false`, `SqlValue::String` values are encoded
+    /// as VARCHAR (single-byte) instead of NVARCHAR (UTF-16), which allows
+    /// SQL Server to use index seeks on VARCHAR columns.
     pub(crate) fn sql_value_to_rpc_param(
         name: &str,
         sql_value: &mssql_types::SqlValue,
+        send_unicode: bool,
     ) -> Result<RpcParam> {
         use bytes::{BufMut, BytesMut};
         use mssql_types::SqlValue;
@@ -59,7 +64,13 @@ impl<S: ConnectionState> Client<S> {
                 buf.put_f64_le(*v);
                 RpcParam::new(name, RpcTypeInfo::float(), buf.freeze())
             }
-            SqlValue::String(s) => RpcParam::nvarchar(name, s),
+            SqlValue::String(s) => {
+                if send_unicode {
+                    RpcParam::nvarchar(name, s)
+                } else {
+                    RpcParam::varchar(name, s)
+                }
+            }
             SqlValue::Binary(b) => {
                 RpcParam::new(name, RpcTypeInfo::varbinary(b.len() as u16), b.clone())
             }
@@ -121,19 +132,23 @@ impl<S: ConnectionState> Client<S> {
     pub(crate) fn convert_single_param(
         name: &str,
         value: &(dyn crate::ToSql + Sync),
+        send_unicode: bool,
     ) -> Result<RpcParam> {
         let sql_value = value.to_sql()?;
-        Self::sql_value_to_rpc_param(name, &sql_value)
+        Self::sql_value_to_rpc_param(name, &sql_value, send_unicode)
     }
 
     /// Convert ToSql parameters to RPC parameters with auto-generated names.
-    pub(crate) fn convert_params(params: &[&(dyn crate::ToSql + Sync)]) -> Result<Vec<RpcParam>> {
+    pub(crate) fn convert_params(
+        params: &[&(dyn crate::ToSql + Sync)],
+        send_unicode: bool,
+    ) -> Result<Vec<RpcParam>> {
         params
             .iter()
             .enumerate()
             .map(|(i, p)| {
                 let name = format!("@p{}", i + 1);
-                Self::convert_single_param(&name, *p)
+                Self::convert_single_param(&name, *p, send_unicode)
             })
             .collect()
     }
@@ -144,6 +159,7 @@ impl<S: ConnectionState> Client<S> {
     /// `sp_executesql` parameter declarations.
     pub(crate) fn convert_named_params(
         params: &[crate::to_params::NamedParam],
+        send_unicode: bool,
     ) -> Result<Vec<RpcParam>> {
         params
             .iter()
@@ -153,7 +169,7 @@ impl<S: ConnectionState> Client<S> {
                 } else {
                     format!("@{}", p.name)
                 };
-                Self::sql_value_to_rpc_param(&name, &p.value)
+                Self::sql_value_to_rpc_param(&name, &p.value, send_unicode)
             })
             .collect()
     }

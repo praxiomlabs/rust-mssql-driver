@@ -266,6 +266,22 @@ pub struct Config {
     /// Default: `false`
     pub multi_subnet_failover: bool,
 
+    /// Whether to send `String`/`&str` parameters as NVARCHAR (Unicode).
+    ///
+    /// When `true` (default), string parameters are sent as NVARCHAR using
+    /// UTF-16LE encoding. This is safe for all character sets but prevents
+    /// SQL Server from using index seeks on VARCHAR columns (due to implicit
+    /// NVARCHAR→VARCHAR conversion).
+    ///
+    /// When `false`, string parameters are sent as VARCHAR using Windows-1252
+    /// encoding. This allows index seeks on VARCHAR columns but may lose data
+    /// for characters outside the Windows-1252 range.
+    ///
+    /// Set via `SendStringParametersAsUnicode=false` in connection strings.
+    ///
+    /// Default: `true`
+    pub send_string_parameters_as_unicode: bool,
+
     /// Always Encrypted configuration.
     ///
     /// When `Some`, the client will negotiate Always Encrypted support with the
@@ -309,6 +325,7 @@ impl Default for Config {
             workstation_id: None,
             language: None,
             multi_subnet_failover: false,
+            send_string_parameters_as_unicode: true,
             #[cfg(feature = "always-encrypted")]
             column_encryption: None,
         }
@@ -550,6 +567,10 @@ impl Config {
                 // --- MultiSubnetFailover ---
                 "multisubnetfailover" | "multi subnet failover" => {
                     config.multi_subnet_failover = parse_conn_bool(&key, value)?;
+                }
+                // --- String parameter encoding ---
+                "sendstringparametersasunicode" | "send string parameters as unicode" => {
+                    config.send_string_parameters_as_unicode = parse_conn_bool(&key, value)?;
                 }
                 // --- Known ADO.NET keywords not supported by this driver ---
                 "failover partner"
@@ -862,6 +883,19 @@ impl Config {
     #[must_use]
     pub fn multi_subnet_failover(mut self, enabled: bool) -> Self {
         self.multi_subnet_failover = enabled;
+        self
+    }
+
+    /// Control whether string parameters are sent as NVARCHAR (Unicode) or VARCHAR.
+    ///
+    /// When `false`, `String`/`&str` parameters are sent as VARCHAR using
+    /// Windows-1252 encoding, which allows SQL Server to use index seeks on
+    /// VARCHAR columns.
+    ///
+    /// Default: `true` (NVARCHAR)
+    #[must_use]
+    pub fn send_string_parameters_as_unicode(mut self, enabled: bool) -> Self {
+        self.send_string_parameters_as_unicode = enabled;
         self
     }
 }
@@ -1592,6 +1626,50 @@ mod tests {
     fn test_language_builder() {
         let config = Config::new().language("us_english");
         assert_eq!(config.language, Some("us_english".to_string()));
+    }
+
+    #[test]
+    fn test_send_string_parameters_as_unicode_connection_string() {
+        let config = Config::from_connection_string(
+            "Server=localhost;SendStringParametersAsUnicode=false;",
+        )
+        .unwrap();
+        assert!(!config.send_string_parameters_as_unicode);
+
+        // Space-separated variant
+        let config = Config::from_connection_string(
+            "Server=localhost;Send String Parameters As Unicode=false;",
+        )
+        .unwrap();
+        assert!(!config.send_string_parameters_as_unicode);
+
+        // Enabled explicitly
+        let config = Config::from_connection_string(
+            "Server=localhost;SendStringParametersAsUnicode=true;",
+        )
+        .unwrap();
+        assert!(config.send_string_parameters_as_unicode);
+
+        // Default is true
+        let config = Config::from_connection_string("Server=localhost;").unwrap();
+        assert!(config.send_string_parameters_as_unicode);
+    }
+
+    #[test]
+    fn test_send_string_parameters_as_unicode_builder() {
+        let config = Config::new().send_string_parameters_as_unicode(false);
+        assert!(!config.send_string_parameters_as_unicode);
+
+        let config = Config::new().send_string_parameters_as_unicode(true);
+        assert!(config.send_string_parameters_as_unicode);
+    }
+
+    #[test]
+    fn test_send_string_parameters_as_unicode_invalid_value() {
+        let result = Config::from_connection_string(
+            "Server=localhost;SendStringParametersAsUnicode=banana;",
+        );
+        assert!(result.is_err());
     }
 
     #[test]

@@ -86,6 +86,7 @@ The `Config::from_connection_string()` parser conforms to the Microsoft ADO.NET 
 - **`Current Language`** / `Language`: Sent in LOGIN7 Language field.
 - **`ConnectRetryCount`** / `ConnectRetryInterval`**: Wired to `RetryPolicy`.
 - **`MultiSubnetFailover`**: Parallel TCP connect to all resolved IPs for AG listener failover.
+- **`SendStringParametersAsUnicode`**: When `false`, sends string params as VARCHAR (Windows-1252) instead of NVARCHAR (UTF-16) for index seek compatibility.
 - **`Encrypt`**: Supports `strict`, `mandatory`, `optional`, `no_tls`, plus standard booleans.
 - **Pool keywords** (`Max Pool Size`, etc.): Recognized with info-level log directing to `PoolConfig`.
 - **Known-but-unsupported keywords** (30+): Recognized at info level instead of silently ignored.

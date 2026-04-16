@@ -255,7 +255,7 @@ impl<S: ConnectionState> Client<S> {
             "executing stored procedure"
         );
 
-        let rpc_params = Self::convert_params(params)?;
+        let rpc_params = Self::convert_params(params, self.send_unicode())?;
         let mut rpc = RpcRequest::named(proc_name);
         for param in rpc_params {
             rpc = rpc.param(param);
@@ -389,7 +389,7 @@ impl<S: ConnectionState> Client<S> {
         if params.is_empty() {
             self.send_sql_batch(sql).await?;
         } else {
-            let rpc_params = Self::convert_named_params(params)?;
+            let rpc_params = Self::convert_named_params(params, self.send_unicode())?;
             let rpc = RpcRequest::execute_sql(sql, rpc_params);
             self.send_rpc(&rpc).await?;
         }
@@ -432,12 +432,17 @@ impl<S: ConnectionState> Client<S> {
         if params.is_empty() {
             self.send_sql_batch(sql).await?;
         } else {
-            let rpc_params = Self::convert_named_params(params)?;
+            let rpc_params = Self::convert_named_params(params, self.send_unicode())?;
             let rpc = RpcRequest::execute_sql(sql, rpc_params);
             self.send_rpc(&rpc).await?;
         }
 
         self.read_execute_result().await
+    }
+
+    /// Whether string parameters are sent as NVARCHAR (Unicode).
+    pub(crate) fn send_unicode(&self) -> bool {
+        self.config.send_string_parameters_as_unicode
     }
 }
 
@@ -507,7 +512,7 @@ impl Client<Ready> {
                 self.send_sql_batch(sql).await?;
             } else {
                 // Parameterized query - use sp_executesql via RPC
-                let rpc_params = Self::convert_params(params)?;
+                let rpc_params = Self::convert_params(params, self.send_unicode())?;
                 let rpc = RpcRequest::execute_sql(sql, rpc_params);
                 self.send_rpc(&rpc).await?;
             }
@@ -610,7 +615,7 @@ impl Client<Ready> {
             self.send_sql_batch(sql).await?;
         } else {
             // Parameterized query - use sp_executesql via RPC
-            let rpc_params = Self::convert_params(params)?;
+            let rpc_params = Self::convert_params(params, self.send_unicode())?;
             let rpc = RpcRequest::execute_sql(sql, rpc_params);
             self.send_rpc(&rpc).await?;
         }
@@ -645,7 +650,7 @@ impl Client<Ready> {
                 self.send_sql_batch(sql).await?;
             } else {
                 // Parameterized statement - use sp_executesql via RPC
-                let rpc_params = Self::convert_params(params)?;
+                let rpc_params = Self::convert_params(params, self.send_unicode())?;
                 let rpc = RpcRequest::execute_sql(sql, rpc_params);
                 self.send_rpc(&rpc).await?;
             }
@@ -995,7 +1000,7 @@ impl Client<InTransaction> {
                 self.send_sql_batch(sql).await?;
             } else {
                 // Parameterized query - use sp_executesql via RPC
-                let rpc_params = Self::convert_params(params)?;
+                let rpc_params = Self::convert_params(params, self.send_unicode())?;
                 let rpc = RpcRequest::execute_sql(sql, rpc_params);
                 self.send_rpc(&rpc).await?;
             }
@@ -1044,7 +1049,7 @@ impl Client<InTransaction> {
                 self.send_sql_batch(sql).await?;
             } else {
                 // Parameterized statement - use sp_executesql via RPC
-                let rpc_params = Self::convert_params(params)?;
+                let rpc_params = Self::convert_params(params, self.send_unicode())?;
                 let rpc = RpcRequest::execute_sql(sql, rpc_params);
                 self.send_rpc(&rpc).await?;
             }
