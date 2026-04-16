@@ -27,6 +27,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 
 use crate::codec::write_utf16_string;
 use crate::prelude::*;
+use crate::token::Collation;
 
 /// Well-known stored procedure IDs.
 ///
@@ -275,27 +276,39 @@ impl TypeInfo {
         }
     }
 
+    /// Default collation bytes: Latin1_General_CI_AS (LCID 0x0409, sort ID 0x34).
+    const DEFAULT_COLLATION: [u8; 5] = [0x09, 0x04, 0xD0, 0x00, 0x34];
+
     /// Create type info for VARCHAR with max length (in bytes).
     pub fn varchar(max_len: u16) -> Self {
+        Self::varchar_with_collation(max_len, Self::DEFAULT_COLLATION)
+    }
+
+    /// Create type info for VARCHAR with max length and explicit collation.
+    pub fn varchar_with_collation(max_len: u16, collation: [u8; 5]) -> Self {
         Self {
-            type_id: 0xA7,                 // BIGVARCHARTYPE
+            type_id: 0xA7, // BIGVARCHARTYPE
             max_length: Some(max_len),
             precision: None,
             scale: None,
-            // Default collation (Latin1_General_CI_AS equivalent)
-            collation: Some([0x09, 0x04, 0xD0, 0x00, 0x34]),
+            collation: Some(collation),
             tvp_type_name: None,
         }
     }
 
     /// Create type info for VARCHAR(MAX).
     pub fn varchar_max() -> Self {
+        Self::varchar_max_with_collation(Self::DEFAULT_COLLATION)
+    }
+
+    /// Create type info for VARCHAR(MAX) with explicit collation.
+    pub fn varchar_max_with_collation(collation: [u8; 5]) -> Self {
         Self {
             type_id: 0xA7,            // BIGVARCHARTYPE
             max_length: Some(0xFFFF), // MAX indicator
             precision: None,
             scale: None,
-            collation: Some([0x09, 0x04, 0xD0, 0x00, 0x34]),
+            collation: Some(collation),
             tvp_type_name: None,
         }
     }
@@ -538,7 +551,8 @@ impl RpcParam {
         Self::new(name, type_info, Bytes::from(encoded))
     }
 
-    /// Encode a string as single-byte VARCHAR data.
+    /// Encode a string as single-byte VARCHAR data using the default
+    /// Windows-1252 encoding (or Latin-1 fallback without the `encoding` feature).
     fn encode_varchar_bytes(value: &str) -> Vec<u8> {
         #[cfg(feature = "encoding")]
         {
@@ -548,6 +562,57 @@ impl RpcParam {
         #[cfg(not(feature = "encoding"))]
         {
             // Latin-1 fallback: chars ≤ 0xFF pass through, others become '?'
+            value
+                .chars()
+                .map(|ch| {
+                    if (ch as u32) <= 0xFF {
+                        ch as u8
+                    } else {
+                        b'?'
+                    }
+                })
+                .collect()
+        }
+    }
+
+    /// Create a VARCHAR parameter using the server's collation for encoding.
+    ///
+    /// Uses the collation's character encoding instead of the default Windows-1252.
+    /// For UTF-8 collations (SQL Server 2019+), the string bytes are used directly.
+    pub fn varchar_with_collation(
+        name: impl Into<String>,
+        value: &str,
+        collation: &Collation,
+    ) -> Self {
+        let collation_bytes = collation.to_bytes();
+        let encoded = Self::encode_varchar_bytes_for_collation(value, collation);
+        let byte_len = encoded.len();
+        let type_info = if byte_len > 8000 {
+            TypeInfo::varchar_max_with_collation(collation_bytes)
+        } else {
+            TypeInfo::varchar_with_collation(byte_len.max(1) as u16, collation_bytes)
+        };
+        Self::new(name, type_info, Bytes::from(encoded))
+    }
+
+    /// Encode a string using the collation's character encoding.
+    fn encode_varchar_bytes_for_collation(value: &str, collation: &Collation) -> Vec<u8> {
+        #[cfg(feature = "encoding")]
+        {
+            if collation.is_utf8() {
+                return value.as_bytes().to_vec();
+            }
+            if let Some(encoding) = collation.encoding() {
+                let (encoded, _, _) = encoding.encode(value);
+                return encoded.into_owned();
+            }
+            // Unknown LCID — fallback to Windows-1252
+            let (encoded, _, _) = encoding_rs::WINDOWS_1252.encode(value);
+            encoded.into_owned()
+        }
+        #[cfg(not(feature = "encoding"))]
+        {
+            let _ = collation;
             value
                 .chars()
                 .map(|ch| {
@@ -1092,5 +1157,51 @@ mod tests {
         let mut buf = bytes::BytesMut::new();
         param.encode(&mut buf);
         assert!(!buf.is_empty());
+    }
+
+    #[test]
+    fn test_collation_round_trip() {
+        let collation = Collation {
+            lcid: 0x00D0_0409,
+            sort_id: 0x34,
+        };
+        let bytes = collation.to_bytes();
+        assert_eq!(bytes, [0x09, 0x04, 0xD0, 0x00, 0x34]);
+
+        let restored = Collation::from_bytes(&bytes);
+        assert_eq!(restored.lcid, collation.lcid);
+        assert_eq!(restored.sort_id, collation.sort_id);
+    }
+
+    #[test]
+    fn test_varchar_with_collation_uses_custom_collation_bytes() {
+        // Chinese_PRC_CI_AS collation (LCID 0x0804)
+        let collation = Collation {
+            lcid: 0x0804,
+            sort_id: 0,
+        };
+        let param = RpcParam::varchar_with_collation("@val", "test", &collation);
+        assert_eq!(param.type_info.type_id, 0xA7);
+        // Collation bytes should match the custom collation, not default Latin1
+        assert_eq!(
+            param.type_info.collation,
+            Some(collation.to_bytes())
+        );
+    }
+
+    #[test]
+    fn test_varchar_with_collation_default_vs_custom_differ() {
+        let default_param = RpcParam::varchar("@val", "test");
+        let custom_collation = Collation {
+            lcid: 0x0419, // Russian
+            sort_id: 0,
+        };
+        let custom_param =
+            RpcParam::varchar_with_collation("@val", "test", &custom_collation);
+        // The collation bytes should differ
+        assert_ne!(
+            default_param.type_info.collation,
+            custom_param.type_info.collation
+        );
     }
 }

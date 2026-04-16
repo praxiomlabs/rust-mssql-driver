@@ -235,6 +235,24 @@ pub struct Collation {
 }
 
 impl Collation {
+    /// Create a `Collation` from the 5-byte TDS wire format.
+    ///
+    /// Format: 4 bytes LCID (little-endian u32) + 1 byte sort ID.
+    pub fn from_bytes(bytes: &[u8; 5]) -> Self {
+        Self {
+            lcid: u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+            sort_id: bytes[4],
+        }
+    }
+
+    /// Serialize to the 5-byte TDS wire format.
+    ///
+    /// Format: 4 bytes LCID (little-endian u32) + 1 byte sort ID.
+    pub fn to_bytes(&self) -> [u8; 5] {
+        let b = self.lcid.to_le_bytes();
+        [b[0], b[1], b[2], b[3], self.sort_id]
+    }
+
     /// Returns the character encoding for this collation.
     ///
     /// This method maps the collation's LCID to the appropriate character

@@ -31,6 +31,7 @@ impl<S: ConnectionState> Client<S> {
         name: &str,
         sql_value: &mssql_types::SqlValue,
         send_unicode: bool,
+        collation: Option<&tds_protocol::token::Collation>,
     ) -> Result<RpcParam> {
         use bytes::{BufMut, BytesMut};
         use mssql_types::SqlValue;
@@ -67,6 +68,8 @@ impl<S: ConnectionState> Client<S> {
             SqlValue::String(s) => {
                 if send_unicode {
                     RpcParam::nvarchar(name, s)
+                } else if let Some(c) = collation {
+                    RpcParam::varchar_with_collation(name, s, c)
                 } else {
                     RpcParam::varchar(name, s)
                 }
@@ -138,22 +141,24 @@ impl<S: ConnectionState> Client<S> {
         name: &str,
         value: &(dyn crate::ToSql + Sync),
         send_unicode: bool,
+        collation: Option<&tds_protocol::token::Collation>,
     ) -> Result<RpcParam> {
         let sql_value = value.to_sql()?;
-        Self::sql_value_to_rpc_param(name, &sql_value, send_unicode)
+        Self::sql_value_to_rpc_param(name, &sql_value, send_unicode, collation)
     }
 
     /// Convert ToSql parameters to RPC parameters with auto-generated names.
     pub(crate) fn convert_params(
         params: &[&(dyn crate::ToSql + Sync)],
         send_unicode: bool,
+        collation: Option<&tds_protocol::token::Collation>,
     ) -> Result<Vec<RpcParam>> {
         params
             .iter()
             .enumerate()
             .map(|(i, p)| {
                 let name = format!("@p{}", i + 1);
-                Self::convert_single_param(&name, *p, send_unicode)
+                Self::convert_single_param(&name, *p, send_unicode, collation)
             })
             .collect()
     }
@@ -165,6 +170,7 @@ impl<S: ConnectionState> Client<S> {
     pub(crate) fn convert_named_params(
         params: &[crate::to_params::NamedParam],
         send_unicode: bool,
+        collation: Option<&tds_protocol::token::Collation>,
     ) -> Result<Vec<RpcParam>> {
         params
             .iter()
@@ -174,7 +180,7 @@ impl<S: ConnectionState> Client<S> {
                 } else {
                     format!("@{}", p.name)
                 };
-                Self::sql_value_to_rpc_param(&name, &p.value, send_unicode)
+                Self::sql_value_to_rpc_param(&name, &p.value, send_unicode, collation)
             })
             .collect()
     }

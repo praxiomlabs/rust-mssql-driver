@@ -357,7 +357,7 @@ impl Client<Disconnected> {
         Self::send_login7(&mut connection, &login).await?;
 
         // Process login response (with timeout to prevent hangs during redirect)
-        let (server_version, current_database, routing) = timeout(
+        let (server_version, current_database, routing, server_collation) = timeout(
             config.timeouts.login_timeout,
             Self::process_login_response(
                 &mut connection,
@@ -382,6 +382,7 @@ impl Client<Disconnected> {
             connection: Some(ConnectionHandle::Tls(connection)),
             server_version,
             current_database: current_database.clone(),
+            server_collation,
             statement_cache: StatementCache::with_default_size(),
             transaction_descriptor: 0, // Auto-commit mode initially
             needs_reset: false,        // Fresh connection, no reset needed
@@ -630,7 +631,7 @@ impl Client<Disconnected> {
                 let mut connection = Connection::new(tcp_stream);
 
                 // Process login response (comes in plaintext, with timeout)
-                let (server_version, current_database, routing) = timeout(
+                let (server_version, current_database, routing, server_collation) = timeout(
                     config.timeouts.login_timeout,
                     Self::process_login_response(
                         &mut connection,
@@ -656,6 +657,7 @@ impl Client<Disconnected> {
                     connection: Some(ConnectionHandle::Plain(connection)),
                     server_version,
                     current_database: current_database.clone(),
+                    server_collation,
                     statement_cache: StatementCache::with_default_size(),
                     transaction_descriptor: 0, // Auto-commit mode initially
                     needs_reset: false,        // Fresh connection, no reset needed
@@ -689,7 +691,7 @@ impl Client<Disconnected> {
                 Self::send_login7(&mut connection, &login).await?;
 
                 // Process login response (with timeout)
-                let (server_version, current_database, routing) = timeout(
+                let (server_version, current_database, routing, server_collation) = timeout(
                     config.timeouts.login_timeout,
                     Self::process_login_response(
                         &mut connection,
@@ -714,6 +716,7 @@ impl Client<Disconnected> {
                     connection: Some(ConnectionHandle::TlsPrelogin(connection)),
                     server_version,
                     current_database: current_database.clone(),
+                    server_collation,
                     statement_cache: StatementCache::with_default_size(),
                     transaction_descriptor: 0, // Auto-commit mode initially
                     needs_reset: false,        // Fresh connection, no reset needed
@@ -752,7 +755,7 @@ impl Client<Disconnected> {
             Self::send_login7(&mut connection, &login).await?;
 
             // Process login response (with timeout)
-            let (server_version, current_database, routing) = timeout(
+            let (server_version, current_database, routing, server_collation) = timeout(
                 config.timeouts.login_timeout,
                 Self::process_login_response(
                     &mut connection,
@@ -777,6 +780,7 @@ impl Client<Disconnected> {
                 connection: Some(ConnectionHandle::Plain(connection)),
                 server_version,
                 current_database: current_database.clone(),
+                server_collation,
                 statement_cache: StatementCache::with_default_size(),
                 transaction_descriptor: 0, // Auto-commit mode initially
                 needs_reset: false,        // Fresh connection, no reset needed
@@ -881,7 +885,7 @@ impl Client<Disconnected> {
         Self::send_login7(&mut connection, &login).await?;
 
         // Process login response (with timeout)
-        let (server_version, current_database, routing) = timeout(
+        let (server_version, current_database, routing, server_collation) = timeout(
             config.timeouts.login_timeout,
             Self::process_login_response(
                 &mut connection,
@@ -906,6 +910,7 @@ impl Client<Disconnected> {
             connection: Some(ConnectionHandle::Plain(connection)),
             server_version,
             current_database: current_database.clone(),
+            server_collation,
             statement_cache: StatementCache::with_default_size(),
             transaction_descriptor: 0,
             needs_reset: false,
@@ -1118,13 +1123,19 @@ impl Client<Disconnected> {
         #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))] negotiator: Option<
             &dyn mssql_auth::SspiNegotiator,
         >,
-    ) -> Result<(Option<u32>, Option<String>, Option<(String, u16)>)>
+    ) -> Result<(
+        Option<u32>,
+        Option<String>,
+        Option<(String, u16)>,
+        Option<tds_protocol::token::Collation>,
+    )>
     where
         T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     {
         let mut server_version = None;
         let mut database = None;
         let mut routing = None;
+        let mut collation = None;
 
         'outer: loop {
             let message = connection
@@ -1147,7 +1158,12 @@ impl Client<Disconnected> {
                         server_version = Some(ack.tds_version);
                     }
                     Token::EnvChange(env) => {
-                        Self::process_env_change(&env, &mut database, &mut routing);
+                        Self::process_env_change(
+                            &env,
+                            &mut database,
+                            &mut routing,
+                            &mut collation,
+                        );
                     }
                     #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
                     Token::Sspi(sspi_token) => {
@@ -1217,7 +1233,7 @@ impl Client<Disconnected> {
             break;
         }
 
-        Ok((server_version, database, routing))
+        Ok((server_version, database, routing, collation))
     }
 
     /// Process an EnvChange token.
@@ -1225,6 +1241,7 @@ impl Client<Disconnected> {
         env: &EnvChange,
         database: &mut Option<String>,
         routing: &mut Option<(String, u16)>,
+        collation: &mut Option<tds_protocol::token::Collation>,
     ) {
         use tds_protocol::token::EnvChangeValue;
 
@@ -1239,6 +1256,21 @@ impl Client<Disconnected> {
                 if let EnvChangeValue::Routing { ref host, port } = env.new_value {
                     tracing::info!(host = %host, port = port, "routing redirect received");
                     *routing = Some((host.clone(), port));
+                }
+            }
+            EnvChangeType::SqlCollation => {
+                if let EnvChangeValue::Binary(ref data) = env.new_value {
+                    if data.len() >= 5 {
+                        let c = tds_protocol::token::Collation::from_bytes(
+                            data[..5].try_into().unwrap(),
+                        );
+                        tracing::debug!(
+                            lcid = c.lcid,
+                            sort_id = c.sort_id,
+                            "server collation received"
+                        );
+                        *collation = Some(c);
+                    }
                 }
             }
             _ => {

@@ -42,6 +42,10 @@ pub struct Client<S: ConnectionState> {
     server_version: Option<u32>,
     /// Current database from EnvChange
     current_database: Option<String>,
+    /// Server's default collation from SqlCollation EnvChange during login.
+    /// Used when `SendStringParametersAsUnicode=false` to encode VARCHAR
+    /// parameters with the correct character encoding and collation bytes.
+    server_collation: Option<tds_protocol::token::Collation>,
     /// Prepared statement cache for query optimization
     statement_cache: StatementCache,
     /// Transaction descriptor from BeginTransaction EnvChange.
@@ -255,7 +259,7 @@ impl<S: ConnectionState> Client<S> {
             "executing stored procedure"
         );
 
-        let rpc_params = Self::convert_params(params, self.send_unicode())?;
+        let rpc_params = Self::convert_params(params, self.send_unicode(), self.server_collation())?;
         let mut rpc = RpcRequest::named(proc_name);
         for param in rpc_params {
             rpc = rpc.param(param);
@@ -389,7 +393,7 @@ impl<S: ConnectionState> Client<S> {
         if params.is_empty() {
             self.send_sql_batch(sql).await?;
         } else {
-            let rpc_params = Self::convert_named_params(params, self.send_unicode())?;
+            let rpc_params = Self::convert_named_params(params, self.send_unicode(), self.server_collation())?;
             let rpc = RpcRequest::execute_sql(sql, rpc_params);
             self.send_rpc(&rpc).await?;
         }
@@ -432,7 +436,7 @@ impl<S: ConnectionState> Client<S> {
         if params.is_empty() {
             self.send_sql_batch(sql).await?;
         } else {
-            let rpc_params = Self::convert_named_params(params, self.send_unicode())?;
+            let rpc_params = Self::convert_named_params(params, self.send_unicode(), self.server_collation())?;
             let rpc = RpcRequest::execute_sql(sql, rpc_params);
             self.send_rpc(&rpc).await?;
         }
@@ -443,6 +447,11 @@ impl<S: ConnectionState> Client<S> {
     /// Whether string parameters are sent as NVARCHAR (Unicode).
     pub(crate) fn send_unicode(&self) -> bool {
         self.config.send_string_parameters_as_unicode
+    }
+
+    /// Server's default collation, captured from ENVCHANGE during login.
+    pub(crate) fn server_collation(&self) -> Option<&tds_protocol::token::Collation> {
+        self.server_collation.as_ref()
     }
 }
 
@@ -512,7 +521,7 @@ impl Client<Ready> {
                 self.send_sql_batch(sql).await?;
             } else {
                 // Parameterized query - use sp_executesql via RPC
-                let rpc_params = Self::convert_params(params, self.send_unicode())?;
+                let rpc_params = Self::convert_params(params, self.send_unicode(), self.server_collation())?;
                 let rpc = RpcRequest::execute_sql(sql, rpc_params);
                 self.send_rpc(&rpc).await?;
             }
@@ -615,7 +624,7 @@ impl Client<Ready> {
             self.send_sql_batch(sql).await?;
         } else {
             // Parameterized query - use sp_executesql via RPC
-            let rpc_params = Self::convert_params(params, self.send_unicode())?;
+            let rpc_params = Self::convert_params(params, self.send_unicode(), self.server_collation())?;
             let rpc = RpcRequest::execute_sql(sql, rpc_params);
             self.send_rpc(&rpc).await?;
         }
@@ -650,7 +659,7 @@ impl Client<Ready> {
                 self.send_sql_batch(sql).await?;
             } else {
                 // Parameterized statement - use sp_executesql via RPC
-                let rpc_params = Self::convert_params(params, self.send_unicode())?;
+                let rpc_params = Self::convert_params(params, self.send_unicode(), self.server_collation())?;
                 let rpc = RpcRequest::execute_sql(sql, rpc_params);
                 self.send_rpc(&rpc).await?;
             }
@@ -749,6 +758,7 @@ impl Client<Ready> {
             connection: self.connection,
             server_version: self.server_version,
             current_database: self.current_database,
+            server_collation: self.server_collation,
             statement_cache: self.statement_cache,
             transaction_descriptor, // Store the descriptor from server
             needs_reset: self.needs_reset,
@@ -816,6 +826,7 @@ impl Client<Ready> {
             connection: self.connection,
             server_version: self.server_version,
             current_database: self.current_database,
+            server_collation: self.server_collation,
             statement_cache: self.statement_cache,
             transaction_descriptor,
             needs_reset: self.needs_reset,
@@ -1000,7 +1011,7 @@ impl Client<InTransaction> {
                 self.send_sql_batch(sql).await?;
             } else {
                 // Parameterized query - use sp_executesql via RPC
-                let rpc_params = Self::convert_params(params, self.send_unicode())?;
+                let rpc_params = Self::convert_params(params, self.send_unicode(), self.server_collation())?;
                 let rpc = RpcRequest::execute_sql(sql, rpc_params);
                 self.send_rpc(&rpc).await?;
             }
@@ -1049,7 +1060,7 @@ impl Client<InTransaction> {
                 self.send_sql_batch(sql).await?;
             } else {
                 // Parameterized statement - use sp_executesql via RPC
-                let rpc_params = Self::convert_params(params, self.send_unicode())?;
+                let rpc_params = Self::convert_params(params, self.send_unicode(), self.server_collation())?;
                 let rpc = RpcRequest::execute_sql(sql, rpc_params);
                 self.send_rpc(&rpc).await?;
             }
@@ -1206,6 +1217,7 @@ impl Client<InTransaction> {
             connection: self.connection,
             server_version: self.server_version,
             current_database: self.current_database,
+            server_collation: self.server_collation,
             statement_cache: self.statement_cache,
             transaction_descriptor: 0, // Reset to auto-commit mode
             needs_reset: self.needs_reset,
@@ -1253,6 +1265,7 @@ impl Client<InTransaction> {
             connection: self.connection,
             server_version: self.server_version,
             current_database: self.current_database,
+            server_collation: self.server_collation,
             statement_cache: self.statement_cache,
             transaction_descriptor: 0, // Reset to auto-commit mode
             needs_reset: self.needs_reset,
