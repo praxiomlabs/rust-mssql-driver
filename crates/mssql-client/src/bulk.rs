@@ -961,8 +961,8 @@ impl BulkInsert {
                         buf.put_u8(total_len);
                     }
                     match total_len {
-                        8 => encode_datetime_legacy(*dt, buf),
-                        4 => encode_smalldatetime(*dt, buf)?,
+                        8 => mssql_types::encode::encode_datetime_legacy(*dt, buf),
+                        4 => mssql_types::encode::encode_smalldatetime(*dt, buf)?,
                         _ => {
                             return Err(TypeError::InvalidDateTime(format!(
                                 "DATETIMEN max_length must be 4 or 8, got {total_len}"
@@ -978,6 +978,30 @@ impl BulkInsert {
                     encode_time_with_scale(dt.time(), scale, buf);
                     mssql_types::encode::encode_date(dt.date(), buf);
                 }
+            }
+            #[cfg(feature = "chrono")]
+            SqlValue::SmallDateTime(dt) => {
+                // Explicit SMALLDATETIME variant — always 4-byte days+minutes,
+                // regardless of column metadata.
+                if !is_fixed {
+                    buf.put_u8(4);
+                }
+                mssql_types::encode::encode_smalldatetime(*dt, buf)?;
+            }
+            #[cfg(feature = "decimal")]
+            SqlValue::Money(d) => {
+                // Force 8-byte MONEY encoding regardless of column metadata.
+                if !is_fixed {
+                    buf.put_u8(8);
+                }
+                mssql_types::encode::encode_money(*d, buf)?;
+            }
+            #[cfg(feature = "decimal")]
+            SqlValue::SmallMoney(d) => {
+                if !is_fixed {
+                    buf.put_u8(4);
+                }
+                mssql_types::encode::encode_smallmoney(*d, buf)?;
             }
 
             #[cfg(feature = "chrono")]
@@ -1025,60 +1049,11 @@ impl BulkInsert {
     }
 }
 
-/// Encode a DATETIME value (8 bytes): days since 1900 (`i32` LE) + time units
-/// since midnight (`u32` LE) where each unit is 1/300 of a second. Matches the
-/// decoder at `column_parser.rs::TypeId::DateTime`.
-#[cfg(feature = "chrono")]
-fn encode_datetime_legacy(dt: chrono::NaiveDateTime, buf: &mut BytesMut) {
-    use chrono::Timelike;
-    let epoch = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("epoch 1900-01-01 is valid");
-    let days = (dt.date() - epoch).num_days() as i32;
-
-    let since_midnight = dt.time().num_seconds_from_midnight() as u64 * 1000
-        + u64::from(dt.time().nanosecond()) / 1_000_000;
-    // Convert ms → 1/300s ticks: ticks = round(ms * 300 / 1000) = round(ms * 3 / 10)
-    let ticks = ((since_midnight * 3 + 5) / 10) as u32;
-
-    buf.put_i32_le(days);
-    buf.put_u32_le(ticks);
-}
-
-/// Encode a SMALLDATETIME value (4 bytes): days since 1900 (`u16` LE) +
-/// minutes since midnight (`u16` LE). Seconds are discarded — SMALLDATETIME
-/// has minute precision. Matches the decoder at
-/// `column_parser.rs::TypeId::DateTime4`.
-#[cfg(feature = "chrono")]
-fn encode_smalldatetime(dt: chrono::NaiveDateTime, buf: &mut BytesMut) -> Result<(), TypeError> {
-    use chrono::Timelike;
-    let epoch = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("epoch 1900-01-01 is valid");
-    let days_i64 = (dt.date() - epoch).num_days();
-    let days: u16 = u16::try_from(days_i64).map_err(|_| {
-        TypeError::InvalidDateTime(format!(
-            "SMALLDATETIME year must be 1900-2079, got date with {days_i64} days since 1900-01-01"
-        ))
-    })?;
-
-    // Round seconds to nearest minute (SQL Server SMALLDATETIME rounds 30s up).
-    let total_seconds = u32::from(dt.time().hour()) * 3600
-        + u32::from(dt.time().minute()) * 60
-        + u32::from(dt.time().second());
-    let minutes = ((total_seconds + 30) / 60) as u16;
-
-    buf.put_u16_le(days);
-    buf.put_u16_le(minutes);
-    Ok(())
-}
-
-/// Encode a decimal as MONEY or SMALLMONEY (fixed-point, scale 10_000).
+/// Encode a MONEY or SMALLMONEY column value with the appropriate length prefix.
 ///
-/// SQL Server MONEY stores a signed 64-bit integer scaled by 10_000.
-/// - SMALLMONEY (`max_length == 4`): 4-byte LE `i32` (cents).
-/// - MONEY (`max_length == 8`): 8-byte value written as high 32 bits LE then
-///   low 32 bits LE, forming the signed 64-bit integer (MS-TDS §2.2.5.5.1.2).
-///
-/// When `is_fixed` is true (NOT NULL column using fixed type ID 0x3C or 0x7A),
-/// no length byte precedes the payload. Otherwise a 1-byte length prefix is
-/// written (matching the MONEYN nullable variant).
+/// When `is_fixed` is true (fixed type ID 0x3C or 0x7A), no length byte
+/// precedes the payload. Otherwise a 1-byte length prefix is written
+/// (matching the MONEYN nullable variant).
 #[cfg(feature = "decimal")]
 fn encode_money_value(
     value: rust_decimal::Decimal,
@@ -1087,48 +1062,16 @@ fn encode_money_value(
     is_fixed: bool,
 ) -> Result<(), TypeError> {
     let money_bytes: u8 = col.max_length.unwrap_or(8) as u8;
-    if money_bytes != 4 && money_bytes != 8 {
-        return Err(TypeError::InvalidDecimal(format!(
-            "MONEY column has invalid max_length: {money_bytes}"
-        )));
-    }
-
-    // Re-scale the decimal so that the mantissa represents the value multiplied
-    // by 10_000. Excess precision past 4 decimal places is truncated toward zero.
-    let mantissa: i128 = value.mantissa();
-    let scale: u32 = value.scale();
-    let cents_i128: i128 = if scale <= 4 {
-        let factor = 10_i128.pow(4 - scale);
-        mantissa
-            .checked_mul(factor)
-            .ok_or(TypeError::OutOfRange { target_type: "MONEY" })?
-    } else {
-        let factor = 10_i128.pow(scale - 4);
-        mantissa / factor
-    };
-
     if !is_fixed {
         buf.put_u8(money_bytes);
     }
-
     match money_bytes {
-        4 => {
-            let cents = i32::try_from(cents_i128)
-                .map_err(|_| TypeError::OutOfRange { target_type: "SMALLMONEY" })?;
-            buf.put_i32_le(cents);
-        }
-        8 => {
-            let cents = i64::try_from(cents_i128)
-                .map_err(|_| TypeError::OutOfRange { target_type: "MONEY" })?;
-            let high = (cents >> 32) as i32;
-            let low = (cents & 0xFFFF_FFFF) as u32;
-            buf.put_i32_le(high);
-            buf.put_u32_le(low);
-        }
-        _ => unreachable!("money_bytes validated to be 4 or 8"),
+        4 => mssql_types::encode::encode_smallmoney(value, buf),
+        8 => mssql_types::encode::encode_money(value, buf),
+        _ => Err(TypeError::InvalidDecimal(format!(
+            "MONEY column has invalid max_length: {money_bytes}"
+        ))),
     }
-
-    Ok(())
 }
 
 /// Encode a string as NVARCHAR with length prefix.

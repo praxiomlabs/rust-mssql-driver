@@ -129,6 +129,10 @@ pub use tds_protocol::version::TdsVersion;
 #[cfg(feature = "zeroize")]
 pub use mssql_auth::{SecretString, SecureCredentials};
 pub use mssql_types::{FromSql, SqlValue, ToSql};
+#[cfg(feature = "decimal")]
+pub use mssql_types::{Money, SmallMoney};
+#[cfg(feature = "chrono")]
+pub use mssql_types::SmallDateTime;
 pub use procedure::ProcedureBuilder;
 pub use query::{Query, in_params};
 pub use row::{Column, Row};

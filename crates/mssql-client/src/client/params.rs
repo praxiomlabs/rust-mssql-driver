@@ -105,6 +105,18 @@ impl<S: ConnectionState> Client<S> {
                 let scale = d.scale() as u8;
                 RpcParam::new(name, RpcTypeInfo::decimal(38, scale), buf.freeze())
             }
+            #[cfg(feature = "decimal")]
+            SqlValue::Money(d) => {
+                let mut buf = BytesMut::with_capacity(8);
+                mssql_types::encode::encode_money(*d, &mut buf)?;
+                RpcParam::new(name, RpcTypeInfo::money(), buf.freeze())
+            }
+            #[cfg(feature = "decimal")]
+            SqlValue::SmallMoney(d) => {
+                let mut buf = BytesMut::with_capacity(4);
+                mssql_types::encode::encode_smallmoney(*d, &mut buf)?;
+                RpcParam::new(name, RpcTypeInfo::smallmoney(), buf.freeze())
+            }
             #[cfg(feature = "chrono")]
             SqlValue::Date(d) => {
                 let mut buf = BytesMut::with_capacity(3);
@@ -122,6 +134,12 @@ impl<S: ConnectionState> Client<S> {
                 let mut buf = BytesMut::with_capacity(8);
                 mssql_types::encode::encode_datetime2(*dt, &mut buf);
                 RpcParam::new(name, RpcTypeInfo::datetime2(7), buf.freeze())
+            }
+            #[cfg(feature = "chrono")]
+            SqlValue::SmallDateTime(dt) => {
+                let mut buf = BytesMut::with_capacity(4);
+                mssql_types::encode::encode_smalldatetime(*dt, &mut buf)?;
+                RpcParam::new(name, RpcTypeInfo::smalldatetime(), buf.freeze())
             }
             #[cfg(feature = "chrono")]
             SqlValue::DateTimeOffset(dto) => {
@@ -372,7 +390,11 @@ impl<S: ConnectionState> Client<S> {
                 encode_tvp_varbinary(b, max_len, buf);
             }
             #[cfg(feature = "decimal")]
-            SqlValue::Decimal(d) => {
+            SqlValue::Decimal(d) | SqlValue::Money(d) | SqlValue::SmallMoney(d) => {
+                // TVP MONEY encoding isn't currently distinguished from DECIMAL
+                // on the wire here — the existing encode_tvp_decimal treats
+                // them uniformly. The Money/SmallMoney arms exist so these
+                // variants don't fall through to the NULL wildcard.
                 let sign = if d.is_sign_negative() { 0u8 } else { 1u8 };
                 let mantissa = d.mantissa().unsigned_abs();
                 encode_tvp_decimal(sign, mantissa, buf);
@@ -403,7 +425,10 @@ impl<S: ConnectionState> Client<S> {
                 tds_protocol::tvp::encode_tvp_time(intervals, scale, buf);
             }
             #[cfg(feature = "chrono")]
-            SqlValue::DateTime(dt) => {
+            SqlValue::DateTime(dt) | SqlValue::SmallDateTime(dt) => {
+                // TVP SMALLDATETIME isn't currently distinguished on the wire
+                // from DATETIME2 here — the SmallDateTime arm exists so the
+                // variant doesn't fall through to the NULL wildcard.
                 use chrono::Timelike;
                 // Time component
                 let nanos = dt.time().num_seconds_from_midnight() as u64 * 1_000_000_000

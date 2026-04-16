@@ -24,6 +24,10 @@ enum FuzzSqlValue {
     Binary(Vec<u8>),
     // Decimal: use i64 mantissa + scale to construct valid Decimal values
     Decimal { mantissa: i64, scale: u8 },
+    // Money: i64 mantissa rescaled to 10_000
+    Money { mantissa: i64, scale: u8 },
+    // SmallMoney: i32 mantissa rescaled to 10_000
+    SmallMoney { mantissa: i32, scale: u8 },
     // UUID: construct from raw bytes
     Uuid([u8; 16]),
     // Date: days since epoch (constrained to valid range)
@@ -32,6 +36,8 @@ enum FuzzSqlValue {
     Time(u64),
     // DateTime: date days + time nanoseconds
     DateTime { days: u32, nanos: u64 },
+    // SmallDateTime: days since 1900 + minutes since midnight (constrained)
+    SmallDateTime { days: u16, minutes: u16 },
     // DateTimeOffset: datetime + offset minutes
     DateTimeOffset { days: u32, nanos: u64, offset_minutes: i16 },
     // Xml: string content
@@ -56,6 +62,16 @@ impl FuzzSqlValue {
                 // scale must be 0..=28 for rust_decimal
                 let _ = d.set_scale(scale.min(28) as u32);
                 SqlValue::Decimal(d)
+            }
+            FuzzSqlValue::Money { mantissa, scale } => {
+                let mut d = rust_decimal::Decimal::from(mantissa);
+                let _ = d.set_scale(scale.min(28) as u32);
+                SqlValue::Money(d)
+            }
+            FuzzSqlValue::SmallMoney { mantissa, scale } => {
+                let mut d = rust_decimal::Decimal::from(mantissa as i64);
+                let _ = d.set_scale(scale.min(28) as u32);
+                SqlValue::SmallMoney(d)
             }
             FuzzSqlValue::Uuid(bytes) => SqlValue::Uuid(uuid::Uuid::from_bytes(bytes)),
             FuzzSqlValue::Date(days) => {
@@ -85,6 +101,16 @@ impl FuzzSqlValue {
                 let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nsec)
                     .unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap());
                 SqlValue::DateTime(chrono::NaiveDateTime::new(date, time))
+            }
+            FuzzSqlValue::SmallDateTime { days, minutes } => {
+                // SMALLDATETIME range: 1900-01-01 through 2079-06-06 (≈65_535 days).
+                let base =
+                    chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
+                let date = base + chrono::Duration::days(days as i64);
+                let total_secs = (minutes as u32 % 1440) * 60;
+                let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(total_secs, 0)
+                    .unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+                SqlValue::SmallDateTime(chrono::NaiveDateTime::new(date, time))
             }
             FuzzSqlValue::DateTimeOffset { days, nanos, offset_minutes } => {
                 let days = days % 3_652_059;

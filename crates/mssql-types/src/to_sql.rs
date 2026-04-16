@@ -176,6 +176,28 @@ impl ToSql for rust_decimal::Decimal {
     }
 }
 
+#[cfg(feature = "decimal")]
+impl ToSql for crate::value::Money {
+    fn to_sql(&self) -> Result<SqlValue, TypeError> {
+        Ok(SqlValue::Money(self.0))
+    }
+
+    fn sql_type(&self) -> &'static str {
+        "MONEY"
+    }
+}
+
+#[cfg(feature = "decimal")]
+impl ToSql for crate::value::SmallMoney {
+    fn to_sql(&self) -> Result<SqlValue, TypeError> {
+        Ok(SqlValue::SmallMoney(self.0))
+    }
+
+    fn sql_type(&self) -> &'static str {
+        "SMALLMONEY"
+    }
+}
+
 #[cfg(feature = "chrono")]
 impl ToSql for chrono::NaiveDate {
     fn to_sql(&self) -> Result<SqlValue, TypeError> {
@@ -206,6 +228,17 @@ impl ToSql for chrono::NaiveDateTime {
 
     fn sql_type(&self) -> &'static str {
         "DATETIME2"
+    }
+}
+
+#[cfg(feature = "chrono")]
+impl ToSql for crate::value::SmallDateTime {
+    fn to_sql(&self) -> Result<SqlValue, TypeError> {
+        Ok(SqlValue::SmallDateTime(self.0))
+    }
+
+    fn sql_type(&self) -> &'static str {
+        "SMALLDATETIME"
     }
 }
 

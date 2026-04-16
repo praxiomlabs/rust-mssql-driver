@@ -409,6 +409,42 @@ impl TypeInfo {
         }
     }
 
+    /// Create type info for MONEY (8-byte scaled integer via MONEYN / 0x6E).
+    pub fn money() -> Self {
+        Self {
+            type_id: 0x6E, // MONEYNTYPE
+            max_length: Some(8),
+            precision: None,
+            scale: None,
+            collation: None,
+            tvp_type_name: None,
+        }
+    }
+
+    /// Create type info for SMALLMONEY (4-byte scaled integer via MONEYN / 0x6E).
+    pub fn smallmoney() -> Self {
+        Self {
+            type_id: 0x6E, // MONEYNTYPE
+            max_length: Some(4),
+            precision: None,
+            scale: None,
+            collation: None,
+            tvp_type_name: None,
+        }
+    }
+
+    /// Create type info for SMALLDATETIME (4-byte days+minutes via DATETIMEN / 0x6F).
+    pub fn smalldatetime() -> Self {
+        Self {
+            type_id: 0x6F, // DATETIMENTYPE
+            max_length: Some(4),
+            precision: None,
+            scale: None,
+            collation: None,
+            tvp_type_name: None,
+        }
+    }
+
     /// Create type info for a Table-Valued Parameter.
     ///
     /// # Arguments
@@ -434,8 +470,8 @@ impl TypeInfo {
 
         // Variable-length types need max length
         match self.type_id {
-            0x26 | 0x68 | 0x6D => {
-                // INTNTYPE, BITNTYPE, FLTNTYPE
+            0x26 | 0x68 | 0x6D | 0x6E | 0x6F => {
+                // INTNTYPE, BITNTYPE, FLTNTYPE, MONEYNTYPE, DATETIMENTYPE
                 if let Some(len) = self.max_length {
                     buf.put_u8(len as u8);
                 }
@@ -650,8 +686,8 @@ impl RpcParam {
                     buf.put_u8(value.len() as u8);
                     buf.put_slice(value);
                 }
-                0x68 | 0x6D => {
-                    // BITNTYPE, FLTNTYPE
+                0x68 | 0x6D | 0x6E | 0x6F => {
+                    // BITNTYPE, FLTNTYPE, MONEYNTYPE, DATETIMENTYPE
                     buf.put_u8(value.len() as u8);
                     buf.put_slice(value);
                 }
@@ -858,6 +894,14 @@ impl RpcRequest {
                         let scale = p.type_info.scale.unwrap_or(0);
                         format!("decimal({precision}, {scale})")
                     }
+                    0x6E => match p.type_info.max_length {
+                        Some(4) => "smallmoney".to_string(),
+                        _ => "money".to_string(),
+                    },
+                    0x6F => match p.type_info.max_length {
+                        Some(4) => "smalldatetime".to_string(),
+                        _ => "datetime".to_string(),
+                    },
                     0xF3 => {
                         // TVP - Table-Valued Parameter
                         // Must be declared with the table type name and READONLY
@@ -1194,6 +1238,63 @@ mod tests {
             param.type_info.collation,
             Some(collation.to_bytes())
         );
+    }
+
+    #[test]
+    fn test_money_type_info() {
+        let ti = TypeInfo::money();
+        assert_eq!(ti.type_id, 0x6E);
+        assert_eq!(ti.max_length, Some(8));
+    }
+
+    #[test]
+    fn test_smallmoney_type_info() {
+        let ti = TypeInfo::smallmoney();
+        assert_eq!(ti.type_id, 0x6E);
+        assert_eq!(ti.max_length, Some(4));
+    }
+
+    #[test]
+    fn test_smalldatetime_type_info() {
+        let ti = TypeInfo::smalldatetime();
+        assert_eq!(ti.type_id, 0x6F);
+        assert_eq!(ti.max_length, Some(4));
+    }
+
+    #[test]
+    fn test_money_param_declarations() {
+        let decls = RpcRequest::build_param_declarations(&[
+            RpcParam::new("@m", TypeInfo::money(), Bytes::from_static(&[0u8; 8])),
+            RpcParam::new(
+                "@sm",
+                TypeInfo::smallmoney(),
+                Bytes::from_static(&[0u8; 4]),
+            ),
+            RpcParam::new(
+                "@sdt",
+                TypeInfo::smalldatetime(),
+                Bytes::from_static(&[0u8; 4]),
+            ),
+        ]);
+        assert!(decls.contains("@m money"), "got: {decls}");
+        assert!(decls.contains("@sm smallmoney"), "got: {decls}");
+        assert!(decls.contains("@sdt smalldatetime"), "got: {decls}");
+    }
+
+    #[test]
+    fn test_money_typeinfo_encodes_max_length_byte() {
+        let mut buf = bytes::BytesMut::new();
+        TypeInfo::money().encode(&mut buf);
+        // type_id 0x6E + max_length byte 0x08
+        assert_eq!(&buf[..], &[0x6E, 0x08]);
+
+        let mut buf = bytes::BytesMut::new();
+        TypeInfo::smallmoney().encode(&mut buf);
+        assert_eq!(&buf[..], &[0x6E, 0x04]);
+
+        let mut buf = bytes::BytesMut::new();
+        TypeInfo::smalldatetime().encode(&mut buf);
+        assert_eq!(&buf[..], &[0x6F, 0x04]);
     }
 
     #[test]

@@ -49,3 +49,7 @@ pub use from_sql::FromSql;
 pub use to_sql::ToSql;
 pub use tvp::{TvpColumnDef, TvpColumnType, TvpData, TvpError};
 pub use value::SqlValue;
+#[cfg(feature = "decimal")]
+pub use value::{Money, SmallMoney};
+#[cfg(feature = "chrono")]
+pub use value::SmallDateTime;

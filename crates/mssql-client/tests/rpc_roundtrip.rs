@@ -420,6 +420,180 @@ async fn test_rpc_roundtrip_decimal() {
 }
 
 // =============================================================================
+// MONEY / SMALLMONEY / SMALLDATETIME (item 2.7 — unblocks 5.11)
+// =============================================================================
+
+#[cfg(feature = "decimal")]
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_rpc_roundtrip_money() {
+    use mssql_client::Money;
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    let mut client = connect().await;
+
+    // MONEY range: -922,337,203,685,477.5808 to +922,337,203,685,477.5807
+    // Precision: 4 decimal places (scaled integer × 10_000).
+    let cases = [
+        Decimal::from_str("0").unwrap(),
+        Decimal::from_str("0.0001").unwrap(), // smallest positive unit
+        Decimal::from_str("-0.0001").unwrap(),
+        Decimal::from_str("1.00").unwrap(),
+        Decimal::from_str("-1.00").unwrap(),
+        Decimal::from_str("12345.6789").unwrap(),
+        Decimal::from_str("-12345.6789").unwrap(),
+        Decimal::from_str("922337203685477.5807").unwrap(), // MONEY max
+        Decimal::from_str("-922337203685477.5808").unwrap(), // MONEY min
+    ];
+
+    for input in cases {
+        let rows = client
+            .query("SELECT @p1 AS v", &[&Money(input)])
+            .await
+            .unwrap_or_else(|e| panic!("Query failed for money {input}: {e}"));
+        let row = rows.into_iter().next().expect("row").expect("row err");
+        let got: Decimal = row.get(0).expect("get decimal");
+        assert_eq!(got, input, "money round-trip mismatch for {input}");
+    }
+}
+
+#[cfg(feature = "decimal")]
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_rpc_roundtrip_smallmoney() {
+    use mssql_client::SmallMoney;
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    let mut client = connect().await;
+
+    // SMALLMONEY range: -214,748.3648 to +214,748.3647 (scaled integer × 10_000 → i32).
+    let cases = [
+        Decimal::from_str("0").unwrap(),
+        Decimal::from_str("0.0001").unwrap(),
+        Decimal::from_str("-0.0001").unwrap(),
+        Decimal::from_str("100.50").unwrap(),
+        Decimal::from_str("-100.50").unwrap(),
+        Decimal::from_str("214748.3647").unwrap(), // SMALLMONEY max
+        Decimal::from_str("-214748.3648").unwrap(), // SMALLMONEY min
+    ];
+
+    for input in cases {
+        let rows = client
+            .query("SELECT @p1 AS v", &[&SmallMoney(input)])
+            .await
+            .unwrap_or_else(|e| panic!("Query failed for smallmoney {input}: {e}"));
+        let row = rows.into_iter().next().expect("row").expect("row err");
+        let got: Decimal = row.get(0).expect("get decimal");
+        assert_eq!(got, input, "smallmoney round-trip mismatch for {input}");
+    }
+}
+
+#[cfg(feature = "decimal")]
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_rpc_roundtrip_money_truncation() {
+    // MONEY has 4-decimal precision. Values with more decimals are truncated
+    // toward zero during encoding. Verify the truncation behaviour is consistent.
+    use mssql_client::Money;
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    let mut client = connect().await;
+    // Send 0.12345 → MONEY truncates to 0.1234
+    let input = Decimal::from_str("0.12345").unwrap();
+    let expected = Decimal::from_str("0.1234").unwrap();
+    let rows = client
+        .query("SELECT @p1 AS v", &[&Money(input)])
+        .await
+        .expect("Query failed");
+    let row = rows.into_iter().next().expect("row").expect("row err");
+    let got: Decimal = row.get(0).expect("get decimal");
+    assert_eq!(got, expected, "money 5-decimal should truncate to 4-decimal");
+}
+
+#[cfg(feature = "chrono")]
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_rpc_roundtrip_smalldatetime() {
+    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+    use mssql_client::SmallDateTime;
+
+    let mut client = connect().await;
+
+    // SMALLDATETIME range: 1900-01-01 00:00 through 2079-06-06 23:59.
+    // Precision: 1 minute (seconds are rounded to nearest minute on the wire).
+    let cases = [
+        // Epoch
+        (
+            NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(1900, 1, 1).unwrap(),
+                NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+            ),
+            NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(1900, 1, 1).unwrap(),
+                NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+            ),
+        ),
+        // Minute precision — exact input, exact output.
+        (
+            NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2026, 4, 16).unwrap(),
+                NaiveTime::from_hms_opt(12, 34, 0).unwrap(),
+            ),
+            NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2026, 4, 16).unwrap(),
+                NaiveTime::from_hms_opt(12, 34, 0).unwrap(),
+            ),
+        ),
+        // Seconds 0..29 round DOWN.
+        (
+            NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2020, 6, 15).unwrap(),
+                NaiveTime::from_hms_opt(10, 20, 29).unwrap(),
+            ),
+            NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2020, 6, 15).unwrap(),
+                NaiveTime::from_hms_opt(10, 20, 0).unwrap(),
+            ),
+        ),
+        // Seconds ≥30 round UP.
+        (
+            NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2020, 6, 15).unwrap(),
+                NaiveTime::from_hms_opt(10, 20, 30).unwrap(),
+            ),
+            NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2020, 6, 15).unwrap(),
+                NaiveTime::from_hms_opt(10, 21, 0).unwrap(),
+            ),
+        ),
+        // Near max — 2079-06-06 at 23:59 is the documented SMALLDATETIME upper bound.
+        (
+            NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2079, 6, 6).unwrap(),
+                NaiveTime::from_hms_opt(23, 59, 0).unwrap(),
+            ),
+            NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2079, 6, 6).unwrap(),
+                NaiveTime::from_hms_opt(23, 59, 0).unwrap(),
+            ),
+        ),
+    ];
+
+    for (input, expected) in cases {
+        let rows = client
+            .query("SELECT @p1 AS v", &[&SmallDateTime(input)])
+            .await
+            .unwrap_or_else(|e| panic!("Query failed for smalldatetime {input}: {e}"));
+        let row = rows.into_iter().next().expect("row").expect("row err");
+        let got: NaiveDateTime = row.get(0).expect("get datetime");
+        assert_eq!(got, expected, "smalldatetime round-trip for {input}");
+    }
+}
+
+// =============================================================================
 // UUID (uuid feature — default)
 // =============================================================================
 

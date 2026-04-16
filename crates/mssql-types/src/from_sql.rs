@@ -119,7 +119,7 @@ impl FromSql for f64 {
             SqlValue::Double(v) => Ok(*v),
             SqlValue::Float(v) => Ok(*v as f64),
             #[cfg(feature = "decimal")]
-            SqlValue::Decimal(v) => {
+            SqlValue::Decimal(v) | SqlValue::Money(v) | SqlValue::SmallMoney(v) => {
                 use rust_decimal::prelude::ToPrimitive;
                 v.to_f64().ok_or_else(|| TypeError::TypeMismatch {
                     expected: "f64",
@@ -198,6 +198,7 @@ impl FromSql for rust_decimal::Decimal {
     fn from_sql(value: &SqlValue) -> Result<Self, TypeError> {
         match value {
             SqlValue::Decimal(v) => Ok(*v),
+            SqlValue::Money(v) | SqlValue::SmallMoney(v) => Ok(*v),
             SqlValue::Int(v) => Ok(rust_decimal::Decimal::from(*v)),
             SqlValue::BigInt(v) => Ok(rust_decimal::Decimal::from(*v)),
             SqlValue::String(s) => s
@@ -217,7 +218,7 @@ impl FromSql for chrono::NaiveDate {
     fn from_sql(value: &SqlValue) -> Result<Self, TypeError> {
         match value {
             SqlValue::Date(v) => Ok(*v),
-            SqlValue::DateTime(v) => Ok(v.date()),
+            SqlValue::DateTime(v) | SqlValue::SmallDateTime(v) => Ok(v.date()),
             SqlValue::Null => Err(TypeError::UnexpectedNull),
             _ => Err(TypeError::TypeMismatch {
                 expected: "NaiveDate",
@@ -232,7 +233,7 @@ impl FromSql for chrono::NaiveTime {
     fn from_sql(value: &SqlValue) -> Result<Self, TypeError> {
         match value {
             SqlValue::Time(v) => Ok(*v),
-            SqlValue::DateTime(v) => Ok(v.time()),
+            SqlValue::DateTime(v) | SqlValue::SmallDateTime(v) => Ok(v.time()),
             SqlValue::Null => Err(TypeError::UnexpectedNull),
             _ => Err(TypeError::TypeMismatch {
                 expected: "NaiveTime",
@@ -246,7 +247,7 @@ impl FromSql for chrono::NaiveTime {
 impl FromSql for chrono::NaiveDateTime {
     fn from_sql(value: &SqlValue) -> Result<Self, TypeError> {
         match value {
-            SqlValue::DateTime(v) => Ok(*v),
+            SqlValue::DateTime(v) | SqlValue::SmallDateTime(v) => Ok(*v),
             SqlValue::DateTimeOffset(v) => Ok(v.naive_utc()),
             SqlValue::Null => Err(TypeError::UnexpectedNull),
             _ => Err(TypeError::TypeMismatch {
@@ -276,7 +277,7 @@ impl FromSql for chrono::DateTime<chrono::Utc> {
     fn from_sql(value: &SqlValue) -> Result<Self, TypeError> {
         match value {
             SqlValue::DateTimeOffset(v) => Ok(v.to_utc()),
-            SqlValue::DateTime(v) => {
+            SqlValue::DateTime(v) | SqlValue::SmallDateTime(v) => {
                 Ok(chrono::DateTime::from_naive_utc_and_offset(*v, chrono::Utc))
             }
             SqlValue::Null => Err(TypeError::UnexpectedNull),
