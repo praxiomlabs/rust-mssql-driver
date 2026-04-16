@@ -22,6 +22,7 @@ use std::time::Duration;
 
 use mssql_client::Config;
 use mssql_driver_pool::{Pool, PoolError};
+use tokio::time::timeout;
 
 /// Helper to get test configuration from environment variables.
 fn get_test_config() -> Option<Config> {
@@ -1004,6 +1005,71 @@ async fn test_pool_mixed_operations_no_deadlock() {
         10,
         "All workers should complete"
     );
+
+    pool.close().await;
+}
+
+// =============================================================================
+// Cancel Safety Tests
+// =============================================================================
+
+/// Test that dropping a query future mid-flight marks the connection dirty
+/// so the pool discards it instead of returning it for reuse.
+///
+/// This validates the in_flight tracking added for cancel safety: when a
+/// tokio::select! or timeout drops a query future, the partially-consumed
+/// TCP stream cannot be reused. The pool must discard it and create a fresh
+/// connection on the next checkout.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_cancel_safety_pool_discards_inflight_connection() {
+    let client_config = get_test_config().expect("SQL Server config required");
+
+    let pool = Pool::builder()
+        .client_config(client_config)
+        .max_connections(2)
+        .min_connections(0)
+        .connection_timeout(Duration::from_secs(10))
+        .build()
+        .await
+        .expect("Failed to create pool");
+
+    // Phase 1: Start a long-running query and cancel it via timeout.
+    // This drops the PooledConnection while a response is in-flight.
+    {
+        let mut conn = pool.get().await.expect("Failed to checkout connection");
+
+        // WAITFOR DELAY runs for 30 seconds; we timeout after 500ms.
+        // This ensures the query future is dropped mid-flight.
+        let result = timeout(
+            Duration::from_millis(500),
+            conn.query("WAITFOR DELAY '00:00:30'; SELECT 1 AS val", &[]),
+        )
+        .await;
+
+        assert!(result.is_err(), "Query should be cancelled by timeout");
+
+        // `conn` is dropped here. Because in_flight is true, the pool
+        // should discard this connection rather than returning it.
+    }
+
+    // Brief pause to let the pool process the returned connection.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Phase 2: Checkout a fresh connection and verify it works.
+    // If the dirty connection were reused, this query would fail or
+    // return garbage data from the partially-consumed response.
+    let mut conn2 = pool.get().await.expect("Failed to checkout second connection");
+
+    let rows = conn2
+        .query("SELECT 42 AS answer", &[])
+        .await
+        .expect("Query on fresh connection should succeed");
+
+    let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    assert_eq!(data.len(), 1);
+    let answer: i32 = data[0].get(0).expect("Should get integer value");
+    assert_eq!(answer, 42, "Fresh connection should return correct data");
 
     pool.close().await;
 }
