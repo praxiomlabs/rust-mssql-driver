@@ -5,12 +5,19 @@
 //!
 //! ## Buffered vs True Streaming
 //!
-//! The current implementation uses a buffered approach where all rows from
-//! the TDS response are parsed upfront. This works well because:
+//! The underlying TDS response is reassembled into a single [`bytes::Bytes`]
+//! payload by [`mssql-codec`](mssql_codec). That payload is handed to the
+//! token parser which walks it once and enqueues each row's raw byte slice
+//! (a cheap, refcounted slice into the original [`bytes::Bytes`] per ADR-004)
+//! into the stream. Individual [`Row`]s are then decoded lazily when callers
+//! pull them — either via the [`Stream`]/[`Iterator`] impls or
+//! [`QueryStream::collect_all`].
 //!
-//! 1. TDS responses arrive as complete messages (reassembled by mssql-codec)
-//! 2. Memory is shared via `Arc<Bytes>` pattern per ADR-004
-//! 3. No complex lifetime/borrow issues with the connection
+//! This "lazy decode" pattern keeps peak memory at roughly the size of the
+//! raw payload instead of payload + fully-typed `Vec<Row>`. Users who iterate
+//! and drop each [`Row`] see memory proportional to a single row at a time
+//! plus the shared raw payload. Users who `collect_all()` pay for the full
+//! `Vec<Row>` just like before.
 //!
 //! For truly large result sets, consider using OFFSET/FETCH pagination.
 
@@ -19,9 +26,26 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures_core::Stream;
+use tds_protocol::token::{ColMetaData, NbcRow, RawRow};
 
 use crate::error::Error;
 use crate::row::{Column, Row};
+
+/// A row that may be already decoded or still held as raw TDS bytes.
+///
+/// The lazy-parse query path enqueues raw rows (cheap `Bytes` slices into
+/// the original response payload) and decodes them on demand. The eager
+/// path used by tests and [`MultiResultStream::into_query_streams`] wraps
+/// already-decoded rows.
+#[derive(Debug, Clone)]
+pub(crate) enum PendingRow {
+    /// Already-decoded row (eager path — tests + `MultiResultStream` compat).
+    Parsed(Row),
+    /// Raw TDS row bytes, to be decoded on pull.
+    Raw(RawRow),
+    /// Null-bitmap-compressed row bytes, to be decoded on pull.
+    Nbc(NbcRow),
+}
 
 /// A streaming result set from a query.
 ///
@@ -44,8 +68,14 @@ use crate::row::{Column, Row};
 pub struct QueryStream<'a> {
     /// Column metadata for the result set.
     columns: Vec<Column>,
-    /// Buffered rows from the response.
-    rows: VecDeque<Row>,
+    /// Buffered rows (typed or raw) from the response.
+    rows: VecDeque<PendingRow>,
+    /// Protocol metadata needed to decode raw rows. `None` if every pending
+    /// row is already [`PendingRow::Parsed`].
+    meta: Option<ColMetaData>,
+    /// Pre-resolved column decryptor for Always Encrypted result sets.
+    #[cfg(feature = "always-encrypted")]
+    decryptor: Option<crate::column_decryptor::ColumnDecryptor>,
     /// Whether the stream has completed.
     finished: bool,
     /// Lifetime tied to the connection.
@@ -53,11 +83,42 @@ pub struct QueryStream<'a> {
 }
 
 impl QueryStream<'_> {
-    /// Create a new query stream with columns and buffered rows.
+    /// Create a new query stream from already-decoded rows.
+    ///
+    /// This is the eager constructor used by `MultiResultStream::into_query_streams`
+    /// and unit tests. Production query paths use [`QueryStream::from_raw`] to
+    /// defer row decoding.
     pub(crate) fn new(columns: Vec<Column>, rows: Vec<Row>) -> Self {
         Self {
             columns,
-            rows: rows.into(),
+            rows: rows.into_iter().map(PendingRow::Parsed).collect(),
+            meta: None,
+            #[cfg(feature = "always-encrypted")]
+            decryptor: None,
+            finished: false,
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    /// Create a query stream from raw row bytes and protocol metadata.
+    ///
+    /// Rows are decoded on demand as the stream is pulled. The `meta` must
+    /// describe every row in `pending`. If decryption is configured,
+    /// `decryptor` must cover the same column set.
+    pub(crate) fn from_raw(
+        columns: Vec<Column>,
+        pending: Vec<PendingRow>,
+        meta: ColMetaData,
+        #[cfg(feature = "always-encrypted")] decryptor: Option<
+            crate::column_decryptor::ColumnDecryptor,
+        >,
+    ) -> Self {
+        Self {
+            columns,
+            rows: pending.into(),
+            meta: Some(meta),
+            #[cfg(feature = "always-encrypted")]
+            decryptor,
             finished: false,
             _marker: std::marker::PhantomData,
         }
@@ -69,6 +130,9 @@ impl QueryStream<'_> {
         Self {
             columns: Vec::new(),
             rows: VecDeque::new(),
+            meta: None,
+            #[cfg(feature = "always-encrypted")]
+            decryptor: None,
             finished: true,
             _marker: std::marker::PhantomData,
         }
@@ -94,28 +158,66 @@ impl QueryStream<'_> {
 
     /// Collect all remaining rows into a vector.
     ///
-    /// This consumes the stream and loads all rows into memory.
-    /// For large result sets, consider iterating with the stream instead.
+    /// This consumes the stream and loads all rows into memory. Each row is
+    /// decoded lazily here, so large raw payloads are freed as rows are
+    /// produced rather than held alongside the typed `Vec<Row>` throughout
+    /// the caller's query call.
+    ///
+    /// For very large result sets, consider iterating with the stream
+    /// instead.
     pub async fn collect_all(mut self) -> Result<Vec<Row>, Error> {
-        // Drain all remaining rows from the buffer
-        let rows: Vec<Row> = self.rows.drain(..).collect();
+        let mut out = Vec::with_capacity(self.rows.len());
+        while let Some(pending) = self.rows.pop_front() {
+            out.push(self.decode(pending)?);
+        }
         self.finished = true;
-        Ok(rows)
+        Ok(out)
     }
 
     /// Try to get the next row synchronously (without async).
     ///
-    /// Returns `None` when no more rows are available.
+    /// Returns `None` when no more rows are available or the next pending
+    /// row fails to decode. Use [`Iterator::next`] instead if you need to
+    /// observe decode errors.
     pub fn try_next(&mut self) -> Option<Row> {
-        if self.finished {
-            return None;
-        }
+        self.next().and_then(|r| r.ok())
+    }
 
-        match self.rows.pop_front() {
-            Some(row) => Some(row),
-            None => {
-                self.finished = true;
-                None
+    /// Decode a pending row into a typed [`Row`].
+    fn decode(&self, pending: PendingRow) -> Result<Row, Error> {
+        match pending {
+            PendingRow::Parsed(row) => Ok(row),
+            PendingRow::Raw(raw) => {
+                let meta = self
+                    .meta
+                    .as_ref()
+                    .ok_or_else(|| Error::Protocol("row metadata missing for raw row".into()))?;
+                #[cfg(feature = "always-encrypted")]
+                if let Some(ref dec) = self.decryptor {
+                    return crate::column_parser::convert_raw_row_decrypted(
+                        &raw,
+                        meta,
+                        &self.columns,
+                        dec,
+                    );
+                }
+                crate::column_parser::convert_raw_row(&raw, meta, &self.columns)
+            }
+            PendingRow::Nbc(nbc) => {
+                let meta = self
+                    .meta
+                    .as_ref()
+                    .ok_or_else(|| Error::Protocol("row metadata missing for NBC row".into()))?;
+                #[cfg(feature = "always-encrypted")]
+                if let Some(ref dec) = self.decryptor {
+                    return crate::column_parser::convert_nbc_row_decrypted(
+                        &nbc,
+                        meta,
+                        &self.columns,
+                        dec,
+                    );
+                }
+                crate::column_parser::convert_nbc_row(&nbc, meta, &self.columns)
             }
         }
     }
@@ -131,9 +233,8 @@ impl Stream for QueryStream<'_> {
             return Poll::Ready(None);
         }
 
-        // Pop the next row from the buffer
         match this.rows.pop_front() {
-            Some(row) => Poll::Ready(Some(Ok(row))),
+            Some(pending) => Poll::Ready(Some(this.decode(pending))),
             None => {
                 this.finished = true;
                 Poll::Ready(None)
@@ -153,7 +254,7 @@ impl Iterator for QueryStream<'_> {
         }
 
         match self.rows.pop_front() {
-            Some(row) => Some(Ok(row)),
+            Some(pending) => Some(self.decode(pending)),
             None => {
                 self.finished = true;
                 None
@@ -703,5 +804,153 @@ mod tests {
         assert!(stream.columns().is_empty());
         assert_eq!(stream.rows_remaining(), 0);
         assert!(stream.is_finished());
+    }
+
+    /// Exercises the lazy-decode path: rows are stored as raw TDS bytes and
+    /// decoded only when the caller pulls them. Mirrors what
+    /// `read_query_response` now produces and pins the contract between
+    /// `PendingRow::Raw` and the per-row decode in `poll_next`/`next`.
+    #[test]
+    fn test_query_stream_lazy_raw_row_decoding() {
+        use bytes::Bytes;
+        use tds_protocol::token::{ColMetaData, ColumnData, RawRow, TypeInfo};
+        use tds_protocol::types::TypeId;
+
+        // Build raw row bytes for two columns: IntN(42) + IntN(NULL).
+        let mut data = Vec::new();
+        data.push(4); // IntN length prefix — 4 bytes
+        data.extend_from_slice(&42i32.to_le_bytes());
+        data.push(0); // IntN NULL (zero-length)
+
+        let meta = ColMetaData {
+            columns: vec![
+                ColumnData {
+                    name: "a".to_string(),
+                    type_id: TypeId::IntN,
+                    col_type: 0x26,
+                    flags: 0x00,
+                    user_type: 0,
+                    type_info: TypeInfo {
+                        max_length: Some(4),
+                        precision: None,
+                        scale: None,
+                        collation: None,
+                    },
+                    crypto_metadata: None,
+                },
+                ColumnData {
+                    name: "b".to_string(),
+                    type_id: TypeId::IntN,
+                    col_type: 0x26,
+                    flags: 0x01,
+                    user_type: 0,
+                    type_info: TypeInfo {
+                        max_length: Some(4),
+                        precision: None,
+                        scale: None,
+                        collation: None,
+                    },
+                    crypto_metadata: None,
+                },
+            ],
+            cek_table: None,
+        };
+
+        let columns = vec![
+            Column {
+                name: "a".to_string(),
+                index: 0,
+                type_name: "INT".to_string(),
+                nullable: false,
+                max_length: Some(4),
+                precision: None,
+                scale: None,
+                collation: None,
+            },
+            Column {
+                name: "b".to_string(),
+                index: 1,
+                type_name: "INT".to_string(),
+                nullable: true,
+                max_length: Some(4),
+                precision: None,
+                scale: None,
+                collation: None,
+            },
+        ];
+
+        let pending = vec![PendingRow::Raw(RawRow {
+            data: Bytes::from(data),
+        })];
+
+        #[cfg(feature = "always-encrypted")]
+        let mut stream = QueryStream::from_raw(columns, pending, meta, None);
+        #[cfg(not(feature = "always-encrypted"))]
+        let mut stream = QueryStream::from_raw(columns, pending, meta);
+
+        assert_eq!(stream.rows_remaining(), 1);
+        let row = stream
+            .next()
+            .expect("one row pending")
+            .expect("row decoded successfully");
+        assert_eq!(row.get::<i32>(0).unwrap(), 42);
+        assert!(row.is_null(1));
+        assert!(stream.next().is_none());
+        assert!(stream.is_finished());
+    }
+
+    /// Decoder errors must surface per-row via `Stream`/`Iterator` without
+    /// derailing the stream state. Truncated raw bytes trigger a decode
+    /// error that the caller observes as `Some(Err(_))`.
+    #[test]
+    fn test_query_stream_lazy_decode_error_propagates() {
+        use bytes::Bytes;
+        use tds_protocol::token::{ColMetaData, ColumnData, RawRow, TypeInfo};
+        use tds_protocol::types::TypeId;
+
+        // Declare an Int4 column but provide only 2 bytes — decode must fail.
+        let data = vec![0x01u8, 0x02];
+
+        let meta = ColMetaData {
+            columns: vec![ColumnData {
+                name: "a".to_string(),
+                type_id: TypeId::Int4,
+                col_type: 0x38,
+                flags: 0x00,
+                user_type: 0,
+                type_info: TypeInfo {
+                    max_length: Some(4),
+                    precision: None,
+                    scale: None,
+                    collation: None,
+                },
+                crypto_metadata: None,
+            }],
+            cek_table: None,
+        };
+
+        let columns = vec![Column {
+            name: "a".to_string(),
+            index: 0,
+            type_name: "INT".to_string(),
+            nullable: false,
+            max_length: Some(4),
+            precision: None,
+            scale: None,
+            collation: None,
+        }];
+
+        let pending = vec![PendingRow::Raw(RawRow {
+            data: Bytes::from(data),
+        })];
+
+        #[cfg(feature = "always-encrypted")]
+        let mut stream = QueryStream::from_raw(columns, pending, meta, None);
+        #[cfg(not(feature = "always-encrypted"))]
+        let mut stream = QueryStream::from_raw(columns, pending, meta);
+
+        let item = stream.next().expect("pending row present");
+        assert!(item.is_err(), "truncated bytes must surface a decode error");
+        assert!(stream.next().is_none());
     }
 }

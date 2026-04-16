@@ -78,11 +78,28 @@ impl<S: ConnectionState> Client<S> {
     }
 }
 
+/// Raw rows plus the protocol metadata needed to decode them.
+///
+/// Returned by [`Client::read_query_response`] so callers can hand the pending
+/// rows to [`QueryStream::from_raw`] without up-front typed parsing.
+pub(super) struct RawQueryResponse {
+    pub columns: Vec<crate::row::Column>,
+    pub pending_rows: Vec<crate::stream::PendingRow>,
+    pub meta: ColMetaData,
+    #[cfg(feature = "always-encrypted")]
+    pub decryptor: Option<crate::column_decryptor::ColumnDecryptor>,
+}
+
 impl<S: ConnectionState> Client<S> {
-    /// Read complete query response including columns and rows.
-    pub(super) async fn read_query_response(
-        &mut self,
-    ) -> Result<(Vec<crate::row::Column>, Vec<crate::row::Row>)> {
+    /// Read complete query response, deferring row decoding to the stream.
+    ///
+    /// The TDS response payload is parsed into tokens once; [`RawRow`] and
+    /// [`NbcRow`] tokens are stored as [`PendingRow`] values whose `Bytes`
+    /// slices reference the original payload. Typed [`crate::row::Row`]s are
+    /// produced lazily by [`QueryStream`] as callers pull them. This avoids
+    /// the "payload + `Vec<Row>` simultaneously in memory" doubling that the
+    /// prior eager path had.
+    pub(super) async fn read_query_response(&mut self) -> Result<RawQueryResponse> {
         let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         let message = match connection {
@@ -99,7 +116,7 @@ impl<S: ConnectionState> Client<S> {
 
         let mut parser = self.create_parser(message.payload);
         let mut columns: Vec<crate::row::Column> = Vec::new();
-        let mut rows: Vec<crate::row::Row> = Vec::new();
+        let mut pending_rows: Vec<crate::stream::PendingRow> = Vec::new();
         let mut protocol_metadata: Option<ColMetaData> = None;
         #[cfg(feature = "always-encrypted")]
         let mut current_decryptor: Option<crate::column_decryptor::ColumnDecryptor> = None;
@@ -116,7 +133,7 @@ impl<S: ConnectionState> Client<S> {
                 Token::ColMetaData(meta) => {
                     // New result set starting - clear previous rows
                     // This enables multi-statement batches to return the last result set
-                    rows.clear();
+                    pending_rows.clear();
 
                     columns = Self::build_columns(&meta);
 
@@ -129,33 +146,13 @@ impl<S: ConnectionState> Client<S> {
                     protocol_metadata = Some(meta);
                 }
                 Token::Row(raw_row) => {
-                    if let Some(ref meta) = protocol_metadata {
-                        #[cfg(feature = "always-encrypted")]
-                        let row = if let Some(ref dec) = current_decryptor {
-                            crate::column_parser::convert_raw_row_decrypted(
-                                &raw_row, meta, &columns, dec,
-                            )?
-                        } else {
-                            crate::column_parser::convert_raw_row(&raw_row, meta, &columns)?
-                        };
-                        #[cfg(not(feature = "always-encrypted"))]
-                        let row = crate::column_parser::convert_raw_row(&raw_row, meta, &columns)?;
-                        rows.push(row);
+                    if protocol_metadata.is_some() {
+                        pending_rows.push(crate::stream::PendingRow::Raw(raw_row));
                     }
                 }
                 Token::NbcRow(nbc_row) => {
-                    if let Some(ref meta) = protocol_metadata {
-                        #[cfg(feature = "always-encrypted")]
-                        let row = if let Some(ref dec) = current_decryptor {
-                            crate::column_parser::convert_nbc_row_decrypted(
-                                &nbc_row, meta, &columns, dec,
-                            )?
-                        } else {
-                            crate::column_parser::convert_nbc_row(&nbc_row, meta, &columns)?
-                        };
-                        #[cfg(not(feature = "always-encrypted"))]
-                        let row = crate::column_parser::convert_nbc_row(&nbc_row, meta, &columns)?;
-                        rows.push(row);
+                    if protocol_metadata.is_some() {
+                        pending_rows.push(crate::stream::PendingRow::Nbc(nbc_row));
                     }
                 }
                 Token::Error(err) => {
@@ -229,10 +226,16 @@ impl<S: ConnectionState> Client<S> {
 
         tracing::debug!(
             columns = columns.len(),
-            rows = rows.len(),
-            "query response parsed"
+            pending_rows = pending_rows.len(),
+            "query response parsed (rows deferred)"
         );
-        Ok((columns, rows))
+        Ok(RawQueryResponse {
+            columns,
+            pending_rows,
+            meta: protocol_metadata.unwrap_or_default(),
+            #[cfg(feature = "always-encrypted")]
+            decryptor: current_decryptor,
+        })
     }
 
     /// Read execute result (row count) from the response.

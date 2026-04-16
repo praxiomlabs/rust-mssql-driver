@@ -519,8 +519,24 @@ impl<S: ConnectionState> Client<S> {
             self.send_rpc(&rpc).await?;
         }
 
-        let (columns, rows) = self.read_query_response().await?;
-        Ok(QueryStream::new(columns, rows))
+        let resp = self.read_query_response().await?;
+        #[cfg(feature = "always-encrypted")]
+        {
+            Ok(QueryStream::from_raw(
+                resp.columns,
+                resp.pending_rows,
+                resp.meta,
+                resp.decryptor,
+            ))
+        }
+        #[cfg(not(feature = "always-encrypted"))]
+        {
+            Ok(QueryStream::from_raw(
+                resp.columns,
+                resp.pending_rows,
+                resp.meta,
+            ))
+        }
     }
 
     /// Execute a statement with named parameters.
@@ -662,8 +678,24 @@ impl Client<Ready> {
         #[cfg(feature = "otel")]
         drop(span);
 
-        let (columns, rows) = result?;
-        Ok(QueryStream::new(columns, rows))
+        let resp = result?;
+        #[cfg(feature = "always-encrypted")]
+        {
+            Ok(QueryStream::from_raw(
+                resp.columns,
+                resp.pending_rows,
+                resp.meta,
+                resp.decryptor,
+            ))
+        }
+        #[cfg(not(feature = "always-encrypted"))]
+        {
+            Ok(QueryStream::from_raw(
+                resp.columns,
+                resp.pending_rows,
+                resp.meta,
+            ))
+        }
     }
 
     /// Execute a query with a specific timeout.
@@ -1166,8 +1198,24 @@ impl Client<InTransaction> {
         #[cfg(feature = "otel")]
         drop(span);
 
-        let (columns, rows) = result?;
-        Ok(QueryStream::new(columns, rows))
+        let resp = result?;
+        #[cfg(feature = "always-encrypted")]
+        {
+            Ok(QueryStream::from_raw(
+                resp.columns,
+                resp.pending_rows,
+                resp.meta,
+                resp.decryptor,
+            ))
+        }
+        #[cfg(not(feature = "always-encrypted"))]
+        {
+            Ok(QueryStream::from_raw(
+                resp.columns,
+                resp.pending_rows,
+                resp.meta,
+            ))
+        }
     }
 
     /// Execute a statement within the transaction.
