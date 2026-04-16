@@ -1,0 +1,11 @@
+error: Tvp can only be derived for structs
+ --> tests/compile-fail/tvp_on_enum.rs:3:1
+  |
+3 | / /// Tvp can only be derived for structs, not enums.
+4 | | #[derive(Tvp)]
+5 | | #[mssql(type_name = "dbo.SomeType")]
+6 | | enum NotAStruct {
+7 | |     A,
+8 | |     B,
+9 | | }
+  | |_^

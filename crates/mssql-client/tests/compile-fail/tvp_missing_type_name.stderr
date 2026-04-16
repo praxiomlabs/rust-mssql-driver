@@ -1,0 +1,10 @@
+error: Tvp derive requires #[mssql(type_name = "schema.TypeName")] attribute
+ --> tests/compile-fail/tvp_missing_type_name.rs:3:1
+  |
+3 | / /// Tvp derive requires `#[mssql(type_name = "...")]` on the struct.
+4 | | /// Omitting it should produce a compile error.
+5 | | #[derive(Tvp)]
+6 | | struct MissingTypeName {
+7 | |     id: i32,
+8 | | }
+  | |_^

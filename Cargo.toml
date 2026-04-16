@@ -82,6 +82,7 @@ criterion = { version = "0.8", features = ["async_tokio"] }
 proptest = "1.5"
 testcontainers = "0.27"
 tokio-test = "0.4"
+trybuild = "1.0"
 
 # Azure authentication (optional)
 # Note: Azure SDK crates must be version-aligned

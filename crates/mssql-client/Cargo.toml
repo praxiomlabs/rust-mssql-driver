@@ -73,6 +73,7 @@ tracing-opentelemetry = { workspace = true, optional = true }
 [dev-dependencies]
 tokio-test = { workspace = true }
 mssql-derive = { workspace = true }
+trybuild = { workspace = true }
 # Note: mssql-driver-pool removed to break circular dev-dependency.
 # Pool-dependent tests are in mssql-testing crate.
 tracing-subscriber = "0.3"
