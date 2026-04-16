@@ -19,6 +19,14 @@
 //! plus the shared raw payload. Users who `collect_all()` pay for the full
 //! `Vec<Row>` just like before.
 //!
+//! The same lazy-decode pattern applies to [`MultiResultStream`],
+//! [`ResultSet`], and [`ProcedureResult::result_sets`]: raw row bytes are
+//! stashed during response read and each [`Row`] is decoded when the caller
+//! pulls it. Because decoding can fail per row, [`ResultSet::next_row`]
+//! returns `Option<Result<Row, Error>>` rather than `Option<Row>` — callers
+//! observe decode errors at iteration time instead of at
+//! `call_procedure().await?` / `query_multiple().await?`.
+//!
 //! For truly large result sets, consider using OFFSET/FETCH pagination.
 
 use std::collections::VecDeque;
@@ -74,8 +82,11 @@ pub struct QueryStream<'a> {
     /// row is already [`PendingRow::Parsed`].
     meta: Option<ColMetaData>,
     /// Pre-resolved column decryptor for Always Encrypted result sets.
+    ///
+    /// Wrapped in `Arc` so lazy result-set containers (`ResultSet`) can share
+    /// this state without duplicating the derived-key material.
     #[cfg(feature = "always-encrypted")]
-    decryptor: Option<crate::column_decryptor::ColumnDecryptor>,
+    decryptor: Option<std::sync::Arc<crate::column_decryptor::ColumnDecryptor>>,
     /// Whether the stream has completed.
     finished: bool,
     /// Lifetime tied to the connection.
@@ -85,9 +96,11 @@ pub struct QueryStream<'a> {
 impl QueryStream<'_> {
     /// Create a new query stream from already-decoded rows.
     ///
-    /// This is the eager constructor used by `MultiResultStream::into_query_streams`
-    /// and unit tests. Production query paths use [`QueryStream::from_raw`] to
-    /// defer row decoding.
+    /// This is the eager constructor used by unit tests. Production query
+    /// paths use [`QueryStream::from_raw`] to defer row decoding.
+    /// [`MultiResultStream::into_query_streams`] uses
+    /// [`ResultSet::into_query_stream`] to preserve pending-row state.
+    #[cfg(test)]
     pub(crate) fn new(columns: Vec<Column>, rows: Vec<Row>) -> Self {
         Self {
             columns,
@@ -110,7 +123,7 @@ impl QueryStream<'_> {
         pending: Vec<PendingRow>,
         meta: ColMetaData,
         #[cfg(feature = "always-encrypted")] decryptor: Option<
-            crate::column_decryptor::ColumnDecryptor,
+            std::sync::Arc<crate::column_decryptor::ColumnDecryptor>,
         >,
     ) -> Self {
         Self {
@@ -333,6 +346,7 @@ impl ExecuteResult {
 /// // Process result sets
 /// for mut rs in result.result_sets {
 ///     while let Some(row) = rs.next_row() {
+///         let row = row?;
 ///         println!("{:?}", row);
 ///     }
 /// }
@@ -417,21 +431,67 @@ impl ProcedureResult {
 }
 
 /// A single result set within a multi-result batch.
+///
+/// Rows are stored as [`PendingRow`] values that may be either already-decoded
+/// [`Row`]s (eager path, used by tests and direct construction) or raw TDS
+/// bytes (lazy path, used by [`Client::call_procedure`] and
+/// [`Client::query_multiple`]). Decoding happens on pull, so per-row decode
+/// errors surface through [`ResultSet::next_row`] and
+/// [`ResultSet::collect_all`].
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct ResultSet {
     /// Column metadata for this result set.
     columns: Vec<Column>,
-    /// Rows in this result set.
-    rows: VecDeque<Row>,
+    /// Pending rows — either pre-parsed or raw TDS bytes awaiting decode.
+    pending_rows: VecDeque<PendingRow>,
+    /// Protocol metadata required to decode raw rows. `None` when every
+    /// pending row is already [`PendingRow::Parsed`] (eager path).
+    meta: Option<ColMetaData>,
+    /// Pre-resolved column decryptor for Always Encrypted result sets.
+    ///
+    /// Wrapped in `Arc` so cloning a [`ResultSet`] stays cheap (clones share
+    /// the underlying decryptor state instead of duplicating derived keys).
+    #[cfg(feature = "always-encrypted")]
+    decryptor: Option<std::sync::Arc<crate::column_decryptor::ColumnDecryptor>>,
 }
 
 impl ResultSet {
-    /// Create a new result set.
+    /// Create a new result set from already-decoded rows.
+    ///
+    /// This is the eager constructor used by tests and callers that already
+    /// hold typed [`Row`]s. Production query paths use
+    /// [`ResultSet::from_raw`] to defer row decoding.
     pub fn new(columns: Vec<Column>, rows: Vec<Row>) -> Self {
         Self {
             columns,
-            rows: rows.into(),
+            pending_rows: rows.into_iter().map(PendingRow::Parsed).collect(),
+            meta: None,
+            #[cfg(feature = "always-encrypted")]
+            decryptor: None,
+        }
+    }
+
+    /// Create a result set from raw row bytes and protocol metadata.
+    ///
+    /// Rows are decoded on demand as the caller pulls them via
+    /// [`ResultSet::next_row`] or [`ResultSet::collect_all`]. The `meta` must
+    /// describe every row in `pending`. If decryption is configured,
+    /// `decryptor` must cover the same column set.
+    pub(crate) fn from_raw(
+        columns: Vec<Column>,
+        pending: Vec<PendingRow>,
+        meta: ColMetaData,
+        #[cfg(feature = "always-encrypted")] decryptor: Option<
+            std::sync::Arc<crate::column_decryptor::ColumnDecryptor>,
+        >,
+    ) -> Self {
+        Self {
+            columns,
+            pending_rows: pending.into(),
+            meta: Some(meta),
+            #[cfg(feature = "always-encrypted")]
+            decryptor,
         }
     }
 
@@ -444,23 +504,89 @@ impl ResultSet {
     /// Get the number of rows remaining.
     #[must_use]
     pub fn rows_remaining(&self) -> usize {
-        self.rows.len()
+        self.pending_rows.len()
     }
 
     /// Get the next row from this result set.
-    pub fn next_row(&mut self) -> Option<Row> {
-        self.rows.pop_front()
+    ///
+    /// Returns `None` when no more rows remain, or `Some(Err(_))` when the
+    /// next pending row fails to decode. The stream is not short-circuited
+    /// on decode error — the caller may continue to pull subsequent rows.
+    pub fn next_row(&mut self) -> Option<Result<Row, Error>> {
+        self.pending_rows.pop_front().map(|p| self.decode(p))
     }
 
     /// Check if this result set is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.rows.is_empty()
+        self.pending_rows.is_empty()
     }
 
     /// Collect all remaining rows into a vector.
-    pub fn collect_all(&mut self) -> Vec<Row> {
-        self.rows.drain(..).collect()
+    ///
+    /// Stops at the first decode error and returns it.
+    pub fn collect_all(&mut self) -> Result<Vec<Row>, Error> {
+        let mut out = Vec::with_capacity(self.pending_rows.len());
+        while let Some(pending) = self.pending_rows.pop_front() {
+            out.push(self.decode(pending)?);
+        }
+        Ok(out)
+    }
+
+    /// Decode a pending row into a typed [`Row`].
+    fn decode(&self, pending: PendingRow) -> Result<Row, Error> {
+        match pending {
+            PendingRow::Parsed(row) => Ok(row),
+            PendingRow::Raw(raw) => {
+                let meta = self
+                    .meta
+                    .as_ref()
+                    .ok_or_else(|| Error::Protocol("row metadata missing for raw row".into()))?;
+                #[cfg(feature = "always-encrypted")]
+                if let Some(ref dec) = self.decryptor {
+                    return crate::column_parser::convert_raw_row_decrypted(
+                        &raw,
+                        meta,
+                        &self.columns,
+                        dec,
+                    );
+                }
+                crate::column_parser::convert_raw_row(&raw, meta, &self.columns)
+            }
+            PendingRow::Nbc(nbc) => {
+                let meta = self
+                    .meta
+                    .as_ref()
+                    .ok_or_else(|| Error::Protocol("row metadata missing for NBC row".into()))?;
+                #[cfg(feature = "always-encrypted")]
+                if let Some(ref dec) = self.decryptor {
+                    return crate::column_parser::convert_nbc_row_decrypted(
+                        &nbc,
+                        meta,
+                        &self.columns,
+                        dec,
+                    );
+                }
+                crate::column_parser::convert_nbc_row(&nbc, meta, &self.columns)
+            }
+        }
+    }
+
+    /// Consume this result set and produce a [`QueryStream`] that carries the
+    /// same pending rows and decode state.
+    ///
+    /// Used by [`MultiResultStream::into_query_streams`] — avoids eagerly
+    /// materializing rows when the caller wants stream-level ergonomics.
+    fn into_query_stream<'a>(self) -> QueryStream<'a> {
+        QueryStream {
+            columns: self.columns,
+            rows: self.pending_rows,
+            meta: self.meta,
+            #[cfg(feature = "always-encrypted")]
+            decryptor: self.decryptor,
+            finished: false,
+            _marker: std::marker::PhantomData,
+        }
     }
 }
 
@@ -561,9 +687,13 @@ impl<'a> MultiResultStream<'a> {
     ///
     /// Returns `None` when no more rows in the current result set.
     /// Call `next_result()` to move to the next result set.
+    ///
+    /// Per-row decode errors (from lazy row decoding) surface here as
+    /// `Err(_)`. Pre-2.9 this reader decoded rows eagerly and decode errors
+    /// surfaced at `query_multiple().await?` instead.
     pub async fn next_row(&mut self) -> Result<Option<Row>, Error> {
         if let Some(result_set) = self.result_sets.get_mut(self.current_result) {
-            Ok(result_set.next_row())
+            result_set.next_row().transpose()
         } else {
             Ok(None)
         }
@@ -577,21 +707,21 @@ impl<'a> MultiResultStream<'a> {
 
     /// Collect all rows from the current result set.
     ///
-    /// Returns an empty `Vec` if the current result index is out of range
-    /// (e.g., all result sets have been consumed). The `unwrap_or_default`
-    /// below is on `Option`, not `Result` — no errors are being swallowed.
-    pub fn collect_current(&mut self) -> Vec<Row> {
-        self.result_sets
-            .get_mut(self.current_result)
-            .map(|rs| rs.collect_all())
-            .unwrap_or_default()
+    /// Returns `Ok(vec![])` if the current result index is out of range
+    /// (e.g., all result sets have been consumed). Propagates decode errors
+    /// from the underlying lazy row parser.
+    pub fn collect_current(&mut self) -> Result<Vec<Row>, Error> {
+        match self.result_sets.get_mut(self.current_result) {
+            Some(rs) => rs.collect_all(),
+            None => Ok(Vec::new()),
+        }
     }
 
     /// Consume the stream and return all result sets as `QueryStream`s.
     pub fn into_query_streams(self) -> Vec<QueryStream<'a>> {
         self.result_sets
             .into_iter()
-            .map(|rs| QueryStream::new(rs.columns, rs.rows.into()))
+            .map(ResultSet::into_query_stream)
             .collect()
     }
 }
@@ -952,5 +1082,287 @@ mod tests {
         let item = stream.next().expect("pending row present");
         assert!(item.is_err(), "truncated bytes must surface a decode error");
         assert!(stream.next().is_none());
+    }
+
+    /// Helper to build a single-column IntN metadata block for the lazy
+    /// `ResultSet` / `MultiResultStream` tests below.
+    #[cfg(test)]
+    fn intn_meta_and_columns(
+        col_name: &str,
+        nullable: bool,
+    ) -> (tds_protocol::token::ColMetaData, Vec<Column>) {
+        use tds_protocol::token::{ColMetaData, ColumnData, TypeInfo};
+        use tds_protocol::types::TypeId;
+        (
+            ColMetaData {
+                columns: vec![ColumnData {
+                    name: col_name.to_string(),
+                    type_id: TypeId::IntN,
+                    col_type: 0x26,
+                    flags: if nullable { 0x01 } else { 0x00 },
+                    user_type: 0,
+                    type_info: TypeInfo {
+                        max_length: Some(4),
+                        precision: None,
+                        scale: None,
+                        collation: None,
+                    },
+                    crypto_metadata: None,
+                }],
+                cek_table: None,
+            },
+            vec![Column {
+                name: col_name.to_string(),
+                index: 0,
+                type_name: "INT".to_string(),
+                nullable,
+                max_length: Some(4),
+                precision: None,
+                scale: None,
+                collation: None,
+            }],
+        )
+    }
+
+    /// Exercises the `ResultSet` lazy-decode path introduced in 2.9.
+    /// Mirrors `test_query_stream_lazy_raw_row_decoding` but via the
+    /// result-set API that `call_procedure` / `query_multiple` expose.
+    #[test]
+    fn test_result_set_lazy_raw_row_decoding() {
+        use bytes::Bytes;
+        use tds_protocol::token::RawRow;
+
+        let (meta, columns) = intn_meta_and_columns("a", false);
+
+        // Two rows: 7 and 11 encoded as IntN(4).
+        let pending = vec![
+            PendingRow::Raw(RawRow {
+                data: {
+                    let mut b = Vec::with_capacity(5);
+                    b.push(4);
+                    b.extend_from_slice(&7i32.to_le_bytes());
+                    Bytes::from(b)
+                },
+            }),
+            PendingRow::Raw(RawRow {
+                data: {
+                    let mut b = Vec::with_capacity(5);
+                    b.push(4);
+                    b.extend_from_slice(&11i32.to_le_bytes());
+                    Bytes::from(b)
+                },
+            }),
+        ];
+
+        #[cfg(feature = "always-encrypted")]
+        let mut rs = ResultSet::from_raw(columns, pending, meta, None);
+        #[cfg(not(feature = "always-encrypted"))]
+        let mut rs = ResultSet::from_raw(columns, pending, meta);
+
+        assert_eq!(rs.rows_remaining(), 2);
+        assert!(!rs.is_empty());
+
+        let row1 = rs.next_row().expect("row present").expect("decodes");
+        assert_eq!(row1.get::<i32>(0).unwrap(), 7);
+
+        let row2 = rs.next_row().expect("row present").expect("decodes");
+        assert_eq!(row2.get::<i32>(0).unwrap(), 11);
+
+        assert!(rs.next_row().is_none());
+        assert!(rs.is_empty());
+    }
+
+    /// Decoder errors in `ResultSet::next_row` must surface per-row without
+    /// derailing further calls. Same contract as
+    /// `test_query_stream_lazy_decode_error_propagates`.
+    #[test]
+    fn test_result_set_lazy_decode_error_propagates() {
+        use bytes::Bytes;
+        use tds_protocol::token::{ColMetaData, ColumnData, RawRow, TypeInfo};
+        use tds_protocol::types::TypeId;
+
+        // Int4 (not IntN) with only 2 bytes → decode must fail.
+        let meta = ColMetaData {
+            columns: vec![ColumnData {
+                name: "a".to_string(),
+                type_id: TypeId::Int4,
+                col_type: 0x38,
+                flags: 0x00,
+                user_type: 0,
+                type_info: TypeInfo {
+                    max_length: Some(4),
+                    precision: None,
+                    scale: None,
+                    collation: None,
+                },
+                crypto_metadata: None,
+            }],
+            cek_table: None,
+        };
+        let columns = vec![Column {
+            name: "a".to_string(),
+            index: 0,
+            type_name: "INT".to_string(),
+            nullable: false,
+            max_length: Some(4),
+            precision: None,
+            scale: None,
+            collation: None,
+        }];
+
+        let pending = vec![PendingRow::Raw(RawRow {
+            data: Bytes::from(vec![0x01u8, 0x02]),
+        })];
+
+        #[cfg(feature = "always-encrypted")]
+        let mut rs = ResultSet::from_raw(columns, pending, meta, None);
+        #[cfg(not(feature = "always-encrypted"))]
+        let mut rs = ResultSet::from_raw(columns, pending, meta);
+
+        let first = rs.next_row().expect("pending row present");
+        assert!(first.is_err(), "truncated bytes must surface a decode error");
+        assert!(rs.next_row().is_none());
+    }
+
+    /// `collect_all` on a lazy `ResultSet` decodes every pending row and
+    /// propagates the first decode error. Ensures 2.9's signature change is
+    /// exercised end-to-end.
+    #[test]
+    fn test_result_set_lazy_collect_all_success_and_error() {
+        use bytes::Bytes;
+        use tds_protocol::token::RawRow;
+
+        // Success: two rows decode cleanly.
+        let (meta_ok, cols_ok) = intn_meta_and_columns("a", false);
+        let pending_ok = vec![
+            PendingRow::Raw(RawRow {
+                data: {
+                    let mut b = Vec::with_capacity(5);
+                    b.push(4);
+                    b.extend_from_slice(&10i32.to_le_bytes());
+                    Bytes::from(b)
+                },
+            }),
+            PendingRow::Raw(RawRow {
+                data: {
+                    let mut b = Vec::with_capacity(5);
+                    b.push(4);
+                    b.extend_from_slice(&20i32.to_le_bytes());
+                    Bytes::from(b)
+                },
+            }),
+        ];
+
+        #[cfg(feature = "always-encrypted")]
+        let mut rs_ok = ResultSet::from_raw(cols_ok, pending_ok, meta_ok, None);
+        #[cfg(not(feature = "always-encrypted"))]
+        let mut rs_ok = ResultSet::from_raw(cols_ok, pending_ok, meta_ok);
+        let rows = rs_ok.collect_all().expect("all rows decode");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].get::<i32>(0).unwrap(), 10);
+        assert_eq!(rows[1].get::<i32>(0).unwrap(), 20);
+        assert!(rs_ok.is_empty());
+
+        // Error: a truncated row (declared Int4 with only 2 bytes) makes
+        // collect_all fail. collect_all short-circuits on the first Err.
+        use tds_protocol::token::{ColMetaData, ColumnData, TypeInfo};
+        use tds_protocol::types::TypeId;
+        let meta_err = ColMetaData {
+            columns: vec![ColumnData {
+                name: "a".to_string(),
+                type_id: TypeId::Int4,
+                col_type: 0x38,
+                flags: 0x00,
+                user_type: 0,
+                type_info: TypeInfo {
+                    max_length: Some(4),
+                    precision: None,
+                    scale: None,
+                    collation: None,
+                },
+                crypto_metadata: None,
+            }],
+            cek_table: None,
+        };
+        let cols_err = vec![Column {
+            name: "a".to_string(),
+            index: 0,
+            type_name: "INT".to_string(),
+            nullable: false,
+            max_length: Some(4),
+            precision: None,
+            scale: None,
+            collation: None,
+        }];
+        let pending_err = vec![PendingRow::Raw(RawRow {
+            data: Bytes::from(vec![0x01u8, 0x02]),
+        })];
+
+        #[cfg(feature = "always-encrypted")]
+        let mut rs_err = ResultSet::from_raw(cols_err, pending_err, meta_err, None);
+        #[cfg(not(feature = "always-encrypted"))]
+        let mut rs_err = ResultSet::from_raw(cols_err, pending_err, meta_err);
+        let err = rs_err.collect_all();
+        assert!(err.is_err(), "collect_all must propagate decode error");
+    }
+
+    /// `MultiResultStream` end-to-end lazy-decode path: two lazy `ResultSet`s
+    /// decoded on demand as the caller walks through via `next_row` /
+    /// `next_result`. Pins the 2.9 refactor of `read_multi_result_response`.
+    #[tokio::test]
+    async fn test_multi_result_stream_lazy_decode_across_result_sets() {
+        use bytes::Bytes;
+        use tds_protocol::token::RawRow;
+
+        let (meta1, cols1) = intn_meta_and_columns("a", false);
+        let pending1 = vec![PendingRow::Raw(RawRow {
+            data: {
+                let mut b = Vec::with_capacity(5);
+                b.push(4);
+                b.extend_from_slice(&101i32.to_le_bytes());
+                Bytes::from(b)
+            },
+        })];
+        #[cfg(feature = "always-encrypted")]
+        let rs1 = ResultSet::from_raw(cols1, pending1, meta1, None);
+        #[cfg(not(feature = "always-encrypted"))]
+        let rs1 = ResultSet::from_raw(cols1, pending1, meta1);
+
+        let (meta2, cols2) = intn_meta_and_columns("b", false);
+        let pending2 = vec![PendingRow::Raw(RawRow {
+            data: {
+                let mut b = Vec::with_capacity(5);
+                b.push(4);
+                b.extend_from_slice(&202i32.to_le_bytes());
+                Bytes::from(b)
+            },
+        })];
+        #[cfg(feature = "always-encrypted")]
+        let rs2 = ResultSet::from_raw(cols2, pending2, meta2, None);
+        #[cfg(not(feature = "always-encrypted"))]
+        let rs2 = ResultSet::from_raw(cols2, pending2, meta2);
+
+        let mut stream = MultiResultStream::new(vec![rs1, rs2]);
+        assert_eq!(stream.result_count(), 2);
+        assert_eq!(stream.current_result_index(), 0);
+
+        let row = stream
+            .next_row()
+            .await
+            .expect("first row success")
+            .expect("row present");
+        assert_eq!(row.get::<i32>(0).unwrap(), 101);
+        assert!(stream.next_row().await.expect("no more rows").is_none());
+
+        assert!(stream.has_more_results());
+        assert!(stream.next_result().await.expect("advance ok"));
+        assert_eq!(stream.current_result_index(), 1);
+
+        let row = stream
+            .next_row()
+            .await
+            .expect("second row success")
+            .expect("row present");
+        assert_eq!(row.get::<i32>(0).unwrap(), 202);
     }
 }

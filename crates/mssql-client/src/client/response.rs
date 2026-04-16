@@ -87,7 +87,7 @@ pub(super) struct RawQueryResponse {
     pub pending_rows: Vec<crate::stream::PendingRow>,
     pub meta: ColMetaData,
     #[cfg(feature = "always-encrypted")]
-    pub decryptor: Option<crate::column_decryptor::ColumnDecryptor>,
+    pub decryptor: Option<std::sync::Arc<crate::column_decryptor::ColumnDecryptor>>,
 }
 
 impl<S: ConnectionState> Client<S> {
@@ -119,7 +119,9 @@ impl<S: ConnectionState> Client<S> {
         let mut pending_rows: Vec<crate::stream::PendingRow> = Vec::new();
         let mut protocol_metadata: Option<ColMetaData> = None;
         #[cfg(feature = "always-encrypted")]
-        let mut current_decryptor: Option<crate::column_decryptor::ColumnDecryptor> = None;
+        let mut current_decryptor: Option<
+            std::sync::Arc<crate::column_decryptor::ColumnDecryptor>,
+        > = None;
 
         loop {
             // Use next_token_with_metadata to properly parse Row/NbcRow tokens
@@ -139,7 +141,10 @@ impl<S: ConnectionState> Client<S> {
 
                     #[cfg(feature = "always-encrypted")]
                     {
-                        current_decryptor = self.resolve_decryptor(&meta).await?;
+                        current_decryptor = self
+                            .resolve_decryptor(&meta)
+                            .await?
+                            .map(std::sync::Arc::new);
                     }
 
                     tracing::debug!(columns = columns.len(), "received column metadata");
@@ -462,12 +467,16 @@ impl<S: ConnectionState> Client<S> {
         let mut parser = self.create_parser(message.payload);
         let mut result = crate::stream::ProcedureResult::new();
 
-        // State for accumulating the current result set
+        // State for accumulating the current result set. Rows are staged as
+        // `PendingRow::Raw`/`PendingRow::Nbc` so the typed `Row` decode is
+        // deferred to the caller (see 2.9 / 2.5 parity).
         let mut current_columns: Vec<crate::row::Column> = Vec::new();
-        let mut current_rows: Vec<crate::row::Row> = Vec::new();
+        let mut current_pending: Vec<crate::stream::PendingRow> = Vec::new();
         let mut protocol_metadata: Option<ColMetaData> = None;
         #[cfg(feature = "always-encrypted")]
-        let mut current_decryptor: Option<crate::column_decryptor::ColumnDecryptor> = None;
+        let mut current_decryptor: Option<
+            std::sync::Arc<crate::column_decryptor::ColumnDecryptor>,
+        > = None;
 
         loop {
             let token = parser.next_token_with_metadata(protocol_metadata.as_ref())?;
@@ -480,9 +489,18 @@ impl<S: ConnectionState> Client<S> {
                 Token::ColMetaData(meta) => {
                     // New result set starting — save the previous one if it has columns
                     if !current_columns.is_empty() {
-                        result.result_sets.push(crate::stream::ResultSet::new(
-                            std::mem::take(&mut current_columns),
-                            std::mem::take(&mut current_rows),
+                        let saved_meta = protocol_metadata.take().unwrap_or_default();
+                        #[cfg(feature = "always-encrypted")]
+                        let saved_dec = current_decryptor.clone();
+                        let columns = std::mem::take(&mut current_columns);
+                        let pending = std::mem::take(&mut current_pending);
+                        #[cfg(feature = "always-encrypted")]
+                        result.result_sets.push(crate::stream::ResultSet::from_raw(
+                            columns, pending, saved_meta, saved_dec,
+                        ));
+                        #[cfg(not(feature = "always-encrypted"))]
+                        result.result_sets.push(crate::stream::ResultSet::from_raw(
+                            columns, pending, saved_meta,
                         ));
                     }
 
@@ -490,7 +508,10 @@ impl<S: ConnectionState> Client<S> {
 
                     #[cfg(feature = "always-encrypted")]
                     {
-                        current_decryptor = self.resolve_decryptor(&meta).await?;
+                        current_decryptor = self
+                            .resolve_decryptor(&meta)
+                            .await?
+                            .map(std::sync::Arc::new);
                     }
 
                     tracing::debug!(
@@ -501,57 +522,31 @@ impl<S: ConnectionState> Client<S> {
                     protocol_metadata = Some(meta);
                 }
                 Token::Row(raw_row) => {
-                    if let Some(ref meta) = protocol_metadata {
-                        #[cfg(feature = "always-encrypted")]
-                        let row = if let Some(ref dec) = current_decryptor {
-                            crate::column_parser::convert_raw_row_decrypted(
-                                &raw_row,
-                                meta,
-                                &current_columns,
-                                dec,
-                            )?
-                        } else {
-                            crate::column_parser::convert_raw_row(&raw_row, meta, &current_columns)?
-                        };
-                        #[cfg(not(feature = "always-encrypted"))]
-                        let row = crate::column_parser::convert_raw_row(
-                            &raw_row,
-                            meta,
-                            &current_columns,
-                        )?;
-                        current_rows.push(row);
+                    if protocol_metadata.is_some() {
+                        current_pending.push(crate::stream::PendingRow::Raw(raw_row));
                     }
                 }
                 Token::NbcRow(nbc_row) => {
-                    if let Some(ref meta) = protocol_metadata {
-                        #[cfg(feature = "always-encrypted")]
-                        let row = if let Some(ref dec) = current_decryptor {
-                            crate::column_parser::convert_nbc_row_decrypted(
-                                &nbc_row,
-                                meta,
-                                &current_columns,
-                                dec,
-                            )?
-                        } else {
-                            crate::column_parser::convert_nbc_row(&nbc_row, meta, &current_columns)?
-                        };
-                        #[cfg(not(feature = "always-encrypted"))]
-                        let row = crate::column_parser::convert_nbc_row(
-                            &nbc_row,
-                            meta,
-                            &current_columns,
-                        )?;
-                        current_rows.push(row);
+                    if protocol_metadata.is_some() {
+                        current_pending.push(crate::stream::PendingRow::Nbc(nbc_row));
                     }
                 }
                 Token::DoneInProc(done) => {
                     // Save current result set if we have columns
                     if !current_columns.is_empty() {
-                        result.result_sets.push(crate::stream::ResultSet::new(
-                            std::mem::take(&mut current_columns),
-                            std::mem::take(&mut current_rows),
+                        let saved_meta = protocol_metadata.take().unwrap_or_default();
+                        #[cfg(feature = "always-encrypted")]
+                        let saved_dec = current_decryptor.clone();
+                        let columns = std::mem::take(&mut current_columns);
+                        let pending = std::mem::take(&mut current_pending);
+                        #[cfg(feature = "always-encrypted")]
+                        result.result_sets.push(crate::stream::ResultSet::from_raw(
+                            columns, pending, saved_meta, saved_dec,
                         ));
-                        protocol_metadata = None;
+                        #[cfg(not(feature = "always-encrypted"))]
+                        result.result_sets.push(crate::stream::ResultSet::from_raw(
+                            columns, pending, saved_meta,
+                        ));
                     }
 
                     if done.status.count {
@@ -600,9 +595,18 @@ impl<S: ConnectionState> Client<S> {
                 Token::DoneProc(done) => {
                     // Save any remaining result set
                     if !current_columns.is_empty() {
-                        result.result_sets.push(crate::stream::ResultSet::new(
-                            std::mem::take(&mut current_columns),
-                            std::mem::take(&mut current_rows),
+                        let saved_meta = protocol_metadata.take().unwrap_or_default();
+                        #[cfg(feature = "always-encrypted")]
+                        let saved_dec = current_decryptor.clone();
+                        let columns = std::mem::take(&mut current_columns);
+                        let pending = std::mem::take(&mut current_pending);
+                        #[cfg(feature = "always-encrypted")]
+                        result.result_sets.push(crate::stream::ResultSet::from_raw(
+                            columns, pending, saved_meta, saved_dec,
+                        ));
+                        #[cfg(not(feature = "always-encrypted"))]
+                        result.result_sets.push(crate::stream::ResultSet::from_raw(
+                            columns, pending, saved_meta,
                         ));
                     }
 
@@ -691,11 +695,18 @@ impl Client<Ready> {
         let mut parser = self.create_parser(message.payload);
         let mut result_sets: Vec<crate::stream::ResultSet> = Vec::new();
         let mut current_columns: Vec<crate::row::Column> = Vec::new();
-        let mut current_rows: Vec<crate::row::Row> = Vec::new();
+        // Rows are staged as `PendingRow` slices so typed `Row` decode is
+        // deferred to the caller (see 2.9 / 2.5 parity).
+        let mut current_pending: Vec<crate::stream::PendingRow> = Vec::new();
         let mut protocol_metadata: Option<ColMetaData> = None;
         #[cfg(feature = "always-encrypted")]
-        let mut current_decryptor: Option<crate::column_decryptor::ColumnDecryptor> = None;
+        let mut current_decryptor: Option<
+            std::sync::Arc<crate::column_decryptor::ColumnDecryptor>,
+        > = None;
 
+        // Helper closure to build and push a lazy ResultSet from the current
+        // accumulators. Takes the meta and decryptor so callers can `take()`
+        // outer state after the push.
         loop {
             let token = parser.next_token_with_metadata(protocol_metadata.as_ref())?;
 
@@ -707,9 +718,18 @@ impl Client<Ready> {
                 Token::ColMetaData(meta) => {
                     // New result set starting - save the previous one if it has columns
                     if !current_columns.is_empty() {
-                        result_sets.push(crate::stream::ResultSet::new(
-                            std::mem::take(&mut current_columns),
-                            std::mem::take(&mut current_rows),
+                        let saved_meta = protocol_metadata.take().unwrap_or_default();
+                        #[cfg(feature = "always-encrypted")]
+                        let saved_dec = current_decryptor.clone();
+                        let columns = std::mem::take(&mut current_columns);
+                        let pending = std::mem::take(&mut current_pending);
+                        #[cfg(feature = "always-encrypted")]
+                        result_sets.push(crate::stream::ResultSet::from_raw(
+                            columns, pending, saved_meta, saved_dec,
+                        ));
+                        #[cfg(not(feature = "always-encrypted"))]
+                        result_sets.push(crate::stream::ResultSet::from_raw(
+                            columns, pending, saved_meta,
                         ));
                     }
 
@@ -718,7 +738,10 @@ impl Client<Ready> {
 
                     #[cfg(feature = "always-encrypted")]
                     {
-                        current_decryptor = self.resolve_decryptor(&meta).await?;
+                        current_decryptor = self
+                            .resolve_decryptor(&meta)
+                            .await?
+                            .map(std::sync::Arc::new);
                     }
 
                     tracing::debug!(
@@ -729,47 +752,13 @@ impl Client<Ready> {
                     protocol_metadata = Some(meta);
                 }
                 Token::Row(raw_row) => {
-                    if let Some(ref meta) = protocol_metadata {
-                        #[cfg(feature = "always-encrypted")]
-                        let row = if let Some(ref dec) = current_decryptor {
-                            crate::column_parser::convert_raw_row_decrypted(
-                                &raw_row,
-                                meta,
-                                &current_columns,
-                                dec,
-                            )?
-                        } else {
-                            crate::column_parser::convert_raw_row(&raw_row, meta, &current_columns)?
-                        };
-                        #[cfg(not(feature = "always-encrypted"))]
-                        let row = crate::column_parser::convert_raw_row(
-                            &raw_row,
-                            meta,
-                            &current_columns,
-                        )?;
-                        current_rows.push(row);
+                    if protocol_metadata.is_some() {
+                        current_pending.push(crate::stream::PendingRow::Raw(raw_row));
                     }
                 }
                 Token::NbcRow(nbc_row) => {
-                    if let Some(ref meta) = protocol_metadata {
-                        #[cfg(feature = "always-encrypted")]
-                        let row = if let Some(ref dec) = current_decryptor {
-                            crate::column_parser::convert_nbc_row_decrypted(
-                                &nbc_row,
-                                meta,
-                                &current_columns,
-                                dec,
-                            )?
-                        } else {
-                            crate::column_parser::convert_nbc_row(&nbc_row, meta, &current_columns)?
-                        };
-                        #[cfg(not(feature = "always-encrypted"))]
-                        let row = crate::column_parser::convert_nbc_row(
-                            &nbc_row,
-                            meta,
-                            &current_columns,
-                        )?;
-                        current_rows.push(row);
+                    if protocol_metadata.is_some() {
+                        current_pending.push(crate::stream::PendingRow::Nbc(nbc_row));
                     }
                 }
                 Token::Error(err) => {
@@ -801,11 +790,19 @@ impl Client<Ready> {
 
                     // Save the current result set if we have columns
                     if !current_columns.is_empty() {
-                        result_sets.push(crate::stream::ResultSet::new(
-                            std::mem::take(&mut current_columns),
-                            std::mem::take(&mut current_rows),
+                        let saved_meta = protocol_metadata.take().unwrap_or_default();
+                        #[cfg(feature = "always-encrypted")]
+                        let saved_dec = current_decryptor.clone();
+                        let columns = std::mem::take(&mut current_columns);
+                        let pending = std::mem::take(&mut current_pending);
+                        #[cfg(feature = "always-encrypted")]
+                        result_sets.push(crate::stream::ResultSet::from_raw(
+                            columns, pending, saved_meta, saved_dec,
                         ));
-                        protocol_metadata = None;
+                        #[cfg(not(feature = "always-encrypted"))]
+                        result_sets.push(crate::stream::ResultSet::from_raw(
+                            columns, pending, saved_meta,
+                        ));
                     }
 
                     // Check if there are more result sets
@@ -824,11 +821,19 @@ impl Client<Ready> {
 
                     // Save the current result set if we have columns (within stored proc)
                     if !current_columns.is_empty() {
-                        result_sets.push(crate::stream::ResultSet::new(
-                            std::mem::take(&mut current_columns),
-                            std::mem::take(&mut current_rows),
+                        let saved_meta = protocol_metadata.take().unwrap_or_default();
+                        #[cfg(feature = "always-encrypted")]
+                        let saved_dec = current_decryptor.clone();
+                        let columns = std::mem::take(&mut current_columns);
+                        let pending = std::mem::take(&mut current_pending);
+                        #[cfg(feature = "always-encrypted")]
+                        result_sets.push(crate::stream::ResultSet::from_raw(
+                            columns, pending, saved_meta, saved_dec,
                         ));
-                        protocol_metadata = None;
+                        #[cfg(not(feature = "always-encrypted"))]
+                        result_sets.push(crate::stream::ResultSet::from_raw(
+                            columns, pending, saved_meta,
+                        ));
                     }
 
                     // DoneInProc may indicate more results within the batch
@@ -858,7 +863,22 @@ impl Client<Ready> {
 
         // Don't forget any remaining result set that wasn't followed by Done
         if !current_columns.is_empty() {
-            result_sets.push(crate::stream::ResultSet::new(current_columns, current_rows));
+            let saved_meta = protocol_metadata.unwrap_or_default();
+            #[cfg(feature = "always-encrypted")]
+            let saved_dec = current_decryptor;
+            #[cfg(feature = "always-encrypted")]
+            result_sets.push(crate::stream::ResultSet::from_raw(
+                current_columns,
+                current_pending,
+                saved_meta,
+                saved_dec,
+            ));
+            #[cfg(not(feature = "always-encrypted"))]
+            result_sets.push(crate::stream::ResultSet::from_raw(
+                current_columns,
+                current_pending,
+                saved_meta,
+            ));
         }
 
         Ok(result_sets)
