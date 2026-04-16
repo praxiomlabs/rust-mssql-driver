@@ -155,9 +155,10 @@ impl BulkColumn {
     /// # Errors
     ///
     /// Returns [`TypeError::UnsupportedType`] when `sql_type` names a deprecated
-    /// large object type (`TEXT`, `NTEXT`). Use `VARCHAR(MAX)` / `NVARCHAR(MAX)`
-    /// instead — Microsoft deprecated `TEXT` / `NTEXT` in SQL Server 2005 and
-    /// recommends the `MAX` types for all new development.
+    /// large object type (`TEXT`, `NTEXT`, `IMAGE`). Use `VARCHAR(MAX)` /
+    /// `NVARCHAR(MAX)` / `VARBINARY(MAX)` instead — Microsoft deprecated
+    /// `TEXT` / `NTEXT` / `IMAGE` in SQL Server 2005 and recommends the `MAX`
+    /// types for all new development.
     pub fn new<S: Into<String>>(name: S, sql_type: S, ordinal: usize) -> Result<Self, TypeError> {
         let sql_type_str: String = sql_type.into();
         reject_unsupported_bulk_type(&sql_type_str)?;
@@ -294,15 +295,15 @@ fn parse_sql_type(sql_type: &str) -> (u8, Option<u32>, Option<u8>, Option<u8>) {
         "MONEY" => (0x6E, Some(8), None, None),         // MONEYN(8)
         "SMALLMONEY" => (0x6E, Some(4), None, None),    // MONEYN(4)
         "XML" => (0xF1, Some(0xFFFF), None, None),
-        "IMAGE" => (0x22, Some(0x7FFF_FFFF), None, None),
         _ => (0xE7, Some(8000), None, None), // Default to NVARCHAR(4000)
     }
 }
 
 /// Reject deprecated large object types that this driver does not support in
-/// bulk insert. `TEXT` / `NTEXT` have been deprecated since SQL Server 2005 and
-/// use a legacy TEXTPTR wire format. Users should use `VARCHAR(MAX)` /
-/// `NVARCHAR(MAX)` which the driver supports end-to-end.
+/// bulk insert. `TEXT` / `NTEXT` / `IMAGE` have been deprecated since SQL
+/// Server 2005 and use a legacy TEXTPTR wire format. Users should use
+/// `VARCHAR(MAX)` / `NVARCHAR(MAX)` / `VARBINARY(MAX)` which the driver
+/// supports end-to-end.
 fn reject_unsupported_bulk_type(sql_type: &str) -> Result<(), TypeError> {
     let base = sql_type
         .split('(')
@@ -316,6 +317,12 @@ fn reject_unsupported_bulk_type(sql_type: &str) -> Result<(), TypeError> {
             reason: "TEXT/NTEXT are not supported. Use VARCHAR(MAX) / \
                      NVARCHAR(MAX) instead (Microsoft deprecated TEXT/NTEXT in \
                      SQL Server 2005)."
+                .to_string(),
+        }),
+        "IMAGE" => Err(TypeError::UnsupportedType {
+            sql_type: base,
+            reason: "IMAGE is not supported. Use VARBINARY(MAX) instead \
+                     (Microsoft deprecated IMAGE in SQL Server 2005)."
                 .to_string(),
         }),
         _ => Ok(()),
@@ -1499,6 +1506,37 @@ mod tests {
         ));
         assert!(matches!(
             BulkColumn::new("body", "Ntext", 0),
+            Err(TypeError::UnsupportedType { .. })
+        ));
+    }
+
+    #[test]
+    fn test_bulk_column_rejects_image() {
+        let err = BulkColumn::new("blob", "IMAGE", 0).unwrap_err();
+        match err {
+            TypeError::UnsupportedType { sql_type, reason } => {
+                assert_eq!(sql_type, "IMAGE");
+                assert!(
+                    reason.contains("VARBINARY(MAX)"),
+                    "error should redirect to VARBINARY(MAX), got: {reason}"
+                );
+                assert!(
+                    reason.contains("deprecated"),
+                    "error should mention deprecation, got: {reason}"
+                );
+            }
+            other => panic!("expected UnsupportedType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_bulk_column_rejects_image_case_insensitive() {
+        assert!(matches!(
+            BulkColumn::new("blob", "image", 0),
+            Err(TypeError::UnsupportedType { .. })
+        ));
+        assert!(matches!(
+            BulkColumn::new("blob", "Image", 0),
             Err(TypeError::UnsupportedType { .. })
         ));
     }

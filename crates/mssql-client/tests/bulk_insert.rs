@@ -2086,3 +2086,42 @@ async fn test_bulk_insert_rejects_ntext_column_from_server_metadata() {
 
     client.close().await.expect("Failed to close");
 }
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_rejects_image_column_from_server_metadata() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client
+        .execute(
+            "CREATE TABLE #BulkRejImage (id INT NOT NULL, blob IMAGE NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkRejImage").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
+        BulkColumn::new("blob", "VARBINARY(MAX)", 1).unwrap(),
+    ]);
+
+    let msg = match client.bulk_insert(&builder).await {
+        Ok(_writer) => panic!("bulk_insert should reject IMAGE column reported by the server"),
+        Err(e) => e.to_string(),
+    };
+    assert!(
+        msg.contains("IMAGE"),
+        "error should mention IMAGE, got: {msg}"
+    );
+    assert!(
+        msg.contains("VARBINARY(MAX)"),
+        "error should redirect to VARBINARY(MAX), got: {msg}"
+    );
+    assert!(
+        msg.contains("deprecated"),
+        "error should mention deprecation, got: {msg}"
+    );
+
+    client.close().await.expect("Failed to close");
+}
