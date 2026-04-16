@@ -1,7 +1,7 @@
 //! Bulk Copy Protocol (BCP) example.
 //!
 //! This example demonstrates high-performance bulk data loading using
-//! the TDS Bulk Load protocol.
+//! the TDS Bulk Load protocol via `Client::bulk_insert()`.
 //!
 //! # Running
 //!
@@ -12,7 +12,7 @@
 // Allow common patterns in example code
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::vec_init_then_push)]
 
-use mssql_client::{BulkColumn, BulkInsert, BulkInsertBuilder, BulkOptions, Client, Config, Error};
+use mssql_client::{BulkColumn, BulkInsertBuilder, BulkOptions, Client, Config, Error};
 use mssql_types::SqlValue;
 
 #[tokio::main]
@@ -49,38 +49,30 @@ async fn main() -> Result<(), Error> {
         .await?;
     println!("Test table created");
 
-    // Configure bulk insert options
-    let options = BulkOptions {
-        batch_size: 1000, // Commit every 1000 rows
-        check_constraints: true,
-        fire_triggers: false,
-        keep_nulls: true,
-        table_lock: false, // Use row-level locking
-        order_hint: None,
-    };
-
     // Define columns for bulk insert
-    // Note: Precision/scale for DECIMAL comes from the SQL type string
     let columns = vec![
         BulkColumn::new("id", "INT", 0),
         BulkColumn::new("name", "NVARCHAR(100)", 1),
         BulkColumn::new("value", "DECIMAL(18,2)", 2),
     ];
 
-    // Create the bulk insert builder to generate the INSERT BULK statement
+    // Configure and build the bulk insert operation
     let builder = BulkInsertBuilder::new("#BulkTest")
-        .with_options(options.clone())
-        .with_typed_columns(columns.clone());
+        .with_typed_columns(columns)
+        .with_options(BulkOptions {
+            batch_size: 1000,
+            check_constraints: true,
+            fire_triggers: false,
+            keep_nulls: true,
+            table_lock: false,
+            order_hint: None,
+        });
 
-    let insert_bulk_sql = builder.build_insert_bulk_statement()?;
-    println!("INSERT BULK statement: {insert_bulk_sql}");
-
+    // Start the bulk insert — sends INSERT BULK to the server
+    let mut writer = client.bulk_insert(&builder).await?;
     println!("Starting bulk insert...");
 
-    // Create the bulk insert operation with columns and batch size
-    let mut bulk = BulkInsert::new(columns, options.batch_size);
-
-    // Generate and send sample data
+    // Generate and buffer sample data
     let num_rows = 10_000;
     for i in 0..num_rows {
         let row = vec![
@@ -88,47 +80,25 @@ async fn main() -> Result<(), Error> {
             SqlValue::String(format!("User_{i}")),
             SqlValue::Null, // Using NULL for simplicity; real code could use Decimal
         ];
-
-        bulk.send_row_values(&row)?;
-
-        // Check if we should flush the batch
-        if bulk.should_flush() {
-            let packets = bulk.take_packets();
-            // In a real implementation, these packets would be sent to the server
-            println!(
-                "  Flushed batch at {} rows, {} packets generated",
-                bulk.total_rows(),
-                packets.len()
-            );
-        }
+        writer.send_row_values(&row)?;
     }
 
-    // Finish the bulk operation
-    let final_packets = bulk.finish_packets();
+    // Send all buffered rows to the server and read the response
+    let result = writer.finish().await?;
     println!(
-        "  Final flush: {} total rows, {} packets",
-        bulk.total_rows(),
-        final_packets.len()
+        "Bulk insert complete: {} rows affected",
+        result.rows_affected
     );
 
-    let result = bulk.result();
-    println!(
-        "\nBulk insert packet generation complete: {} rows prepared, {} batches",
-        result.rows_affected, result.batches_committed
-    );
-
-    // Note: In a full implementation, the packets would be sent to the server
-    // and then we'd verify the data. This example demonstrates packet generation.
-
-    // Query to show that we're still connected
+    // Verify the data was inserted
     let rows = client
-        .query("SELECT 'Bulk insert packets generated' AS status", &[])
+        .query("SELECT COUNT(*) AS cnt FROM #BulkTest", &[])
         .await?;
 
     for result in rows {
         let row = result?;
-        let status: String = row.get(0)?;
-        println!("Status: {status}");
+        let count: i32 = row.get(0)?;
+        println!("Verified: {count} rows in #BulkTest");
     }
 
     client.close().await?;
