@@ -55,23 +55,19 @@ When a query future is dropped mid-flight:
 
 Rust does not support `async fn drop()`. The cleanup (draining response data until `DONE_ATTN`) requires async I/O, which cannot run in a synchronous `Drop` impl. This is a fundamental limitation shared by all async Rust database drivers.
 
-## Pool Safety Net
+## Pool Protection
 
-The connection pool mitigates this with health checking:
+The connection pool detects dirty connections and discards them automatically:
+
+1. **In-flight detection (primary):** The client tracks an `in_flight` flag that is set before sending a request and cleared after the full response is read from the wire. When a `PooledConnection` is dropped, if `in_flight` is true, the connection is discarded instead of returned to the pool.
+
+2. **Health checks (secondary safety net):** `test_on_checkout = true` (default) runs `SELECT 1` before handing out a connection. This catches edge cases where a connection becomes dirty through other means.
 
 | Setting | Default | Effect |
 |---|---|---|
+| `in_flight` detection | Always on | Discards connections with pending responses |
 | `test_on_checkout` | `true` | Runs `SELECT 1` before handing out a connection |
 | `test_on_checkin` | `false` | Marks connection for health check on next checkout |
-
-With `test_on_checkout = true` (the default), dirty connections will fail the health check and be discarded. This wastes a connection and adds ~1ms latency, but prevents data corruption.
-
-```rust
-let pool = Pool::builder()
-    .test_on_checkout(true) // default, shown for clarity
-    .build(config)
-    .await?;
-```
 
 ## Recommendations
 

@@ -971,6 +971,18 @@ impl Drop for PooledConnection {
         self.pool.in_use_count.fetch_sub(1, Ordering::Relaxed);
 
         if let Some(mut client) = self.client.take() {
+            // Check if a request was in-flight (sent but response not fully read).
+            // This happens when a query future is dropped mid-execution (e.g.,
+            // via tokio::select! or a timeout). The TCP buffer has unread response
+            // data, making the connection unusable.
+            if client.is_in_flight() {
+                tracing::warn!(
+                    connection_id = self.metadata.id,
+                    "connection returned to pool with in-flight request - discarding"
+                );
+                return;
+            }
+
             // Check if connection is in a transaction started via raw SQL.
             // If so, we cannot safely return it to the pool because:
             // 1. Drop is sync, so we can't execute ROLLBACK

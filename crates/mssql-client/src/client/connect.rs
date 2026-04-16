@@ -256,6 +256,7 @@ impl Client<Disconnected> {
             statement_cache: StatementCache::with_default_size(),
             transaction_descriptor: 0, // Auto-commit mode initially
             needs_reset: false,        // Fresh connection, no reset needed
+            in_flight: false,          // No request pending
             #[cfg(feature = "otel")]
             instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
                 .with_database(current_database.clone().unwrap_or_default()),
@@ -529,6 +530,7 @@ impl Client<Disconnected> {
                     statement_cache: StatementCache::with_default_size(),
                     transaction_descriptor: 0, // Auto-commit mode initially
                     needs_reset: false,        // Fresh connection, no reset needed
+                    in_flight: false,          // No request pending
                     #[cfg(feature = "otel")]
                     instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
                         .with_database(current_database.clone().unwrap_or_default()),
@@ -586,6 +588,7 @@ impl Client<Disconnected> {
                     statement_cache: StatementCache::with_default_size(),
                     transaction_descriptor: 0, // Auto-commit mode initially
                     needs_reset: false,        // Fresh connection, no reset needed
+                    in_flight: false,          // No request pending
                     #[cfg(feature = "otel")]
                     instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
                         .with_database(current_database.clone().unwrap_or_default()),
@@ -648,6 +651,7 @@ impl Client<Disconnected> {
                 statement_cache: StatementCache::with_default_size(),
                 transaction_descriptor: 0, // Auto-commit mode initially
                 needs_reset: false,        // Fresh connection, no reset needed
+                in_flight: false,          // No request pending
                 #[cfg(feature = "otel")]
                 instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
                     .with_database(current_database.clone().unwrap_or_default()),
@@ -776,6 +780,7 @@ impl Client<Disconnected> {
             statement_cache: StatementCache::with_default_size(),
             transaction_descriptor: 0,
             needs_reset: false,
+            in_flight: false,
             #[cfg(feature = "otel")]
             instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
                 .with_database(current_database.clone().unwrap_or_default()),

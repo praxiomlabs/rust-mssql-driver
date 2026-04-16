@@ -94,6 +94,9 @@ impl<S: ConnectionState> Client<S> {
         }
         .ok_or(Error::ConnectionClosed)?;
 
+        // Full response received from wire — connection is clean for next request
+        self.in_flight = false;
+
         let mut parser = self.create_parser(message.payload);
         let mut columns: Vec<crate::row::Column> = Vec::new();
         let mut rows: Vec<crate::row::Row> = Vec::new();
@@ -247,6 +250,9 @@ impl<S: ConnectionState> Client<S> {
         }
         .ok_or(Error::ConnectionClosed)?;
 
+        // Full response received from wire — connection is clean for next request
+        self.in_flight = false;
+
         let mut parser = self.create_parser(message.payload);
         let mut rows_affected = 0u64;
         let mut current_metadata: Option<ColMetaData> = None;
@@ -350,6 +356,9 @@ impl<S: ConnectionState> Client<S> {
         }
         .ok_or(Error::ConnectionClosed)?;
 
+        // Full response received from wire — connection is clean for next request
+        self.in_flight = false;
+
         let mut parser = self.create_parser(message.payload);
         let mut transaction_descriptor: u64 = 0;
 
@@ -443,6 +452,9 @@ impl<S: ConnectionState> Client<S> {
             ConnectionHandle::Plain(conn) => conn.read_message().await?,
         }
         .ok_or(Error::ConnectionClosed)?;
+
+        // Full response received from wire — connection is clean for next request
+        self.in_flight = false;
 
         let mut parser = self.create_parser(message.payload);
         let mut result = crate::stream::ProcedureResult::new();
@@ -669,6 +681,9 @@ impl Client<Ready> {
             ConnectionHandle::Plain(conn) => conn.read_message().await?,
         }
         .ok_or(Error::ConnectionClosed)?;
+
+        // Full response received from wire — connection is clean for next request
+        self.in_flight = false;
 
         let mut parser = self.create_parser(message.payload);
         let mut result_sets: Vec<crate::stream::ResultSet> = Vec::new();

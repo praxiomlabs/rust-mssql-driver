@@ -48,6 +48,9 @@ pub struct Client<S: ConnectionState> {
     /// Per MS-TDS spec, this value must be included in ALL_HEADERS for subsequent
     /// requests within an explicit transaction. 0 indicates auto-commit mode.
     transaction_descriptor: u64,
+    /// Whether a request has been sent and the response has not yet been fully read.
+    /// Used by the connection pool to detect dirty connections after cancel/timeout.
+    in_flight: bool,
     /// Whether this connection needs a reset on next use.
     /// Set by connection pool on checkin, cleared after first query/execute.
     /// When true, the RESETCONNECTION flag is set on the first TDS packet.
@@ -133,6 +136,7 @@ impl<S: ConnectionState> Client<S> {
             tracing::debug!("sending SQL batch with RESETCONNECTION flag");
         }
 
+        self.in_flight = true;
         let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         match connection {
@@ -172,6 +176,7 @@ impl<S: ConnectionState> Client<S> {
             tracing::debug!("sending RPC with RESETCONNECTION flag");
         }
 
+        self.in_flight = true;
         let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         match connection {
@@ -567,6 +572,7 @@ impl Client<Ready> {
             statement_cache: self.statement_cache,
             transaction_descriptor, // Store the descriptor from server
             needs_reset: self.needs_reset,
+            in_flight: self.in_flight,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
             #[cfg(feature = "always-encrypted")]
@@ -633,6 +639,7 @@ impl Client<Ready> {
             statement_cache: self.statement_cache,
             transaction_descriptor,
             needs_reset: self.needs_reset,
+            in_flight: self.in_flight,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
             #[cfg(feature = "always-encrypted")]
@@ -701,6 +708,17 @@ impl Client<Ready> {
     #[must_use]
     pub fn is_in_transaction(&self) -> bool {
         self.transaction_descriptor != 0
+    }
+
+    /// Check if a request is in-flight (sent but response not fully read).
+    ///
+    /// Used by the connection pool to detect dirty connections that were
+    /// interrupted mid-query (e.g., by `tokio::select!` or a timeout).
+    /// A connection with an in-flight request has unread data in the TCP
+    /// buffer and must be discarded rather than returned to the pool.
+    #[must_use]
+    pub fn is_in_flight(&self) -> bool {
+        self.in_flight
     }
 
     /// Get a handle for cancelling the current query.
@@ -1011,6 +1029,7 @@ impl Client<InTransaction> {
             statement_cache: self.statement_cache,
             transaction_descriptor: 0, // Reset to auto-commit mode
             needs_reset: self.needs_reset,
+            in_flight: self.in_flight,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
             #[cfg(feature = "always-encrypted")]
@@ -1057,6 +1076,7 @@ impl Client<InTransaction> {
             statement_cache: self.statement_cache,
             transaction_descriptor: 0, // Reset to auto-commit mode
             needs_reset: self.needs_reset,
+            in_flight: self.in_flight,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
             #[cfg(feature = "always-encrypted")]
