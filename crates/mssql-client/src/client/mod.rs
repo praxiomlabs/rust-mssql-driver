@@ -259,7 +259,8 @@ impl<S: ConnectionState> Client<S> {
             "executing stored procedure"
         );
 
-        let rpc_params = Self::convert_params(params, self.send_unicode(), self.server_collation())?;
+        let rpc_params =
+            Self::convert_params_positional(params, self.send_unicode(), self.server_collation())?;
         let mut rpc = RpcRequest::named(proc_name);
         for param in rpc_params {
             rpc = rpc.param(param);

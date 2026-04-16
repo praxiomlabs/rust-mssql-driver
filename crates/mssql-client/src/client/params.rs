@@ -163,6 +163,25 @@ impl<S: ConnectionState> Client<S> {
             .collect()
     }
 
+    /// Convert ToSql parameters to RPC parameters with empty names for positional binding.
+    ///
+    /// Used by [`Client::call_procedure`](super::Client::call_procedure) because
+    /// SQL Server's RPC layer binds parameters by name when names are present and
+    /// by position when names are empty. The previous behavior of emitting
+    /// `@p1`, `@p2`, … rejected any procedure whose parameters weren't literally
+    /// named `@p1`, `@p2`, … with "Procedure or function expects parameter '@…',
+    /// which was not supplied."
+    pub(crate) fn convert_params_positional(
+        params: &[&(dyn crate::ToSql + Sync)],
+        send_unicode: bool,
+        collation: Option<&tds_protocol::token::Collation>,
+    ) -> Result<Vec<RpcParam>> {
+        params
+            .iter()
+            .map(|p| Self::convert_single_param("", *p, send_unicode, collation))
+            .collect()
+    }
+
     /// Convert named parameters to RPC parameters.
     ///
     /// Ensures each parameter name has an `@` prefix as required by
