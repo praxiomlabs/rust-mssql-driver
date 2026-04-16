@@ -1568,24 +1568,20 @@ mod tests {
 
     #[test]
     fn test_multi_subnet_failover_connection_string() {
-        let config = Config::from_connection_string(
-            "Server=ag-listener;MultiSubnetFailover=true;",
-        )
-        .unwrap();
+        let config =
+            Config::from_connection_string("Server=ag-listener;MultiSubnetFailover=true;").unwrap();
         assert!(config.multi_subnet_failover);
 
         // Space-separated variant
-        let config = Config::from_connection_string(
-            "Server=ag-listener;Multi Subnet Failover=true;",
-        )
-        .unwrap();
+        let config =
+            Config::from_connection_string("Server=ag-listener;Multi Subnet Failover=true;")
+                .unwrap();
         assert!(config.multi_subnet_failover);
 
         // Disabled
-        let config = Config::from_connection_string(
-            "Server=ag-listener;MultiSubnetFailover=false;",
-        )
-        .unwrap();
+        let config =
+            Config::from_connection_string("Server=ag-listener;MultiSubnetFailover=false;")
+                .unwrap();
         assert!(!config.multi_subnet_failover);
 
         // Default is false
@@ -1604,9 +1600,7 @@ mod tests {
 
     #[test]
     fn test_multi_subnet_failover_invalid_value() {
-        let result = Config::from_connection_string(
-            "Server=localhost;MultiSubnetFailover=banana;",
-        );
+        let result = Config::from_connection_string("Server=localhost;MultiSubnetFailover=banana;");
         assert!(result.is_err());
     }
 
@@ -1630,10 +1624,9 @@ mod tests {
 
     #[test]
     fn test_send_string_parameters_as_unicode_connection_string() {
-        let config = Config::from_connection_string(
-            "Server=localhost;SendStringParametersAsUnicode=false;",
-        )
-        .unwrap();
+        let config =
+            Config::from_connection_string("Server=localhost;SendStringParametersAsUnicode=false;")
+                .unwrap();
         assert!(!config.send_string_parameters_as_unicode);
 
         // Space-separated variant
@@ -1644,10 +1637,9 @@ mod tests {
         assert!(!config.send_string_parameters_as_unicode);
 
         // Enabled explicitly
-        let config = Config::from_connection_string(
-            "Server=localhost;SendStringParametersAsUnicode=true;",
-        )
-        .unwrap();
+        let config =
+            Config::from_connection_string("Server=localhost;SendStringParametersAsUnicode=true;")
+                .unwrap();
         assert!(config.send_string_parameters_as_unicode);
 
         // Default is true

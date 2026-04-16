@@ -247,9 +247,9 @@ fn decimal_to_money_cents(value: rust_decimal::Decimal) -> Result<i128, TypeErro
     let scale: u32 = value.scale();
     if scale <= 4 {
         let factor = 10_i128.pow(4 - scale);
-        mantissa
-            .checked_mul(factor)
-            .ok_or(TypeError::OutOfRange { target_type: "MONEY" })
+        mantissa.checked_mul(factor).ok_or(TypeError::OutOfRange {
+            target_type: "MONEY",
+        })
     } else {
         let factor = 10_i128.pow(scale - 4);
         Ok(mantissa / factor)
@@ -264,14 +264,18 @@ fn decimal_to_money_cents(value: rust_decimal::Decimal) -> Result<i128, TypeErro
 #[cfg(feature = "decimal")]
 pub fn decimal_to_money_cents_i64(value: rust_decimal::Decimal) -> Result<i64, TypeError> {
     let cents_i128 = decimal_to_money_cents(value)?;
-    i64::try_from(cents_i128).map_err(|_| TypeError::OutOfRange { target_type: "MONEY" })
+    i64::try_from(cents_i128).map_err(|_| TypeError::OutOfRange {
+        target_type: "MONEY",
+    })
 }
 
 /// Convert a decimal to the scaled i32 used on the SMALLMONEY wire.
 #[cfg(feature = "decimal")]
 pub fn decimal_to_smallmoney_cents_i32(value: rust_decimal::Decimal) -> Result<i32, TypeError> {
     let cents_i128 = decimal_to_money_cents(value)?;
-    i32::try_from(cents_i128).map_err(|_| TypeError::OutOfRange { target_type: "SMALLMONEY" })
+    i32::try_from(cents_i128).map_err(|_| TypeError::OutOfRange {
+        target_type: "SMALLMONEY",
+    })
 }
 
 /// Encode a decimal as MONEY (8 bytes): the signed 64-bit scaled integer is

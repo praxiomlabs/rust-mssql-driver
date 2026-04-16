@@ -165,14 +165,13 @@ impl Client<Disconnected> {
         } else {
             let addr = format!("{host}:{port}");
             tracing::debug!("establishing TCP connection to {}", addr);
-            let stream =
-                timeout(config.timeouts.connect_timeout, TcpStream::connect(&addr))
-                    .await
-                    .map_err(|_| Error::ConnectTimeout {
-                        host: config.host.clone(),
-                        port: config.port,
-                    })?
-                    .map_err(Error::from)?;
+            let stream = timeout(config.timeouts.connect_timeout, TcpStream::connect(&addr))
+                .await
+                .map_err(|_| Error::ConnectTimeout {
+                    host: config.host.clone(),
+                    port: config.port,
+                })?
+                .map_err(Error::from)?;
             stream.set_nodelay(true).map_err(Error::from)?;
             stream
         };
@@ -217,7 +216,11 @@ impl Client<Disconnected> {
     ///
     /// Used when `MultiSubnetFailover=True` for AlwaysOn AG listeners that
     /// span multiple subnets. First successful TCP connection wins.
-    async fn connect_parallel(host: &str, port: u16, connect_timeout: std::time::Duration) -> Result<TcpStream> {
+    async fn connect_parallel(
+        host: &str,
+        port: u16,
+        connect_timeout: std::time::Duration,
+    ) -> Result<TcpStream> {
         let addr_str = format!("{host}:{port}");
         let addrs: Vec<SocketAddr> = tokio::net::lookup_host(&addr_str)
             .await
@@ -258,14 +261,12 @@ impl Client<Disconnected> {
         for addr in addrs {
             let dur = connect_timeout;
             join_set.spawn(async move {
-                let tcp = timeout(dur, TcpStream::connect(addr))
-                    .await
-                    .map_err(|_| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::TimedOut,
-                            format!("connection to {addr} timed out"),
-                        )
-                    })??;
+                let tcp = timeout(dur, TcpStream::connect(addr)).await.map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        format!("connection to {addr} timed out"),
+                    )
+                })??;
                 tcp.set_nodelay(true)?;
                 Ok::<(TcpStream, SocketAddr), std::io::Error>((tcp, addr))
             });
@@ -298,9 +299,7 @@ impl Client<Disconnected> {
         Err(Error::from(last_error.unwrap_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::ConnectionRefused,
-                format!(
-                    "all {addr_count} parallel connection attempts failed for {host}:{port}"
-                ),
+                format!("all {addr_count} parallel connection attempts failed for {host}:{port}"),
             )
         })))
     }
@@ -1158,12 +1157,7 @@ impl Client<Disconnected> {
                         server_version = Some(ack.tds_version);
                     }
                     Token::EnvChange(env) => {
-                        Self::process_env_change(
-                            &env,
-                            &mut database,
-                            &mut routing,
-                            &mut collation,
-                        );
+                        Self::process_env_change(&env, &mut database, &mut routing, &mut collation);
                     }
                     #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
                     Token::Sspi(sspi_token) => {

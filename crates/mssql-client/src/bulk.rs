@@ -222,19 +222,19 @@ fn parse_sql_type(sql_type: &str) -> (u8, Option<u32>, Option<u8>, Option<u8>) {
     // column is NOT NULL, since SQL Server's BulkLoad rejects nullable type IDs
     // for NOT NULL columns with error 4816.
     match base {
-        "BIT" => (0x68, Some(1), None, None),           // BITN
-        "TINYINT" => (0x26, Some(1), None, None),       // INTN(1)
-        "SMALLINT" => (0x26, Some(2), None, None),      // INTN(2)
-        "INT" => (0x26, Some(4), None, None),            // INTN(4)
-        "BIGINT" => (0x26, Some(8), None, None),         // INTN(8)
-        "REAL" => (0x6D, Some(4), None, None),           // FLTN(4)
-        "FLOAT" => (0x6D, Some(8), None, None),          // FLTN(8)
+        "BIT" => (0x68, Some(1), None, None),      // BITN
+        "TINYINT" => (0x26, Some(1), None, None),  // INTN(1)
+        "SMALLINT" => (0x26, Some(2), None, None), // INTN(2)
+        "INT" => (0x26, Some(4), None, None),      // INTN(4)
+        "BIGINT" => (0x26, Some(8), None, None),   // INTN(8)
+        "REAL" => (0x6D, Some(4), None, None),     // FLTN(4)
+        "FLOAT" => (0x6D, Some(8), None, None),    // FLTN(8)
         "DATE" => (0x28, None, None, None),
         "TIME" => {
             let scale = params.and_then(|p| p.parse().ok()).unwrap_or(7);
             (0x29, None, None, Some(scale))
         }
-        "DATETIME" => (0x6F, Some(8), None, None),      // DATETIMEN(8)
+        "DATETIME" => (0x6F, Some(8), None, None), // DATETIMEN(8)
         "DATETIME2" => {
             let scale = params.and_then(|p| p.parse().ok()).unwrap_or(7);
             (0x2A, None, None, Some(scale))
@@ -292,8 +292,8 @@ fn parse_sql_type(sql_type: &str) -> (u8, Option<u32>, Option<u8>, Option<u8>) {
             };
             (0x6C, None, Some(precision), Some(scale))
         }
-        "MONEY" => (0x6E, Some(8), None, None),         // MONEYN(8)
-        "SMALLMONEY" => (0x6E, Some(4), None, None),    // MONEYN(4)
+        "MONEY" => (0x6E, Some(8), None, None), // MONEYN(8)
+        "SMALLMONEY" => (0x6E, Some(4), None, None), // MONEYN(4)
         "XML" => (0xF1, Some(0xFFFF), None, None),
         _ => (0xE7, Some(8000), None, None), // Default to NVARCHAR(4000)
     }
@@ -581,7 +581,10 @@ impl BulkInsert {
                     col.collation = srv.type_info.collation;
                 }
             }
-            srv_cols.iter().map(|c| c.type_id.is_fixed_length()).collect()
+            srv_cols
+                .iter()
+                .map(|c| c.type_id.is_fixed_length())
+                .collect()
         } else {
             // Without server metadata, NOT NULL columns of fixed-width types
             // must use the fixed type ID variant (e.g. INT NOT NULL uses 0x38
@@ -836,8 +839,8 @@ impl BulkInsert {
                     }
                     // Nullable fixed types use 0 length
                     // INTN, BITN, FLTN, MONEYN, DATETIMEN, Decimal, GUID, temporal
-                    0x26 | 0x68 | 0x6D | 0x6E | 0x6F | 0x6C | 0x6A | 0x24 | 0x28
-                    | 0x29 | 0x2A | 0x2B => {
+                    0x26 | 0x68 | 0x6D | 0x6E | 0x6F | 0x6C | 0x6A | 0x24 | 0x28 | 0x29 | 0x2A
+                    | 0x2B => {
                         buf.put_u8(0);
                     }
                     // Fixed types without nullable variant
@@ -852,37 +855,51 @@ impl BulkInsert {
             }
 
             SqlValue::Bool(v) => {
-                if !is_fixed { buf.put_u8(1); }
+                if !is_fixed {
+                    buf.put_u8(1);
+                }
                 buf.put_u8(if *v { 1 } else { 0 });
             }
 
             SqlValue::TinyInt(v) => {
-                if !is_fixed { buf.put_u8(1); }
+                if !is_fixed {
+                    buf.put_u8(1);
+                }
                 buf.put_u8(*v);
             }
 
             SqlValue::SmallInt(v) => {
-                if !is_fixed { buf.put_u8(2); }
+                if !is_fixed {
+                    buf.put_u8(2);
+                }
                 buf.put_i16_le(*v);
             }
 
             SqlValue::Int(v) => {
-                if !is_fixed { buf.put_u8(4); }
+                if !is_fixed {
+                    buf.put_u8(4);
+                }
                 buf.put_i32_le(*v);
             }
 
             SqlValue::BigInt(v) => {
-                if !is_fixed { buf.put_u8(8); }
+                if !is_fixed {
+                    buf.put_u8(8);
+                }
                 buf.put_i64_le(*v);
             }
 
             SqlValue::Float(v) => {
-                if !is_fixed { buf.put_u8(4); }
+                if !is_fixed {
+                    buf.put_u8(4);
+                }
                 buf.put_f32_le(*v);
             }
 
             SqlValue::Double(v) => {
-                if !is_fixed { buf.put_u8(8); }
+                if !is_fixed {
+                    buf.put_u8(8);
+                }
                 buf.put_f64_le(*v);
             }
 
@@ -1389,17 +1406,17 @@ impl<'a, S: crate::state::ConnectionState> BulkWriter<'a, S> {
 /// VARBINARY, DECIMAL, temporal types other than DATETIME/SMALLDATETIME).
 fn nullable_to_fixed_type(type_id: u8, max_length: Option<u32>) -> Option<u8> {
     match (type_id, max_length) {
-        (0x68, _) => Some(0x32),           // BITN → Bit
-        (0x26, Some(1)) => Some(0x30),      // INTN(1) → Int1 (TINYINT)
-        (0x26, Some(2)) => Some(0x34),      // INTN(2) → Int2 (SMALLINT)
-        (0x26, Some(4)) => Some(0x38),      // INTN(4) → Int4 (INT)
-        (0x26, Some(8)) => Some(0x7F),      // INTN(8) → Int8 (BIGINT)
-        (0x6D, Some(4)) => Some(0x3B),      // FLTN(4) → Float4 (REAL)
-        (0x6D, Some(8)) => Some(0x3E),      // FLTN(8) → Float8 (FLOAT)
-        (0x6E, Some(4)) => Some(0x7A),      // MONEYN(4) → Money4 (SMALLMONEY)
-        (0x6E, Some(8)) => Some(0x3C),      // MONEYN(8) → Money (MONEY)
-        (0x6F, Some(4)) => Some(0x3A),      // DATETIMEN(4) → DateTime4 (SMALLDATETIME)
-        (0x6F, Some(8)) => Some(0x3D),      // DATETIMEN(8) → DateTime (DATETIME)
+        (0x68, _) => Some(0x32),       // BITN → Bit
+        (0x26, Some(1)) => Some(0x30), // INTN(1) → Int1 (TINYINT)
+        (0x26, Some(2)) => Some(0x34), // INTN(2) → Int2 (SMALLINT)
+        (0x26, Some(4)) => Some(0x38), // INTN(4) → Int4 (INT)
+        (0x26, Some(8)) => Some(0x7F), // INTN(8) → Int8 (BIGINT)
+        (0x6D, Some(4)) => Some(0x3B), // FLTN(4) → Float4 (REAL)
+        (0x6D, Some(8)) => Some(0x3E), // FLTN(8) → Float8 (FLOAT)
+        (0x6E, Some(4)) => Some(0x7A), // MONEYN(4) → Money4 (SMALLMONEY)
+        (0x6E, Some(8)) => Some(0x3C), // MONEYN(8) → Money (MONEY)
+        (0x6F, Some(4)) => Some(0x3A), // DATETIMEN(4) → DateTime4 (SMALLDATETIME)
+        (0x6F, Some(8)) => Some(0x3D), // DATETIMEN(8) → DateTime (DATETIME)
         _ => None,
     }
 }
@@ -1597,12 +1614,8 @@ mod tests {
 
     #[test]
     fn test_bulk_insert_validates_column_names() {
-        let builder = BulkInsertBuilder::new("Users").with_typed_columns(vec![BulkColumn::new(
-            "col;DROP TABLE x",
-            "INT",
-            0,
-        )
-        .unwrap()]);
+        let builder = BulkInsertBuilder::new("Users")
+            .with_typed_columns(vec![BulkColumn::new("col;DROP TABLE x", "INT", 0).unwrap()]);
 
         assert!(builder.build_insert_bulk_statement().is_err());
     }
@@ -1773,10 +1786,7 @@ mod tests {
 
         // Verify each column parsed correctly
         for (i, (parsed, original)) in meta.columns.iter().zip(columns.iter()).enumerate() {
-            assert_eq!(
-                parsed.name, original.name,
-                "column {i} name mismatch"
-            );
+            assert_eq!(parsed.name, original.name, "column {i} name mismatch");
             assert_eq!(
                 parsed.col_type, original.type_id,
                 "column {i} ({}) type mismatch",
@@ -1788,8 +1798,7 @@ mod tests {
                 // INTN — max_length should match
                 0x26 => {
                     assert_eq!(
-                        parsed.type_info.max_length,
-                        original.max_length,
+                        parsed.type_info.max_length, original.max_length,
                         "column {i} ({}) INTN max_length",
                         original.name
                     );
@@ -1801,8 +1810,7 @@ mod tests {
                 // FLTN
                 0x6D => {
                     assert_eq!(
-                        parsed.type_info.max_length,
-                        original.max_length,
+                        parsed.type_info.max_length, original.max_length,
                         "column {i} ({}) FLTN max_length",
                         original.name
                     );
@@ -1810,8 +1818,7 @@ mod tests {
                 // MONEYN
                 0x6E => {
                     assert_eq!(
-                        parsed.type_info.max_length,
-                        original.max_length,
+                        parsed.type_info.max_length, original.max_length,
                         "column {i} ({}) MONEYN max_length",
                         original.name
                     );
@@ -1819,8 +1826,7 @@ mod tests {
                 // DATETIMEN
                 0x6F => {
                     assert_eq!(
-                        parsed.type_info.max_length,
-                        original.max_length,
+                        parsed.type_info.max_length, original.max_length,
                         "column {i} ({}) DATETIMEN max_length",
                         original.name
                     );
@@ -1834,8 +1840,7 @@ mod tests {
                 // TIME/DATETIME2/DATETIMEOFFSET — scale
                 0x29..=0x2B => {
                     assert_eq!(
-                        parsed.type_info.scale,
-                        original.scale,
+                        parsed.type_info.scale, original.scale,
                         "column {i} ({}) scale",
                         original.name
                     );
@@ -1843,8 +1848,7 @@ mod tests {
                 // NVARCHAR/VARCHAR — max_length + collation
                 0xE7 | 0xA7 => {
                     assert_eq!(
-                        parsed.type_info.max_length,
-                        original.max_length,
+                        parsed.type_info.max_length, original.max_length,
                         "column {i} ({}) string max_length",
                         original.name
                     );
@@ -1857,8 +1861,7 @@ mod tests {
                 // VARBINARY — max_length, no collation
                 0xA5 => {
                     assert_eq!(
-                        parsed.type_info.max_length,
-                        original.max_length,
+                        parsed.type_info.max_length, original.max_length,
                         "column {i} ({}) binary max_length",
                         original.name
                     );
@@ -1871,14 +1874,12 @@ mod tests {
                 // DECIMAL
                 0x6C => {
                     assert_eq!(
-                        parsed.type_info.precision,
-                        original.precision,
+                        parsed.type_info.precision, original.precision,
                         "column {i} ({}) precision",
                         original.name
                     );
                     assert_eq!(
-                        parsed.type_info.scale,
-                        original.scale,
+                        parsed.type_info.scale, original.scale,
                         "column {i} ({}) scale",
                         original.name
                     );
@@ -1897,24 +1898,50 @@ mod tests {
         use tds_protocol::types::TypeId;
 
         let columns = vec![
-            BulkColumn::new("id", "INT", 0).unwrap().with_nullable(false),
-            BulkColumn::new("tiny", "TINYINT", 1).unwrap().with_nullable(false),
-            BulkColumn::new("small", "SMALLINT", 2).unwrap().with_nullable(false),
-            BulkColumn::new("big", "BIGINT", 3).unwrap().with_nullable(false),
-            BulkColumn::new("flag", "BIT", 4).unwrap().with_nullable(false),
-            BulkColumn::new("r", "REAL", 5).unwrap().with_nullable(false),
-            BulkColumn::new("f", "FLOAT", 6).unwrap().with_nullable(false),
-            BulkColumn::new("dt", "DATETIME", 7).unwrap().with_nullable(false),
-            BulkColumn::new("sdt", "SMALLDATETIME", 8).unwrap().with_nullable(false),
-            BulkColumn::new("mny", "MONEY", 9).unwrap().with_nullable(false),
-            BulkColumn::new("smny", "SMALLMONEY", 10).unwrap().with_nullable(false),
+            BulkColumn::new("id", "INT", 0)
+                .unwrap()
+                .with_nullable(false),
+            BulkColumn::new("tiny", "TINYINT", 1)
+                .unwrap()
+                .with_nullable(false),
+            BulkColumn::new("small", "SMALLINT", 2)
+                .unwrap()
+                .with_nullable(false),
+            BulkColumn::new("big", "BIGINT", 3)
+                .unwrap()
+                .with_nullable(false),
+            BulkColumn::new("flag", "BIT", 4)
+                .unwrap()
+                .with_nullable(false),
+            BulkColumn::new("r", "REAL", 5)
+                .unwrap()
+                .with_nullable(false),
+            BulkColumn::new("f", "FLOAT", 6)
+                .unwrap()
+                .with_nullable(false),
+            BulkColumn::new("dt", "DATETIME", 7)
+                .unwrap()
+                .with_nullable(false),
+            BulkColumn::new("sdt", "SMALLDATETIME", 8)
+                .unwrap()
+                .with_nullable(false),
+            BulkColumn::new("mny", "MONEY", 9)
+                .unwrap()
+                .with_nullable(false),
+            BulkColumn::new("smny", "SMALLMONEY", 10)
+                .unwrap()
+                .with_nullable(false),
         ];
 
         let bulk = BulkInsert::new(columns.clone(), 0);
 
         // Every NOT NULL fixed-width column should have fixed_len=true
         for (i, fixed) in bulk.fixed_len.iter().enumerate() {
-            assert!(*fixed, "column {i} ({}) should be fixed_len", columns[i].name);
+            assert!(
+                *fixed,
+                "column {i} ({}) should be fixed_len",
+                columns[i].name
+            );
         }
 
         // Parse the generated COLMETADATA
@@ -1962,9 +1989,13 @@ mod tests {
         };
 
         let columns = vec![
-            BulkColumn::new("s", "VARCHAR(50)", 0).unwrap().with_collation(chinese.clone()),
+            BulkColumn::new("s", "VARCHAR(50)", 0)
+                .unwrap()
+                .with_collation(chinese.clone()),
             // NVARCHAR also writes 5 collation bytes — should honor caller too
-            BulkColumn::new("n", "NVARCHAR(50)", 1).unwrap().with_collation(chinese.clone()),
+            BulkColumn::new("n", "NVARCHAR(50)", 1)
+                .unwrap()
+                .with_collation(chinese.clone()),
             // VARCHAR without with_collation should keep the Latin1 default
             BulkColumn::new("d", "VARCHAR(10)", 2).unwrap(),
         ];

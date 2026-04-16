@@ -377,19 +377,17 @@ impl<S: ConnectionState> Client<S> {
             SqlValue::Double(v) => {
                 encode_tvp_float(*v, 8, buf);
             }
-            SqlValue::String(s) => {
-                match wire_type {
-                    TvpWireType::NVarChar { max_length } => {
-                        encode_tvp_nvarchar(s, *max_length, buf);
-                    }
-                    TvpWireType::VarChar { max_length } => {
-                        encode_tvp_varchar(s, *max_length, buf);
-                    }
-                    _ => {
-                        encode_tvp_nvarchar(s, 4000, buf);
-                    }
+            SqlValue::String(s) => match wire_type {
+                TvpWireType::NVarChar { max_length } => {
+                    encode_tvp_nvarchar(s, *max_length, buf);
                 }
-            }
+                TvpWireType::VarChar { max_length } => {
+                    encode_tvp_varchar(s, *max_length, buf);
+                }
+                _ => {
+                    encode_tvp_nvarchar(s, 4000, buf);
+                }
+            },
             SqlValue::Binary(b) => {
                 let max_len = match wire_type {
                     TvpWireType::VarBinary { max_length } => *max_length,
@@ -407,28 +405,27 @@ impl<S: ConnectionState> Client<S> {
                 // authoritative dispatch key.
                 match wire_type {
                     TvpWireType::Money => {
-                        let scaled =
-                            match mssql_types::encode::decimal_to_money_cents_i64(*d) {
-                                Ok(v) => v,
-                                Err(_) => {
-                                    // Out-of-range values write NULL so the row
-                                    // structure stays intact; the caller can
-                                    // pre-validate to reject.
-                                    encode_tvp_null(wire_type, buf);
-                                    return;
-                                }
-                            };
+                        let scaled = match mssql_types::encode::decimal_to_money_cents_i64(*d) {
+                            Ok(v) => v,
+                            Err(_) => {
+                                // Out-of-range values write NULL so the row
+                                // structure stays intact; the caller can
+                                // pre-validate to reject.
+                                encode_tvp_null(wire_type, buf);
+                                return;
+                            }
+                        };
                         encode_tvp_money(scaled, buf);
                     }
                     TvpWireType::SmallMoney => {
-                        let scaled =
-                            match mssql_types::encode::decimal_to_smallmoney_cents_i32(*d) {
-                                Ok(v) => v,
-                                Err(_) => {
-                                    encode_tvp_null(wire_type, buf);
-                                    return;
-                                }
-                            };
+                        let scaled = match mssql_types::encode::decimal_to_smallmoney_cents_i32(*d)
+                        {
+                            Ok(v) => v,
+                            Err(_) => {
+                                encode_tvp_null(wire_type, buf);
+                                return;
+                            }
+                        };
                         encode_tvp_smallmoney(scaled, buf);
                     }
                     _ => {
@@ -471,8 +468,7 @@ impl<S: ConnectionState> Client<S> {
                 // gets the DATETIME2 time+date format.
                 match wire_type {
                     TvpWireType::DateTime => {
-                        let (days, ticks) =
-                            mssql_types::encode::datetime_to_legacy_days_ticks(*dt);
+                        let (days, ticks) = mssql_types::encode::datetime_to_legacy_days_ticks(*dt);
                         encode_tvp_datetime(days, ticks, buf);
                     }
                     TvpWireType::SmallDateTime => {
@@ -489,8 +485,7 @@ impl<S: ConnectionState> Client<S> {
                     _ => {
                         use chrono::Timelike;
                         // Time component
-                        let nanos = dt.time().num_seconds_from_midnight() as u64
-                            * 1_000_000_000
+                        let nanos = dt.time().num_seconds_from_midnight() as u64 * 1_000_000_000
                             + dt.time().nanosecond() as u64;
                         let intervals = nanos / 100;
                         // Date component

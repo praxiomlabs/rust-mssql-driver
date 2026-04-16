@@ -2673,7 +2673,10 @@ async fn test_tvp_money_datetime_null_round_trip() {
         .next()
         .map(|row| row.get(0).unwrap())
         .unwrap_or(0);
-    assert_eq!(null_count, 2, "all MONEY/SMALLMONEY/DATETIME/SMALLDATETIME values must be SQL NULL");
+    assert_eq!(
+        null_count, 2,
+        "all MONEY/SMALLMONEY/DATETIME/SMALLDATETIME values must be SQL NULL"
+    );
 
     client.close().await.unwrap();
 }
@@ -3237,11 +3240,17 @@ async fn test_trigger_insert_row_count() {
         .expect("Cleanup");
 
     client
-        .execute("CREATE TABLE dbo.TrigSrc (id INT NOT NULL, val NVARCHAR(50) NOT NULL)", &[])
+        .execute(
+            "CREATE TABLE dbo.TrigSrc (id INT NOT NULL, val NVARCHAR(50) NOT NULL)",
+            &[],
+        )
         .await
         .expect("Create TrigSrc");
     client
-        .execute("CREATE TABLE dbo.TrigLog (src_id INT NOT NULL, action NVARCHAR(10) NOT NULL)", &[])
+        .execute(
+            "CREATE TABLE dbo.TrigLog (src_id INT NOT NULL, action NVARCHAR(10) NOT NULL)",
+            &[],
+        )
         .await
         .expect("Create TrigLog");
 
@@ -3303,8 +3312,14 @@ async fn test_trigger_insert_row_count() {
     );
 
     // Cleanup
-    client.execute("DROP TABLE dbo.TrigSrc", &[]).await.expect("Cleanup");
-    client.execute("DROP TABLE dbo.TrigLog", &[]).await.expect("Cleanup");
+    client
+        .execute("DROP TABLE dbo.TrigSrc", &[])
+        .await
+        .expect("Cleanup");
+    client
+        .execute("DROP TABLE dbo.TrigLog", &[])
+        .await
+        .expect("Cleanup");
 
     client.close().await.expect("Failed to close");
 }
@@ -3333,7 +3348,10 @@ async fn test_trigger_update_row_count() {
         .expect("Cleanup");
 
     client
-        .execute("CREATE TABLE dbo.TrigUpd (id INT NOT NULL, val INT NOT NULL)", &[])
+        .execute(
+            "CREATE TABLE dbo.TrigUpd (id INT NOT NULL, val INT NOT NULL)",
+            &[],
+        )
         .await
         .expect("Create table");
     client
@@ -3387,8 +3405,14 @@ async fn test_trigger_update_row_count() {
     );
 
     // Cleanup
-    client.execute("DROP TABLE dbo.TrigUpd", &[]).await.expect("Cleanup");
-    client.execute("DROP TABLE dbo.TrigUpdLog", &[]).await.expect("Cleanup");
+    client
+        .execute("DROP TABLE dbo.TrigUpd", &[])
+        .await
+        .expect("Cleanup");
+    client
+        .execute("DROP TABLE dbo.TrigUpdLog", &[])
+        .await
+        .expect("Cleanup");
 
     client.close().await.expect("Failed to close");
 }
@@ -3417,7 +3441,10 @@ async fn test_trigger_nocount_row_count() {
         .expect("Cleanup");
 
     client
-        .execute("CREATE TABLE dbo.TrigNC (id INT NOT NULL, val NVARCHAR(50) NOT NULL)", &[])
+        .execute(
+            "CREATE TABLE dbo.TrigNC (id INT NOT NULL, val NVARCHAR(50) NOT NULL)",
+            &[],
+        )
         .await
         .expect("Create table");
     client
@@ -3451,7 +3478,10 @@ async fn test_trigger_nocount_row_count() {
 
     // With SET NOCOUNT ON, the trigger's DML does not produce DONE_COUNT,
     // so rows_affected should be exactly the user's INSERT count.
-    assert_eq!(affected, 2, "With NOCOUNT trigger, rows_affected should be 2");
+    assert_eq!(
+        affected, 2,
+        "With NOCOUNT trigger, rows_affected should be 2"
+    );
 
     // Verify trigger still fired
     let rows = client
@@ -3466,8 +3496,14 @@ async fn test_trigger_nocount_row_count() {
     assert_eq!(log_count, 2, "Trigger should still have fired");
 
     // Cleanup
-    client.execute("DROP TABLE dbo.TrigNC", &[]).await.expect("Cleanup");
-    client.execute("DROP TABLE dbo.TrigNCLog", &[]).await.expect("Cleanup");
+    client
+        .execute("DROP TABLE dbo.TrigNC", &[])
+        .await
+        .expect("Cleanup");
+    client
+        .execute("DROP TABLE dbo.TrigNCLog", &[])
+        .await
+        .expect("Cleanup");
 
     client.close().await.expect("Failed to close");
 }

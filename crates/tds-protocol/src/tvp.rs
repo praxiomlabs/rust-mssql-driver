@@ -127,21 +127,21 @@ impl TvpWireType {
     #[must_use]
     pub const fn type_id(&self) -> u8 {
         match self {
-            Self::Bit => 0x68,                          // BITNTYPE
-            Self::Int { .. } => 0x26,                   // INTNTYPE
-            Self::Float { .. } => 0x6D,                 // FLTNTYPE
-            Self::Decimal { .. } => 0x6C,               // DECIMALNTYPE
-            Self::NVarChar { .. } => 0xE7,              // NVARCHARTYPE
-            Self::VarChar { .. } => 0xA7,               // BIGVARCHARTYPE
-            Self::VarBinary { .. } => 0xA5,             // BIGVARBINTYPE
-            Self::Guid => 0x24,                         // GUIDTYPE
-            Self::Date => 0x28,                         // DATETYPE
-            Self::Time { .. } => 0x29,                  // TIMETYPE
-            Self::DateTime2 { .. } => 0x2A,             // DATETIME2TYPE
-            Self::DateTimeOffset { .. } => 0x2B,        // DATETIMEOFFSETTYPE
-            Self::Money | Self::SmallMoney => 0x6E,     // MONEYNTYPE
+            Self::Bit => 0x68,                            // BITNTYPE
+            Self::Int { .. } => 0x26,                     // INTNTYPE
+            Self::Float { .. } => 0x6D,                   // FLTNTYPE
+            Self::Decimal { .. } => 0x6C,                 // DECIMALNTYPE
+            Self::NVarChar { .. } => 0xE7,                // NVARCHARTYPE
+            Self::VarChar { .. } => 0xA7,                 // BIGVARCHARTYPE
+            Self::VarBinary { .. } => 0xA5,               // BIGVARBINTYPE
+            Self::Guid => 0x24,                           // GUIDTYPE
+            Self::Date => 0x28,                           // DATETYPE
+            Self::Time { .. } => 0x29,                    // TIMETYPE
+            Self::DateTime2 { .. } => 0x2A,               // DATETIME2TYPE
+            Self::DateTimeOffset { .. } => 0x2B,          // DATETIMEOFFSETTYPE
+            Self::Money | Self::SmallMoney => 0x6E,       // MONEYNTYPE
             Self::DateTime | Self::SmallDateTime => 0x6F, // DATETIMNTYPE
-            Self::Xml => 0xF1,                          // XMLTYPE
+            Self::Xml => 0xF1,                            // XMLTYPE
         }
     }
 
@@ -837,7 +837,11 @@ mod tests {
     fn test_tvp_money_type_info_encoding() {
         let mut buf = BytesMut::new();
         TvpWireType::Money.encode_type_info(&mut buf);
-        assert_eq!(&buf[..], &[0x6E, 8], "MONEY = MONEYN type_id with max_length 8");
+        assert_eq!(
+            &buf[..],
+            &[0x6E, 8],
+            "MONEY = MONEYN type_id with max_length 8"
+        );
     }
 
     #[test]
@@ -881,6 +885,10 @@ mod tests {
 
         let mut buf = BytesMut::new();
         encode_tvp_null(&TvpWireType::SmallDateTime, &mut buf);
-        assert_eq!(&buf[..], &[0], "DATETIMEN NULL is a single length-zero byte");
+        assert_eq!(
+            &buf[..],
+            &[0],
+            "DATETIMEN NULL is a single length-zero byte"
+        );
     }
 }

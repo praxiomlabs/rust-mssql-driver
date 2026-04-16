@@ -1189,8 +1189,7 @@ mod tests {
             crate::encode::encode_date(date, &mut buf);
             assert_eq!(buf.len(), 3, "DATE encoding is always 3 bytes");
             // 3652058 days from 0001-01-01 — fits in 3 bytes (max ~16M)
-            let days =
-                buf[0] as u32 | ((buf[1] as u32) << 8) | ((buf[2] as u32) << 16);
+            let days = buf[0] as u32 | ((buf[1] as u32) << 8) | ((buf[2] as u32) << 16);
             assert_eq!(days, 3_652_058);
         }
 

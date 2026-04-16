@@ -57,7 +57,11 @@ async fn test_rpc_roundtrip_bool() {
             .query("SELECT @p1 AS v", &[&input])
             .await
             .expect("Query failed");
-        let row = rows.into_iter().next().expect("Expected one row").expect("row err");
+        let row = rows
+            .into_iter()
+            .next()
+            .expect("Expected one row")
+            .expect("row err");
         let got: bool = row.get(0).expect("get bool");
         assert_eq!(got, input, "bool round-trip mismatch");
     }
@@ -97,7 +101,15 @@ async fn test_rpc_roundtrip_smallint() {
 #[ignore = "Requires SQL Server"]
 async fn test_rpc_roundtrip_bigint() {
     let mut client = connect().await;
-    for &input in &[i64::MIN, -1_000_000_000_000, -1, 0, 1, 1_000_000_000_000, i64::MAX] {
+    for &input in &[
+        i64::MIN,
+        -1_000_000_000_000,
+        -1,
+        0,
+        1,
+        1_000_000_000_000,
+        i64::MAX,
+    ] {
         let rows = client
             .query("SELECT @p1 AS v", &[&input])
             .await
@@ -131,7 +143,11 @@ async fn test_rpc_roundtrip_f32() {
             .expect("Query failed");
         let row = rows.into_iter().next().expect("row").expect("row err");
         let got: f32 = row.get(0).expect("get f32");
-        assert_eq!(got.to_bits(), input.to_bits(), "f32 round-trip mismatch for {input}");
+        assert_eq!(
+            got.to_bits(),
+            input.to_bits(),
+            "f32 round-trip mismatch for {input}"
+        );
     }
 }
 
@@ -155,7 +171,11 @@ async fn test_rpc_roundtrip_f64() {
             .expect("Query failed");
         let row = rows.into_iter().next().expect("row").expect("row err");
         let got: f64 = row.get(0).expect("get f64");
-        assert_eq!(got.to_bits(), input.to_bits(), "f64 round-trip mismatch for {input}");
+        assert_eq!(
+            got.to_bits(),
+            input.to_bits(),
+            "f64 round-trip mismatch for {input}"
+        );
     }
 }
 
@@ -183,14 +203,18 @@ async fn test_rpc_roundtrip_string_ascii() {
 async fn test_rpc_roundtrip_string_unicode_bmp() {
     let mut client = connect().await;
     // Multi-byte UTF-16 code units in the BMP (Basic Multilingual Plane)
-    for input in ["世界", "Héllo wörld", "Привет мир", "مرحبا بالعالم", "🌍"] {
+    for input in ["世界", "Héllo wörld", "Привет мир", "مرحبا بالعالم", "🌍"]
+    {
         let rows = client
             .query("SELECT @p1 AS v", &[&input])
             .await
             .expect("Query failed");
         let row = rows.into_iter().next().expect("row").expect("row err");
         let got: String = row.get(0).expect("get string");
-        assert_eq!(got, input, "string unicode round-trip mismatch for {input:?}");
+        assert_eq!(
+            got, input,
+            "string unicode round-trip mismatch for {input:?}"
+        );
     }
 }
 
@@ -207,7 +231,10 @@ async fn test_rpc_roundtrip_string_supplementary() {
             .expect("Query failed");
         let row = rows.into_iter().next().expect("row").expect("row err");
         let got: String = row.get(0).expect("get string");
-        assert_eq!(got, input, "string supplementary round-trip mismatch for {input:?}");
+        assert_eq!(
+            got, input,
+            "string supplementary round-trip mismatch for {input:?}"
+        );
     }
 }
 
@@ -249,8 +276,8 @@ async fn test_rpc_roundtrip_date() {
 
     let mut client = connect().await;
     let cases = [
-        NaiveDate::from_ymd_opt(1, 1, 1).unwrap(),     // DATE epoch
-        NaiveDate::from_ymd_opt(1753, 1, 1).unwrap(),  // DATETIME epoch edge
+        NaiveDate::from_ymd_opt(1, 1, 1).unwrap(),    // DATE epoch
+        NaiveDate::from_ymd_opt(1753, 1, 1).unwrap(), // DATETIME epoch edge
         NaiveDate::from_ymd_opt(1899, 12, 31).unwrap(),
         NaiveDate::from_ymd_opt(1900, 1, 1).unwrap(),
         NaiveDate::from_ymd_opt(2026, 4, 16).unwrap(),
@@ -510,7 +537,10 @@ async fn test_rpc_roundtrip_money_truncation() {
         .expect("Query failed");
     let row = rows.into_iter().next().expect("row").expect("row err");
     let got: Decimal = row.get(0).expect("get decimal");
-    assert_eq!(got, expected, "money 5-decimal should truncate to 4-decimal");
+    assert_eq!(
+        got, expected,
+        "money 5-decimal should truncate to 4-decimal"
+    );
 }
 
 #[cfg(feature = "chrono")]
@@ -639,7 +669,10 @@ async fn test_rpc_roundtrip_null_int() {
         .expect("Query failed");
     let row = rows.into_iter().next().expect("row").expect("row err");
     let got: Option<i32> = row.get(0).expect("get option");
-    assert!(got.is_none(), "NULL int round-trip: expected None, got {got:?}");
+    assert!(
+        got.is_none(),
+        "NULL int round-trip: expected None, got {got:?}"
+    );
 }
 
 #[tokio::test]
@@ -653,5 +686,8 @@ async fn test_rpc_roundtrip_null_string() {
         .expect("Query failed");
     let row = rows.into_iter().next().expect("row").expect("row err");
     let got: Option<String> = row.get(0).expect("get option");
-    assert!(got.is_none(), "NULL string round-trip: expected None, got {got:?}");
+    assert!(
+        got.is_none(),
+        "NULL string round-trip: expected None, got {got:?}"
+    );
 }

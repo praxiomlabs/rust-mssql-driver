@@ -315,7 +315,10 @@ pub fn encoding_name_for_lcid(lcid: u32) -> &'static str {
 ///
 /// When the `encoding` feature is disabled, characters ≤ 0xFF pass through as
 /// Latin-1 bytes and everything else becomes `?`.
-pub fn encode_str_for_collation(value: &str, collation: Option<&crate::token::Collation>) -> Vec<u8> {
+pub fn encode_str_for_collation(
+    value: &str,
+    collation: Option<&crate::token::Collation>,
+) -> Vec<u8> {
     #[cfg(feature = "encoding")]
     {
         if let Some(c) = collation {

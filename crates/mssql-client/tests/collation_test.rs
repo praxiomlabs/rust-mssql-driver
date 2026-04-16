@@ -346,10 +346,7 @@ async fn test_varchar_param_chinese_prc_collation_round_trip() -> Result<(), Err
             .await?;
 
         let rows = client
-            .query(
-                "SELECT txt FROM dbo.chinese_round_trip WHERE id = 2",
-                &[],
-            )
+            .query("SELECT txt FROM dbo.chinese_round_trip WHERE id = 2", &[])
             .await?;
         let mut iter = rows.into_iter();
         let row = iter.next().expect("expected one row from named insert")?;

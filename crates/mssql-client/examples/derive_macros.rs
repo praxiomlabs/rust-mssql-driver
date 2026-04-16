@@ -134,7 +134,9 @@ fn demonstrate_to_params() {
 
     println!("\nUsage:");
     println!("  client.execute_named(");
-    println!("      \"INSERT INTO users (name, email_address, active) VALUES (@name, @email_address, @active)\",");
+    println!(
+        "      \"INSERT INTO users (name, email_address, active) VALUES (@name, @email_address, @active)\","
+    );
     println!("      &new_user.to_params()?");
     println!("  ).await?;");
 }

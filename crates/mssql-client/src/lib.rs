@@ -114,7 +114,9 @@ pub mod tvp;
 pub(crate) mod validation;
 
 // Re-export commonly used types
-pub use bulk::{BulkColumn, BulkInsert, BulkInsertBuilder, BulkInsertResult, BulkOptions, BulkWriter};
+pub use bulk::{
+    BulkColumn, BulkInsert, BulkInsertBuilder, BulkInsertResult, BulkOptions, BulkWriter,
+};
 pub use cancel::CancelHandle;
 pub use client::Client;
 pub use config::{ApplicationIntent, Config, RedirectConfig, RetryPolicy, TimeoutConfig};
@@ -128,11 +130,11 @@ pub use tds_protocol::version::TdsVersion;
 // Secure credential types (with zeroize feature)
 #[cfg(feature = "zeroize")]
 pub use mssql_auth::{SecretString, SecureCredentials};
+#[cfg(feature = "chrono")]
+pub use mssql_types::SmallDateTime;
 pub use mssql_types::{FromSql, SqlValue, ToSql};
 #[cfg(feature = "decimal")]
 pub use mssql_types::{Money, SmallMoney};
-#[cfg(feature = "chrono")]
-pub use mssql_types::SmallDateTime;
 pub use procedure::ProcedureBuilder;
 pub use query::{Query, in_params};
 pub use row::{Column, Row};

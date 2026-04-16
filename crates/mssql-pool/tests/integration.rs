@@ -85,10 +85,7 @@ async fn test_pool_with_otel_name() {
 
     // Checkout/checkin cycle — exercises record_connection_wait + record_pool_status.
     let mut conn = pool.get().await.expect("Failed to get connection");
-    let rows = conn
-        .query("SELECT 1", &[])
-        .await
-        .expect("Query failed");
+    let rows = conn.query("SELECT 1", &[]).await.expect("Query failed");
     for _ in rows {}
     drop(conn);
 
@@ -1094,7 +1091,10 @@ async fn test_cancel_safety_pool_discards_inflight_connection() {
     // Phase 2: Checkout a fresh connection and verify it works.
     // If the dirty connection were reused, this query would fail or
     // return garbage data from the partially-consumed response.
-    let mut conn2 = pool.get().await.expect("Failed to checkout second connection");
+    let mut conn2 = pool
+        .get()
+        .await
+        .expect("Failed to checkout second connection");
 
     let rows = conn2
         .query("SELECT 42 AS answer", &[])

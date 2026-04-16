@@ -433,10 +433,8 @@ impl<S: ConnectionState> Client<S> {
         self.read_execute_result().await?;
 
         // Create bulk writer with hand-crafted metadata
-        let bulk = crate::bulk::BulkInsert::new(
-            builder.columns().to_vec(),
-            builder.options().batch_size,
-        );
+        let bulk =
+            crate::bulk::BulkInsert::new(builder.columns().to_vec(), builder.options().batch_size);
 
         Ok(crate::bulk::BulkWriter::new(self, bulk))
     }
@@ -514,7 +512,8 @@ impl<S: ConnectionState> Client<S> {
         if params.is_empty() {
             self.send_sql_batch(sql).await?;
         } else {
-            let rpc_params = Self::convert_named_params(params, self.send_unicode(), self.server_collation())?;
+            let rpc_params =
+                Self::convert_named_params(params, self.send_unicode(), self.server_collation())?;
             let rpc = RpcRequest::execute_sql(sql, rpc_params);
             self.send_rpc(&rpc).await?;
         }
@@ -573,7 +572,8 @@ impl<S: ConnectionState> Client<S> {
         if params.is_empty() {
             self.send_sql_batch(sql).await?;
         } else {
-            let rpc_params = Self::convert_named_params(params, self.send_unicode(), self.server_collation())?;
+            let rpc_params =
+                Self::convert_named_params(params, self.send_unicode(), self.server_collation())?;
             let rpc = RpcRequest::execute_sql(sql, rpc_params);
             self.send_rpc(&rpc).await?;
         }
@@ -658,7 +658,8 @@ impl Client<Ready> {
                 self.send_sql_batch(sql).await?;
             } else {
                 // Parameterized query - use sp_executesql via RPC
-                let rpc_params = Self::convert_params(params, self.send_unicode(), self.server_collation())?;
+                let rpc_params =
+                    Self::convert_params(params, self.send_unicode(), self.server_collation())?;
                 let rpc = RpcRequest::execute_sql(sql, rpc_params);
                 self.send_rpc(&rpc).await?;
             }
@@ -777,7 +778,8 @@ impl Client<Ready> {
             self.send_sql_batch(sql).await?;
         } else {
             // Parameterized query - use sp_executesql via RPC
-            let rpc_params = Self::convert_params(params, self.send_unicode(), self.server_collation())?;
+            let rpc_params =
+                Self::convert_params(params, self.send_unicode(), self.server_collation())?;
             let rpc = RpcRequest::execute_sql(sql, rpc_params);
             self.send_rpc(&rpc).await?;
         }
@@ -812,7 +814,8 @@ impl Client<Ready> {
                 self.send_sql_batch(sql).await?;
             } else {
                 // Parameterized statement - use sp_executesql via RPC
-                let rpc_params = Self::convert_params(params, self.send_unicode(), self.server_collation())?;
+                let rpc_params =
+                    Self::convert_params(params, self.send_unicode(), self.server_collation())?;
                 let rpc = RpcRequest::execute_sql(sql, rpc_params);
                 self.send_rpc(&rpc).await?;
             }
@@ -1178,7 +1181,8 @@ impl Client<InTransaction> {
                 self.send_sql_batch(sql).await?;
             } else {
                 // Parameterized query - use sp_executesql via RPC
-                let rpc_params = Self::convert_params(params, self.send_unicode(), self.server_collation())?;
+                let rpc_params =
+                    Self::convert_params(params, self.send_unicode(), self.server_collation())?;
                 let rpc = RpcRequest::execute_sql(sql, rpc_params);
                 self.send_rpc(&rpc).await?;
             }
@@ -1243,7 +1247,8 @@ impl Client<InTransaction> {
                 self.send_sql_batch(sql).await?;
             } else {
                 // Parameterized statement - use sp_executesql via RPC
-                let rpc_params = Self::convert_params(params, self.send_unicode(), self.server_collation())?;
+                let rpc_params =
+                    Self::convert_params(params, self.send_unicode(), self.server_collation())?;
                 let rpc = RpcRequest::execute_sql(sql, rpc_params);
                 self.send_rpc(&rpc).await?;
             }

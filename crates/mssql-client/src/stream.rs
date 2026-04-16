@@ -1220,7 +1220,10 @@ mod tests {
         let mut rs = ResultSet::from_raw(columns, pending, meta);
 
         let first = rs.next_row().expect("pending row present");
-        assert!(first.is_err(), "truncated bytes must surface a decode error");
+        assert!(
+            first.is_err(),
+            "truncated bytes must surface a decode error"
+        );
         assert!(rs.next_row().is_none());
     }
 

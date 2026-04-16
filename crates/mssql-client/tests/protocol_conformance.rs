@@ -386,17 +386,17 @@ async fn test_protocol_guid_roundtrip() {
     // Send a known UUID as a parameter and verify exact round-trip
     let original = Uuid::parse_str("12345678-1234-5678-9abc-def012345678").unwrap();
     let rows = client
-        .query(
-            "SELECT CAST(@p1 AS UNIQUEIDENTIFIER) AS uid",
-            &[&original],
-        )
+        .query("SELECT CAST(@p1 AS UNIQUEIDENTIFIER) AS uid", &[&original])
         .await
         .expect("UUID round-trip query failed");
 
     let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
     assert_eq!(data.len(), 1);
     let result: Uuid = data[0].get(0).expect("Failed to get UUID");
-    assert_eq!(result, original, "UUID should survive parameterized round-trip");
+    assert_eq!(
+        result, original,
+        "UUID should survive parameterized round-trip"
+    );
 
     client.close().await.expect("Failed to close");
 }

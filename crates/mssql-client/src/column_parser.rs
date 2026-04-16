@@ -1358,8 +1358,8 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
                     buf.advance(data_len - consumed);
                 }
 
-                let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1)
-                    .expect("epoch 0001-01-01 is valid");
+                let base =
+                    chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
                 let date = base + chrono::Duration::days(days as i64);
                 let time = intervals_to_time(intervals, scale);
                 Ok(SqlValue::DateTime(date.and_time(time)))
@@ -1401,8 +1401,8 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
                 }
 
                 use chrono::TimeZone;
-                let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1)
-                    .expect("epoch 0001-01-01 is valid");
+                let base =
+                    chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
                 let date = base + chrono::Duration::days(days as i64);
                 let time = intervals_to_time(intervals, scale);
                 let offset = chrono::FixedOffset::east_opt((offset_minutes as i32) * 60)

@@ -654,10 +654,9 @@ mod live_server {
         admin.execute(&cek_sql, &[]).await.expect("create cek");
 
         // CREATE TABLE
-        let tbl_sql = table_ddl.replace("{TABLE}", &table_name).replace(
-            "{CEK}",
-            &cek_name,
-        );
+        let tbl_sql = table_ddl
+            .replace("{TABLE}", &table_name)
+            .replace("{CEK}", &cek_name);
         admin.execute(&tbl_sql, &[]).await.expect("create table");
 
         Fixture {

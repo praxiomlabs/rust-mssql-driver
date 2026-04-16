@@ -752,18 +752,17 @@ mod tests {
         //   5: ibExtension, cbExtension  4   <-- what we want
         const OFFSET_TABLE_START: usize = 36;
         const EXTENSION_SLOT: usize = OFFSET_TABLE_START + 5 * 4; // = 56
-        let ib_extension = u16::from_le_bytes([
-            encoded[EXTENSION_SLOT],
-            encoded[EXTENSION_SLOT + 1],
-        ]) as usize;
-        let cb_extension = u16::from_le_bytes([
-            encoded[EXTENSION_SLOT + 2],
-            encoded[EXTENSION_SLOT + 3],
-        ]);
+        let ib_extension =
+            u16::from_le_bytes([encoded[EXTENSION_SLOT], encoded[EXTENSION_SLOT + 1]]) as usize;
+        let cb_extension =
+            u16::from_le_bytes([encoded[EXTENSION_SLOT + 2], encoded[EXTENSION_SLOT + 3]]);
         assert_eq!(cb_extension, 4, "cbExtension must be 4 per MS-TDS §2.2.6.4");
 
         // ibExtension must point to a 4-byte region still inside the packet.
-        assert!(ib_extension + 4 <= encoded.len(), "ibExtension out of bounds");
+        assert!(
+            ib_extension + 4 <= encoded.len(),
+            "ibExtension out of bounds"
+        );
 
         // Dereference the pointer. That u32 is the absolute offset of the
         // FeatureExt data, which must also land inside the packet and must

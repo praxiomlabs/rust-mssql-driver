@@ -617,13 +617,7 @@ impl RpcParam {
             // Latin-1 fallback: chars ≤ 0xFF pass through, others become '?'
             value
                 .chars()
-                .map(|ch| {
-                    if (ch as u32) <= 0xFF {
-                        ch as u8
-                    } else {
-                        b'?'
-                    }
-                })
+                .map(|ch| if (ch as u32) <= 0xFF { ch as u8 } else { b'?' })
                 .collect()
         }
     }
@@ -1234,10 +1228,7 @@ mod tests {
         let param = RpcParam::varchar_with_collation("@val", "test", &collation);
         assert_eq!(param.type_info.type_id, 0xA7);
         // Collation bytes should match the custom collation, not default Latin1
-        assert_eq!(
-            param.type_info.collation,
-            Some(collation.to_bytes())
-        );
+        assert_eq!(param.type_info.collation, Some(collation.to_bytes()));
     }
 
     #[test]
@@ -1265,11 +1256,7 @@ mod tests {
     fn test_money_param_declarations() {
         let decls = RpcRequest::build_param_declarations(&[
             RpcParam::new("@m", TypeInfo::money(), Bytes::from_static(&[0u8; 8])),
-            RpcParam::new(
-                "@sm",
-                TypeInfo::smallmoney(),
-                Bytes::from_static(&[0u8; 4]),
-            ),
+            RpcParam::new("@sm", TypeInfo::smallmoney(), Bytes::from_static(&[0u8; 4])),
             RpcParam::new(
                 "@sdt",
                 TypeInfo::smalldatetime(),
@@ -1304,8 +1291,7 @@ mod tests {
             lcid: 0x0419, // Russian
             sort_id: 0,
         };
-        let custom_param =
-            RpcParam::varchar_with_collation("@val", "test", &custom_collation);
+        let custom_param = RpcParam::varchar_with_collation("@val", "test", &custom_collation);
         // The collation bytes should differ
         assert_ne!(
             default_param.type_info.collation,
