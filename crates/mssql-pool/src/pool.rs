@@ -124,6 +124,10 @@ struct PoolMetricsInner {
     connections_lifetime_expired: u64,
     /// Reaper task runs.
     reaper_runs: u64,
+    /// Idle health checks performed (background pings).
+    idle_health_checks_performed: u64,
+    /// Idle health checks that failed (connections discarded).
+    idle_health_checks_failed: u64,
     /// Peak wait queue depth observed.
     peak_wait_queue_depth: u64,
     /// Total connection acquisition time in microseconds.
@@ -265,11 +269,14 @@ impl Pool {
         );
     }
 
-    /// Background reaper task that cleans up expired connections.
+    /// Background reaper task that cleans up expired connections and
+    /// optionally health-checks idle ones.
     ///
     /// This task runs periodically and:
     /// - Removes connections that exceed `max_lifetime`
     /// - Removes connections that exceed `idle_timeout` (keeping at least `min_connections`)
+    /// - When `test_while_idle` is enabled, pings remaining idle connections
+    ///   and discards any that fail the health check
     async fn reaper_task(inner: Arc<PoolInner>, interval: Duration) {
         let mut ticker = tokio::time::interval(interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -351,6 +358,94 @@ impl Pool {
                     .add_permits((expired_lifetime + expired_idle) as usize);
             } else {
                 inner.metrics.lock().reaper_runs += 1;
+            }
+
+            // Health-check idle connections if configured.
+            // Connections are popped one at a time so checkout availability
+            // is only reduced by one during each individual check.
+            if inner.config.test_while_idle {
+                let health_query = &*inner.config.health_check_query;
+                let check_interval = inner.config.health_check_interval;
+
+                // Snapshot count — we'll stop if the pool empties or closes.
+                let count_to_check = inner.idle_connections.lock().len();
+                let mut healthy_count = 0u64;
+                let mut unhealthy_count = 0u64;
+
+                for _ in 0..count_to_check {
+                    if inner.closed.load(Ordering::Acquire) {
+                        break;
+                    }
+
+                    let entry = inner.idle_connections.lock().pop_front();
+                    let Some(mut entry) = entry else { break };
+
+                    // Skip connections that were recently checked.
+                    if !entry.metadata.needs_health_check(check_interval) {
+                        inner.idle_connections.lock().push_back(entry);
+                        continue;
+                    }
+
+                    // Run health check with a timeout so a dead connection
+                    // can't block the reaper indefinitely.
+                    let healthy = match timeout(
+                        Duration::from_secs(10),
+                        entry.client.query(health_query, &[]),
+                    )
+                    .await
+                    {
+                        Ok(Ok(rows)) => {
+                            // Consume the result set to release the borrow.
+                            for _ in rows {}
+                            true
+                        }
+                        Ok(Err(e)) => {
+                            tracing::debug!(
+                                connection_id = entry.metadata.id,
+                                error = %e,
+                                "idle health check failed, discarding connection"
+                            );
+                            false
+                        }
+                        Err(_) => {
+                            tracing::debug!(
+                                connection_id = entry.metadata.id,
+                                "idle health check timed out, discarding connection"
+                            );
+                            false
+                        }
+                    };
+
+                    if healthy {
+                        entry.metadata.mark_health_check();
+                        entry.needs_health_check = false;
+                        inner.idle_connections.lock().push_back(entry);
+                        healthy_count += 1;
+                    } else {
+                        unhealthy_count += 1;
+                        inner.metrics.lock().connections_closed += 1;
+                        // Connection dropped here — TCP stream closed.
+                    }
+                }
+
+                if healthy_count > 0 || unhealthy_count > 0 {
+                    let mut metrics = inner.metrics.lock();
+                    metrics.idle_health_checks_performed += healthy_count + unhealthy_count;
+                    metrics.idle_health_checks_failed += unhealthy_count;
+                }
+
+                if unhealthy_count > 0 {
+                    tracing::info!(
+                        healthy = healthy_count,
+                        unhealthy = unhealthy_count,
+                        "idle connection health check complete"
+                    );
+                } else if healthy_count > 0 {
+                    tracing::debug!(
+                        checked = healthy_count,
+                        "idle connection health check complete"
+                    );
+                }
             }
         }
     }
@@ -619,6 +714,8 @@ impl Pool {
             connections_idle_expired: inner.connections_idle_expired,
             connections_lifetime_expired: inner.connections_lifetime_expired,
             reaper_runs: inner.reaper_runs,
+            idle_health_checks_performed: inner.idle_health_checks_performed,
+            idle_health_checks_failed: inner.idle_health_checks_failed,
             peak_wait_queue_depth: inner.peak_wait_queue_depth,
             avg_acquisition_time_us,
             uptime: self.inner.created_at.elapsed(),
@@ -751,6 +848,13 @@ impl PoolBuilder {
         self
     }
 
+    /// Enable or disable health checking of idle connections during reaper ticks.
+    #[must_use]
+    pub fn test_while_idle(mut self, enabled: bool) -> Self {
+        self.pool_config.test_while_idle = enabled;
+        self
+    }
+
     /// Enable or disable `sp_reset_connection` on return.
     #[must_use]
     pub fn sp_reset_connection(mut self, enabled: bool) -> Self {
@@ -852,6 +956,10 @@ pub struct PoolMetrics {
     pub connections_lifetime_expired: u64,
     /// Number of reaper task runs.
     pub reaper_runs: u64,
+    /// Idle health checks performed by the background reaper (`test_while_idle`).
+    pub idle_health_checks_performed: u64,
+    /// Idle health checks that failed (connections discarded by reaper).
+    pub idle_health_checks_failed: u64,
     /// Peak wait queue depth observed.
     pub peak_wait_queue_depth: u64,
     /// Average connection acquisition time in microseconds.
@@ -1118,6 +1226,8 @@ mod tests {
             connections_idle_expired: 1,
             connections_lifetime_expired: 1,
             reaper_runs: 5,
+            idle_health_checks_performed: 50,
+            idle_health_checks_failed: 2,
             peak_wait_queue_depth: 3,
             avg_acquisition_time_us: 500,
             uptime: std::time::Duration::from_secs(3600),

@@ -38,6 +38,18 @@ pub struct PoolConfig {
     /// Interval between health checks for idle connections.
     pub health_check_interval: Duration,
 
+    /// Whether to health-check idle connections during reaper ticks.
+    ///
+    /// When enabled, the background reaper task will ping idle connections
+    /// using the configured health check query. Connections that fail the
+    /// check are discarded, catching network disconnects (e.g., firewall
+    /// timeouts, Azure idle connection drops) before checkout.
+    ///
+    /// Each idle connection is checked at most once per `health_check_interval`.
+    /// Connections are popped one at a time, checked, and returned to the pool,
+    /// so checkout availability is minimally impacted during checking.
+    pub test_while_idle: bool,
+
     /// Whether to execute sp_reset_connection on return.
     pub sp_reset_connection: bool,
 
@@ -66,6 +78,7 @@ impl Default for PoolConfig {
             test_on_checkout: true,
             test_on_checkin: false,
             health_check_interval: Duration::from_secs(30),
+            test_while_idle: false,
             sp_reset_connection: true,
             health_check_query: Arc::from(DEFAULT_HEALTH_CHECK_QUERY),
         }
@@ -132,6 +145,18 @@ impl PoolConfig {
     #[must_use]
     pub fn health_check_interval(mut self, interval: Duration) -> Self {
         self.health_check_interval = interval;
+        self
+    }
+
+    /// Enable or disable health checking idle connections during reaper ticks.
+    ///
+    /// When enabled, the reaper task pings idle connections using the
+    /// configured health check query, discarding any that fail. This
+    /// catches stale connections (firewall timeouts, Azure idle drops)
+    /// before checkout.
+    #[must_use]
+    pub fn test_while_idle(mut self, enabled: bool) -> Self {
+        self.test_while_idle = enabled;
         self
     }
 
@@ -202,6 +227,7 @@ mod tests {
         assert!(config.sp_reset_connection);
         assert!(config.test_on_checkout);
         assert!(!config.test_on_checkin);
+        assert!(!config.test_while_idle);
         assert_eq!(&*config.health_check_query, DEFAULT_HEALTH_CHECK_QUERY);
     }
 
