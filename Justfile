@@ -1827,7 +1827,12 @@ release-preflight:
     # Gate 8: repository URLs
     run_check "Repository URLs" just url-check
 
-    # Gate 9: tier 0 publish dry-run (the only check that hits crates.io index)
+    # Gate 9: feature flag isolation (catches CI 'Feature Flag Validation' failures
+    # locally — e.g., missing feature gates on `use` imports or unused-variable
+    # warnings under `-D warnings` when features are disabled).
+    run_check "Feature flag isolation (cargo-hack --each-feature)" just check-feature-flags
+
+    # Gate 10: tier 0 publish dry-run (the only check that hits crates.io index)
     printf '{{bold}}▸ Tier 0 publish dry-run (tds-protocol){{reset}}\n'
     if cargo publish -p tds-protocol --dry-run --allow-dirty > /tmp/preflight-$$.log 2>&1; then
         printf '  {{green}}[OK]{{reset}}    Packaged successfully\n\n'
