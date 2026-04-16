@@ -1071,3 +1071,91 @@ async fn test_connection_usable_after_bulk_insert() {
 
     client.close().await.expect("Failed to close");
 }
+
+// =============================================================================
+// Hand-Crafted COLMETADATA Tests (no schema discovery)
+// =============================================================================
+
+/// Test bulk insert using hand-crafted COLMETADATA (no SELECT TOP 0 round-trip).
+/// Exercises the `write_colmetadata()` code path directly. If the hand-crafted
+/// wire format is wrong, the server will reject the BulkLoad packet.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_without_schema_discovery() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // Mix of NOT NULL (exercises fixed type ID path: INT→0x38, BIT→0x32)
+    // and NULL (exercises nullable type ID path: DECIMAL→0x6C, NVARCHAR→0xE7).
+    client
+        .execute(
+            "CREATE TABLE #BulkNoDiscovery (\
+                id INT NOT NULL, \
+                name NVARCHAR(100) NOT NULL, \
+                amount DECIMAL(18,2) NULL, \
+                flag BIT NOT NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkNoDiscovery").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0).with_nullable(false),
+        BulkColumn::new("name", "NVARCHAR(100)", 1).with_nullable(false),
+        BulkColumn::new("amount", "DECIMAL(18,2)", 2),
+        BulkColumn::new("flag", "BIT", 3).with_nullable(false),
+    ]);
+
+    let mut writer = client
+        .bulk_insert_without_schema_discovery(&builder)
+        .await
+        .expect("Failed to start bulk insert");
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(1),
+            SqlValue::String("Alice".into()),
+            SqlValue::Decimal(rust_decimal::Decimal::new(12345, 2)), // 123.45
+            SqlValue::Bool(true),
+        ])
+        .expect("Failed to send row 1");
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(2),
+            SqlValue::String("Bob".into()),
+            SqlValue::Null,
+            SqlValue::Bool(false),
+        ])
+        .expect("Failed to send row 2");
+
+    let result = writer.finish().await.expect("Failed to finish bulk insert");
+    assert_eq!(result.rows_affected, 2);
+
+    // Verify data round-trip
+    let rows = client
+        .query(
+            "SELECT id, name, amount, flag FROM #BulkNoDiscovery ORDER BY id",
+            &[],
+        )
+        .await
+        .expect("Query failed");
+
+    let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    assert_eq!(data.len(), 2);
+
+    assert_eq!(data[0].get::<i32>(0).unwrap(), 1);
+    assert_eq!(data[0].get::<String>(1).unwrap(), "Alice");
+    assert_eq!(
+        data[0].get::<rust_decimal::Decimal>(2).unwrap(),
+        rust_decimal::Decimal::new(12345, 2)
+    );
+    assert!(data[0].get::<bool>(3).unwrap());
+
+    assert_eq!(data[1].get::<i32>(0).unwrap(), 2);
+    assert_eq!(data[1].get::<String>(1).unwrap(), "Bob");
+    assert_eq!(data[1].get::<Option<rust_decimal::Decimal>>(2).unwrap(), None);
+    assert!(!data[1].get::<bool>(3).unwrap());
+
+    client.close().await.expect("Failed to close");
+}

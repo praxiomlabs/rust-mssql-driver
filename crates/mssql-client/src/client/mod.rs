@@ -369,6 +369,46 @@ impl<S: ConnectionState> Client<S> {
         Ok(crate::bulk::BulkWriter::new(self, bulk))
     }
 
+    /// Start a bulk insert without querying the server for column metadata.
+    ///
+    /// Unlike [`bulk_insert()`](Self::bulk_insert), this method does not send
+    /// `SELECT TOP 0 * FROM table` to discover column types. Instead, the
+    /// column metadata is constructed from the `BulkColumn` types provided
+    /// on the builder. This saves a round-trip when the schema is known.
+    ///
+    /// # Caveats
+    ///
+    /// The caller must ensure `BulkColumn` entries match the target table's
+    /// column definitions exactly. Mismatched types, lengths, precision/scale,
+    /// or column ordering will cause the server to reject the BulkLoad packet.
+    ///
+    /// For most use cases, prefer [`bulk_insert()`](Self::bulk_insert) — the
+    /// extra round-trip is usually negligible and the server-supplied metadata
+    /// is guaranteed correct.
+    pub async fn bulk_insert_without_schema_discovery(
+        &mut self,
+        builder: &crate::bulk::BulkInsertBuilder,
+    ) -> Result<crate::bulk::BulkWriter<'_, S>> {
+        tracing::debug!(
+            table = builder.table_name(),
+            columns = builder.columns().len(),
+            "starting bulk insert (no schema discovery)"
+        );
+
+        // Send INSERT BULK statement to put server in bulk load mode
+        let stmt = builder.build_insert_bulk_statement()?;
+        self.send_sql_batch(&stmt).await?;
+        self.read_execute_result().await?;
+
+        // Create bulk writer with hand-crafted metadata
+        let bulk = crate::bulk::BulkInsert::new(
+            builder.columns().to_vec(),
+            builder.options().batch_size,
+        );
+
+        Ok(crate::bulk::BulkWriter::new(self, bulk))
+    }
+
     /// Send bulk load data as a BulkLoad (0x07) message and read the server response.
     ///
     /// Used internally by [`crate::bulk::BulkWriter::finish()`] to transmit accumulated

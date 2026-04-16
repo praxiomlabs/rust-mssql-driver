@@ -187,9 +187,10 @@ fn parse_sql_type(sql_type: &str) -> (u8, Option<u32>, Option<u8>, Option<u8>) {
         (upper.as_str(), None)
     };
 
-    // BulkLoad protocol requires nullable type variants in COLMETADATA.
-    // The server returns these types in SELECT TOP 0 metadata — fixed-length
-    // type IDs (INT 0x38, etc.) are rejected with error 4816.
+    // This returns the nullable type variant ID. `write_colmetadata` switches
+    // to the fixed-width variant (e.g. 0x26 INTN → 0x38 Int4) when the target
+    // column is NOT NULL, since SQL Server's BulkLoad rejects nullable type IDs
+    // for NOT NULL columns with error 4816.
     match base {
         "BIT" => (0x68, Some(1), None, None),           // BITN
         "TINYINT" => (0x26, Some(1), None, None),       // INTN(1)
@@ -507,12 +508,19 @@ impl BulkInsert {
         raw_colmetadata: Option<bytes::Bytes>,
         server_columns: Option<&[tds_protocol::token::ColumnData]>,
     ) -> Self {
-        // Determine which columns use fixed-length types on the wire
+        // Determine which columns use fixed-length types on the wire.
+        // Fixed-length types omit the per-row length prefix.
         let fixed_len: Vec<bool> = if let Some(srv_cols) = server_columns {
             srv_cols.iter().map(|c| c.type_id.is_fixed_length()).collect()
         } else {
-            // Without server metadata, assume all types are nullable (variable-length)
-            vec![false; columns.len()]
+            // Without server metadata, NOT NULL columns of fixed-width types
+            // must use the fixed type ID variant (e.g. INT NOT NULL uses 0x38
+            // Int4, not 0x26 INTN). SQL Server rejects nullable type IDs for
+            // NOT NULL target columns with error 4816.
+            columns
+                .iter()
+                .map(|c| !c.nullable && nullable_to_fixed_type(c.type_id, c.max_length).is_some())
+                .collect()
         };
 
         let mut bulk = Self {
@@ -549,6 +557,16 @@ impl BulkInsert {
             // User type (always 0 for basic types)
             buf.put_u32_le(0);
 
+            // For NOT NULL columns with a fixed-width type, use the fixed type ID
+            // variant (e.g. INT NOT NULL → 0x38 Int4 instead of 0x26 INTN).
+            // SQL Server's BCP rejects nullable type IDs for NOT NULL columns.
+            let effective_type_id = if !col.nullable {
+                nullable_to_fixed_type(col.type_id, col.max_length).unwrap_or(col.type_id)
+            } else {
+                col.type_id
+            };
+            let is_fixed_variant = effective_type_id != col.type_id;
+
             // Flags: Nullable (bit 0) | Updateable (bit 3)
             // BulkLoad columns must have Updateable set to indicate they accept writes.
             let mut flags: u16 = 0x0008; // Updateable
@@ -558,7 +576,18 @@ impl BulkInsert {
             buf.put_u16_le(flags);
 
             // Type info
-            buf.put_u8(col.type_id);
+            buf.put_u8(effective_type_id);
+
+            // Fixed-width types have no additional TYPE_INFO bytes — skip straight
+            // to the column name.
+            if is_fixed_variant {
+                let name_utf16: Vec<u16> = col.name.encode_utf16().collect();
+                buf.put_u8(name_utf16.len() as u8);
+                for code_unit in name_utf16 {
+                    buf.put_u16_le(code_unit);
+                }
+                continue;
+            }
 
             // Type-specific length/precision/scale
             match col.type_id {
@@ -1170,6 +1199,32 @@ impl<'a, S: crate::state::ConnectionState> BulkWriter<'a, S> {
     }
 }
 
+/// Map a nullable type ID to its fixed-width counterpart.
+///
+/// SQL Server's BulkLoad protocol rejects nullable type IDs (INTN, BITN, etc.)
+/// when the target column is NOT NULL. For those columns, the fixed type ID
+/// variant must be sent instead — with no max_length and no per-row length
+/// prefix.
+///
+/// Returns `None` for types that have no fixed-width variant (e.g. NVARCHAR,
+/// VARBINARY, DECIMAL, temporal types other than DATETIME/SMALLDATETIME).
+fn nullable_to_fixed_type(type_id: u8, max_length: Option<u32>) -> Option<u8> {
+    match (type_id, max_length) {
+        (0x68, _) => Some(0x32),           // BITN → Bit
+        (0x26, Some(1)) => Some(0x30),      // INTN(1) → Int1 (TINYINT)
+        (0x26, Some(2)) => Some(0x34),      // INTN(2) → Int2 (SMALLINT)
+        (0x26, Some(4)) => Some(0x38),      // INTN(4) → Int4 (INT)
+        (0x26, Some(8)) => Some(0x7F),      // INTN(8) → Int8 (BIGINT)
+        (0x6D, Some(4)) => Some(0x3B),      // FLTN(4) → Float4 (REAL)
+        (0x6D, Some(8)) => Some(0x3E),      // FLTN(8) → Float8 (FLOAT)
+        (0x6E, Some(4)) => Some(0x7A),      // MONEYN(4) → Money4 (SMALLMONEY)
+        (0x6E, Some(8)) => Some(0x3C),      // MONEYN(8) → Money (MONEY)
+        (0x6F, Some(4)) => Some(0x3A),      // DATETIMEN(4) → DateTime4 (SMALLDATETIME)
+        (0x6F, Some(8)) => Some(0x3D),      // DATETIMEN(8) → DateTime (DATETIME)
+        _ => None,
+    }
+}
+
 /// Calculate byte length for decimal based on precision.
 fn decimal_byte_length(precision: u8) -> u8 {
     match precision {
@@ -1411,6 +1466,225 @@ mod tests {
 
         // Check terminator
         assert_eq!(&buf[8..12], &0u32.to_le_bytes());
+    }
+
+    /// Verify that write_colmetadata() produces bytes that the TDS parser can
+    /// decode correctly for all supported column types (nullable variants).
+    #[test]
+    fn test_write_colmetadata_roundtrip() {
+        use tds_protocol::token::ColMetaData;
+
+        let columns = vec![
+            BulkColumn::new("id", "INT", 0),
+            BulkColumn::new("tiny", "TINYINT", 1),
+            BulkColumn::new("small", "SMALLINT", 2),
+            BulkColumn::new("big", "BIGINT", 3),
+            BulkColumn::new("flag", "BIT", 4),
+            BulkColumn::new("r", "REAL", 5),
+            BulkColumn::new("f", "FLOAT", 6),
+            BulkColumn::new("name", "NVARCHAR(100)", 7),
+            BulkColumn::new("code", "VARCHAR(50)", 8),
+            BulkColumn::new("data", "VARBINARY(200)", 9),
+            BulkColumn::new("d", "DATE", 10),
+            BulkColumn::new("t", "TIME(3)", 11),
+            BulkColumn::new("dt", "DATETIME", 12),
+            BulkColumn::new("dt2", "DATETIME2(7)", 13),
+            BulkColumn::new("dto", "DATETIMEOFFSET(7)", 14),
+            BulkColumn::new("sdt", "SMALLDATETIME", 15),
+            BulkColumn::new("uid", "UNIQUEIDENTIFIER", 16),
+            BulkColumn::new("amt", "DECIMAL(18,2)", 17),
+            BulkColumn::new("price", "MONEY", 18),
+            BulkColumn::new("smoney", "SMALLMONEY", 19),
+            BulkColumn::new("nmax", "NVARCHAR(MAX)", 20),
+            BulkColumn::new("vmax", "VARCHAR(MAX)", 21),
+            BulkColumn::new("bmax", "VARBINARY(MAX)", 22),
+        ];
+
+        let bulk = BulkInsert::new(columns.clone(), 0);
+
+        // Extract COLMETADATA bytes (skip the 0x81 token type byte)
+        let buf = &bulk.buffer[1..];
+        let mut cursor = bytes::Bytes::copy_from_slice(buf);
+        let meta = ColMetaData::decode(&mut cursor)
+            .expect("write_colmetadata output should be parseable by TDS decoder");
+
+        assert_eq!(meta.columns.len(), columns.len());
+
+        // Verify each column parsed correctly
+        for (i, (parsed, original)) in meta.columns.iter().zip(columns.iter()).enumerate() {
+            assert_eq!(
+                parsed.name, original.name,
+                "column {i} name mismatch"
+            );
+            assert_eq!(
+                parsed.col_type, original.type_id,
+                "column {i} ({}) type mismatch",
+                original.name
+            );
+
+            // Verify type-specific metadata
+            match original.type_id {
+                // INTN — max_length should match
+                0x26 => {
+                    assert_eq!(
+                        parsed.type_info.max_length,
+                        original.max_length,
+                        "column {i} ({}) INTN max_length",
+                        original.name
+                    );
+                }
+                // BITN
+                0x68 => {
+                    assert_eq!(parsed.type_info.max_length, Some(1));
+                }
+                // FLTN
+                0x6D => {
+                    assert_eq!(
+                        parsed.type_info.max_length,
+                        original.max_length,
+                        "column {i} ({}) FLTN max_length",
+                        original.name
+                    );
+                }
+                // MONEYN
+                0x6E => {
+                    assert_eq!(
+                        parsed.type_info.max_length,
+                        original.max_length,
+                        "column {i} ({}) MONEYN max_length",
+                        original.name
+                    );
+                }
+                // DATETIMEN
+                0x6F => {
+                    assert_eq!(
+                        parsed.type_info.max_length,
+                        original.max_length,
+                        "column {i} ({}) DATETIMEN max_length",
+                        original.name
+                    );
+                }
+                // GUID
+                0x24 => {
+                    assert_eq!(parsed.type_info.max_length, Some(16));
+                }
+                // DATE — no extra metadata
+                0x28 => {}
+                // TIME/DATETIME2/DATETIMEOFFSET — scale
+                0x29..=0x2B => {
+                    assert_eq!(
+                        parsed.type_info.scale,
+                        original.scale,
+                        "column {i} ({}) scale",
+                        original.name
+                    );
+                }
+                // NVARCHAR/VARCHAR — max_length + collation
+                0xE7 | 0xA7 => {
+                    assert_eq!(
+                        parsed.type_info.max_length,
+                        original.max_length,
+                        "column {i} ({}) string max_length",
+                        original.name
+                    );
+                    assert!(
+                        parsed.type_info.collation.is_some(),
+                        "column {i} ({}) should have collation",
+                        original.name
+                    );
+                }
+                // VARBINARY — max_length, no collation
+                0xA5 => {
+                    assert_eq!(
+                        parsed.type_info.max_length,
+                        original.max_length,
+                        "column {i} ({}) binary max_length",
+                        original.name
+                    );
+                    assert!(
+                        parsed.type_info.collation.is_none(),
+                        "column {i} ({}) should not have collation",
+                        original.name
+                    );
+                }
+                // DECIMAL
+                0x6C => {
+                    assert_eq!(
+                        parsed.type_info.precision,
+                        original.precision,
+                        "column {i} ({}) precision",
+                        original.name
+                    );
+                    assert_eq!(
+                        parsed.type_info.scale,
+                        original.scale,
+                        "column {i} ({}) scale",
+                        original.name
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Verify that NOT NULL columns use fixed-width type IDs (0x38 Int4,
+    /// 0x32 Bit, etc.) rather than nullable type IDs (0x26 INTN, 0x68 BITN).
+    /// SQL Server's BulkLoad rejects nullable IDs for NOT NULL columns.
+    #[test]
+    fn test_write_colmetadata_not_null_uses_fixed_types() {
+        use tds_protocol::token::ColMetaData;
+        use tds_protocol::types::TypeId;
+
+        let columns = vec![
+            BulkColumn::new("id", "INT", 0).with_nullable(false),
+            BulkColumn::new("tiny", "TINYINT", 1).with_nullable(false),
+            BulkColumn::new("small", "SMALLINT", 2).with_nullable(false),
+            BulkColumn::new("big", "BIGINT", 3).with_nullable(false),
+            BulkColumn::new("flag", "BIT", 4).with_nullable(false),
+            BulkColumn::new("r", "REAL", 5).with_nullable(false),
+            BulkColumn::new("f", "FLOAT", 6).with_nullable(false),
+            BulkColumn::new("dt", "DATETIME", 7).with_nullable(false),
+            BulkColumn::new("sdt", "SMALLDATETIME", 8).with_nullable(false),
+            BulkColumn::new("mny", "MONEY", 9).with_nullable(false),
+            BulkColumn::new("smny", "SMALLMONEY", 10).with_nullable(false),
+        ];
+
+        let bulk = BulkInsert::new(columns.clone(), 0);
+
+        // Every NOT NULL fixed-width column should have fixed_len=true
+        for (i, fixed) in bulk.fixed_len.iter().enumerate() {
+            assert!(*fixed, "column {i} ({}) should be fixed_len", columns[i].name);
+        }
+
+        // Parse the generated COLMETADATA
+        let buf = &bulk.buffer[1..]; // skip token type byte
+        let mut cursor = bytes::Bytes::copy_from_slice(buf);
+        let meta = ColMetaData::decode(&mut cursor).expect("parseable");
+
+        // Verify each column has the expected fixed type ID and no Nullable flag
+        let expected: &[(&str, TypeId)] = &[
+            ("id", TypeId::Int4),
+            ("tiny", TypeId::Int1),
+            ("small", TypeId::Int2),
+            ("big", TypeId::Int8),
+            ("flag", TypeId::Bit),
+            ("r", TypeId::Float4),
+            ("f", TypeId::Float8),
+            ("dt", TypeId::DateTime),
+            ("sdt", TypeId::DateTime4),
+            ("mny", TypeId::Money),
+            ("smny", TypeId::Money4),
+        ];
+
+        for (i, (name, ty)) in expected.iter().enumerate() {
+            assert_eq!(meta.columns[i].name, *name, "column {i} name");
+            assert_eq!(meta.columns[i].type_id, *ty, "column {i} ({name}) type");
+            assert_eq!(
+                meta.columns[i].flags & 0x0001,
+                0,
+                "column {i} ({name}) should not have Nullable flag set"
+            );
+        }
     }
 
     #[test]
