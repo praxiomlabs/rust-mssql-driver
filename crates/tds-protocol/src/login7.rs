@@ -473,21 +473,39 @@ impl Login7 {
         write_utf16_string(&mut var_data, &self.server_name);
         offset += server_name_len * 2;
 
-        // Unused / Feature extension pointer
+        // Unused / Feature extension pointer.
+        //
+        // Per MS-TDS §2.2.6.4, when fExtension is set, the variable-length
+        // slot that normally holds the `Unused` string is replaced by a
+        // 4-byte u32 containing the absolute offset of the FeatureExt data
+        // block. The offset/length table's `ibExtension` field points to
+        // THAT u32 (not to the FeatureExt data itself), and `cbExtension`
+        // is fixed at 4.
+        //
+        // The previously-shipped code set `ibExtension = base` (feature
+        // data offset) instead of the offset of the 4-byte pointer, causing
+        // SQL Server to read the first four bytes of our FeatureExt blob
+        // (e.g., `0x04, 0x01, 0x00, 0x00` for ColumnEncryption version 1)
+        // as a u32 offset — landing deep inside the hostname string and
+        // failing the LOGIN7 parse. The connection was dropped mid-handshake
+        // with no server-side diagnostic, which is why the bug sat unnoticed.
         let extension_offset = if self.option_flags3.extension {
-            // Calculate feature extension offset after all other data
-            let base = offset
-                + unused_len * 2
+            // Absolute offset where the FeatureExt block will land once all
+            // remaining var_data fields are written.
+            let feature_data_offset = offset
+                + 4 // the u32 pointer we're about to write
                 + library_name_len * 2
                 + language_len * 2
                 + database_len * 2
                 + sspi_len
                 + attach_db_len * 2
                 + new_password_len * 2;
-            // Store the offset where feature extension will be
-            var_data.put_u32_le(base as u32);
+            let pointer_offset = offset;
+            // Write the u32 that ibExtension will point TO. Its value is the
+            // offset of the actual FeatureExt block.
+            var_data.put_u32_le(feature_data_offset as u32);
             offset += 4;
-            base
+            pointer_offset
         } else {
             let unused_offset = offset;
             write_utf16_string(&mut var_data, &self.unused);
@@ -674,6 +692,124 @@ mod tests {
         assert_eq!(buf.len(), 2);
         assert_eq!(buf[0], 0xB3);
         assert_eq!(buf[1], 0xA5);
+    }
+
+    /// Per MS-TDS §2.2.6.4, when `fExtension=1` the slot normally occupied
+    /// by `Unused` in the offset/length table becomes `ibExtension`/`cbExtension`:
+    ///   * `ibExtension` = absolute offset of a 4-byte u32.
+    ///   * `cbExtension` = 4 (fixed).
+    ///   * The u32 at that location = absolute offset of the FeatureExt data.
+    ///   * FeatureExt data = zero or more `(FeatureID u8, DataLen u32_le, Data)`
+    ///     triples, terminated by `0xFF`.
+    ///
+    /// Regression test for the bug where `ibExtension` was pointing directly
+    /// at the FeatureExt data (skipping the pointer indirection) AND the
+    /// pointer's value was off-by-4 (did not count the pointer slot itself).
+    /// Combined, SQL Server read the first four bytes of the FeatureExt blob
+    /// as a u32 offset and silently dropped the connection at LOGIN7.
+    #[test]
+    fn test_login7_feature_extension_pointer_indirection() {
+        let login = Login7::new()
+            .with_hostname("HOST")
+            .with_sql_auth("u", "p")
+            .with_database("db")
+            .with_app_name("app")
+            .with_feature(FeatureExtension {
+                feature_id: FeatureId::ColumnEncryption,
+                data: Bytes::from_static(&[0x01]),
+            });
+
+        let encoded = login.encode();
+        assert!(encoded.len() >= LOGIN7_HEADER_SIZE);
+
+        // Fixed header layout, per the `encode()` method:
+        //   0..4   length (u32)
+        //   4..8   TDS version (u32)
+        //   8..12  packet size (u32)
+        //  12..16  client program version (u32)
+        //  16..20  client PID (u32)
+        //  20..24  connection ID (u32)
+        //  24     OptionFlags1
+        //  25     OptionFlags2
+        //  26     TypeFlags
+        //  27     OptionFlags3   <-- fExtension bit lives here
+        //  28..32 client timezone (i32)
+        //  32..36 client LCID (u32)
+        //  36..   offset/length table begins
+        assert_eq!(
+            encoded[27] & 0x10,
+            0x10,
+            "option_flags3.extension bit must be set"
+        );
+
+        // ibExtension/cbExtension live in the offset/length table right after
+        // server_name's (offset, len) pair:
+        //   0: hostname (off, len)       4 bytes
+        //   1: username (off, len)       4
+        //   2: password (off, len)       4
+        //   3: app_name (off, len)       4
+        //   4: server_name (off, len)    4
+        //   5: ibExtension, cbExtension  4   <-- what we want
+        const OFFSET_TABLE_START: usize = 36;
+        const EXTENSION_SLOT: usize = OFFSET_TABLE_START + 5 * 4; // = 56
+        let ib_extension = u16::from_le_bytes([
+            encoded[EXTENSION_SLOT],
+            encoded[EXTENSION_SLOT + 1],
+        ]) as usize;
+        let cb_extension = u16::from_le_bytes([
+            encoded[EXTENSION_SLOT + 2],
+            encoded[EXTENSION_SLOT + 3],
+        ]);
+        assert_eq!(cb_extension, 4, "cbExtension must be 4 per MS-TDS §2.2.6.4");
+
+        // ibExtension must point to a 4-byte region still inside the packet.
+        assert!(ib_extension + 4 <= encoded.len(), "ibExtension out of bounds");
+
+        // Dereference the pointer. That u32 is the absolute offset of the
+        // FeatureExt data, which must also land inside the packet and must
+        // start with our FeatureId (0x04 = ColumnEncryption).
+        let feature_ext_offset = u32::from_le_bytes([
+            encoded[ib_extension],
+            encoded[ib_extension + 1],
+            encoded[ib_extension + 2],
+            encoded[ib_extension + 3],
+        ]) as usize;
+        assert!(
+            feature_ext_offset + 6 <= encoded.len(), // 1 id + 4 len + 1 data + 0xFF terminator
+            "FeatureExt offset {feature_ext_offset} out of bounds (packet is {} bytes)",
+            encoded.len()
+        );
+        assert_eq!(
+            encoded[feature_ext_offset], 0x04,
+            "first byte of FeatureExt block should be FeatureId::ColumnEncryption (0x04)"
+        );
+        let data_len = u32::from_le_bytes([
+            encoded[feature_ext_offset + 1],
+            encoded[feature_ext_offset + 2],
+            encoded[feature_ext_offset + 3],
+            encoded[feature_ext_offset + 4],
+        ]);
+        assert_eq!(data_len, 1, "ColumnEncryption version payload is 1 byte");
+        assert_eq!(
+            encoded[feature_ext_offset + 5],
+            0x01,
+            "ColumnEncryption payload is version byte 0x01"
+        );
+        assert_eq!(
+            encoded[feature_ext_offset + 6],
+            0xFF,
+            "FeatureExt stream terminator 0xFF must follow"
+        );
+
+        // Belt-and-suspenders: ibExtension must NOT point at the FeatureExt
+        // data directly (that was the original bug — it skipped the u32
+        // pointer indirection). The pointer's own offset is strictly less
+        // than the feature data's offset.
+        assert!(
+            ib_extension < feature_ext_offset,
+            "ibExtension ({ib_extension}) must point at the u32 pointer, \
+             which lives before FeatureExt data ({feature_ext_offset})"
+        );
     }
 
     #[test]
