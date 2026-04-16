@@ -1301,6 +1301,7 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
         }
         0x29 => {
             // TIME - 1 prop byte (scale)
+            #[cfg_attr(not(feature = "chrono"), allow(unused_variables))]
             let scale = if prop_count >= 1 { buf.get_u8() } else { 7 };
             buf.advance(prop_count.saturating_sub(1));
 
@@ -1332,6 +1333,7 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
         }
         0x2A => {
             // DATETIME2 - 1 prop byte (scale)
+            #[cfg_attr(not(feature = "chrono"), allow(unused_variables))]
             let scale = if prop_count >= 1 { buf.get_u8() } else { 7 };
             buf.advance(prop_count.saturating_sub(1));
 
@@ -1372,6 +1374,7 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
         }
         0x2B => {
             // DATETIMEOFFSET - 1 prop byte (scale)
+            #[cfg_attr(not(feature = "chrono"), allow(unused_variables))]
             let scale = if prop_count >= 1 { buf.get_u8() } else { 7 };
             buf.advance(prop_count.saturating_sub(1));
 
