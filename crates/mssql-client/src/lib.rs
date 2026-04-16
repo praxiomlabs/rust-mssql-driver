@@ -130,7 +130,7 @@ pub use tds_protocol::version::TdsVersion;
 pub use mssql_auth::{SecretString, SecureCredentials};
 pub use mssql_types::{FromSql, SqlValue, ToSql};
 pub use procedure::ProcedureBuilder;
-pub use query::Query;
+pub use query::{Query, in_params};
 pub use row::{Column, Row};
 pub use state::{
     Connected, ConnectionState, Disconnected, InTransaction, ProtocolState, Ready, Streaming,
