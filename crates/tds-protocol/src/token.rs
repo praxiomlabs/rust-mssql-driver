@@ -11,19 +11,21 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use tds_protocol::token::{Token, TokenParser};
 //! use bytes::Bytes;
 //!
-//! let data: Bytes = /* received from server */;
-//! let mut parser = TokenParser::new(data);
+//! fn parse(data: Bytes) -> Result<(), tds_protocol::ProtocolError> {
+//!     let mut parser = TokenParser::new(data);
 //!
-//! while let Some(token) = parser.next_token()? {
-//!     match token {
-//!         Token::Done(done) => println!("Rows affected: {}", done.row_count),
-//!         Token::Error(err) => eprintln!("Error {}: {}", err.number, err.message),
-//!         _ => {}
+//!     while let Some(token) = parser.next_token()? {
+//!         match token {
+//!             Token::Done(done) => println!("Rows affected: {}", done.row_count),
+//!             Token::Error(err) => eprintln!("Error {}: {}", err.number, err.message),
+//!             _ => {}
+//!         }
 //!     }
+//!     Ok(())
 //! }
 //! ```
 
