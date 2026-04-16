@@ -518,15 +518,20 @@ impl RpcParam {
     /// Create an NVARCHAR parameter.
     pub fn nvarchar(name: impl Into<String>, value: &str) -> Self {
         let mut buf = BytesMut::new();
-        // Encode as UTF-16LE
+        let mut code_units: usize = 0;
         for code_unit in value.encode_utf16() {
             buf.put_u16_le(code_unit);
+            code_units += 1;
         }
-        let char_len = value.chars().count();
-        let type_info = if char_len > 4000 {
+        // NVARCHAR length is measured in UTF-16 code units, not Rust chars —
+        // supplementary characters (emoji, CJK extension B) encode to a surrogate
+        // pair (2 code units) but count as 1 `char`. Using chars().count() here
+        // under-reports the buffer length and the server rejects the RPC with
+        // "Data type 0xE7 has an invalid data length or metadata length."
+        let type_info = if code_units > 4000 {
             TypeInfo::nvarchar_max()
         } else {
-            TypeInfo::nvarchar(char_len.max(1) as u16)
+            TypeInfo::nvarchar(code_units.max(1) as u16)
         };
         Self::new(name, type_info, buf.freeze())
     }
@@ -1022,6 +1027,22 @@ mod tests {
         assert_eq!(param.type_info.type_id, 0xE7);
         // UTF-16 encoded "Alice" = 10 bytes
         assert_eq!(param.value.as_ref().unwrap().len(), 10);
+    }
+
+    #[test]
+    fn test_nvarchar_param_surrogate_pair_length() {
+        // 🌍 is a supplementary character — 1 Rust char but 2 UTF-16 code units
+        // (4 bytes). TypeInfo.max_length is stored doubled internally, so
+        // the metadata must declare 2 code units for the buffer to match.
+        let param = RpcParam::nvarchar("@p", "🌍");
+        assert_eq!(param.value.as_ref().unwrap().len(), 4);
+        // TypeInfo::nvarchar(n) stores max_length as n*2 bytes.
+        assert_eq!(param.type_info.max_length, Some(4));
+
+        let param = RpcParam::nvarchar("@p", "Hello 世界 🌍");
+        // "Hello 世界 " = 9 BMP code units + 🌍 = 2 surrogate units → 11 code units, 22 bytes
+        assert_eq!(param.value.as_ref().unwrap().len(), 22);
+        assert_eq!(param.type_info.max_length, Some(22));
     }
 
     #[test]
