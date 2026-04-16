@@ -418,6 +418,7 @@ async fn test_pool_status_tracking() {
     let pool = Pool::builder()
         .client_config(client_config)
         .max_connections(5)
+        .min_connections(0)
         .build()
         .await
         .expect("Failed to create pool");
