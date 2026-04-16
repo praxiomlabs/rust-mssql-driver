@@ -1443,13 +1443,12 @@ impl NbcRow {
 impl ReturnValue {
     /// Decode a RETURNVALUE token from bytes.
     pub fn decode(src: &mut impl Buf) -> Result<Self, ProtocolError> {
-        // Length (2 bytes)
-        if src.remaining() < 2 {
-            return Err(ProtocolError::UnexpectedEof);
-        }
-        let _length = src.get_u16_le();
-
-        // Parameter ordinal (2 bytes)
+        // MS-TDS §2.2.7.18: the RETURNVALUE token has no length prefix —
+        // it begins directly with the 2-byte ParamOrdinal. The previous
+        // spurious 2-byte read consumed the ordinal and shifted every
+        // subsequent field, leaving the stream parser two bytes ahead and
+        // reading value bytes as the next token type (e.g. `0x74` from a
+        // Unicode name fragment was misread as an unknown token).
         if src.remaining() < 2 {
             return Err(ProtocolError::UnexpectedEof);
         }
@@ -3441,11 +3440,9 @@ mod tests {
             }
         }
 
-        // Now build the full token with the 2-byte length prefix
-        let mut buf = BytesMut::new();
-        buf.put_u16_le(inner.len() as u16);
-        buf.extend_from_slice(&inner);
-        buf
+        // RETURNVALUE has no outer length prefix (MS-TDS §2.2.7.18) — the
+        // decoder walks the inner fields directly after the 0xAC token byte.
+        inner
     }
 
     #[test]
@@ -3536,12 +3533,7 @@ mod tests {
             inner.put_u16_le(c);
         }
 
-        // Wrap with length prefix
-        let mut buf = BytesMut::new();
-        buf.put_u16_le(inner.len() as u16);
-        buf.extend_from_slice(&inner);
-
-        let mut cursor = buf.freeze();
+        let mut cursor = inner.freeze();
         let rv = ReturnValue::decode(&mut cursor).unwrap();
 
         assert_eq!(rv.param_ordinal, 1);
