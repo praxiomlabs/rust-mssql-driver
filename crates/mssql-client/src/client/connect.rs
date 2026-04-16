@@ -4,6 +4,7 @@
 //! TCP connection, TLS negotiation, PreLogin exchange, and Login7 authentication.
 
 use std::marker::PhantomData;
+use std::net::SocketAddr;
 
 use bytes::BytesMut;
 use mssql_codec::connection::Connection;
@@ -158,20 +159,23 @@ impl Client<Disconnected> {
             &config.host
         };
 
-        let addr = format!("{host}:{port}");
-
         // Step 1: Establish TCP connection
-        tracing::debug!("establishing TCP connection to {}", addr);
-        let tcp_stream = timeout(config.timeouts.connect_timeout, TcpStream::connect(&addr))
-            .await
-            .map_err(|_| Error::ConnectTimeout {
-                host: config.host.clone(),
-                port: config.port,
-            })?
-            .map_err(Error::from)?;
-
-        // Enable TCP nodelay for better latency
-        tcp_stream.set_nodelay(true).map_err(Error::from)?;
+        let tcp_stream = if config.multi_subnet_failover {
+            Self::connect_parallel(host, port, config.timeouts.connect_timeout).await?
+        } else {
+            let addr = format!("{host}:{port}");
+            tracing::debug!("establishing TCP connection to {}", addr);
+            let stream =
+                timeout(config.timeouts.connect_timeout, TcpStream::connect(&addr))
+                    .await
+                    .map_err(|_| Error::ConnectTimeout {
+                        host: config.host.clone(),
+                        port: config.port,
+                    })?
+                    .map_err(Error::from)?;
+            stream.set_nodelay(true).map_err(Error::from)?;
+            stream
+        };
 
         #[cfg(feature = "tls")]
         {
@@ -207,6 +211,98 @@ impl Client<Disconnected> {
             // Proceed with no-TLS connection
             Self::connect_no_tls(config, tcp_stream).await
         }
+    }
+
+    /// Resolve hostname to all IPs and race parallel TCP connections.
+    ///
+    /// Used when `MultiSubnetFailover=True` for AlwaysOn AG listeners that
+    /// span multiple subnets. First successful TCP connection wins.
+    async fn connect_parallel(host: &str, port: u16, connect_timeout: std::time::Duration) -> Result<TcpStream> {
+        let addr_str = format!("{host}:{port}");
+        let addrs: Vec<SocketAddr> = tokio::net::lookup_host(&addr_str)
+            .await
+            .map_err(Error::from)?
+            .collect();
+
+        if addrs.is_empty() {
+            return Err(Error::from(std::io::Error::new(
+                std::io::ErrorKind::AddrNotAvailable,
+                format!("no addresses resolved for {host}:{port}"),
+            )));
+        }
+
+        // Single address — no need to spawn tasks
+        if addrs.len() == 1 {
+            tracing::debug!(addr = %addrs[0], "MultiSubnetFailover: single address resolved");
+            let stream = timeout(connect_timeout, TcpStream::connect(addrs[0]))
+                .await
+                .map_err(|_| Error::ConnectTimeout {
+                    host: host.to_string(),
+                    port,
+                })?
+                .map_err(Error::from)?;
+            stream.set_nodelay(true).map_err(Error::from)?;
+            return Ok(stream);
+        }
+
+        let addr_count = addrs.len();
+        tracing::debug!(
+            host = host,
+            port = port,
+            resolved_count = addr_count,
+            "MultiSubnetFailover: racing parallel connections",
+        );
+
+        let mut join_set = tokio::task::JoinSet::new();
+
+        for addr in addrs {
+            let dur = connect_timeout;
+            join_set.spawn(async move {
+                let tcp = timeout(dur, TcpStream::connect(addr))
+                    .await
+                    .map_err(|_| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            format!("connection to {addr} timed out"),
+                        )
+                    })??;
+                tcp.set_nodelay(true)?;
+                Ok::<(TcpStream, SocketAddr), std::io::Error>((tcp, addr))
+            });
+        }
+
+        let mut last_error: Option<std::io::Error> = None;
+
+        while let Some(result) = join_set.join_next().await {
+            match result {
+                Ok(Ok((stream, addr))) => {
+                    tracing::debug!(addr = %addr, "MultiSubnetFailover: connected");
+                    join_set.abort_all();
+                    return Ok(stream);
+                }
+                Ok(Err(e)) => {
+                    tracing::debug!(error = %e, "MultiSubnetFailover: attempt failed");
+                    last_error = Some(e);
+                }
+                Err(join_err) => {
+                    tracing::debug!(error = %join_err, "MultiSubnetFailover: task failed");
+                    last_error = Some(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        join_err.to_string(),
+                    ));
+                }
+            }
+        }
+
+        // All connections failed
+        Err(Error::from(last_error.unwrap_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                format!(
+                    "all {addr_count} parallel connection attempts failed for {host}:{port}"
+                ),
+            )
+        })))
     }
 
     /// Connect using TDS 8.0 strict mode.

@@ -85,6 +85,7 @@ The `Config::from_connection_string()` parser conforms to the Microsoft ADO.NET 
 - **`Workstation ID`** / `WSID`: Sent in LOGIN7 HostName field. Defaults to machine hostname via env var.
 - **`Current Language`** / `Language`: Sent in LOGIN7 Language field.
 - **`ConnectRetryCount`** / `ConnectRetryInterval`**: Wired to `RetryPolicy`.
+- **`MultiSubnetFailover`**: Parallel TCP connect to all resolved IPs for AG listener failover.
 - **`Encrypt`**: Supports `strict`, `mandatory`, `optional`, `no_tls`, plus standard booleans.
 - **Pool keywords** (`Max Pool Size`, etc.): Recognized with info-level log directing to `PoolConfig`.
 - **Known-but-unsupported keywords** (30+): Recognized at info level instead of silently ignored.

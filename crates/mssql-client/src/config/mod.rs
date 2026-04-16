@@ -254,6 +254,18 @@ pub struct Config {
     /// connection strings.
     pub language: Option<String>,
 
+    /// Enable MultiSubnetFailover for AlwaysOn Availability Group listeners.
+    ///
+    /// When `true`, the driver resolves the server hostname to all IP addresses
+    /// and attempts parallel TCP connections simultaneously. The first successful
+    /// connection wins and all others are cancelled. This reduces connection time
+    /// when the AG listener spans multiple subnets.
+    ///
+    /// Set via `MultiSubnetFailover=True` in connection strings.
+    ///
+    /// Default: `false`
+    pub multi_subnet_failover: bool,
+
     /// Always Encrypted configuration.
     ///
     /// When `Some`, the client will negotiate Always Encrypted support with the
@@ -296,6 +308,7 @@ impl Default for Config {
             application_intent: ApplicationIntent::default(),
             workstation_id: None,
             language: None,
+            multi_subnet_failover: false,
             #[cfg(feature = "always-encrypted")]
             column_encryption: None,
         }
@@ -534,10 +547,12 @@ impl Config {
                         key,
                     );
                 }
+                // --- MultiSubnetFailover ---
+                "multisubnetfailover" | "multi subnet failover" => {
+                    config.multi_subnet_failover = parse_conn_bool(&key, value)?;
+                }
                 // --- Known ADO.NET keywords not supported by this driver ---
                 "failover partner"
-                | "multisubnetfailover"
-                | "multi subnet failover"
                 | "persist security info"
                 | "persistsecurityinfo"
                 | "enlist"
@@ -837,6 +852,16 @@ impl Config {
     #[must_use]
     pub fn language(mut self, lang: impl Into<String>) -> Self {
         self.language = Some(lang.into());
+        self
+    }
+
+    /// Enable MultiSubnetFailover for AlwaysOn Availability Group listeners.
+    ///
+    /// When enabled, the driver resolves the server hostname to all IP addresses
+    /// and races parallel TCP connections. The first successful connection wins.
+    #[must_use]
+    pub fn multi_subnet_failover(mut self, enabled: bool) -> Self {
+        self.multi_subnet_failover = enabled;
         self
     }
 }
@@ -1502,9 +1527,53 @@ mod tests {
     fn test_known_unsupported_keywords_accepted() {
         // Known ADO.NET keywords we don't support should not error
         let result = Config::from_connection_string(
-            "Server=localhost;Failover Partner=backup;MultiSubnetFailover=true;",
+            "Server=localhost;Failover Partner=backup;Persist Security Info=false;",
         );
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_multi_subnet_failover_connection_string() {
+        let config = Config::from_connection_string(
+            "Server=ag-listener;MultiSubnetFailover=true;",
+        )
+        .unwrap();
+        assert!(config.multi_subnet_failover);
+
+        // Space-separated variant
+        let config = Config::from_connection_string(
+            "Server=ag-listener;Multi Subnet Failover=true;",
+        )
+        .unwrap();
+        assert!(config.multi_subnet_failover);
+
+        // Disabled
+        let config = Config::from_connection_string(
+            "Server=ag-listener;MultiSubnetFailover=false;",
+        )
+        .unwrap();
+        assert!(!config.multi_subnet_failover);
+
+        // Default is false
+        let config = Config::from_connection_string("Server=localhost;").unwrap();
+        assert!(!config.multi_subnet_failover);
+    }
+
+    #[test]
+    fn test_multi_subnet_failover_builder() {
+        let config = Config::new().multi_subnet_failover(true);
+        assert!(config.multi_subnet_failover);
+
+        let config = Config::new().multi_subnet_failover(false);
+        assert!(!config.multi_subnet_failover);
+    }
+
+    #[test]
+    fn test_multi_subnet_failover_invalid_value() {
+        let result = Config::from_connection_string(
+            "Server=localhost;MultiSubnetFailover=banana;",
+        );
+        assert!(result.is_err());
     }
 
     #[test]
