@@ -2756,3 +2756,266 @@ async fn test_data_type_sql_variant() {
 
     client.close().await.expect("Failed to close");
 }
+
+// =============================================================================
+// Trigger Row Count Tests (items 5.4 / 3.8)
+// =============================================================================
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_trigger_insert_row_count() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client.execute("USE tempdb", &[]).await.expect("USE tempdb");
+
+    client
+        .execute(
+            "IF OBJECT_ID('dbo.TrigSrc', 'U') IS NOT NULL DROP TABLE dbo.TrigSrc",
+            &[],
+        )
+        .await
+        .expect("Cleanup");
+    client
+        .execute(
+            "IF OBJECT_ID('dbo.TrigLog', 'U') IS NOT NULL DROP TABLE dbo.TrigLog",
+            &[],
+        )
+        .await
+        .expect("Cleanup");
+
+    client
+        .execute("CREATE TABLE dbo.TrigSrc (id INT NOT NULL, val NVARCHAR(50) NOT NULL)", &[])
+        .await
+        .expect("Create TrigSrc");
+    client
+        .execute("CREATE TABLE dbo.TrigLog (src_id INT NOT NULL, action NVARCHAR(10) NOT NULL)", &[])
+        .await
+        .expect("Create TrigLog");
+
+    // Create AFTER INSERT trigger that inserts into log table
+    client
+        .execute(
+            "CREATE TRIGGER trg_TrigSrc_Insert ON dbo.TrigSrc \
+             AFTER INSERT AS \
+             INSERT INTO dbo.TrigLog (src_id, action) SELECT id, 'INSERT' FROM inserted",
+            &[],
+        )
+        .await
+        .expect("Create trigger");
+
+    // Insert 3 rows — trigger fires and inserts 3 more rows into TrigLog
+    let affected = client
+        .execute(
+            "INSERT INTO dbo.TrigSrc (id, val) VALUES (1, 'a'), (2, 'b'), (3, 'c')",
+            &[],
+        )
+        .await
+        .expect("Insert failed");
+
+    // Document actual behavior: rows_affected includes trigger-inserted rows
+    // because read_execute_result accumulates Done/DoneProc/DoneInProc counts.
+    // SQL Server sends DoneInProc for the trigger's INSERT with DONE_COUNT set.
+    println!("rows_affected after INSERT with trigger: {affected}");
+
+    // Verify source and log tables
+    let rows = client
+        .query("SELECT COUNT(*) FROM dbo.TrigSrc", &[])
+        .await
+        .expect("Count query failed");
+    let src_count: i32 = rows
+        .filter_map(|r| r.ok())
+        .next()
+        .map(|row| row.get(0).unwrap())
+        .unwrap();
+    assert_eq!(src_count, 3, "Source table should have 3 rows");
+
+    let rows = client
+        .query("SELECT COUNT(*) FROM dbo.TrigLog", &[])
+        .await
+        .expect("Count query failed");
+    let log_count: i32 = rows
+        .filter_map(|r| r.ok())
+        .next()
+        .map(|row| row.get(0).unwrap())
+        .unwrap();
+    assert_eq!(log_count, 3, "Log table should have 3 rows from trigger");
+
+    // Investigation result (item 3.8): rows_affected INCLUDES trigger rows.
+    // Without SET NOCOUNT ON, the trigger's DML produces DoneInProc tokens
+    // with DONE_COUNT set. The driver accumulates all Done* token counts.
+    // This matches ADO.NET/Tiberius behavior. Mitigation: SET NOCOUNT ON in triggers.
+    assert_eq!(
+        affected, 6,
+        "rows_affected includes both user INSERT (3) and trigger INSERT (3)"
+    );
+
+    // Cleanup
+    client.execute("DROP TABLE dbo.TrigSrc", &[]).await.expect("Cleanup");
+    client.execute("DROP TABLE dbo.TrigLog", &[]).await.expect("Cleanup");
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_trigger_update_row_count() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client.execute("USE tempdb", &[]).await.expect("USE tempdb");
+
+    client
+        .execute(
+            "IF OBJECT_ID('dbo.TrigUpd', 'U') IS NOT NULL DROP TABLE dbo.TrigUpd",
+            &[],
+        )
+        .await
+        .expect("Cleanup");
+    client
+        .execute(
+            "IF OBJECT_ID('dbo.TrigUpdLog', 'U') IS NOT NULL DROP TABLE dbo.TrigUpdLog",
+            &[],
+        )
+        .await
+        .expect("Cleanup");
+
+    client
+        .execute("CREATE TABLE dbo.TrigUpd (id INT NOT NULL, val INT NOT NULL)", &[])
+        .await
+        .expect("Create table");
+    client
+        .execute("CREATE TABLE dbo.TrigUpdLog (src_id INT NOT NULL)", &[])
+        .await
+        .expect("Create log table");
+
+    // Seed data
+    client
+        .execute(
+            "INSERT INTO dbo.TrigUpd (id, val) VALUES (1, 10), (2, 20), (3, 30)",
+            &[],
+        )
+        .await
+        .expect("Seed data");
+
+    // Create AFTER UPDATE trigger
+    client
+        .execute(
+            "CREATE TRIGGER trg_TrigUpd_Update ON dbo.TrigUpd \
+             AFTER UPDATE AS \
+             INSERT INTO dbo.TrigUpdLog (src_id) SELECT id FROM inserted",
+            &[],
+        )
+        .await
+        .expect("Create trigger");
+
+    // Update 2 rows — trigger fires and logs 2 rows
+    let affected = client
+        .execute("UPDATE dbo.TrigUpd SET val = val + 1 WHERE id <= 2", &[])
+        .await
+        .expect("Update failed");
+
+    println!("rows_affected after UPDATE with trigger: {affected}");
+
+    let rows = client
+        .query("SELECT COUNT(*) FROM dbo.TrigUpdLog", &[])
+        .await
+        .expect("Count query failed");
+    let log_count: i32 = rows
+        .filter_map(|r| r.ok())
+        .next()
+        .map(|row| row.get(0).unwrap())
+        .unwrap();
+    assert_eq!(log_count, 2, "Log should have 2 entries from trigger");
+
+    // Same as INSERT: trigger row counts are included without NOCOUNT
+    assert_eq!(
+        affected, 4,
+        "rows_affected includes both user UPDATE (2) and trigger INSERT (2)"
+    );
+
+    // Cleanup
+    client.execute("DROP TABLE dbo.TrigUpd", &[]).await.expect("Cleanup");
+    client.execute("DROP TABLE dbo.TrigUpdLog", &[]).await.expect("Cleanup");
+
+    client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_trigger_nocount_row_count() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client.execute("USE tempdb", &[]).await.expect("USE tempdb");
+
+    client
+        .execute(
+            "IF OBJECT_ID('dbo.TrigNC', 'U') IS NOT NULL DROP TABLE dbo.TrigNC",
+            &[],
+        )
+        .await
+        .expect("Cleanup");
+    client
+        .execute(
+            "IF OBJECT_ID('dbo.TrigNCLog', 'U') IS NOT NULL DROP TABLE dbo.TrigNCLog",
+            &[],
+        )
+        .await
+        .expect("Cleanup");
+
+    client
+        .execute("CREATE TABLE dbo.TrigNC (id INT NOT NULL, val NVARCHAR(50) NOT NULL)", &[])
+        .await
+        .expect("Create table");
+    client
+        .execute("CREATE TABLE dbo.TrigNCLog (src_id INT NOT NULL)", &[])
+        .await
+        .expect("Create log table");
+
+    // Create trigger WITH SET NOCOUNT ON — the standard mitigation
+    client
+        .execute(
+            "CREATE TRIGGER trg_TrigNC_Insert ON dbo.TrigNC \
+             AFTER INSERT AS \
+             BEGIN \
+                 SET NOCOUNT ON; \
+                 INSERT INTO dbo.TrigNCLog (src_id) SELECT id FROM inserted; \
+             END",
+            &[],
+        )
+        .await
+        .expect("Create trigger");
+
+    let affected = client
+        .execute(
+            "INSERT INTO dbo.TrigNC (id, val) VALUES (1, 'x'), (2, 'y')",
+            &[],
+        )
+        .await
+        .expect("Insert failed");
+
+    println!("rows_affected with NOCOUNT trigger: {affected}");
+
+    // With SET NOCOUNT ON, the trigger's DML does not produce DONE_COUNT,
+    // so rows_affected should be exactly the user's INSERT count.
+    assert_eq!(affected, 2, "With NOCOUNT trigger, rows_affected should be 2");
+
+    // Verify trigger still fired
+    let rows = client
+        .query("SELECT COUNT(*) FROM dbo.TrigNCLog", &[])
+        .await
+        .expect("Count query failed");
+    let log_count: i32 = rows
+        .filter_map(|r| r.ok())
+        .next()
+        .map(|row| row.get(0).unwrap())
+        .unwrap();
+    assert_eq!(log_count, 2, "Trigger should still have fired");
+
+    // Cleanup
+    client.execute("DROP TABLE dbo.TrigNC", &[]).await.expect("Cleanup");
+    client.execute("DROP TABLE dbo.TrigNCLog", &[]).await.expect("Cleanup");
+
+    client.close().await.expect("Failed to close");
+}
