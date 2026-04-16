@@ -1326,8 +1326,8 @@ impl BulkInsert {
 /// memory as they are added with [`send_row()`](BulkWriter::send_row), then
 /// transmitted to the server when [`finish()`](BulkWriter::finish) is called.
 ///
-/// The writer holds a mutable reference to the [`Client`], preventing other
-/// operations on the connection while the bulk insert is in progress.
+/// The writer holds a mutable reference to the [`crate::Client`], preventing
+/// other operations on the connection while the bulk insert is in progress.
 ///
 /// # Example
 ///

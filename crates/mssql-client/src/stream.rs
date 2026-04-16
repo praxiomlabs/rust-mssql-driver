@@ -432,11 +432,11 @@ impl ProcedureResult {
 
 /// A single result set within a multi-result batch.
 ///
-/// Rows are stored as [`PendingRow`] values that may be either already-decoded
+/// Rows are stored as `PendingRow` values that may be either already-decoded
 /// [`Row`]s (eager path, used by tests and direct construction) or raw TDS
-/// bytes (lazy path, used by [`Client::call_procedure`] and
-/// [`Client::query_multiple`]). Decoding happens on pull, so per-row decode
-/// errors surface through [`ResultSet::next_row`] and
+/// bytes (lazy path, used by [`crate::Client::call_procedure`] and
+/// [`crate::Client::query_multiple`]). Decoding happens on pull, so per-row
+/// decode errors surface through [`ResultSet::next_row`] and
 /// [`ResultSet::collect_all`].
 #[derive(Debug, Clone)]
 #[must_use]
@@ -460,8 +460,8 @@ impl ResultSet {
     /// Create a new result set from already-decoded rows.
     ///
     /// This is the eager constructor used by tests and callers that already
-    /// hold typed [`Row`]s. Production query paths use
-    /// [`ResultSet::from_raw`] to defer row decoding.
+    /// hold typed [`Row`]s. Production query paths use `ResultSet::from_raw`
+    /// (private) to defer row decoding.
     pub fn new(columns: Vec<Column>, rows: Vec<Row>) -> Self {
         Self {
             columns,
