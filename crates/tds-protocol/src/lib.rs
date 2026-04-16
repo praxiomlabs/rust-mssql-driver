@@ -132,6 +132,7 @@ pub use tvp::{
     TvpEncoder, TvpWireType, encode_tvp_bit, encode_tvp_date, encode_tvp_datetime2,
     encode_tvp_datetimeoffset, encode_tvp_decimal, encode_tvp_float, encode_tvp_guid,
     encode_tvp_int, encode_tvp_null, encode_tvp_nvarchar, encode_tvp_time, encode_tvp_varbinary,
+    encode_tvp_varchar,
 };
 pub use types::{ColumnFlags, TypeId, Updateable};
 pub use version::{SqlServerVersion, TdsVersion};

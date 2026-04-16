@@ -446,6 +446,31 @@ pub fn encode_tvp_nvarchar(value: &str, max_length: u16, buf: &mut BytesMut) {
     }
 }
 
+/// Encode a VARCHAR value for TVP using single-byte codepage encoding.
+///
+/// SQL Server stores VARCHAR data as single-byte characters using the column collation
+/// code page. Passing UTF-16 bytes (as NVARCHAR) into a VARCHAR column corrupts every
+/// character: "abc" would be stored as "a\0b\0c\0".
+///
+/// Encodes using Windows-1252 (Latin1_General_CI_AS), matching [`DEFAULT_COLLATION`]
+/// declared in TVP column metadata.
+pub fn encode_tvp_varchar(value: &str, max_length: u16, buf: &mut BytesMut) {
+    let encoded = crate::collation::encode_str_for_collation(value, None);
+    let byte_len = encoded.len();
+
+    if max_length == 0xFFFF {
+        // MAX type - use PLP format
+        buf.put_u64_le(byte_len as u64); // Total length
+        buf.put_u32_le(byte_len as u32); // Chunk length
+        buf.put_slice(&encoded);
+        buf.put_u32_le(0); // Terminator
+    } else {
+        // Regular type
+        buf.put_u16_le(byte_len as u16);
+        buf.put_slice(&encoded);
+    }
+}
+
 /// Encode a VARBINARY value for TVP.
 pub fn encode_tvp_varbinary(value: &[u8], max_length: u16, buf: &mut BytesMut) {
     if max_length == 0xFFFF {
