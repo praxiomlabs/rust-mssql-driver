@@ -1159,3 +1159,612 @@ async fn test_bulk_insert_without_schema_discovery() {
 
     client.close().await.expect("Failed to close");
 }
+
+// =============================================================================
+// Expanded Type Coverage (work item 3.5)
+// =============================================================================
+
+/// MONEY and SMALLMONEY round-trip. MONEY uses a distinct on-wire format
+/// (signed int scaled by 10_000) that is NOT the same as DECIMAL encoding.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_money_and_smallmoney() {
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client
+        .execute(
+            "CREATE TABLE #BulkMoney (\
+                id INT NOT NULL, \
+                price MONEY NOT NULL, \
+                tip SMALLMONEY NOT NULL, \
+                adjustment MONEY NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkMoney").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0).with_nullable(false),
+        BulkColumn::new("price", "MONEY", 1).with_nullable(false),
+        BulkColumn::new("tip", "SMALLMONEY", 2).with_nullable(false),
+        BulkColumn::new("adjustment", "MONEY", 3),
+    ]);
+
+    let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
+
+    // Positive values with fractional cents (MONEY supports 4 decimal places)
+    writer
+        .send_row_values(&[
+            SqlValue::Int(1),
+            SqlValue::Decimal(Decimal::from_str("123.4500").unwrap()),
+            SqlValue::Decimal(Decimal::from_str("12.3400").unwrap()),
+            SqlValue::Decimal(Decimal::from_str("-7.8900").unwrap()),
+        ])
+        .expect("row 1");
+
+    // Large MONEY value (fits in i64 / 10_000)
+    writer
+        .send_row_values(&[
+            SqlValue::Int(2),
+            SqlValue::Decimal(Decimal::from_str("999999999.9999").unwrap()),
+            SqlValue::Decimal(Decimal::from_str("214748.3647").unwrap()), // SMALLMONEY max
+            SqlValue::Null,
+        ])
+        .expect("row 2");
+
+    // Zero and negative edge cases
+    writer
+        .send_row_values(&[
+            SqlValue::Int(3),
+            SqlValue::Decimal(Decimal::from_str("0").unwrap()),
+            SqlValue::Decimal(Decimal::from_str("-214748.3648").unwrap()), // SMALLMONEY min
+            SqlValue::Decimal(Decimal::from_str("-922337203685477.5808").unwrap()), // MONEY min
+        ])
+        .expect("row 3");
+
+    let result = writer.finish().await.expect("Failed to finish bulk insert");
+    assert_eq!(result.rows_affected, 3);
+
+    let rows = client
+        .query(
+            "SELECT id, price, tip, adjustment FROM #BulkMoney ORDER BY id",
+            &[],
+        )
+        .await
+        .expect("Query failed");
+
+    let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    assert_eq!(data.len(), 3);
+
+    assert_eq!(data[0].get::<i32>(0).unwrap(), 1);
+    assert_eq!(
+        data[0].get::<Decimal>(1).unwrap(),
+        Decimal::from_str("123.4500").unwrap()
+    );
+    assert_eq!(
+        data[0].get::<Decimal>(2).unwrap(),
+        Decimal::from_str("12.3400").unwrap()
+    );
+    assert_eq!(
+        data[0].get::<Decimal>(3).unwrap(),
+        Decimal::from_str("-7.8900").unwrap()
+    );
+
+    assert_eq!(
+        data[1].get::<Decimal>(1).unwrap(),
+        Decimal::from_str("999999999.9999").unwrap()
+    );
+    assert_eq!(
+        data[1].get::<Decimal>(2).unwrap(),
+        Decimal::from_str("214748.3647").unwrap()
+    );
+    assert_eq!(data[1].get::<Option<Decimal>>(3).unwrap(), None);
+
+    assert_eq!(data[2].get::<Decimal>(1).unwrap(), Decimal::ZERO);
+    assert_eq!(
+        data[2].get::<Decimal>(2).unwrap(),
+        Decimal::from_str("-214748.3648").unwrap()
+    );
+    assert_eq!(
+        data[2].get::<Decimal>(3).unwrap(),
+        Decimal::from_str("-922337203685477.5808").unwrap()
+    );
+
+    client.close().await.expect("Failed to close");
+}
+
+/// SMALLDATETIME round-trip. Unblocked by fix for work item 1.2 (SMALLDATETIME
+/// type ID collision). SMALLDATETIME has minute precision and range 1900-2079.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_smalldatetime() {
+    use chrono::{NaiveDate, NaiveDateTime};
+
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client
+        .execute(
+            "CREATE TABLE #BulkSmallDt (\
+                id INT NOT NULL, \
+                ts SMALLDATETIME NOT NULL, \
+                maybe SMALLDATETIME NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkSmallDt").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0).with_nullable(false),
+        BulkColumn::new("ts", "SMALLDATETIME", 1).with_nullable(false),
+        BulkColumn::new("maybe", "SMALLDATETIME", 2),
+    ]);
+
+    let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
+
+    // SMALLDATETIME has minute precision — use minute-aligned times
+    let dt1 = NaiveDate::from_ymd_opt(2026, 4, 15)
+        .unwrap()
+        .and_hms_opt(10, 30, 0)
+        .unwrap();
+    let dt2 = NaiveDate::from_ymd_opt(1900, 1, 1)
+        .unwrap()
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(1),
+            SqlValue::DateTime(dt1),
+            SqlValue::DateTime(dt2),
+        ])
+        .expect("row 1");
+
+    writer
+        .send_row_values(&[SqlValue::Int(2), SqlValue::DateTime(dt2), SqlValue::Null])
+        .expect("row 2");
+
+    let result = writer.finish().await.expect("Failed to finish bulk insert");
+    assert_eq!(result.rows_affected, 2);
+
+    let rows = client
+        .query(
+            "SELECT id, ts, maybe FROM #BulkSmallDt ORDER BY id",
+            &[],
+        )
+        .await
+        .expect("Query failed");
+
+    let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    assert_eq!(data.len(), 2);
+
+    assert_eq!(data[0].get::<NaiveDateTime>(1).unwrap(), dt1);
+    assert_eq!(data[0].get::<NaiveDateTime>(2).unwrap(), dt2);
+    assert_eq!(data[1].get::<NaiveDateTime>(1).unwrap(), dt2);
+    assert_eq!(data[1].get::<Option<NaiveDateTime>>(2).unwrap(), None);
+
+    client.close().await.expect("Failed to close");
+}
+
+/// DATETIME vs DATETIME2 precision handling. DATETIME has ~3.33ms precision
+/// (actually 1/300th second rounding) while DATETIME2(7) has 100ns precision.
+/// This test verifies that sub-second values are preserved through bulk insert.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_datetime_vs_datetime2_precision() {
+    use chrono::{NaiveDate, NaiveDateTime};
+
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client
+        .execute(
+            "CREATE TABLE #BulkDtPrecision (\
+                id INT NOT NULL, \
+                dt DATETIME NOT NULL, \
+                dt2 DATETIME2(7) NOT NULL, \
+                dt2_3 DATETIME2(3) NOT NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkDtPrecision").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0).with_nullable(false),
+        BulkColumn::new("dt", "DATETIME", 1).with_nullable(false),
+        BulkColumn::new("dt2", "DATETIME2(7)", 2).with_nullable(false),
+        BulkColumn::new("dt2_3", "DATETIME2(3)", 3).with_nullable(false),
+    ]);
+
+    let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
+
+    // DATETIME rounds to nearest 3.33ms — use 123ms which SQL Server rounds to 123
+    let dt = NaiveDate::from_ymd_opt(2026, 4, 15)
+        .unwrap()
+        .and_hms_milli_opt(10, 30, 45, 123)
+        .unwrap();
+
+    // DATETIME2(7) supports 100ns resolution
+    let dt2 = NaiveDate::from_ymd_opt(2026, 4, 15)
+        .unwrap()
+        .and_hms_nano_opt(10, 30, 45, 123_456_700)
+        .unwrap();
+
+    // DATETIME2(3) rounds to millisecond
+    let dt2_3 = NaiveDate::from_ymd_opt(2026, 4, 15)
+        .unwrap()
+        .and_hms_milli_opt(10, 30, 45, 789)
+        .unwrap();
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(1),
+            SqlValue::DateTime(dt),
+            SqlValue::DateTime(dt2),
+            SqlValue::DateTime(dt2_3),
+        ])
+        .expect("row 1");
+
+    let result = writer.finish().await.expect("Failed to finish bulk insert");
+    assert_eq!(result.rows_affected, 1);
+
+    let rows = client
+        .query(
+            "SELECT id, dt, dt2, dt2_3 FROM #BulkDtPrecision ORDER BY id",
+            &[],
+        )
+        .await
+        .expect("Query failed");
+
+    let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    assert_eq!(data.len(), 1);
+
+    // DATETIME rounds to 3.33ms grid — 123ms should round to 123ms
+    let got_dt: NaiveDateTime = data[0].get(1).unwrap();
+    assert_eq!(got_dt.date(), dt.date());
+    assert_eq!(
+        (got_dt.time() - dt.time()).num_milliseconds().abs(),
+        0,
+        "DATETIME should preserve 123ms exactly"
+    );
+
+    // DATETIME2(7) preserves 100ns resolution — exact match
+    let got_dt2: NaiveDateTime = data[0].get(2).unwrap();
+    assert_eq!(got_dt2, dt2, "DATETIME2(7) should round-trip exactly");
+
+    // DATETIME2(3) truncates to millisecond
+    let got_dt2_3: NaiveDateTime = data[0].get(3).unwrap();
+    assert_eq!(got_dt2_3, dt2_3, "DATETIME2(3) at ms precision should round-trip");
+
+    client.close().await.expect("Failed to close");
+}
+
+/// Mixed temporal column orderings — DATE → TIME → DATETIME2 → DATETIMEOFFSET
+/// with non-temporal columns interleaved. Catches bugs where column ordering
+/// affects the encoding offsets.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_mixed_column_ordering() {
+    use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
+
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client
+        .execute(
+            "CREATE TABLE #BulkMixedOrder (\
+                id INT NOT NULL, \
+                d DATE NOT NULL, \
+                label NVARCHAR(50) NOT NULL, \
+                t TIME(3) NOT NULL, \
+                flag BIT NOT NULL, \
+                dt2 DATETIME2(5) NOT NULL, \
+                qty INT NOT NULL, \
+                dto DATETIMEOFFSET(4) NOT NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkMixedOrder").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0).with_nullable(false),
+        BulkColumn::new("d", "DATE", 1).with_nullable(false),
+        BulkColumn::new("label", "NVARCHAR(50)", 2).with_nullable(false),
+        BulkColumn::new("t", "TIME(3)", 3).with_nullable(false),
+        BulkColumn::new("flag", "BIT", 4).with_nullable(false),
+        BulkColumn::new("dt2", "DATETIME2(5)", 5).with_nullable(false),
+        BulkColumn::new("qty", "INT", 6).with_nullable(false),
+        BulkColumn::new("dto", "DATETIMEOFFSET(4)", 7).with_nullable(false),
+    ]);
+
+    let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
+
+    let d = NaiveDate::from_ymd_opt(2026, 4, 15).unwrap();
+    let t = NaiveTime::from_hms_milli_opt(14, 30, 15, 500).unwrap();
+    // DATETIME2(5) has 10µs precision — use a 10µs-aligned nanosecond value.
+    let dt2 = NaiveDateTime::new(
+        d,
+        NaiveTime::from_hms_nano_opt(14, 30, 15, 20_000).unwrap(),
+    );
+    let offset = FixedOffset::east_opt(5 * 3600 + 30 * 60).unwrap(); // +05:30
+    // DATETIMEOFFSET(4) has 100µs precision — use 100µs-aligned microseconds.
+    let dto: DateTime<FixedOffset> = DateTime::from_naive_utc_and_offset(
+        NaiveDateTime::new(d, NaiveTime::from_hms_micro_opt(9, 0, 0, 123_400).unwrap()),
+        offset,
+    );
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(42),
+            SqlValue::Date(d),
+            SqlValue::String("hello".into()),
+            SqlValue::Time(t),
+            SqlValue::Bool(true),
+            SqlValue::DateTime(dt2),
+            SqlValue::Int(-100),
+            SqlValue::DateTimeOffset(dto),
+        ])
+        .expect("row 1");
+
+    let result = writer.finish().await.expect("Failed to finish bulk insert");
+    assert_eq!(result.rows_affected, 1);
+
+    let rows = client
+        .query(
+            "SELECT id, d, label, t, flag, dt2, qty, dto FROM #BulkMixedOrder",
+            &[],
+        )
+        .await
+        .expect("Query failed");
+
+    let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    assert_eq!(data.len(), 1);
+
+    assert_eq!(data[0].get::<i32>(0).unwrap(), 42);
+    assert_eq!(data[0].get::<NaiveDate>(1).unwrap(), d);
+    assert_eq!(data[0].get::<String>(2).unwrap(), "hello");
+    assert_eq!(data[0].get::<NaiveTime>(3).unwrap(), t);
+    assert!(data[0].get::<bool>(4).unwrap());
+    assert_eq!(data[0].get::<NaiveDateTime>(5).unwrap(), dt2);
+    assert_eq!(data[0].get::<i32>(6).unwrap(), -100);
+    assert_eq!(data[0].get::<DateTime<FixedOffset>>(7).unwrap(), dto);
+
+    client.close().await.expect("Failed to close");
+}
+
+/// NULL values across every supported bulk type. Catches encoding gaps where
+/// a particular type's NULL path is wrong. Items from the existing null test
+/// only covered INT and NVARCHAR.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_all_types_null() {
+    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+    use rust_decimal::Decimal;
+
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client
+        .execute(
+            "CREATE TABLE #BulkAllNulls (\
+                id INT NOT NULL, \
+                b BIT NULL, \
+                ti TINYINT NULL, \
+                si SMALLINT NULL, \
+                i INT NULL, \
+                bi BIGINT NULL, \
+                rl REAL NULL, \
+                fl FLOAT NULL, \
+                dec_c DECIMAL(10,2) NULL, \
+                mny MONEY NULL, \
+                smny SMALLMONEY NULL, \
+                vc VARCHAR(50) NULL, \
+                nvc NVARCHAR(50) NULL, \
+                vb VARBINARY(50) NULL, \
+                d DATE NULL, \
+                t TIME(3) NULL, \
+                dt DATETIME NULL, \
+                sdt SMALLDATETIME NULL, \
+                dt2 DATETIME2(7) NULL, \
+                dto DATETIMEOFFSET(7) NULL, \
+                g UNIQUEIDENTIFIER NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkAllNulls").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0).with_nullable(false),
+        BulkColumn::new("b", "BIT", 1),
+        BulkColumn::new("ti", "TINYINT", 2),
+        BulkColumn::new("si", "SMALLINT", 3),
+        BulkColumn::new("i", "INT", 4),
+        BulkColumn::new("bi", "BIGINT", 5),
+        BulkColumn::new("rl", "REAL", 6),
+        BulkColumn::new("fl", "FLOAT", 7),
+        BulkColumn::new("dec_c", "DECIMAL(10,2)", 8),
+        BulkColumn::new("mny", "MONEY", 9),
+        BulkColumn::new("smny", "SMALLMONEY", 10),
+        BulkColumn::new("vc", "VARCHAR(50)", 11),
+        BulkColumn::new("nvc", "NVARCHAR(50)", 12),
+        BulkColumn::new("vb", "VARBINARY(50)", 13),
+        BulkColumn::new("d", "DATE", 14),
+        BulkColumn::new("t", "TIME(3)", 15),
+        BulkColumn::new("dt", "DATETIME", 16),
+        BulkColumn::new("sdt", "SMALLDATETIME", 17),
+        BulkColumn::new("dt2", "DATETIME2(7)", 18),
+        BulkColumn::new("dto", "DATETIMEOFFSET(7)", 19),
+        BulkColumn::new("g", "UNIQUEIDENTIFIER", 20),
+    ]);
+
+    let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
+
+    // Row with all NULLs except id
+    let nulls = [
+        SqlValue::Int(1),
+        SqlValue::Null, SqlValue::Null, SqlValue::Null, SqlValue::Null, SqlValue::Null,
+        SqlValue::Null, SqlValue::Null, SqlValue::Null, SqlValue::Null, SqlValue::Null,
+        SqlValue::Null, SqlValue::Null, SqlValue::Null, SqlValue::Null, SqlValue::Null,
+        SqlValue::Null, SqlValue::Null, SqlValue::Null, SqlValue::Null, SqlValue::Null,
+    ];
+    writer.send_row_values(&nulls).expect("row 1 all nulls");
+
+    // Row with all values set
+    let d = NaiveDate::from_ymd_opt(2026, 4, 15).unwrap();
+    let t = NaiveTime::from_hms_opt(12, 0, 0).unwrap();
+    let dt = NaiveDateTime::new(d, NaiveTime::from_hms_milli_opt(12, 0, 0, 500).unwrap());
+    let sdt = NaiveDateTime::new(d, NaiveTime::from_hms_opt(12, 0, 0).unwrap());
+    let dt2 = NaiveDateTime::new(
+        d,
+        NaiveTime::from_hms_nano_opt(12, 0, 0, 1234567).unwrap(),
+    );
+    let offset = chrono::FixedOffset::east_opt(0).unwrap();
+    let dto = chrono::DateTime::<chrono::FixedOffset>::from_naive_utc_and_offset(dt2, offset);
+    let guid = uuid::Uuid::from_u128(0x1234_5678_1234_5678_1234_5678_1234_5678);
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(2),
+            SqlValue::Bool(true),
+            SqlValue::TinyInt(42),
+            SqlValue::SmallInt(-42),
+            SqlValue::Int(42),
+            SqlValue::BigInt(42_000_000_000),
+            SqlValue::Float(std::f32::consts::PI),
+            SqlValue::Double(std::f64::consts::E),
+            SqlValue::Decimal(Decimal::new(1234, 2)),
+            SqlValue::Decimal(Decimal::new(98765432, 4)),
+            SqlValue::Decimal(Decimal::new(12345, 4)),
+            SqlValue::String("vc".into()),
+            SqlValue::String("nvc".into()),
+            SqlValue::Binary(bytes::Bytes::from(vec![0xDE, 0xAD, 0xBE, 0xEF])),
+            SqlValue::Date(d),
+            SqlValue::Time(t),
+            SqlValue::DateTime(dt),
+            SqlValue::DateTime(sdt),
+            SqlValue::DateTime(dt2),
+            SqlValue::DateTimeOffset(dto),
+            SqlValue::Uuid(guid),
+        ])
+        .expect("row 2 values");
+
+    let result = writer.finish().await.expect("Failed to finish bulk insert");
+    assert_eq!(result.rows_affected, 2);
+
+    let rows = client
+        .query(
+            "SELECT id, b, ti, si, i, bi, rl, fl, dec_c, mny, smny, \
+                    vc, nvc, vb, d, t, dt, sdt, dt2, dto, g \
+             FROM #BulkAllNulls ORDER BY id",
+            &[],
+        )
+        .await
+        .expect("Query failed");
+
+    let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    assert_eq!(data.len(), 2);
+
+    // Row 1: all NULL except id
+    assert_eq!(data[0].get::<i32>(0).unwrap(), 1);
+    for idx in 1..=20 {
+        assert!(
+            data[0].is_null(idx),
+            "column {idx} should be NULL in row 1"
+        );
+    }
+
+    // Row 2: all values set
+    assert_eq!(data[1].get::<i32>(0).unwrap(), 2);
+    assert!(data[1].get::<bool>(1).unwrap());
+    assert_eq!(data[1].get::<u8>(2).unwrap(), 42);
+    assert_eq!(data[1].get::<i16>(3).unwrap(), -42);
+    assert_eq!(data[1].get::<i32>(4).unwrap(), 42);
+    assert_eq!(data[1].get::<i64>(5).unwrap(), 42_000_000_000);
+
+    client.close().await.expect("Failed to close");
+}
+
+/// DATETIME (legacy 8-byte format) round-trip covering pre-1900 dates and
+/// sub-second precision that DATETIME2 handles differently.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_datetime_legacy_edge_cases() {
+    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client
+        .execute(
+            "CREATE TABLE #BulkDtLegacy (\
+                id INT NOT NULL, \
+                dt DATETIME NOT NULL, \
+                dtn DATETIME NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkDtLegacy").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0).with_nullable(false),
+        BulkColumn::new("dt", "DATETIME", 1).with_nullable(false),
+        BulkColumn::new("dtn", "DATETIME", 2),
+    ]);
+
+    let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
+
+    // DATETIME range: 1753-01-01 to 9999-12-31, 3.33ms resolution
+    let dt_min = NaiveDateTime::new(
+        NaiveDate::from_ymd_opt(1753, 1, 1).unwrap(),
+        NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+    );
+    // 500ms lands exactly on a 3.33ms tick boundary (150 ticks)
+    let dt_with_ms = NaiveDateTime::new(
+        NaiveDate::from_ymd_opt(2026, 4, 15).unwrap(),
+        NaiveTime::from_hms_milli_opt(14, 30, 45, 500).unwrap(),
+    );
+    let dt_midnight = NaiveDateTime::new(
+        NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
+        NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+    );
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(1),
+            SqlValue::DateTime(dt_min),
+            SqlValue::DateTime(dt_with_ms),
+        ])
+        .expect("row 1");
+    writer
+        .send_row_values(&[
+            SqlValue::Int(2),
+            SqlValue::DateTime(dt_midnight),
+            SqlValue::Null,
+        ])
+        .expect("row 2");
+
+    let result = writer.finish().await.expect("Failed to finish bulk insert");
+    assert_eq!(result.rows_affected, 2);
+
+    let rows = client
+        .query(
+            "SELECT id, dt, dtn FROM #BulkDtLegacy ORDER BY id",
+            &[],
+        )
+        .await
+        .expect("Query failed");
+
+    let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    assert_eq!(data.len(), 2);
+
+    assert_eq!(data[0].get::<NaiveDateTime>(1).unwrap(), dt_min);
+    assert_eq!(data[0].get::<NaiveDateTime>(2).unwrap(), dt_with_ms);
+    assert_eq!(data[1].get::<NaiveDateTime>(1).unwrap(), dt_midnight);
+    assert_eq!(data[1].get::<Option<NaiveDateTime>>(2).unwrap(), None);
+
+    client.close().await.expect("Failed to close");
+}
