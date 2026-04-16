@@ -432,9 +432,7 @@ async fn test_bulk_insert_binary_and_guid() {
         BulkColumn::new("data", "VARBINARY(200)", 2),
     ]);
 
-    // Use a symmetric UUID so SQL Server's mixed-endian storage doesn't
-    // cause a byte-order mismatch on round-trip comparison
-    let test_uuid = Uuid::parse_str("01020304-0102-0304-0102-030401020304").unwrap();
+    let test_uuid = Uuid::parse_str("12345678-1234-5678-1234-567812345678").unwrap();
     let test_bytes: bytes::Bytes =
         vec![0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04].into();
 
@@ -461,10 +459,8 @@ async fn test_bulk_insert_binary_and_guid() {
 
     let row = &data[0];
     assert_eq!(row.get::<i32>(0).unwrap(), 1);
-    // Verify UUID round-trip via server-side string conversion to avoid
-    // any client-side byte-order encoding differences
     let uid: Uuid = row.get(1).unwrap();
-    assert!(!uid.is_nil(), "UUID should not be nil");
+    assert_eq!(uid, test_uuid, "UUID round-trip should preserve exact value");
     assert_eq!(row.get::<Vec<u8>>(2).unwrap(), &test_bytes[..]);
 
     client.close().await.expect("Failed to close");

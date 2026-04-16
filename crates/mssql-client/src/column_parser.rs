@@ -857,10 +857,10 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
             } else if buf.remaining() < 16 {
                 return Err(Error::Protocol("unexpected EOF reading GUID".into()));
             } else {
-                // SQL Server stores GUIDs in mixed-endian format
-                let data = bytes::Bytes::copy_from_slice(&buf[..16]);
-                buf.advance(16);
-                SqlValue::Binary(data)
+                // SQL Server stores GUIDs in mixed-endian format:
+                // first 3 groups byte-swapped, last 2 groups big-endian.
+                // Swap back to RFC 4122 big-endian format.
+                decode_guid_bytes(buf)
             }
         }
 
@@ -1272,11 +1272,8 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
             if data_len < 16 {
                 return Ok(SqlValue::Null);
             }
-            let mut guid_bytes = [0u8; 16];
-            for byte in &mut guid_bytes {
-                *byte = buf.get_u8();
-            }
-            Ok(SqlValue::Binary(bytes::Bytes::copy_from_slice(&guid_bytes)))
+            // SQL Server stores GUIDs in mixed-endian format — swap back to RFC 4122
+            Ok(decode_guid_bytes(buf))
         }
         0x28 => {
             // DATE (no properties)
@@ -1517,6 +1514,43 @@ fn intervals_to_time(intervals: u64, scale: u8) -> chrono::NaiveTime {
 
     chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nano_part)
         .unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(0, 0, 0).expect("midnight is valid"))
+}
+
+/// Decode 16 GUID bytes from SQL Server mixed-endian wire format to RFC 4122 format.
+///
+/// SQL Server stores UUIDs with the first 3 groups byte-swapped (little-endian)
+/// and the last 2 groups in big-endian order. This function reads 16 bytes,
+/// swaps the first 3 groups back, and returns the appropriate SqlValue.
+fn decode_guid_bytes(buf: &mut &[u8]) -> SqlValue {
+    let mut bytes = [0u8; 16];
+
+    // First 4 bytes — little-endian on wire, swap to big-endian
+    bytes[3] = buf.get_u8();
+    bytes[2] = buf.get_u8();
+    bytes[1] = buf.get_u8();
+    bytes[0] = buf.get_u8();
+
+    // Next 2 bytes — little-endian on wire, swap to big-endian
+    bytes[5] = buf.get_u8();
+    bytes[4] = buf.get_u8();
+
+    // Next 2 bytes — little-endian on wire, swap to big-endian
+    bytes[7] = buf.get_u8();
+    bytes[6] = buf.get_u8();
+
+    // Last 8 bytes — big-endian, keep as-is
+    for byte in &mut bytes[8..16] {
+        *byte = buf.get_u8();
+    }
+
+    #[cfg(feature = "uuid")]
+    {
+        SqlValue::Uuid(uuid::Uuid::from_bytes(bytes))
+    }
+    #[cfg(not(feature = "uuid"))]
+    {
+        SqlValue::Binary(bytes::Bytes::copy_from_slice(&bytes))
+    }
 }
 
 #[cfg(test)]

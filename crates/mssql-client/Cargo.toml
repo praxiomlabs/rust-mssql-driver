@@ -13,7 +13,7 @@ categories = ["database", "asynchronous"]
 default = ["chrono", "uuid", "decimal", "encoding", "tls"]
 # Type support features — forwarded to mssql-types
 chrono = ["mssql-types/chrono", "dep:chrono"]
-uuid = ["mssql-types/uuid"]
+uuid = ["mssql-types/uuid", "dep:uuid"]
 decimal = ["mssql-types/decimal", "dep:rust_decimal"]
 json = ["mssql-types/json"]
 otel = [
@@ -61,6 +61,9 @@ lru = { workspace = true }
 
 # Optional: chrono for date/time types
 chrono = { workspace = true, optional = true }
+
+# Optional: uuid for UNIQUEIDENTIFIER (GUID) types
+uuid = { workspace = true, optional = true }
 
 # Optional: rust_decimal for DECIMAL/NUMERIC types
 rust_decimal = { workspace = true, optional = true }
