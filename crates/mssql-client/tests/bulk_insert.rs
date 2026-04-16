@@ -1851,3 +1851,164 @@ async fn test_bulk_insert_datetime_legacy_edge_cases() {
 
     client.close().await.expect("Failed to close");
 }
+
+/// VARCHAR columns must encode values in the server's collation code page, not
+/// UTF-16. Before 1.10 was fixed, `SqlValue::String("abc")` would be written as
+/// the six-byte UTF-16 sequence `"a\0b\0c\0"` into a single-byte VARCHAR column,
+/// doubling DATALENGTH and inserting NUL padding chars. This test verifies the
+/// plain ASCII case (DATALENGTH(col) == char count) for VARCHAR, CHAR and
+/// VARCHAR(MAX).
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_varchar_ascii() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client
+        .execute(
+            "CREATE TABLE #BulkVc (\
+                id INT NOT NULL, \
+                vc VARCHAR(100) NOT NULL, \
+                ch CHAR(5) NOT NULL, \
+                vcm VARCHAR(MAX) NOT NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkVc").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0).with_nullable(false),
+        BulkColumn::new("vc", "VARCHAR(100)", 1).with_nullable(false),
+        BulkColumn::new("ch", "CHAR(5)", 2).with_nullable(false),
+        BulkColumn::new("vcm", "VARCHAR(MAX)", 3).with_nullable(false),
+    ]);
+
+    // A multi-packet VARCHAR(MAX) exercise: 5000 ASCII bytes spans two 4096-byte
+    // packets so we catch PLP chunk boundaries as well.
+    let long = "abcdefghij".repeat(500);
+
+    let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
+
+    writer
+        .send_row_values(&[
+            SqlValue::Int(1),
+            SqlValue::String("hello".into()),
+            SqlValue::String("world".into()),
+            SqlValue::String(long.clone()),
+        ])
+        .expect("row 1");
+    writer
+        .send_row_values(&[
+            SqlValue::Int(2),
+            SqlValue::String(String::new()),
+            SqlValue::String("     ".into()),
+            SqlValue::String("x".into()),
+        ])
+        .expect("row 2");
+
+    let result = writer.finish().await.expect("Failed to finish bulk insert");
+    assert_eq!(result.rows_affected, 2);
+
+    // DATALENGTH returns INT for non-MAX types and BIGINT for VARCHAR(MAX);
+    // cast the MAX column to INT so both round-trip as i32.
+    let rows = client
+        .query(
+            "SELECT id, vc, DATALENGTH(vc), ch, DATALENGTH(ch), vcm, CAST(DATALENGTH(vcm) AS INT) \
+             FROM #BulkVc ORDER BY id",
+            &[],
+        )
+        .await
+        .expect("Query failed");
+
+    let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    assert_eq!(data.len(), 2);
+
+    // Row 1 — ASCII strings, DATALENGTH equals char count for VARCHAR/CHAR,
+    // and the VARCHAR(MAX) column round-trips the multi-packet payload byte-for-byte.
+    assert_eq!(data[0].get::<i32>(0).unwrap(), 1);
+    assert_eq!(data[0].get::<String>(1).unwrap(), "hello");
+    assert_eq!(data[0].get::<i32>(2).unwrap(), 5, "VARCHAR 'hello' should be 5 bytes, not 10");
+    assert_eq!(data[0].get::<String>(3).unwrap(), "world");
+    assert_eq!(data[0].get::<i32>(4).unwrap(), 5, "CHAR(5) 'world' should be 5 bytes");
+    assert_eq!(data[0].get::<String>(5).unwrap(), long);
+    assert_eq!(data[0].get::<i32>(6).unwrap(), 5_000, "VARCHAR(MAX) 5000-byte payload");
+
+    // Row 2 — empty string and single char exercise the edge cases that
+    // previously dropped into the UTF-16 path.
+    assert_eq!(data[1].get::<String>(1).unwrap(), "");
+    assert_eq!(data[1].get::<i32>(2).unwrap(), 0);
+    // CHAR(5) is blank-padded; server returns "     ".
+    assert_eq!(data[1].get::<String>(3).unwrap(), "     ");
+    assert_eq!(data[1].get::<i32>(4).unwrap(), 5);
+    assert_eq!(data[1].get::<String>(5).unwrap(), "x");
+    assert_eq!(data[1].get::<i32>(6).unwrap(), 1);
+
+    client.close().await.expect("Failed to close");
+}
+
+/// VARCHAR under a non-ASCII server collation must transcode through the
+/// collation's code page. The default mssql-test container collation is
+/// SQL_Latin1_General_CP1_CI_AS (Windows-1252), so characters in the 0x80–0xFF
+/// range have distinct single-byte encodings that differ from UTF-16. This test
+/// verifies they round-trip intact (0xE9 'é' → byte 0xE9 on wire → decoded back
+/// to 'é' on read).
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_varchar_latin1_extended() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client
+        .execute(
+            "CREATE TABLE #BulkVcExt (id INT NOT NULL, vc VARCHAR(50) NOT NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkVcExt").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0).with_nullable(false),
+        BulkColumn::new("vc", "VARCHAR(50)", 1).with_nullable(false),
+    ]);
+
+    // "café" — 4 chars, 4 bytes in Windows-1252, 5 bytes in UTF-8, 8 bytes in UTF-16.
+    // The wrong-encoding bug would blow up the length prefix.
+    let accented = "café";
+    let german = "grüße";
+    let mixed = "naïve résumé";
+
+    let mut writer = client.bulk_insert(&builder).await.expect("Failed to start bulk insert");
+
+    writer
+        .send_row_values(&[SqlValue::Int(1), SqlValue::String(accented.into())])
+        .expect("row 1");
+    writer
+        .send_row_values(&[SqlValue::Int(2), SqlValue::String(german.into())])
+        .expect("row 2");
+    writer
+        .send_row_values(&[SqlValue::Int(3), SqlValue::String(mixed.into())])
+        .expect("row 3");
+
+    let result = writer.finish().await.expect("Failed to finish bulk insert");
+    assert_eq!(result.rows_affected, 3);
+
+    let rows = client
+        .query(
+            "SELECT id, vc, DATALENGTH(vc) FROM #BulkVcExt ORDER BY id",
+            &[],
+        )
+        .await
+        .expect("Query failed");
+
+    let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    assert_eq!(data.len(), 3);
+
+    assert_eq!(data[0].get::<String>(1).unwrap(), accented);
+    assert_eq!(data[0].get::<i32>(2).unwrap(), 4, "'café' is 4 bytes in Windows-1252");
+    assert_eq!(data[1].get::<String>(1).unwrap(), german);
+    assert_eq!(data[1].get::<i32>(2).unwrap(), 5, "'grüße' is 5 bytes in Windows-1252");
+    assert_eq!(data[2].get::<String>(1).unwrap(), mixed);
+    assert_eq!(data[2].get::<i32>(2).unwrap(), 12, "'naïve résumé' is 12 bytes in Windows-1252");
+
+    client.close().await.expect("Failed to close");
+}

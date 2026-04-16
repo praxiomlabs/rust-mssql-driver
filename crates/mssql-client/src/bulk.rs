@@ -60,7 +60,7 @@ use std::sync::Arc;
 
 use mssql_types::{SqlValue, ToSql, TypeError};
 use tds_protocol::packet::{PacketHeader, PacketStatus, PacketType};
-use tds_protocol::token::{DoneStatus, TokenType};
+use tds_protocol::token::{Collation, DoneStatus, TokenType};
 
 use crate::error::Error;
 
@@ -139,6 +139,14 @@ pub struct BulkColumn {
     precision: Option<u8>,
     /// Scale for decimal types.
     scale: Option<u8>,
+    /// Collation for VARCHAR/CHAR columns.
+    ///
+    /// Populated automatically from the server's COLMETADATA when
+    /// [`Client::bulk_insert`](crate::Client::bulk_insert) is used. Can be set
+    /// manually via [`with_collation`](Self::with_collation) for the
+    /// schema-discovery-free path. When `None`, VARCHAR values fall back to
+    /// the default Latin1_General_CI_AS collation (Windows-1252).
+    collation: Option<Collation>,
 }
 
 impl BulkColumn {
@@ -156,6 +164,7 @@ impl BulkColumn {
             max_length,
             precision,
             scale,
+            collation: None,
         }
     }
 
@@ -163,6 +172,18 @@ impl BulkColumn {
     #[must_use]
     pub fn with_nullable(mut self, nullable: bool) -> Self {
         self.nullable = nullable;
+        self
+    }
+
+    /// Set the collation used for VARCHAR/CHAR columns.
+    ///
+    /// Required when [`Client::bulk_insert_without_schema_discovery`](crate::Client::bulk_insert_without_schema_discovery)
+    /// targets VARCHAR columns on a server whose default collation is not
+    /// Latin1_General_CI_AS and the target column uses a different code page.
+    /// Ignored for NVARCHAR/NCHAR columns (always UTF-16).
+    #[must_use]
+    pub fn with_collation(mut self, collation: Collation) -> Self {
+        self.collation = Some(collation);
         self
     }
 }
@@ -503,7 +524,7 @@ impl BulkInsert {
     /// from `SELECT TOP 0` is echoed back rather than constructing it from
     /// user-specified types.
     pub fn new_with_server_metadata(
-        columns: Vec<BulkColumn>,
+        mut columns: Vec<BulkColumn>,
         batch_size: usize,
         raw_colmetadata: Option<bytes::Bytes>,
         server_columns: Option<&[tds_protocol::token::ColumnData]>,
@@ -511,6 +532,16 @@ impl BulkInsert {
         // Determine which columns use fixed-length types on the wire.
         // Fixed-length types omit the per-row length prefix.
         let fixed_len: Vec<bool> = if let Some(srv_cols) = server_columns {
+            // Propagate collation from server metadata for VARCHAR/CHAR columns.
+            // The user's BulkColumn is constructed from type strings alone and
+            // has no collation until we see the server's COLMETADATA — falling
+            // back to the default Latin1 on NON-Latin servers would silently
+            // corrupt extended characters.
+            for (col, srv) in columns.iter_mut().zip(srv_cols.iter()) {
+                if col.collation.is_none() {
+                    col.collation = srv.type_info.collation;
+                }
+            }
             srv_cols.iter().map(|c| c.type_id.is_fixed_length()).collect()
         } else {
             // Without server metadata, NOT NULL columns of fixed-width types
@@ -811,25 +842,49 @@ impl BulkInsert {
             }
 
             SqlValue::String(s) => {
-                // UTF-16LE encoding for NVARCHAR
-                let utf16: Vec<u16> = s.encode_utf16().collect();
-                let byte_len = utf16.len() * 2;
+                // NVARCHAR/NCHAR columns (0xE7/0xEF) use UTF-16LE on the wire.
+                // VARCHAR/CHAR/BIGCHAR columns (0xA7/0x2F/0xAF) use the
+                // collation's code page for single-byte encoding — writing UTF-16
+                // into a VARCHAR column lands each surrogate half in its own
+                // single-byte slot and silently corrupts the data.
+                let is_varchar = matches!(col.type_id, 0xA7 | 0x2F | 0xAF);
 
-                if is_plp_type {
-                    // PLP format for MAX types - supports unlimited size
-                    // Send as a single chunk for simplicity
-                    encode_plp_string(&utf16, buf);
-                } else if byte_len > 0xFFFF {
-                    // Non-MAX column can't hold this much data
-                    return Err(TypeError::BufferTooSmall {
-                        needed: byte_len,
-                        available: 0xFFFF,
-                    });
+                if is_varchar {
+                    let encoded = encode_varchar_for_collation(s, col.collation.as_ref());
+                    let byte_len = encoded.len();
+
+                    if is_plp_type {
+                        encode_plp_binary(&encoded, buf);
+                    } else if byte_len > 0xFFFF {
+                        return Err(TypeError::BufferTooSmall {
+                            needed: byte_len,
+                            available: 0xFFFF,
+                        });
+                    } else {
+                        buf.put_u16_le(byte_len as u16);
+                        buf.put_slice(&encoded);
+                    }
                 } else {
-                    // Standard encoding with 2-byte length prefix
-                    buf.put_u16_le(byte_len as u16);
-                    for code_unit in utf16 {
-                        buf.put_u16_le(code_unit);
+                    // UTF-16LE encoding for NVARCHAR
+                    let utf16: Vec<u16> = s.encode_utf16().collect();
+                    let byte_len = utf16.len() * 2;
+
+                    if is_plp_type {
+                        // PLP format for MAX types - supports unlimited size
+                        // Send as a single chunk for simplicity
+                        encode_plp_string(&utf16, buf);
+                    } else if byte_len > 0xFFFF {
+                        // Non-MAX column can't hold this much data
+                        return Err(TypeError::BufferTooSmall {
+                            needed: byte_len,
+                            available: 0xFFFF,
+                        });
+                    } else {
+                        // Standard encoding with 2-byte length prefix
+                        buf.put_u16_le(byte_len as u16);
+                        for code_unit in utf16 {
+                            buf.put_u16_le(code_unit);
+                        }
                     }
                 }
             }
@@ -1139,6 +1194,14 @@ fn encode_plp_binary(data: &[u8], buf: &mut BytesMut) {
     }
 
     buf.put_u32_le(0);
+}
+
+/// Encode a Rust string into single-byte VARCHAR bytes using the column's collation.
+///
+/// Delegates to [`tds_protocol::collation::encode_str_for_collation`] so the
+/// RPC parameter path and the bulk insert path share one implementation.
+fn encode_varchar_for_collation(value: &str, collation: Option<&Collation>) -> Vec<u8> {
+    tds_protocol::collation::encode_str_for_collation(value, collation)
 }
 
 /// Encode time with specific scale (for bulk copy).

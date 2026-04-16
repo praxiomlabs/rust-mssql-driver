@@ -307,6 +307,39 @@ pub fn encoding_name_for_lcid(lcid: u32) -> &'static str {
     }
 }
 
+/// Transcode a Rust `&str` into single-byte VARCHAR bytes for the given collation.
+///
+/// - UTF-8 collations (SQL Server 2019+) pass through as raw UTF-8 bytes.
+/// - Known non-UTF-8 LCIDs transcode via the matching `encoding_rs` codec.
+/// - Unknown or `None` collations fall back to Windows-1252 (Latin1_General_CI_AS).
+///
+/// When the `encoding` feature is disabled, characters ≤ 0xFF pass through as
+/// Latin-1 bytes and everything else becomes `?`.
+pub fn encode_str_for_collation(value: &str, collation: Option<&crate::token::Collation>) -> Vec<u8> {
+    #[cfg(feature = "encoding")]
+    {
+        if let Some(c) = collation {
+            if c.is_utf8() {
+                return value.as_bytes().to_vec();
+            }
+            if let Some(encoding) = c.encoding() {
+                let (encoded, _, _) = encoding.encode(value);
+                return encoded.into_owned();
+            }
+        }
+        let (encoded, _, _) = encoding_rs::WINDOWS_1252.encode(value);
+        encoded.into_owned()
+    }
+    #[cfg(not(feature = "encoding"))]
+    {
+        let _ = collation;
+        value
+            .chars()
+            .map(|ch| if (ch as u32) <= 0xFF { ch as u8 } else { b'?' })
+            .collect()
+    }
+}
+
 #[cfg(all(test, feature = "encoding"))]
 #[allow(clippy::unwrap_used)]
 mod tests {

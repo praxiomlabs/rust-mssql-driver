@@ -597,33 +597,7 @@ impl RpcParam {
 
     /// Encode a string using the collation's character encoding.
     fn encode_varchar_bytes_for_collation(value: &str, collation: &Collation) -> Vec<u8> {
-        #[cfg(feature = "encoding")]
-        {
-            if collation.is_utf8() {
-                return value.as_bytes().to_vec();
-            }
-            if let Some(encoding) = collation.encoding() {
-                let (encoded, _, _) = encoding.encode(value);
-                return encoded.into_owned();
-            }
-            // Unknown LCID — fallback to Windows-1252
-            let (encoded, _, _) = encoding_rs::WINDOWS_1252.encode(value);
-            encoded.into_owned()
-        }
-        #[cfg(not(feature = "encoding"))]
-        {
-            let _ = collation;
-            value
-                .chars()
-                .map(|ch| {
-                    if (ch as u32) <= 0xFF {
-                        ch as u8
-                    } else {
-                        b'?'
-                    }
-                })
-                .collect()
-        }
+        crate::collation::encode_str_for_collation(value, Some(collation))
     }
 
     /// Mark as output parameter.
