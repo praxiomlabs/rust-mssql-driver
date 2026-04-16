@@ -187,20 +187,23 @@ fn parse_sql_type(sql_type: &str) -> (u8, Option<u32>, Option<u8>, Option<u8>) {
         (upper.as_str(), None)
     };
 
+    // BulkLoad protocol requires nullable type variants in COLMETADATA.
+    // The server returns these types in SELECT TOP 0 metadata — fixed-length
+    // type IDs (INT 0x38, etc.) are rejected with error 4816.
     match base {
-        "BIT" => (0x32, None, None, None),
-        "TINYINT" => (0x30, None, None, None),
-        "SMALLINT" => (0x34, None, None, None),
-        "INT" => (0x38, None, None, None),
-        "BIGINT" => (0x7F, None, None, None),
-        "REAL" => (0x3B, None, None, None),
-        "FLOAT" => (0x3E, None, None, None),
+        "BIT" => (0x68, Some(1), None, None),           // BITN
+        "TINYINT" => (0x26, Some(1), None, None),       // INTN(1)
+        "SMALLINT" => (0x26, Some(2), None, None),      // INTN(2)
+        "INT" => (0x26, Some(4), None, None),            // INTN(4)
+        "BIGINT" => (0x26, Some(8), None, None),         // INTN(8)
+        "REAL" => (0x6D, Some(4), None, None),           // FLTN(4)
+        "FLOAT" => (0x6D, Some(8), None, None),          // FLTN(8)
         "DATE" => (0x28, None, None, None),
         "TIME" => {
             let scale = params.and_then(|p| p.parse().ok()).unwrap_or(7);
             (0x29, None, None, Some(scale))
         }
-        "DATETIME" => (0x3D, None, None, None),
+        "DATETIME" => (0x6F, Some(8), None, None),      // DATETIMEN(8)
         "DATETIME2" => {
             let scale = params.and_then(|p| p.parse().ok()).unwrap_or(7);
             (0x2A, None, None, Some(scale))
@@ -209,7 +212,7 @@ fn parse_sql_type(sql_type: &str) -> (u8, Option<u32>, Option<u8>, Option<u8>) {
             let scale = params.and_then(|p| p.parse().ok()).unwrap_or(7);
             (0x2B, None, None, Some(scale))
         }
-        "SMALLDATETIME" => (0x3A, None, None, None),
+        "SMALLDATETIME" => (0x6F, Some(4), None, None), // DATETIMEN(4)
         "UNIQUEIDENTIFIER" => (0x24, Some(16), None, None),
         "VARCHAR" | "CHAR" => {
             let len = params
@@ -258,8 +261,8 @@ fn parse_sql_type(sql_type: &str) -> (u8, Option<u32>, Option<u8>, Option<u8>) {
             };
             (0x6C, None, Some(precision), Some(scale))
         }
-        "MONEY" => (0x3C, Some(8), None, None),
-        "SMALLMONEY" => (0x7A, Some(4), None, None),
+        "MONEY" => (0x6E, Some(8), None, None),         // MONEYN(8)
+        "SMALLMONEY" => (0x6E, Some(4), None, None),    // MONEYN(4)
         "XML" => (0xF1, Some(0xFFFF), None, None),
         "TEXT" => (0x23, Some(0x7FFF_FFFF), None, None),
         "NTEXT" => (0x63, Some(0x7FFF_FFFF), None, None),
@@ -465,6 +468,9 @@ fn validate_sql_type(type_str: &str) -> Result<(), Error> {
 pub struct BulkInsert {
     /// Column metadata.
     columns: Arc<[BulkColumn]>,
+    /// Whether each column uses a fixed-length type on the wire.
+    /// When true, row values for that column are written without a length prefix.
+    fixed_len: Arc<[bool]>,
     /// Buffer for accumulating rows.
     buffer: BytesMut,
     /// Rows in current batch.
@@ -482,9 +488,37 @@ pub struct BulkInsert {
 impl BulkInsert {
     /// Create a new bulk insert operation.
     pub fn new(columns: Vec<BulkColumn>, batch_size: usize) -> Self {
+        Self::new_with_server_metadata(columns, batch_size, None, None)
+    }
+
+    /// Create a new bulk insert operation using server metadata.
+    ///
+    /// When `raw_colmetadata` is provided, it is written directly into the
+    /// BulkLoad buffer, ensuring the COLMETADATA matches the server's exact
+    /// encoding. `server_columns` provides per-column type info so row values
+    /// are encoded correctly (fixed-length types have no length prefix).
+    ///
+    /// This follows the pattern used by Tiberius: the server's own metadata
+    /// from `SELECT TOP 0` is echoed back rather than constructing it from
+    /// user-specified types.
+    pub fn new_with_server_metadata(
+        columns: Vec<BulkColumn>,
+        batch_size: usize,
+        raw_colmetadata: Option<bytes::Bytes>,
+        server_columns: Option<&[tds_protocol::token::ColumnData]>,
+    ) -> Self {
+        // Determine which columns use fixed-length types on the wire
+        let fixed_len: Vec<bool> = if let Some(srv_cols) = server_columns {
+            srv_cols.iter().map(|c| c.type_id.is_fixed_length()).collect()
+        } else {
+            // Without server metadata, assume all types are nullable (variable-length)
+            vec![false; columns.len()]
+        };
+
         let mut bulk = Self {
             columns: columns.into(),
-            buffer: BytesMut::with_capacity(64 * 1024), // 64KB initial buffer
+            fixed_len: fixed_len.into(),
+            buffer: BytesMut::with_capacity(64 * 1024),
             rows_in_batch: 0,
             total_rows: 0,
             batch_size,
@@ -492,8 +526,11 @@ impl BulkInsert {
             packet_id: 1,
         };
 
-        // Write COLMETADATA token
-        bulk.write_colmetadata();
+        if let Some(raw) = raw_colmetadata {
+            bulk.buffer.extend_from_slice(&raw);
+        } else {
+            bulk.write_colmetadata();
+        }
 
         bulk
     }
@@ -512,8 +549,12 @@ impl BulkInsert {
             // User type (always 0 for basic types)
             buf.put_u32_le(0);
 
-            // Flags: Nullable (bit 0) | CaseSen (bit 1) | Updateable (bits 2-3) | etc.
-            let flags: u16 = if col.nullable { 0x0001 } else { 0x0000 };
+            // Flags: Nullable (bit 0) | Updateable (bit 3)
+            // BulkLoad columns must have Updateable set to indicate they accept writes.
+            let mut flags: u16 = 0x0008; // Updateable
+            if col.nullable {
+                flags |= 0x0001; // Nullable
+            }
             buf.put_u16_le(flags);
 
             // Type info
@@ -521,8 +562,14 @@ impl BulkInsert {
 
             // Type-specific length/precision/scale
             match col.type_id {
-                // Fixed-length types - no additional info needed
-                0x32 | 0x30 | 0x34 | 0x38 | 0x7F | 0x3B | 0x3E | 0x3D | 0x3A | 0x28 => {}
+                // Nullable fixed-length types — 1-byte max-length follows type ID
+                // INTN(0x26), BITN(0x68), FLTN(0x6D), MONEYN(0x6E), DATETIMEN(0x6F)
+                0x26 | 0x68 | 0x6D | 0x6E | 0x6F => {
+                    buf.put_u8(col.max_length.unwrap_or(4) as u8);
+                }
+
+                // DATE has no length byte (fixed 3-byte value)
+                0x28 => {}
 
                 // Variable-length string/binary types
                 0xE7 | 0xA7 | 0xA5 | 0xAD => {
@@ -536,9 +583,9 @@ impl BulkInsert {
 
                     // Collation for string types (5 bytes)
                     if col.type_id == 0xE7 || col.type_id == 0xA7 {
-                        // Default collation (Latin1_General_CI_AS)
-                        buf.put_u32_le(0x0409_0904); // LCID + flags
-                        buf.put_u8(52); // Sort ID
+                        // Default collation: Latin1_General_CI_AS
+                        // Bytes: LCID(0x0409) + flags(0xD000) + SortId(0x34)
+                        buf.put_slice(&[0x09, 0x04, 0xD0, 0x00, 0x34]);
                     }
                 }
 
@@ -638,10 +685,12 @@ impl BulkInsert {
 
         // Collect column info needed for encoding to avoid borrow conflict
         let columns: Vec<_> = self.columns.iter().cloned().collect();
+        let fixed_len = self.fixed_len.clone();
 
         // Write each column value
         for (i, (col, value)) in columns.iter().zip(values.iter()).enumerate() {
-            self.encode_column_value(col, value)
+            let is_fixed = *fixed_len.get(i).unwrap_or(&false);
+            self.encode_column_value(col, value, is_fixed)
                 .map_err(|e| Error::Config(format!("failed to encode column {i}: {e}")))?;
         }
 
@@ -649,7 +698,16 @@ impl BulkInsert {
     }
 
     /// Encode a column value according to its type.
-    fn encode_column_value(&mut self, col: &BulkColumn, value: &SqlValue) -> Result<(), TypeError> {
+    ///
+    /// When `is_fixed` is true, the column uses a fixed-length type on the wire
+    /// and values are written without a length prefix. When false, values include
+    /// a length prefix (1 byte for numeric nullable types, 2 bytes for strings).
+    fn encode_column_value(
+        &mut self,
+        col: &BulkColumn,
+        value: &SqlValue,
+        is_fixed: bool,
+    ) -> Result<(), TypeError> {
         let buf = &mut self.buffer;
 
         // Check if this column uses PLP (Partially Length-Prefixed) encoding
@@ -672,7 +730,9 @@ impl BulkInsert {
                         }
                     }
                     // Nullable fixed types use 0 length
-                    0x26 | 0x6C | 0x6A | 0x24 | 0x29 | 0x2A | 0x2B => {
+                    // INTN, BITN, FLTN, MONEYN, DATETIMEN, Decimal, GUID, temporal
+                    0x26 | 0x68 | 0x6D | 0x6E | 0x6F | 0x6C | 0x6A | 0x24 | 0x28
+                    | 0x29 | 0x2A | 0x2B => {
                         buf.put_u8(0);
                     }
                     // Fixed types without nullable variant
@@ -687,37 +747,37 @@ impl BulkInsert {
             }
 
             SqlValue::Bool(v) => {
-                buf.put_u8(1); // Length
+                if !is_fixed { buf.put_u8(1); }
                 buf.put_u8(if *v { 1 } else { 0 });
             }
 
             SqlValue::TinyInt(v) => {
-                buf.put_u8(1); // Length
+                if !is_fixed { buf.put_u8(1); }
                 buf.put_u8(*v);
             }
 
             SqlValue::SmallInt(v) => {
-                buf.put_u8(2); // Length
+                if !is_fixed { buf.put_u8(2); }
                 buf.put_i16_le(*v);
             }
 
             SqlValue::Int(v) => {
-                buf.put_u8(4); // Length
+                if !is_fixed { buf.put_u8(4); }
                 buf.put_i32_le(*v);
             }
 
             SqlValue::BigInt(v) => {
-                buf.put_u8(8); // Length
+                if !is_fixed { buf.put_u8(8); }
                 buf.put_i64_le(*v);
             }
 
             SqlValue::Float(v) => {
-                buf.put_u8(4); // Length
+                if !is_fixed { buf.put_u8(4); }
                 buf.put_f32_le(*v);
             }
 
             SqlValue::Double(v) => {
-                buf.put_u8(8); // Length
+                if !is_fixed { buf.put_u8(8); }
                 buf.put_f64_le(*v);
             }
 
@@ -1167,15 +1227,17 @@ mod tests {
     fn test_bulk_column_creation() {
         let col = BulkColumn::new("id", "INT", 0);
         assert_eq!(col.name, "id");
-        assert_eq!(col.type_id, 0x38);
+        assert_eq!(col.type_id, 0x26); // INTN
+        assert_eq!(col.max_length, Some(4));
         assert!(col.nullable);
     }
 
     #[test]
     fn test_parse_sql_type() {
+        // Integer types → INTN (0x26) with appropriate length
         let (type_id, len, _prec, _scale) = parse_sql_type("INT");
-        assert_eq!(type_id, 0x38);
-        assert!(len.is_none());
+        assert_eq!(type_id, 0x26);
+        assert_eq!(len, Some(4));
 
         let (type_id, len, _, _) = parse_sql_type("NVARCHAR(100)");
         assert_eq!(type_id, 0xE7);
@@ -1186,12 +1248,14 @@ mod tests {
         assert_eq!(prec, Some(10));
         assert_eq!(scale, Some(2));
 
-        // SMALLDATETIME must map to DateTime4 (0x3A), NOT Numeric (0x3F)
-        let (type_id, _, _, _) = parse_sql_type("SMALLDATETIME");
-        assert_eq!(type_id, 0x3A);
+        // SMALLDATETIME/DATETIME → DATETIMEN (0x6F)
+        let (type_id, len, _, _) = parse_sql_type("SMALLDATETIME");
+        assert_eq!(type_id, 0x6F);
+        assert_eq!(len, Some(4));
 
-        let (type_id, _, _, _) = parse_sql_type("DATETIME");
-        assert_eq!(type_id, 0x3D);
+        let (type_id, len, _, _) = parse_sql_type("DATETIME");
+        assert_eq!(type_id, 0x6F);
+        assert_eq!(len, Some(8));
     }
 
     #[test]

@@ -297,7 +297,7 @@ impl<S: ConnectionState> Client<S> {
         &mut self,
         builder: &crate::bulk::BulkInsertBuilder,
     ) -> Result<crate::bulk::BulkWriter<'_, S>> {
-        let stmt = builder.build_insert_bulk_statement()?;
+        use tds_protocol::token::{ColMetaData, Token};
 
         tracing::debug!(
             table = builder.table_name(),
@@ -305,16 +305,65 @@ impl<S: ConnectionState> Client<S> {
             "starting bulk insert"
         );
 
-        // Send INSERT BULK statement to put server in bulk load mode
-        self.send_sql_batch(&stmt).await?;
+        // Step 1: Query the server for column metadata.
+        // This gives us the exact type encoding the server expects for BulkLoad,
+        // following the pattern established by Tiberius.
+        let meta_query = format!("SELECT TOP 0 * FROM {}", builder.table_name());
+        self.send_sql_batch(&meta_query).await?;
 
-        // Read server acknowledgment
+        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
+        let message = match connection {
+            #[cfg(feature = "tls")]
+            ConnectionHandle::Tls(conn) => conn.read_message().await?,
+            #[cfg(feature = "tls")]
+            ConnectionHandle::TlsPrelogin(conn) => conn.read_message().await?,
+            ConnectionHandle::Plain(conn) => conn.read_message().await?,
+        }
+        .ok_or(Error::ConnectionClosed)?;
+        self.in_flight = false;
+
+        // Capture both the raw COLMETADATA bytes and parsed column info
+        let raw_payload = message.payload.clone();
+        let mut parser = self.create_parser(message.payload);
+        let mut server_metadata: Option<ColMetaData> = None;
+        let mut meta_start: usize = 0;
+        let mut meta_end: usize = 0;
+
+        loop {
+            let pos_before = raw_payload.len() - parser.remaining();
+            let token = parser.next_token_with_metadata(server_metadata.as_ref())?;
+            let pos_after = raw_payload.len() - parser.remaining();
+            let Some(token) = token else { break };
+
+            match token {
+                Token::ColMetaData(meta) => {
+                    meta_start = pos_before;
+                    meta_end = pos_after;
+                    server_metadata = Some(meta);
+                }
+                Token::Done(_) => break,
+                _ => {}
+            }
+        }
+
+        // Step 2: Send INSERT BULK statement to put server in bulk load mode
+        let stmt = builder.build_insert_bulk_statement()?;
+        self.send_sql_batch(&stmt).await?;
         self.read_execute_result().await?;
 
-        // Create bulk writer with column definitions from the builder
-        let bulk = crate::bulk::BulkInsert::new(
+        // Step 3: Create bulk writer with server's metadata
+        let raw_meta = if meta_end > meta_start {
+            Some(raw_payload.slice(meta_start..meta_end))
+        } else {
+            None
+        };
+
+        let server_cols = server_metadata.as_ref().map(|m| m.columns.as_slice());
+        let bulk = crate::bulk::BulkInsert::new_with_server_metadata(
             builder.columns().to_vec(),
             builder.options().batch_size,
+            raw_meta,
+            server_cols,
         );
 
         Ok(crate::bulk::BulkWriter::new(self, bulk))

@@ -12,7 +12,7 @@ use super::{Client, ConnectionHandle};
 
 impl<S: ConnectionState> Client<S> {
     /// Create a TokenParser with encryption awareness when configured.
-    fn create_parser(&self, payload: bytes::Bytes) -> TokenParser {
+    pub(super) fn create_parser(&self, payload: bytes::Bytes) -> TokenParser {
         let parser = TokenParser::new(payload);
         #[cfg(feature = "always-encrypted")]
         let parser = if self.encryption_context.is_some() {
