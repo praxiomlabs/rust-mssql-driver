@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use mssql_client::{Client, Config as ClientConfig, Ready};
+use mssql_client::{Client, Config as ClientConfig, DatabaseMetrics, Ready};
 use parking_lot::Mutex;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::timeout;
@@ -97,6 +97,27 @@ struct PoolInner {
 
     /// Number of tasks waiting for a connection.
     wait_queue_depth: AtomicU64,
+
+    /// OpenTelemetry metrics bridge.
+    ///
+    /// When the `otel` feature is enabled on `mssql-client`, this emits
+    /// gauges (usage/idle/max), counters (connections created/closed), and
+    /// histograms (acquisition wait time). When the feature is disabled,
+    /// all methods are no-ops.
+    otel_metrics: DatabaseMetrics,
+}
+
+impl PoolInner {
+    /// Emit the current pool-status gauge snapshot (in_use, idle, max).
+    ///
+    /// Called at each lifecycle event (create/close/checkout/checkin) so the
+    /// OTel gauges reflect current state without requiring a periodic observer.
+    fn record_pool_status(&self) {
+        let idle = self.idle_connections.lock().len() as u64;
+        let in_use = self.in_use_count.load(Ordering::Relaxed);
+        let max = u64::from(self.config.max_connections);
+        self.otel_metrics.record_pool_status(in_use, idle, max);
+    }
 }
 
 /// Internal metrics tracking.
@@ -124,6 +145,10 @@ struct PoolMetricsInner {
     connections_lifetime_expired: u64,
     /// Reaper task runs.
     reaper_runs: u64,
+    /// Idle health checks performed (background pings).
+    idle_health_checks_performed: u64,
+    /// Idle health checks that failed (connections discarded).
+    idle_health_checks_failed: u64,
     /// Peak wait queue depth observed.
     peak_wait_queue_depth: u64,
     /// Total connection acquisition time in microseconds.
@@ -145,7 +170,22 @@ impl Pool {
     ///
     /// For more control over pool creation, use [`Pool::builder()`].
     pub async fn new(config: PoolConfig, client_config: ClientConfig) -> Result<Self, PoolError> {
+        Self::new_inner(config, client_config, None).await
+    }
+
+    /// Internal constructor supporting an optional OTel pool name label.
+    async fn new_inner(
+        config: PoolConfig,
+        client_config: ClientConfig,
+        pool_name: Option<String>,
+    ) -> Result<Self, PoolError> {
         config.validate()?;
+
+        let otel_metrics = DatabaseMetrics::new(
+            pool_name.as_deref(),
+            &client_config.host,
+            client_config.port,
+        );
 
         let inner = Arc::new(PoolInner {
             config: config.clone(),
@@ -158,6 +198,7 @@ impl Pool {
             in_use_count: AtomicU64::new(0),
             total_connections: AtomicU64::new(0),
             wait_queue_depth: AtomicU64::new(0),
+            otel_metrics,
         });
 
         // Start the reaper task for connection cleanup.
@@ -243,6 +284,8 @@ impl Pool {
                     self.inner.idle_connections.lock().push_back(entry);
                     self.inner.total_connections.fetch_add(1, Ordering::Relaxed);
                     self.inner.metrics.lock().connections_created += 1;
+                    self.inner.otel_metrics.record_connection_created();
+                    self.inner.record_pool_status();
                     // Release the permit back so it can be acquired during get()
                     drop(permit);
                     created += 1;
@@ -265,11 +308,14 @@ impl Pool {
         );
     }
 
-    /// Background reaper task that cleans up expired connections.
+    /// Background reaper task that cleans up expired connections and
+    /// optionally health-checks idle ones.
     ///
     /// This task runs periodically and:
     /// - Removes connections that exceed `max_lifetime`
     /// - Removes connections that exceed `idle_timeout` (keeping at least `min_connections`)
+    /// - When `test_while_idle` is enabled, pings remaining idle connections
+    ///   and discards any that fail the health check
     async fn reaper_task(inner: Arc<PoolInner>, interval: Duration) {
         let mut ticker = tokio::time::interval(interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -339,11 +385,19 @@ impl Pool {
 
             // Update metrics
             if expired_lifetime > 0 || expired_idle > 0 {
-                let mut metrics = inner.metrics.lock();
-                metrics.connections_closed += expired_lifetime + expired_idle;
-                metrics.connections_lifetime_expired += expired_lifetime;
-                metrics.connections_idle_expired += expired_idle;
-                metrics.reaper_runs += 1;
+                let total_closed = expired_lifetime + expired_idle;
+                {
+                    let mut metrics = inner.metrics.lock();
+                    metrics.connections_closed += total_closed;
+                    metrics.connections_lifetime_expired += expired_lifetime;
+                    metrics.connections_idle_expired += expired_idle;
+                    metrics.reaper_runs += 1;
+                }
+
+                for _ in 0..total_closed {
+                    inner.otel_metrics.record_connection_closed();
+                }
+                inner.record_pool_status();
 
                 // Release semaphore permits for closed connections
                 inner
@@ -351,6 +405,99 @@ impl Pool {
                     .add_permits((expired_lifetime + expired_idle) as usize);
             } else {
                 inner.metrics.lock().reaper_runs += 1;
+            }
+
+            // Health-check idle connections if configured.
+            // Connections are popped one at a time so checkout availability
+            // is only reduced by one during each individual check.
+            if inner.config.test_while_idle {
+                let health_query = &*inner.config.health_check_query;
+                let check_interval = inner.config.health_check_interval;
+
+                // Snapshot count — we'll stop if the pool empties or closes.
+                let count_to_check = inner.idle_connections.lock().len();
+                let mut healthy_count = 0u64;
+                let mut unhealthy_count = 0u64;
+
+                for _ in 0..count_to_check {
+                    if inner.closed.load(Ordering::Acquire) {
+                        break;
+                    }
+
+                    let entry = inner.idle_connections.lock().pop_front();
+                    let Some(mut entry) = entry else { break };
+
+                    // Skip connections that were recently checked.
+                    if !entry.metadata.needs_health_check(check_interval) {
+                        inner.idle_connections.lock().push_back(entry);
+                        continue;
+                    }
+
+                    // Run health check with a timeout so a dead connection
+                    // can't block the reaper indefinitely.
+                    let healthy = match timeout(
+                        Duration::from_secs(10),
+                        entry.client.query(health_query, &[]),
+                    )
+                    .await
+                    {
+                        Ok(Ok(rows)) => {
+                            // Consume the result set to release the borrow.
+                            for _ in rows {}
+                            true
+                        }
+                        Ok(Err(e)) => {
+                            tracing::debug!(
+                                connection_id = entry.metadata.id,
+                                error = %e,
+                                "idle health check failed, discarding connection"
+                            );
+                            false
+                        }
+                        Err(_) => {
+                            tracing::debug!(
+                                connection_id = entry.metadata.id,
+                                "idle health check timed out, discarding connection"
+                            );
+                            false
+                        }
+                    };
+
+                    if healthy {
+                        entry.metadata.mark_health_check();
+                        entry.needs_health_check = false;
+                        inner.idle_connections.lock().push_back(entry);
+                        healthy_count += 1;
+                    } else {
+                        unhealthy_count += 1;
+                        inner.metrics.lock().connections_closed += 1;
+                        inner.otel_metrics.record_connection_closed();
+                        // Connection dropped here — TCP stream closed.
+                    }
+                }
+
+                if healthy_count > 0 || unhealthy_count > 0 {
+                    let mut metrics = inner.metrics.lock();
+                    metrics.idle_health_checks_performed += healthy_count + unhealthy_count;
+                    metrics.idle_health_checks_failed += unhealthy_count;
+                }
+
+                if unhealthy_count > 0 {
+                    inner.record_pool_status();
+                }
+
+                if unhealthy_count > 0 {
+                    tracing::info!(
+                        healthy = healthy_count,
+                        unhealthy = unhealthy_count,
+                        "idle connection health check complete"
+                    );
+                } else if healthy_count > 0 {
+                    tracing::debug!(
+                        checked = healthy_count,
+                        "idle connection health check complete"
+                    );
+                }
             }
         }
     }
@@ -427,9 +574,12 @@ impl Pool {
                             connection_id = entry.metadata.id,
                             "discarding expired connection on checkout"
                         );
-                        let mut metrics = self.inner.metrics.lock();
-                        metrics.connections_closed += 1;
-                        metrics.connections_lifetime_expired += 1;
+                        {
+                            let mut metrics = self.inner.metrics.lock();
+                            metrics.connections_closed += 1;
+                            metrics.connections_lifetime_expired += 1;
+                        }
+                        self.inner.otel_metrics.record_connection_closed();
                         // Don't return permit - we'll try to get another connection
                         continue;
                     }
@@ -455,6 +605,7 @@ impl Pool {
                             "discarding unhealthy connection, will create new"
                         );
                         self.inner.metrics.lock().connections_closed += 1;
+                        self.inner.otel_metrics.record_connection_closed();
 
                         // Connection is unhealthy, create a new one instead
                         let id = self.next_connection_id();
@@ -467,6 +618,7 @@ impl Pool {
                             Ok(client) => {
                                 self.inner.total_connections.fetch_add(1, Ordering::Relaxed);
                                 self.inner.metrics.lock().connections_created += 1;
+                                self.inner.otel_metrics.record_connection_created();
                                 (client, ConnectionMetadata::new(id))
                             }
                             Err(e) => {
@@ -491,6 +643,7 @@ impl Pool {
                     Ok(client) => {
                         self.inner.total_connections.fetch_add(1, Ordering::Relaxed);
                         self.inner.metrics.lock().connections_created += 1;
+                        self.inner.otel_metrics.record_connection_created();
                         (client, ConnectionMetadata::new(id))
                     }
                     Err(e) => {
@@ -507,13 +660,19 @@ impl Pool {
         metadata.mark_checkout();
         self.inner.in_use_count.fetch_add(1, Ordering::Relaxed);
 
-        let acquisition_time_us = acquisition_start.elapsed().as_micros() as u64;
+        let acquisition_elapsed = acquisition_start.elapsed();
+        let acquisition_time_us = acquisition_elapsed.as_micros() as u64;
         {
             let mut metrics = self.inner.metrics.lock();
             metrics.checkouts_successful += 1;
             metrics.total_acquisition_time_us += acquisition_time_us;
             metrics.acquisition_count += 1;
         }
+
+        self.inner
+            .otel_metrics
+            .record_connection_wait(acquisition_elapsed.as_secs_f64());
+        self.inner.record_pool_status();
 
         Ok(PooledConnection {
             client: Some(client),
@@ -554,6 +713,8 @@ impl Pool {
                 metadata.mark_checkout();
                 self.inner.in_use_count.fetch_add(1, Ordering::Relaxed);
                 self.inner.metrics.lock().checkouts_successful += 1;
+                self.inner.otel_metrics.record_connection_wait(0.0);
+                self.inner.record_pool_status();
 
                 tracing::trace!(
                     connection_id = metadata.id,
@@ -619,6 +780,8 @@ impl Pool {
             connections_idle_expired: inner.connections_idle_expired,
             connections_lifetime_expired: inner.connections_lifetime_expired,
             reaper_runs: inner.reaper_runs,
+            idle_health_checks_performed: inner.idle_health_checks_performed,
+            idle_health_checks_failed: inner.idle_health_checks_failed,
             peak_wait_queue_depth: inner.peak_wait_queue_depth,
             avg_acquisition_time_us,
             uptime: self.inner.created_at.elapsed(),
@@ -698,6 +861,7 @@ impl Pool {
 pub struct PoolBuilder {
     pool_config: PoolConfig,
     client_config: Option<ClientConfig>,
+    pool_name: Option<String>,
 }
 
 impl PoolBuilder {
@@ -706,7 +870,20 @@ impl PoolBuilder {
         Self {
             pool_config: PoolConfig::default(),
             client_config: None,
+            pool_name: None,
         }
+    }
+
+    /// Set an optional pool name used as an OpenTelemetry attribute label.
+    ///
+    /// When the `otel` feature is enabled on `mssql-client`, this label is
+    /// attached to all pool metrics as `db.client.pool.name`, letting you
+    /// distinguish between multiple pools in the same process. When the
+    /// feature is disabled this value is ignored.
+    #[must_use]
+    pub fn pool_name(mut self, name: impl Into<String>) -> Self {
+        self.pool_name = Some(name.into());
+        self
     }
 
     /// Set the client configuration (required).
@@ -751,6 +928,13 @@ impl PoolBuilder {
         self
     }
 
+    /// Enable or disable health checking of idle connections during reaper ticks.
+    #[must_use]
+    pub fn test_while_idle(mut self, enabled: bool) -> Self {
+        self.pool_config.test_while_idle = enabled;
+        self
+    }
+
     /// Enable or disable `sp_reset_connection` on return.
     #[must_use]
     pub fn sp_reset_connection(mut self, enabled: bool) -> Self {
@@ -767,7 +951,7 @@ impl PoolBuilder {
         let client_config = self
             .client_config
             .ok_or_else(|| PoolError::Configuration("client_config is required".to_string()))?;
-        Pool::new(self.pool_config, client_config).await
+        Pool::new_inner(self.pool_config, client_config, self.pool_name).await
     }
 }
 
@@ -852,6 +1036,10 @@ pub struct PoolMetrics {
     pub connections_lifetime_expired: u64,
     /// Number of reaper task runs.
     pub reaper_runs: u64,
+    /// Idle health checks performed by the background reaper (`test_while_idle`).
+    pub idle_health_checks_performed: u64,
+    /// Idle health checks that failed (connections discarded by reaper).
+    pub idle_health_checks_failed: u64,
     /// Peak wait queue depth observed.
     pub peak_wait_queue_depth: u64,
     /// Average connection acquisition time in microseconds.
@@ -971,6 +1159,20 @@ impl Drop for PooledConnection {
         self.pool.in_use_count.fetch_sub(1, Ordering::Relaxed);
 
         if let Some(mut client) = self.client.take() {
+            // Check if a request was in-flight (sent but response not fully read).
+            // This happens when a query future is dropped mid-execution (e.g.,
+            // via tokio::select! or a timeout). The TCP buffer has unread response
+            // data, making the connection unusable.
+            if client.is_in_flight() {
+                tracing::warn!(
+                    connection_id = self.metadata.id,
+                    "connection returned to pool with in-flight request - discarding"
+                );
+                self.pool.otel_metrics.record_connection_closed();
+                self.pool.record_pool_status();
+                return;
+            }
+
             // Check if connection is in a transaction started via raw SQL.
             // If so, we cannot safely return it to the pool because:
             // 1. Drop is sync, so we can't execute ROLLBACK
@@ -981,6 +1183,8 @@ impl Drop for PooledConnection {
                     connection_id = self.metadata.id,
                     "connection returned to pool with active transaction - discarding"
                 );
+                self.pool.otel_metrics.record_connection_closed();
+                self.pool.record_pool_status();
                 // Connection is dropped here, not returned to pool
                 return;
             }
@@ -1023,11 +1227,14 @@ impl Drop for PooledConnection {
             };
 
             self.pool.idle_connections.lock().push_back(entry);
+            self.pool.record_pool_status();
         } else {
             tracing::trace!(
                 connection_id = self.metadata.id,
                 "connection detached, not returning to pool"
             );
+            self.pool.otel_metrics.record_connection_closed();
+            self.pool.record_pool_status();
         }
         // Note: the semaphore permit is automatically released when _permit is dropped
     }
@@ -1106,6 +1313,8 @@ mod tests {
             connections_idle_expired: 1,
             connections_lifetime_expired: 1,
             reaper_runs: 5,
+            idle_health_checks_performed: 50,
+            idle_health_checks_failed: 2,
             peak_wait_queue_depth: 3,
             avg_acquisition_time_us: 500,
             uptime: std::time::Duration::from_secs(3600),
@@ -1132,5 +1341,18 @@ mod tests {
         assert_eq!(builder.pool_config.min_connections, 5);
         assert_eq!(builder.pool_config.max_connections, 50);
         assert!(!builder.pool_config.sp_reset_connection);
+    }
+
+    #[test]
+    fn test_builder_pool_name() {
+        let builder = Pool::builder();
+        assert!(builder.pool_name.is_none());
+
+        let builder = Pool::builder().pool_name("primary");
+        assert_eq!(builder.pool_name.as_deref(), Some("primary"));
+
+        // Accepts owned String as well.
+        let builder = Pool::builder().pool_name(String::from("replica"));
+        assert_eq!(builder.pool_name.as_deref(), Some("replica"));
     }
 }

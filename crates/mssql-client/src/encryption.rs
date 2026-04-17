@@ -124,10 +124,16 @@ impl std::fmt::Debug for EncryptionConfig {
 ///
 /// This is the active encryption state for a connected client,
 /// including resolved CEKs and encryptors.
+///
+/// The context holds an `Arc<EncryptionConfig>` so providers remain accessible
+/// across connection retries/redirects where the `Config` (and its inner
+/// encryption config Arc) gets cloned multiple times.
 #[cfg(feature = "always-encrypted")]
 pub struct EncryptionContext {
-    /// Key store providers by name.
-    providers: HashMap<String, Box<dyn KeyStoreProvider>>,
+    /// Shared handle on the user-supplied configuration. Providers are looked
+    /// up by name through this reference, so an arbitrary number of `Arc`
+    /// clones do not lose access to them.
+    config: std::sync::Arc<EncryptionConfig>,
     /// Cache for decrypted CEKs.
     cek_cache: CekCache,
     /// Whether caching is enabled.
@@ -138,42 +144,21 @@ pub struct EncryptionContext {
 impl EncryptionContext {
     /// Create a new encryption context from an Arc-wrapped configuration.
     ///
-    /// This attempts to unwrap the Arc to get ownership of the config.
-    /// If the Arc has been cloned (multiple references), it falls back
-    /// to creating a context with no providers (connection string-only mode
-    /// where providers must be registered separately).
+    /// The Arc is retained by the context so provider lookups continue to
+    /// work for the lifetime of the client — regardless of how many times
+    /// the outer `Config` has been cloned for retry/redirect handling.
     pub fn from_arc(config: std::sync::Arc<EncryptionConfig>) -> Self {
-        match std::sync::Arc::try_unwrap(config) {
-            Ok(owned) => Self::new(owned),
-            Err(_arc) => {
-                // Config was shared — create context without providers.
-                // The caller should register providers separately.
-                tracing::warn!(
-                    "EncryptionConfig has multiple references; \
-                     creating EncryptionContext without providers"
-                );
-                Self {
-                    providers: std::collections::HashMap::new(),
-                    cek_cache: CekCache::new(),
-                    cache_enabled: true,
-                }
-            }
+        let cache_enabled = config.cache_ceks;
+        Self {
+            config,
+            cek_cache: CekCache::new(),
+            cache_enabled,
         }
     }
 
     /// Create a new encryption context from configuration.
     pub fn new(config: EncryptionConfig) -> Self {
-        let providers = config
-            .providers
-            .into_iter()
-            .map(|p| (p.provider_name().to_string(), p))
-            .collect();
-
-        Self {
-            providers,
-            cek_cache: CekCache::new(),
-            cache_enabled: config.cache_ceks,
-        }
+        Self::from_arc(std::sync::Arc::new(config))
     }
 
     /// Get or decrypt a CEK for a column.
@@ -204,10 +189,10 @@ impl EncryptionContext {
             .primary_value()
             .ok_or_else(|| EncryptionError::CekDecryptionFailed("No CEK value available".into()))?;
 
-        // Find the appropriate key store provider
+        // Find the appropriate key store provider via the shared config
         let provider = self
-            .providers
-            .get(&cek_value.key_store_provider_name)
+            .config
+            .get_provider(&cek_value.key_store_provider_name)
             .ok_or_else(|| {
                 EncryptionError::KeyStoreNotFound(cek_value.key_store_provider_name.clone())
             })?;
@@ -282,7 +267,7 @@ impl EncryptionContext {
 
     /// Check if a provider is registered.
     pub fn has_provider(&self, name: &str) -> bool {
-        self.providers.contains_key(name)
+        self.config.get_provider(name).is_some()
     }
 }
 
@@ -290,7 +275,7 @@ impl EncryptionContext {
 impl std::fmt::Debug for EncryptionContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EncryptionContext")
-            .field("providers", &self.providers.keys().collect::<Vec<_>>())
+            .field("provider_count", &self.config.providers.len())
             .field("cache_entries", &self.cek_cache.len())
             .field("cache_enabled", &self.cache_enabled)
             .finish()

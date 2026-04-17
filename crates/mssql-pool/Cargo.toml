@@ -17,6 +17,9 @@ integrated-auth = ["mssql-client/integrated-auth"]
 sspi-auth = ["mssql-client/sspi-auth"]
 # FILESTREAM BLOB access (Windows only)
 filestream = ["mssql-client/filestream"]
+# OpenTelemetry metrics for pool lifecycle events (gauges for in-use/idle/max,
+# counters for connections created/closed, histogram for acquisition wait time).
+otel = ["mssql-client/otel"]
 
 [dependencies]
 mssql-client = { workspace = true }

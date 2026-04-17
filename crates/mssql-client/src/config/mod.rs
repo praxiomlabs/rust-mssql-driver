@@ -254,6 +254,34 @@ pub struct Config {
     /// connection strings.
     pub language: Option<String>,
 
+    /// Enable MultiSubnetFailover for AlwaysOn Availability Group listeners.
+    ///
+    /// When `true`, the driver resolves the server hostname to all IP addresses
+    /// and attempts parallel TCP connections simultaneously. The first successful
+    /// connection wins and all others are cancelled. This reduces connection time
+    /// when the AG listener spans multiple subnets.
+    ///
+    /// Set via `MultiSubnetFailover=True` in connection strings.
+    ///
+    /// Default: `false`
+    pub multi_subnet_failover: bool,
+
+    /// Whether to send `String`/`&str` parameters as NVARCHAR (Unicode).
+    ///
+    /// When `true` (default), string parameters are sent as NVARCHAR using
+    /// UTF-16LE encoding. This is safe for all character sets but prevents
+    /// SQL Server from using index seeks on VARCHAR columns (due to implicit
+    /// NVARCHAR→VARCHAR conversion).
+    ///
+    /// When `false`, string parameters are sent as VARCHAR using Windows-1252
+    /// encoding. This allows index seeks on VARCHAR columns but may lose data
+    /// for characters outside the Windows-1252 range.
+    ///
+    /// Set via `SendStringParametersAsUnicode=false` in connection strings.
+    ///
+    /// Default: `true`
+    pub send_string_parameters_as_unicode: bool,
+
     /// Always Encrypted configuration.
     ///
     /// When `Some`, the client will negotiate Always Encrypted support with the
@@ -296,6 +324,8 @@ impl Default for Config {
             application_intent: ApplicationIntent::default(),
             workstation_id: None,
             language: None,
+            multi_subnet_failover: false,
+            send_string_parameters_as_unicode: true,
             #[cfg(feature = "always-encrypted")]
             column_encryption: None,
         }
@@ -534,10 +564,16 @@ impl Config {
                         key,
                     );
                 }
+                // --- MultiSubnetFailover ---
+                "multisubnetfailover" | "multi subnet failover" => {
+                    config.multi_subnet_failover = parse_conn_bool(&key, value)?;
+                }
+                // --- String parameter encoding ---
+                "sendstringparametersasunicode" | "send string parameters as unicode" => {
+                    config.send_string_parameters_as_unicode = parse_conn_bool(&key, value)?;
+                }
                 // --- Known ADO.NET keywords not supported by this driver ---
                 "failover partner"
-                | "multisubnetfailover"
-                | "multi subnet failover"
                 | "persist security info"
                 | "persistsecurityinfo"
                 | "enlist"
@@ -837,6 +873,29 @@ impl Config {
     #[must_use]
     pub fn language(mut self, lang: impl Into<String>) -> Self {
         self.language = Some(lang.into());
+        self
+    }
+
+    /// Enable MultiSubnetFailover for AlwaysOn Availability Group listeners.
+    ///
+    /// When enabled, the driver resolves the server hostname to all IP addresses
+    /// and races parallel TCP connections. The first successful connection wins.
+    #[must_use]
+    pub fn multi_subnet_failover(mut self, enabled: bool) -> Self {
+        self.multi_subnet_failover = enabled;
+        self
+    }
+
+    /// Control whether string parameters are sent as NVARCHAR (Unicode) or VARCHAR.
+    ///
+    /// When `false`, `String`/`&str` parameters are sent as VARCHAR using
+    /// Windows-1252 encoding, which allows SQL Server to use index seeks on
+    /// VARCHAR columns.
+    ///
+    /// Default: `true` (NVARCHAR)
+    #[must_use]
+    pub fn send_string_parameters_as_unicode(mut self, enabled: bool) -> Self {
+        self.send_string_parameters_as_unicode = enabled;
         self
     }
 }
@@ -1502,9 +1561,47 @@ mod tests {
     fn test_known_unsupported_keywords_accepted() {
         // Known ADO.NET keywords we don't support should not error
         let result = Config::from_connection_string(
-            "Server=localhost;Failover Partner=backup;MultiSubnetFailover=true;",
+            "Server=localhost;Failover Partner=backup;Persist Security Info=false;",
         );
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_multi_subnet_failover_connection_string() {
+        let config =
+            Config::from_connection_string("Server=ag-listener;MultiSubnetFailover=true;").unwrap();
+        assert!(config.multi_subnet_failover);
+
+        // Space-separated variant
+        let config =
+            Config::from_connection_string("Server=ag-listener;Multi Subnet Failover=true;")
+                .unwrap();
+        assert!(config.multi_subnet_failover);
+
+        // Disabled
+        let config =
+            Config::from_connection_string("Server=ag-listener;MultiSubnetFailover=false;")
+                .unwrap();
+        assert!(!config.multi_subnet_failover);
+
+        // Default is false
+        let config = Config::from_connection_string("Server=localhost;").unwrap();
+        assert!(!config.multi_subnet_failover);
+    }
+
+    #[test]
+    fn test_multi_subnet_failover_builder() {
+        let config = Config::new().multi_subnet_failover(true);
+        assert!(config.multi_subnet_failover);
+
+        let config = Config::new().multi_subnet_failover(false);
+        assert!(!config.multi_subnet_failover);
+    }
+
+    #[test]
+    fn test_multi_subnet_failover_invalid_value() {
+        let result = Config::from_connection_string("Server=localhost;MultiSubnetFailover=banana;");
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1523,6 +1620,48 @@ mod tests {
     fn test_language_builder() {
         let config = Config::new().language("us_english");
         assert_eq!(config.language, Some("us_english".to_string()));
+    }
+
+    #[test]
+    fn test_send_string_parameters_as_unicode_connection_string() {
+        let config =
+            Config::from_connection_string("Server=localhost;SendStringParametersAsUnicode=false;")
+                .unwrap();
+        assert!(!config.send_string_parameters_as_unicode);
+
+        // Space-separated variant
+        let config = Config::from_connection_string(
+            "Server=localhost;Send String Parameters As Unicode=false;",
+        )
+        .unwrap();
+        assert!(!config.send_string_parameters_as_unicode);
+
+        // Enabled explicitly
+        let config =
+            Config::from_connection_string("Server=localhost;SendStringParametersAsUnicode=true;")
+                .unwrap();
+        assert!(config.send_string_parameters_as_unicode);
+
+        // Default is true
+        let config = Config::from_connection_string("Server=localhost;").unwrap();
+        assert!(config.send_string_parameters_as_unicode);
+    }
+
+    #[test]
+    fn test_send_string_parameters_as_unicode_builder() {
+        let config = Config::new().send_string_parameters_as_unicode(false);
+        assert!(!config.send_string_parameters_as_unicode);
+
+        let config = Config::new().send_string_parameters_as_unicode(true);
+        assert!(config.send_string_parameters_as_unicode);
+    }
+
+    #[test]
+    fn test_send_string_parameters_as_unicode_invalid_value() {
+        let result = Config::from_connection_string(
+            "Server=localhost;SendStringParametersAsUnicode=banana;",
+        );
+        assert!(result.is_err());
     }
 
     #[test]

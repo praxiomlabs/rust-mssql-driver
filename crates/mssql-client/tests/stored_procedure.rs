@@ -112,7 +112,7 @@ async fn test_call_procedure_with_input_params() {
     assert_eq!(result.result_sets.len(), 1);
 
     let mut rs = result.result_sets.into_iter().next().unwrap();
-    let row = rs.next_row().unwrap();
+    let row = rs.next_row().unwrap().unwrap();
     let sum: i32 = row.get(0).unwrap();
     assert_eq!(sum, 30);
 
@@ -192,7 +192,7 @@ async fn test_call_procedure_multiple_result_sets() {
     // First result set: two int columns
     let mut rs1 = result.result_sets.into_iter().next().unwrap();
     assert_eq!(rs1.columns().len(), 2);
-    let row = rs1.next_row().unwrap();
+    let row = rs1.next_row().unwrap().unwrap();
     let a: i32 = row.get(0).unwrap();
     let b: i32 = row.get(1).unwrap();
     assert_eq!(a, 1);

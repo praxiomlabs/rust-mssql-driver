@@ -462,49 +462,395 @@ mod key_store_tests {
 // =============================================================================
 // Live Server Tests (require SQL Server with Always Encrypted configured)
 // =============================================================================
+//
+// ## Scope note
+//
+// Populating encrypted columns with ciphertext requires the driver to send
+// encrypted RPC parameters (parameter encryption). That path is NOT yet
+// implemented — see `docs/ALWAYS_ENCRYPTED.md § Limitations`. A naïve
+// `INSERT ... VALUES (CONVERT(varbinary(max), 0x...))` is rejected by
+// SQL Server with "Operand type clash: varbinary is incompatible with
+// varbinary(N) encrypted with (...)" because the server strictly separates
+// plain varbinary from its encrypted-column type, even for literals.
+//
+// Until parameter encryption lands, these live tests exercise the reachable
+// slice of the pipeline end-to-end against a real server:
+//
+//   1. Generate an RSA-2048 keypair in the test.
+//   2. Wrap a random 32-byte CEK with RSA-OAEP-SHA256 and build the
+//      SQL Server envelope consumed by `RsaKeyUnwrapper::parse_encrypted_cek`:
+//      `0x01 || u16le(path_len) || utf16le(path) || u16le(cipher_len) || cipher`.
+//   3. `CREATE COLUMN MASTER KEY`, `CREATE COLUMN ENCRYPTION KEY`, and a
+//      table with at least one encrypted column.
+//   4. Populate rows through the only server-allowed path without parameter
+//      encryption: INSERT leaving the encrypted column NULL.
+//   5. Connect WITH `Column Encryption Setting=Enabled` + registered
+//      `InMemoryKeyStore`, SELECT the row, and assert:
+//       - the driver parses `CekTable` and per-column `CryptoMetadata`
+//       - the driver async-resolves the encryptor via the key-store provider
+//         (this is the path the `from_arc` bug in `EncryptionContext` broke —
+//          see commit history for the fix)
+//       - NULL encrypted values are surfaced as `SqlValue::Null`
+//       - the plaintext base-type re-parse machinery is wired up (verified
+//         by reading an unencrypted companion column from the same row)
+//
+// The full ciphertext round-trip through RPC parameters is tracked as a
+// separate work item and will be added here once parameter encryption is
+// implemented. See item 2.8 in .tmp/work-items.md.
 
-#[tokio::test]
-#[ignore = "Requires SQL Server with Always Encrypted"]
-async fn test_always_encrypted_query() {
-    // This test requires:
-    // 1. SQL Server with Always Encrypted enabled
-    // 2. A table with encrypted columns
-    // 3. CMK configured in a supported key store
-    //
-    // Example setup SQL:
-    // CREATE COLUMN MASTER KEY [TestCMK]
-    // WITH (KEY_STORE_PROVIDER_NAME = 'MSSQL_CERTIFICATE_STORE',
-    //       KEY_PATH = 'CurrentUser/My/TestCertificate');
-    //
-    // CREATE COLUMN ENCRYPTION KEY [TestCEK]
-    // WITH VALUES (COLUMN_MASTER_KEY = [TestCMK],
-    //              ALGORITHM = 'RSA_OAEP');
-    //
-    // CREATE TABLE EncryptedTest (
-    //     Id INT PRIMARY KEY,
-    //     SSN NVARCHAR(11) ENCRYPTED WITH (
-    //         COLUMN_ENCRYPTION_KEY = [TestCEK],
-    //         ENCRYPTION_TYPE = DETERMINISTIC,
-    //         ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256'
-    //     )
-    // );
+#[cfg(feature = "always-encrypted")]
+mod live_server {
+    use mssql_auth::{AeadEncryptor, EncryptionType, InMemoryKeyStore};
+    use mssql_client::{Client, Config, EncryptionConfig};
+    use rand::RngCore;
+    use rsa::{Oaep, RsaPrivateKey, pkcs8::EncodePrivateKey};
+    use sha2::Sha256;
 
-    // Test would connect and query encrypted data
-    // let config = get_test_config().expect("SQL Server config required");
-    // let client = Client::connect(config).await.expect("Failed to connect");
-    // ...
-}
+    /// Key path we register both in SQL Server's CMK metadata and in our
+    /// `InMemoryKeyStore`. The value is arbitrary — SQL Server treats it
+    /// as an opaque string; only the client looks it up.
+    const KEY_PATH: &str = "rust-mssql-driver-test-key";
 
-#[tokio::test]
-#[ignore = "Requires SQL Server with Always Encrypted"]
-async fn test_always_encrypted_insert() {
-    // Test inserting data into encrypted columns
-    // This verifies parameter encryption works correctly
-}
+    /// Value we use for `KEY_STORE_PROVIDER_NAME`. Must match
+    /// `InMemoryKeyStore::provider_name()` exactly.
+    const PROVIDER_NAME: &str = "IN_MEMORY_KEY_STORE";
 
-#[tokio::test]
-#[ignore = "Requires SQL Server with Always Encrypted"]
-async fn test_always_encrypted_comparison() {
-    // Test deterministic encryption supports equality comparisons
-    // WHERE SSN = @SSN should work when @SSN is encrypted the same way
+    /// Bundle everything a test needs after per-test setup completes.
+    struct Fixture {
+        /// The randomly-generated CEK. Unused today — parameter encryption
+        /// (NYI) will pre-encrypt row values with it so INSERT tests can
+        /// round-trip ciphertext. Kept on the fixture so the helpers remain
+        /// wired once that feature lands.
+        #[allow(dead_code)]
+        cek_bytes: [u8; 32],
+        /// CMK name in SQL Server (random per test to avoid collisions).
+        cmk_name: String,
+        /// CEK name in SQL Server.
+        cek_name: String,
+        /// Table name in SQL Server.
+        table_name: String,
+    }
+
+    /// Encrypt `plaintext` with AEAD using the test CEK. Reserved for the
+    /// ciphertext-roundtrip tests that land with parameter encryption.
+    #[allow(dead_code)]
+    fn aead_encrypt(cek: &[u8; 32], plaintext: &[u8], deterministic: bool) -> Vec<u8> {
+        let enc = AeadEncryptor::new(cek).expect("AeadEncryptor::new");
+        let mode = if deterministic {
+            EncryptionType::Deterministic
+        } else {
+            EncryptionType::Randomized
+        };
+        enc.encrypt(plaintext, mode).expect("aead encrypt")
+    }
+
+    /// Convert bytes to an uppercase `0x...` hex literal for inline T-SQL use.
+    #[allow(dead_code)]
+    fn hex_literal(bytes: &[u8]) -> String {
+        let mut s = String::with_capacity(2 + bytes.len() * 2);
+        s.push_str("0x");
+        for b in bytes {
+            s.push_str(&format!("{b:02X}"));
+        }
+        s
+    }
+
+    /// Build a SQL Server CEK envelope in the format `RsaKeyUnwrapper::parse_encrypted_cek`
+    /// expects: `0x01 || u16_le(path_len) || utf16le(path) || u16_le(cipher_len) || cipher`.
+    ///
+    /// `encrypted_cek` is the raw RSA-OAEP output.
+    fn build_cek_envelope(key_path: &str, encrypted_cek: &[u8]) -> Vec<u8> {
+        let path_utf16: Vec<u8> = key_path
+            .encode_utf16()
+            .flat_map(|c| c.to_le_bytes())
+            .collect();
+        let mut out = Vec::with_capacity(1 + 2 + path_utf16.len() + 2 + encrypted_cek.len());
+        out.push(0x01);
+        out.extend_from_slice(&(path_utf16.len() as u16).to_le_bytes());
+        out.extend_from_slice(&path_utf16);
+        out.extend_from_slice(&(encrypted_cek.len() as u16).to_le_bytes());
+        out.extend_from_slice(encrypted_cek);
+        out
+    }
+
+    /// Build an admin Config (no column encryption — used for DDL setup/teardown).
+    fn admin_config() -> Option<Config> {
+        let host = std::env::var("MSSQL_HOST").ok()?;
+        let user = std::env::var("MSSQL_USER").unwrap_or_else(|_| "sa".into());
+        let password =
+            std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "YourStrong@Passw0rd".into());
+        let conn_str = format!(
+            "Server={host};Database=master;User Id={user};Password={password};\
+             TrustServerCertificate=true;Encrypt=true"
+        );
+        Config::from_connection_string(&conn_str).ok()
+    }
+
+    /// Build a Config with Always Encrypted enabled and `InMemoryKeyStore`
+    /// pre-loaded with the caller-supplied PEM.
+    fn encrypted_config(private_key_pem: &str) -> Option<Config> {
+        let host = std::env::var("MSSQL_HOST").ok()?;
+        let user = std::env::var("MSSQL_USER").unwrap_or_else(|_| "sa".into());
+        let password =
+            std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "YourStrong@Passw0rd".into());
+        let conn_str = format!(
+            "Server={host};Database=master;User Id={user};Password={password};\
+             TrustServerCertificate=true;Encrypt=true"
+        );
+        let mut key_store = InMemoryKeyStore::new();
+        key_store
+            .add_key(KEY_PATH, private_key_pem)
+            .expect("add_key");
+        let enc = EncryptionConfig::new().with_provider(key_store);
+        Config::from_connection_string(&conn_str)
+            .ok()
+            .map(|c| c.with_column_encryption(enc))
+    }
+
+    /// Seed per-test unique names to avoid collisions when the suite runs in
+    /// parallel or re-runs after failure (the Docker server is shared).
+    fn unique_suffix() -> String {
+        let mut rng = rand::thread_rng();
+        format!("{:08x}", rng.next_u32())
+    }
+
+    /// Create the CMK, CEK, and table. The caller must run teardown at the end.
+    async fn setup(
+        admin: &mut Client<mssql_client::Ready>,
+        cek_bytes: &[u8; 32],
+        rsa_private: &RsaPrivateKey,
+        table_ddl: &str,
+    ) -> Fixture {
+        let suffix = unique_suffix();
+        let cmk_name = format!("AE_TestCMK_{suffix}");
+        let cek_name = format!("AE_TestCEK_{suffix}");
+        let table_name = format!("AE_TestTbl_{suffix}");
+
+        // Wrap the CEK with RSA-OAEP-SHA256 using the public half.
+        let pub_key = rsa_private.to_public_key();
+        let mut rng = rand::thread_rng();
+        let padding = Oaep::new::<Sha256>();
+        let rsa_ciphertext = pub_key
+            .encrypt(&mut rng, padding, cek_bytes)
+            .expect("rsa encrypt");
+        let envelope = build_cek_envelope(KEY_PATH, &rsa_ciphertext);
+        let envelope_hex = hex_literal(&envelope);
+
+        // CREATE COLUMN MASTER KEY
+        let cmk_sql = format!(
+            "CREATE COLUMN MASTER KEY [{cmk_name}] WITH ( \
+             KEY_STORE_PROVIDER_NAME = '{PROVIDER_NAME}', \
+             KEY_PATH = '{KEY_PATH}' )"
+        );
+        admin.execute(&cmk_sql, &[]).await.expect("create cmk");
+
+        // CREATE COLUMN ENCRYPTION KEY
+        let cek_sql = format!(
+            "CREATE COLUMN ENCRYPTION KEY [{cek_name}] WITH VALUES ( \
+             COLUMN_MASTER_KEY = [{cmk_name}], \
+             ALGORITHM = 'RSA_OAEP', \
+             ENCRYPTED_VALUE = {envelope_hex} )"
+        );
+        admin.execute(&cek_sql, &[]).await.expect("create cek");
+
+        // CREATE TABLE
+        let tbl_sql = table_ddl
+            .replace("{TABLE}", &table_name)
+            .replace("{CEK}", &cek_name);
+        admin.execute(&tbl_sql, &[]).await.expect("create table");
+
+        Fixture {
+            cek_bytes: *cek_bytes,
+            cmk_name,
+            cek_name,
+            table_name,
+        }
+    }
+
+    /// Drop everything we created, ignoring errors so teardown is idempotent.
+    async fn teardown(admin: &mut Client<mssql_client::Ready>, fx: &Fixture) {
+        let _ = admin
+            .execute(&format!("DROP TABLE IF EXISTS [{}]", fx.table_name), &[])
+            .await;
+        let _ = admin
+            .execute(
+                &format!("DROP COLUMN ENCRYPTION KEY IF EXISTS [{}]", fx.cek_name),
+                &[],
+            )
+            .await;
+        let _ = admin
+            .execute(
+                &format!("DROP COLUMN MASTER KEY IF EXISTS [{}]", fx.cmk_name),
+                &[],
+            )
+            .await;
+    }
+
+    /// Generate an RSA-2048 keypair and its PEM encoding.
+    fn fresh_rsa_keypair() -> (RsaPrivateKey, String) {
+        let mut rng = rand::thread_rng();
+        let key = RsaPrivateKey::new(&mut rng, 2048).expect("rsa keygen");
+        let pem = key
+            .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+            .expect("pem encode")
+            .to_string();
+        (key, pem)
+    }
+
+    /// Generate a random 32-byte CEK (the AES-256 key that AEAD uses).
+    fn fresh_cek() -> [u8; 32] {
+        let mut cek = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut cek);
+        cek
+    }
+
+    // -------------------------------------------------------------------------
+    // Tests
+    // -------------------------------------------------------------------------
+
+    /// Validate the Always Encrypted metadata path end-to-end against a live
+    /// server. A row with NULL in the encrypted column is the only value we
+    /// can populate without parameter encryption (any non-NULL plaintext
+    /// literal is rejected with "Operand type clash" at INSERT time — see
+    /// the scope note at the top of this section).
+    ///
+    /// Exercised here:
+    ///   * LOGIN7 FeatureId::ColumnEncryption feature-extension round-trip.
+    ///   * Server's CekTable parsing out of `ColMetaData`.
+    ///   * Per-column `CryptoMetadata` parsing.
+    ///   * `ColumnDecryptor::from_metadata` async resolution path (this is
+    ///     where the `from_arc` provider-loss bug manifested — the context
+    ///     would have an empty providers map and resolution would fail with
+    ///     `KeyStoreNotFound`).
+    ///   * NULL-in-encrypted-column handling in the column parser (returns
+    ///     `SqlValue::Null` without attempting to decrypt).
+    ///   * Plaintext base-type re-parse machinery (via the companion
+    ///     unencrypted column `Description`).
+    #[tokio::test]
+    #[ignore = "Requires SQL Server with Always Encrypted"]
+    async fn test_always_encrypted_metadata_and_null_roundtrip() {
+        let admin_cfg = match admin_config() {
+            Some(c) => c,
+            None => return,
+        };
+        let mut admin = Client::connect(admin_cfg).await.expect("admin connect");
+
+        let (rsa_key, pem) = fresh_rsa_keypair();
+        let cek = fresh_cek();
+
+        let fx = setup(
+            &mut admin,
+            &cek,
+            &rsa_key,
+            "CREATE TABLE [{TABLE}] ( \
+             Id INT NOT NULL PRIMARY KEY, \
+             Description NVARCHAR(64) NOT NULL, \
+             SSN NVARCHAR(32) COLLATE Latin1_General_BIN2 ENCRYPTED WITH ( \
+             COLUMN_ENCRYPTION_KEY = [{CEK}], \
+             ENCRYPTION_TYPE = DETERMINISTIC, \
+             ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256' ) NULL )",
+        )
+        .await;
+
+        // NULL is the only value we can populate through the current wire
+        // path; parameter encryption is required for anything else.
+        admin
+            .execute(
+                &format!(
+                    "INSERT INTO [{}] (Id, Description, SSN) VALUES (1, N'row one', NULL)",
+                    fx.table_name
+                ),
+                &[],
+            )
+            .await
+            .expect("insert nulls");
+        admin
+            .execute(
+                &format!(
+                    "INSERT INTO [{}] (Id, Description, SSN) VALUES (2, N'row two', NULL)",
+                    fx.table_name
+                ),
+                &[],
+            )
+            .await
+            .expect("insert nulls 2");
+
+        // Reconnect with AE enabled + provider registered. The reconnect
+        // exercises the `from_arc` bug-fix path: Config gets cloned inside
+        // `Client::connect` for retry/redirect handling, and the encryption
+        // context must still see our `InMemoryKeyStore` after all those
+        // clones. If the bug regressed, `get_encryptor` would fail with
+        // `KeyStoreNotFound` on the first row because the CekTable entry
+        // references the `IN_MEMORY_KEY_STORE` provider name.
+        drop(admin);
+        let mut client = Client::connect(encrypted_config(&pem).expect("cfg"))
+            .await
+            .expect("ae connect");
+
+        let rows = client
+            .query(
+                &format!(
+                    "SELECT Id, Description, SSN FROM [{}] ORDER BY Id",
+                    fx.table_name
+                ),
+                &[],
+            )
+            .await
+            .expect("select rows");
+
+        let mut got: Vec<(i32, String, Option<String>)> = Vec::new();
+        for row_result in rows {
+            let row = row_result.expect("row");
+            let id: i32 = row.get(0).expect("id");
+            let desc: String = row.get(1).expect("description");
+            let ssn: Option<String> = row.get(2).expect("ssn (NULL-able decrypt)");
+            got.push((id, desc, ssn));
+        }
+
+        // Teardown before assert so a later failure doesn't leak state.
+        let mut admin = Client::connect(admin_config().expect("cfg"))
+            .await
+            .expect("admin reconnect");
+        teardown(&mut admin, &fx).await;
+
+        assert_eq!(
+            got,
+            vec![
+                (1, "row one".to_string(), None),
+                (2, "row two".to_string(), None),
+            ],
+            "metadata round-trip + NULL decryption path must work"
+        );
+    }
+
+    /// Verify the `EncryptionContext::from_arc` bug fix: when `Config` is
+    /// cloned (as `Client::connect` does internally for retry handling), the
+    /// `InMemoryKeyStore` providers must remain visible to the context.
+    ///
+    /// This is a direct in-process assertion that does not require the
+    /// encrypted-table machinery — it probes the exact spot where the bug
+    /// lived. Kept `#[ignore]` because it still builds a real `Client`
+    /// against a server (which is where the Arc clone actually happens).
+    #[tokio::test]
+    #[ignore = "Requires SQL Server"]
+    async fn test_encryption_context_keeps_providers_after_config_clone() {
+        let (_rsa_key, pem) = fresh_rsa_keypair();
+        let cfg = encrypted_config(&pem).expect("host/user/password env vars");
+
+        // Cloning the Config the same way Client::connect does internally
+        // was previously enough to strand providers — `try_unwrap` on the
+        // inner Arc would fail and fall back to an empty provider map.
+        let _clone_1 = cfg.clone();
+        let _clone_2 = cfg.clone();
+
+        // After three live Arc references, connect and invoke any read that
+        // goes through the encryption context. For this we don't need an
+        // encrypted table — the assertion is that the context reports the
+        // provider as registered.
+        let client = Client::connect(cfg).await.expect("ae connect");
+        assert!(
+            client.has_encryption_provider("IN_MEMORY_KEY_STORE"),
+            "providers must survive Config clones (from_arc bug regression)"
+        );
+    }
 }

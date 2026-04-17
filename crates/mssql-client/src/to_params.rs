@@ -23,10 +23,10 @@
 //!     email: "alice@example.com".into(),
 //! };
 //!
-//! // Use with named parameters in query
-//! client.execute(
+//! // Use with named parameters via execute_named / query_named
+//! client.execute_named(
 //!     "INSERT INTO users (name, email_address) VALUES (@name, @email_address)",
-//!     &user.to_params(),
+//!     &user.to_params()?,
 //! ).await?;
 //! ```
 //!

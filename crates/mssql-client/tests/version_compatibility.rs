@@ -167,17 +167,12 @@ async fn test_version_detection() {
         "Should contain Microsoft SQL Server"
     );
 
-    // Check for known version patterns (all supported SQL Server versions)
-    let is_known_version = version_string.contains("2008")
-        || version_string.contains("2012")
-        || version_string.contains("2014")
-        || version_string.contains("2016")
-        || version_string.contains("2017")
-        || version_string.contains("2019")
-        || version_string.contains("2022");
+    // Match any 4-digit 19xx/20xx year immediately after the product name,
+    // so new SQL Server releases don't fail this test without a code change.
+    let version_re = regex::Regex::new(r"Microsoft SQL Server (?:19|20)\d{2}").unwrap();
     assert!(
-        is_known_version,
-        "Should be a known SQL Server version (2008+), got: {version_string}"
+        version_re.is_match(&version_string),
+        "Should be a recognizable SQL Server version (19xx/20xx), got: {version_string}"
     );
 
     client.close().await.expect("Failed to close");

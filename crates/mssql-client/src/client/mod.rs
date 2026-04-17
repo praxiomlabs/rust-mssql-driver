@@ -42,12 +42,19 @@ pub struct Client<S: ConnectionState> {
     server_version: Option<u32>,
     /// Current database from EnvChange
     current_database: Option<String>,
+    /// Server's default collation from SqlCollation EnvChange during login.
+    /// Used when `SendStringParametersAsUnicode=false` to encode VARCHAR
+    /// parameters with the correct character encoding and collation bytes.
+    server_collation: Option<tds_protocol::token::Collation>,
     /// Prepared statement cache for query optimization
     statement_cache: StatementCache,
     /// Transaction descriptor from BeginTransaction EnvChange.
     /// Per MS-TDS spec, this value must be included in ALL_HEADERS for subsequent
     /// requests within an explicit transaction. 0 indicates auto-commit mode.
     transaction_descriptor: u64,
+    /// Whether a request has been sent and the response has not yet been fully read.
+    /// Used by the connection pool to detect dirty connections after cancel/timeout.
+    in_flight: bool,
     /// Whether this connection needs a reset on next use.
     /// Set by connection pool on checkin, cleared after first query/execute.
     /// When true, the RESETCONNECTION flag is set on the first TDS packet.
@@ -133,6 +140,7 @@ impl<S: ConnectionState> Client<S> {
             tracing::debug!("sending SQL batch with RESETCONNECTION flag");
         }
 
+        self.in_flight = true;
         let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         match connection {
@@ -172,6 +180,7 @@ impl<S: ConnectionState> Client<S> {
             tracing::debug!("sending RPC with RESETCONNECTION flag");
         }
 
+        self.in_flight = true;
         let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
 
         match connection {
@@ -250,7 +259,8 @@ impl<S: ConnectionState> Client<S> {
             "executing stored procedure"
         );
 
-        let rpc_params = Self::convert_params(params)?;
+        let rpc_params =
+            Self::convert_params_positional(params, self.send_unicode(), self.server_collation())?;
         let mut rpc = RpcRequest::named(proc_name);
         for param in rpc_params {
             rpc = rpc.param(param);
@@ -258,6 +268,327 @@ impl<S: ConnectionState> Client<S> {
 
         self.send_rpc(&rpc).await?;
         self.read_procedure_result().await
+    }
+
+    /// Start a bulk insert operation for the specified table.
+    ///
+    /// Sends the `INSERT BULK` statement to the server and returns a
+    /// [`crate::bulk::BulkWriter`] for streaming rows. The writer holds
+    /// a mutable borrow on the client, preventing other operations while
+    /// the bulk insert is in progress.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use mssql_client::{BulkInsertBuilder, BulkColumn};
+    ///
+    /// let builder = BulkInsertBuilder::new("dbo.Users")
+    ///     .with_typed_columns(vec![
+    ///         BulkColumn::new("id", "INT", 0)?,
+    ///         BulkColumn::new("name", "NVARCHAR(100)", 1)?,
+    ///     ]);
+    ///
+    /// let mut writer = client.bulk_insert(&builder).await?;
+    /// writer.send_row(&[&1i32, &"Alice"])?;
+    /// writer.send_row(&[&2i32, &"Bob"])?;
+    /// let result = writer.finish().await?;
+    /// println!("Inserted {} rows", result.rows_affected);
+    /// ```
+    pub async fn bulk_insert(
+        &mut self,
+        builder: &crate::bulk::BulkInsertBuilder,
+    ) -> Result<crate::bulk::BulkWriter<'_, S>> {
+        use tds_protocol::token::{ColMetaData, Token};
+
+        tracing::debug!(
+            table = builder.table_name(),
+            columns = builder.columns().len(),
+            "starting bulk insert"
+        );
+
+        // Step 1: Query the server for column metadata.
+        // This gives us the exact type encoding the server expects for BulkLoad,
+        // following the pattern established by Tiberius.
+        let meta_query = format!("SELECT TOP 0 * FROM {}", builder.table_name());
+        self.send_sql_batch(&meta_query).await?;
+
+        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
+        let message = match connection {
+            #[cfg(feature = "tls")]
+            ConnectionHandle::Tls(conn) => conn.read_message().await?,
+            #[cfg(feature = "tls")]
+            ConnectionHandle::TlsPrelogin(conn) => conn.read_message().await?,
+            ConnectionHandle::Plain(conn) => conn.read_message().await?,
+        }
+        .ok_or(Error::ConnectionClosed)?;
+        self.in_flight = false;
+
+        // Capture both the raw COLMETADATA bytes and parsed column info
+        let raw_payload = message.payload.clone();
+        let mut parser = self.create_parser(message.payload);
+        let mut server_metadata: Option<ColMetaData> = None;
+        let mut meta_start: usize = 0;
+        let mut meta_end: usize = 0;
+
+        loop {
+            let pos_before = raw_payload.len() - parser.remaining();
+            let token = parser.next_token_with_metadata(server_metadata.as_ref())?;
+            let pos_after = raw_payload.len() - parser.remaining();
+            let Some(token) = token else { break };
+
+            match token {
+                Token::ColMetaData(meta) => {
+                    meta_start = pos_before;
+                    meta_end = pos_after;
+                    server_metadata = Some(meta);
+                }
+                Token::Done(_) => break,
+                _ => {}
+            }
+        }
+
+        // Reject deprecated TEXT/NTEXT/IMAGE columns reported by the server.
+        // These types require a legacy TEXTPTR wire format that this driver
+        // does not support — users should migrate the column to VARCHAR(MAX) /
+        // NVARCHAR(MAX) / VARBINARY(MAX).
+        if let Some(ref meta) = server_metadata {
+            use tds_protocol::types::TypeId;
+            for col in meta.columns.iter() {
+                let (rejected, replacement) = match col.type_id {
+                    TypeId::Text => (Some("TEXT"), "VARCHAR(MAX)"),
+                    TypeId::NText => (Some("NTEXT"), "NVARCHAR(MAX)"),
+                    TypeId::Image => (Some("IMAGE"), "VARBINARY(MAX)"),
+                    _ => (None, ""),
+                };
+                if let Some(sql_type) = rejected {
+                    return Err(Error::from(mssql_types::TypeError::UnsupportedType {
+                        sql_type: sql_type.to_string(),
+                        reason: format!(
+                            "column `{}` in table `{}` is {} — TEXT/NTEXT/IMAGE \
+                             are not supported. Alter the column to {} instead \
+                             (Microsoft deprecated TEXT/NTEXT/IMAGE in SQL \
+                             Server 2005).",
+                            col.name,
+                            builder.table_name(),
+                            sql_type,
+                            replacement,
+                        ),
+                    }));
+                }
+            }
+        }
+
+        // Step 2: Send INSERT BULK statement to put server in bulk load mode
+        let stmt = builder.build_insert_bulk_statement()?;
+        self.send_sql_batch(&stmt).await?;
+        self.read_execute_result().await?;
+
+        // Step 3: Create bulk writer with server's metadata
+        let raw_meta = if meta_end > meta_start {
+            Some(raw_payload.slice(meta_start..meta_end))
+        } else {
+            None
+        };
+
+        let server_cols = server_metadata.as_ref().map(|m| m.columns.as_slice());
+        let bulk = crate::bulk::BulkInsert::new_with_server_metadata(
+            builder.columns().to_vec(),
+            builder.options().batch_size,
+            raw_meta,
+            server_cols,
+        );
+
+        Ok(crate::bulk::BulkWriter::new(self, bulk))
+    }
+
+    /// Start a bulk insert without querying the server for column metadata.
+    ///
+    /// Unlike [`bulk_insert()`](Self::bulk_insert), this method does not send
+    /// `SELECT TOP 0 * FROM table` to discover column types. Instead, the
+    /// column metadata is constructed from the `BulkColumn` types provided
+    /// on the builder. This saves a round-trip when the schema is known.
+    ///
+    /// # Caveats
+    ///
+    /// The caller must ensure `BulkColumn` entries match the target table's
+    /// column definitions exactly. Mismatched types, lengths, precision/scale,
+    /// or column ordering will cause the server to reject the BulkLoad packet.
+    ///
+    /// For most use cases, prefer [`bulk_insert()`](Self::bulk_insert) — the
+    /// extra round-trip is usually negligible and the server-supplied metadata
+    /// is guaranteed correct.
+    pub async fn bulk_insert_without_schema_discovery(
+        &mut self,
+        builder: &crate::bulk::BulkInsertBuilder,
+    ) -> Result<crate::bulk::BulkWriter<'_, S>> {
+        tracing::debug!(
+            table = builder.table_name(),
+            columns = builder.columns().len(),
+            "starting bulk insert (no schema discovery)"
+        );
+
+        // Send INSERT BULK statement to put server in bulk load mode
+        let stmt = builder.build_insert_bulk_statement()?;
+        self.send_sql_batch(&stmt).await?;
+        self.read_execute_result().await?;
+
+        // Create bulk writer with hand-crafted metadata
+        let bulk =
+            crate::bulk::BulkInsert::new(builder.columns().to_vec(), builder.options().batch_size);
+
+        Ok(crate::bulk::BulkWriter::new(self, bulk))
+    }
+
+    /// Send bulk load data as a BulkLoad (0x07) message and read the server response.
+    ///
+    /// Used internally by [`crate::bulk::BulkWriter::finish()`] to transmit accumulated
+    /// row data after the `INSERT BULK` statement has been acknowledged.
+    pub(crate) async fn send_and_read_bulk_load(&mut self, payload: bytes::Bytes) -> Result<u64> {
+        let max_packet = self.config.packet_size as usize;
+
+        self.in_flight = true;
+        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
+
+        match connection {
+            #[cfg(feature = "tls")]
+            ConnectionHandle::Tls(conn) => {
+                conn.send_message(PacketType::BulkLoad, payload, max_packet)
+                    .await?;
+            }
+            #[cfg(feature = "tls")]
+            ConnectionHandle::TlsPrelogin(conn) => {
+                conn.send_message(PacketType::BulkLoad, payload, max_packet)
+                    .await?;
+            }
+            ConnectionHandle::Plain(conn) => {
+                conn.send_message(PacketType::BulkLoad, payload, max_packet)
+                    .await?;
+            }
+        }
+
+        // Read the server's Done response with row count
+        self.read_execute_result().await
+    }
+
+    /// Execute a query with named parameters and return a streaming result set.
+    ///
+    /// This method accepts [`NamedParam`](crate::to_params::NamedParam) values,
+    /// making it compatible with the [`ToParams`](crate::to_params::ToParams) trait
+    /// and the `#[derive(ToParams)]` macro.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use mssql_client::{NamedParam, ToParams};
+    ///
+    /// // With derive macro:
+    /// #[derive(ToParams)]
+    /// struct UserQuery { name: String }
+    ///
+    /// let q = UserQuery { name: "Alice".into() };
+    /// let rows = client.query_named(
+    ///     "SELECT * FROM users WHERE name = @name",
+    ///     &q.to_params()?,
+    /// ).await?;
+    ///
+    /// // Or manually:
+    /// let params = vec![NamedParam::from_value("name", &"Alice")?];
+    /// let rows = client.query_named(
+    ///     "SELECT * FROM users WHERE name = @name",
+    ///     &params,
+    /// ).await?;
+    /// ```
+    pub async fn query_named<'a>(
+        &'a mut self,
+        sql: &str,
+        params: &[crate::to_params::NamedParam],
+    ) -> Result<QueryStream<'a>> {
+        tracing::debug!(
+            sql = sql,
+            params_count = params.len(),
+            "executing query with named parameters"
+        );
+
+        if params.is_empty() {
+            self.send_sql_batch(sql).await?;
+        } else {
+            let rpc_params =
+                Self::convert_named_params(params, self.send_unicode(), self.server_collation())?;
+            let rpc = RpcRequest::execute_sql(sql, rpc_params);
+            self.send_rpc(&rpc).await?;
+        }
+
+        let resp = self.read_query_response().await?;
+        #[cfg(feature = "always-encrypted")]
+        {
+            Ok(QueryStream::from_raw(
+                resp.columns,
+                resp.pending_rows,
+                resp.meta,
+                resp.decryptor,
+            ))
+        }
+        #[cfg(not(feature = "always-encrypted"))]
+        {
+            Ok(QueryStream::from_raw(
+                resp.columns,
+                resp.pending_rows,
+                resp.meta,
+            ))
+        }
+    }
+
+    /// Execute a statement with named parameters.
+    ///
+    /// Returns the number of affected rows. This is the named-parameter
+    /// counterpart of [`execute()`](Client::execute), compatible with the
+    /// [`ToParams`](crate::to_params::ToParams) trait.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use mssql_client::NamedParam;
+    ///
+    /// let params = vec![
+    ///     NamedParam::from_value("name", &"Alice")?,
+    ///     NamedParam::from_value("email", &"alice@example.com")?,
+    /// ];
+    /// let rows_affected = client.execute_named(
+    ///     "INSERT INTO users (name, email) VALUES (@name, @email)",
+    ///     &params,
+    /// ).await?;
+    /// ```
+    pub async fn execute_named(
+        &mut self,
+        sql: &str,
+        params: &[crate::to_params::NamedParam],
+    ) -> Result<u64> {
+        tracing::debug!(
+            sql = sql,
+            params_count = params.len(),
+            "executing statement with named parameters"
+        );
+
+        if params.is_empty() {
+            self.send_sql_batch(sql).await?;
+        } else {
+            let rpc_params =
+                Self::convert_named_params(params, self.send_unicode(), self.server_collation())?;
+            let rpc = RpcRequest::execute_sql(sql, rpc_params);
+            self.send_rpc(&rpc).await?;
+        }
+
+        self.read_execute_result().await
+    }
+
+    /// Whether string parameters are sent as NVARCHAR (Unicode).
+    pub(crate) fn send_unicode(&self) -> bool {
+        self.config.send_string_parameters_as_unicode
+    }
+
+    /// Server's default collation, captured from ENVCHANGE during login.
+    pub(crate) fn server_collation(&self) -> Option<&tds_protocol::token::Collation> {
+        self.server_collation.as_ref()
     }
 }
 
@@ -327,7 +658,8 @@ impl Client<Ready> {
                 self.send_sql_batch(sql).await?;
             } else {
                 // Parameterized query - use sp_executesql via RPC
-                let rpc_params = Self::convert_params(params)?;
+                let rpc_params =
+                    Self::convert_params(params, self.send_unicode(), self.server_collation())?;
                 let rpc = RpcRequest::execute_sql(sql, rpc_params);
                 self.send_rpc(&rpc).await?;
             }
@@ -347,8 +679,24 @@ impl Client<Ready> {
         #[cfg(feature = "otel")]
         drop(span);
 
-        let (columns, rows) = result?;
-        Ok(QueryStream::new(columns, rows))
+        let resp = result?;
+        #[cfg(feature = "always-encrypted")]
+        {
+            Ok(QueryStream::from_raw(
+                resp.columns,
+                resp.pending_rows,
+                resp.meta,
+                resp.decryptor,
+            ))
+        }
+        #[cfg(not(feature = "always-encrypted"))]
+        {
+            Ok(QueryStream::from_raw(
+                resp.columns,
+                resp.pending_rows,
+                resp.meta,
+            ))
+        }
     }
 
     /// Execute a query with a specific timeout.
@@ -430,7 +778,8 @@ impl Client<Ready> {
             self.send_sql_batch(sql).await?;
         } else {
             // Parameterized query - use sp_executesql via RPC
-            let rpc_params = Self::convert_params(params)?;
+            let rpc_params =
+                Self::convert_params(params, self.send_unicode(), self.server_collation())?;
             let rpc = RpcRequest::execute_sql(sql, rpc_params);
             self.send_rpc(&rpc).await?;
         }
@@ -465,7 +814,8 @@ impl Client<Ready> {
                 self.send_sql_batch(sql).await?;
             } else {
                 // Parameterized statement - use sp_executesql via RPC
-                let rpc_params = Self::convert_params(params)?;
+                let rpc_params =
+                    Self::convert_params(params, self.send_unicode(), self.server_collation())?;
                 let rpc = RpcRequest::execute_sql(sql, rpc_params);
                 self.send_rpc(&rpc).await?;
             }
@@ -564,9 +914,11 @@ impl Client<Ready> {
             connection: self.connection,
             server_version: self.server_version,
             current_database: self.current_database,
+            server_collation: self.server_collation,
             statement_cache: self.statement_cache,
             transaction_descriptor, // Store the descriptor from server
             needs_reset: self.needs_reset,
+            in_flight: self.in_flight,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
             #[cfg(feature = "always-encrypted")]
@@ -630,9 +982,11 @@ impl Client<Ready> {
             connection: self.connection,
             server_version: self.server_version,
             current_database: self.current_database,
+            server_collation: self.server_collation,
             statement_cache: self.statement_cache,
             transaction_descriptor,
             needs_reset: self.needs_reset,
+            in_flight: self.in_flight,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
             #[cfg(feature = "always-encrypted")]
@@ -701,6 +1055,31 @@ impl Client<Ready> {
     #[must_use]
     pub fn is_in_transaction(&self) -> bool {
         self.transaction_descriptor != 0
+    }
+
+    /// Check if a request is in-flight (sent but response not fully read).
+    ///
+    /// Used by the connection pool to detect dirty connections that were
+    /// interrupted mid-query (e.g., by `tokio::select!` or a timeout).
+    /// A connection with an in-flight request has unread data in the TCP
+    /// buffer and must be discarded rather than returned to the pool.
+    #[must_use]
+    pub fn is_in_flight(&self) -> bool {
+        self.in_flight
+    }
+
+    /// Report whether an Always Encrypted key-store provider with the given
+    /// name is currently reachable through this client's encryption context.
+    ///
+    /// Returns `false` when the `always-encrypted` feature isn't enabled, when
+    /// the connection was opened without `column_encryption` configured, or
+    /// when no matching provider was registered.
+    #[cfg(feature = "always-encrypted")]
+    #[must_use]
+    pub fn has_encryption_provider(&self, name: &str) -> bool {
+        self.encryption_context
+            .as_ref()
+            .is_some_and(|ctx| ctx.has_provider(name))
     }
 
     /// Get a handle for cancelling the current query.
@@ -802,7 +1181,8 @@ impl Client<InTransaction> {
                 self.send_sql_batch(sql).await?;
             } else {
                 // Parameterized query - use sp_executesql via RPC
-                let rpc_params = Self::convert_params(params)?;
+                let rpc_params =
+                    Self::convert_params(params, self.send_unicode(), self.server_collation())?;
                 let rpc = RpcRequest::execute_sql(sql, rpc_params);
                 self.send_rpc(&rpc).await?;
             }
@@ -822,8 +1202,24 @@ impl Client<InTransaction> {
         #[cfg(feature = "otel")]
         drop(span);
 
-        let (columns, rows) = result?;
-        Ok(QueryStream::new(columns, rows))
+        let resp = result?;
+        #[cfg(feature = "always-encrypted")]
+        {
+            Ok(QueryStream::from_raw(
+                resp.columns,
+                resp.pending_rows,
+                resp.meta,
+                resp.decryptor,
+            ))
+        }
+        #[cfg(not(feature = "always-encrypted"))]
+        {
+            Ok(QueryStream::from_raw(
+                resp.columns,
+                resp.pending_rows,
+                resp.meta,
+            ))
+        }
     }
 
     /// Execute a statement within the transaction.
@@ -851,7 +1247,8 @@ impl Client<InTransaction> {
                 self.send_sql_batch(sql).await?;
             } else {
                 // Parameterized statement - use sp_executesql via RPC
-                let rpc_params = Self::convert_params(params)?;
+                let rpc_params =
+                    Self::convert_params(params, self.send_unicode(), self.server_collation())?;
                 let rpc = RpcRequest::execute_sql(sql, rpc_params);
                 self.send_rpc(&rpc).await?;
             }
@@ -1008,9 +1405,11 @@ impl Client<InTransaction> {
             connection: self.connection,
             server_version: self.server_version,
             current_database: self.current_database,
+            server_collation: self.server_collation,
             statement_cache: self.statement_cache,
             transaction_descriptor: 0, // Reset to auto-commit mode
             needs_reset: self.needs_reset,
+            in_flight: self.in_flight,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
             #[cfg(feature = "always-encrypted")]
@@ -1054,9 +1453,11 @@ impl Client<InTransaction> {
             connection: self.connection,
             server_version: self.server_version,
             current_database: self.current_database,
+            server_collation: self.server_collation,
             statement_cache: self.statement_cache,
             transaction_descriptor: 0, // Reset to auto-commit mode
             needs_reset: self.needs_reset,
+            in_flight: self.in_flight,
             #[cfg(feature = "otel")]
             instrumentation: self.instrumentation,
             #[cfg(feature = "always-encrypted")]

@@ -27,6 +27,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 
 use crate::codec::write_utf16_string;
 use crate::prelude::*;
+use crate::token::Collation;
 
 /// Well-known stored procedure IDs.
 ///
@@ -275,11 +276,60 @@ impl TypeInfo {
         }
     }
 
+    /// Default collation bytes: Latin1_General_CI_AS (LCID 0x0409, sort ID 0x34).
+    const DEFAULT_COLLATION: [u8; 5] = [0x09, 0x04, 0xD0, 0x00, 0x34];
+
+    /// Create type info for VARCHAR with max length (in bytes).
+    pub fn varchar(max_len: u16) -> Self {
+        Self::varchar_with_collation(max_len, Self::DEFAULT_COLLATION)
+    }
+
+    /// Create type info for VARCHAR with max length and explicit collation.
+    pub fn varchar_with_collation(max_len: u16, collation: [u8; 5]) -> Self {
+        Self {
+            type_id: 0xA7, // BIGVARCHARTYPE
+            max_length: Some(max_len),
+            precision: None,
+            scale: None,
+            collation: Some(collation),
+            tvp_type_name: None,
+        }
+    }
+
+    /// Create type info for VARCHAR(MAX).
+    pub fn varchar_max() -> Self {
+        Self::varchar_max_with_collation(Self::DEFAULT_COLLATION)
+    }
+
+    /// Create type info for VARCHAR(MAX) with explicit collation.
+    pub fn varchar_max_with_collation(collation: [u8; 5]) -> Self {
+        Self {
+            type_id: 0xA7,            // BIGVARCHARTYPE
+            max_length: Some(0xFFFF), // MAX indicator
+            precision: None,
+            scale: None,
+            collation: Some(collation),
+            tvp_type_name: None,
+        }
+    }
+
     /// Create type info for VARBINARY with max length.
     pub fn varbinary(max_len: u16) -> Self {
         Self {
             type_id: 0xA5, // BIGVARBINTYPE
             max_length: Some(max_len),
+            precision: None,
+            scale: None,
+            collation: None,
+            tvp_type_name: None,
+        }
+    }
+
+    /// Create type info for VARBINARY(MAX).
+    pub fn varbinary_max() -> Self {
+        Self {
+            type_id: 0xA5,            // BIGVARBINTYPE
+            max_length: Some(0xFFFF), // MAX indicator — triggers PLP encoding
             precision: None,
             scale: None,
             collation: None,
@@ -311,10 +361,34 @@ impl TypeInfo {
         }
     }
 
+    /// Create type info for TIME.
+    pub fn time(scale: u8) -> Self {
+        Self {
+            type_id: 0x29, // TIMETYPE
+            max_length: None,
+            precision: None,
+            scale: Some(scale),
+            collation: None,
+            tvp_type_name: None,
+        }
+    }
+
     /// Create type info for DATETIME2.
     pub fn datetime2(scale: u8) -> Self {
         Self {
             type_id: 0x2A, // DATETIME2TYPE
+            max_length: None,
+            precision: None,
+            scale: Some(scale),
+            collation: None,
+            tvp_type_name: None,
+        }
+    }
+
+    /// Create type info for DATETIMEOFFSET.
+    pub fn datetimeoffset(scale: u8) -> Self {
+        Self {
+            type_id: 0x2B, // DATETIMEOFFSETTYPE
             max_length: None,
             precision: None,
             scale: Some(scale),
@@ -330,6 +404,42 @@ impl TypeInfo {
             max_length: Some(17), // Max decimal size
             precision: Some(precision),
             scale: Some(scale),
+            collation: None,
+            tvp_type_name: None,
+        }
+    }
+
+    /// Create type info for MONEY (8-byte scaled integer via MONEYN / 0x6E).
+    pub fn money() -> Self {
+        Self {
+            type_id: 0x6E, // MONEYNTYPE
+            max_length: Some(8),
+            precision: None,
+            scale: None,
+            collation: None,
+            tvp_type_name: None,
+        }
+    }
+
+    /// Create type info for SMALLMONEY (4-byte scaled integer via MONEYN / 0x6E).
+    pub fn smallmoney() -> Self {
+        Self {
+            type_id: 0x6E, // MONEYNTYPE
+            max_length: Some(4),
+            precision: None,
+            scale: None,
+            collation: None,
+            tvp_type_name: None,
+        }
+    }
+
+    /// Create type info for SMALLDATETIME (4-byte days+minutes via DATETIMEN / 0x6F).
+    pub fn smalldatetime() -> Self {
+        Self {
+            type_id: 0x6F, // DATETIMENTYPE
+            max_length: Some(4),
+            precision: None,
+            scale: None,
             collation: None,
             tvp_type_name: None,
         }
@@ -360,14 +470,14 @@ impl TypeInfo {
 
         // Variable-length types need max length
         match self.type_id {
-            0x26 | 0x68 | 0x6D => {
-                // INTNTYPE, BITNTYPE, FLTNTYPE
+            0x26 | 0x68 | 0x6D | 0x6E | 0x6F => {
+                // INTNTYPE, BITNTYPE, FLTNTYPE, MONEYNTYPE, DATETIMENTYPE
                 if let Some(len) = self.max_length {
                     buf.put_u8(len as u8);
                 }
             }
-            0xE7 | 0xA5 | 0xEF => {
-                // NVARCHARTYPE, BIGVARBINTYPE, NCHARTYPE
+            0xE7 | 0xA7 | 0xA5 | 0xEF => {
+                // NVARCHARTYPE, BIGVARCHARTYPE, BIGVARBINTYPE, NCHARTYPE
                 if let Some(len) = self.max_length {
                     buf.put_u16_le(len);
                 }
@@ -456,17 +566,85 @@ impl RpcParam {
     /// Create an NVARCHAR parameter.
     pub fn nvarchar(name: impl Into<String>, value: &str) -> Self {
         let mut buf = BytesMut::new();
-        // Encode as UTF-16LE
+        let mut code_units: usize = 0;
         for code_unit in value.encode_utf16() {
             buf.put_u16_le(code_unit);
+            code_units += 1;
         }
-        let char_len = value.chars().count();
-        let type_info = if char_len > 4000 {
+        // NVARCHAR length is measured in UTF-16 code units, not Rust chars —
+        // supplementary characters (emoji, CJK extension B) encode to a surrogate
+        // pair (2 code units) but count as 1 `char`. Using chars().count() here
+        // under-reports the buffer length and the server rejects the RPC with
+        // "Data type 0xE7 has an invalid data length or metadata length."
+        let type_info = if code_units > 4000 {
             TypeInfo::nvarchar_max()
         } else {
-            TypeInfo::nvarchar(char_len.max(1) as u16)
+            TypeInfo::nvarchar(code_units.max(1) as u16)
         };
         Self::new(name, type_info, buf.freeze())
+    }
+
+    /// Create a VARCHAR parameter.
+    ///
+    /// Encodes the string as single-byte characters using Windows-1252 encoding
+    /// (when the `encoding` feature is enabled) or Latin-1 fallback. Characters
+    /// not representable in the target encoding are replaced with `?`.
+    ///
+    /// Use this instead of [`nvarchar`](Self::nvarchar) when
+    /// `SendStringParametersAsUnicode=false` to allow SQL Server to use
+    /// index seeks on VARCHAR columns.
+    pub fn varchar(name: impl Into<String>, value: &str) -> Self {
+        let encoded = Self::encode_varchar_bytes(value);
+        let byte_len = encoded.len();
+        let type_info = if byte_len > 8000 {
+            TypeInfo::varchar_max()
+        } else {
+            TypeInfo::varchar(byte_len.max(1) as u16)
+        };
+        Self::new(name, type_info, Bytes::from(encoded))
+    }
+
+    /// Encode a string as single-byte VARCHAR data using the default
+    /// Windows-1252 encoding (or Latin-1 fallback without the `encoding` feature).
+    fn encode_varchar_bytes(value: &str) -> Vec<u8> {
+        #[cfg(feature = "encoding")]
+        {
+            let (encoded, _, _) = encoding_rs::WINDOWS_1252.encode(value);
+            encoded.into_owned()
+        }
+        #[cfg(not(feature = "encoding"))]
+        {
+            // Latin-1 fallback: chars ≤ 0xFF pass through, others become '?'
+            value
+                .chars()
+                .map(|ch| if (ch as u32) <= 0xFF { ch as u8 } else { b'?' })
+                .collect()
+        }
+    }
+
+    /// Create a VARCHAR parameter using the server's collation for encoding.
+    ///
+    /// Uses the collation's character encoding instead of the default Windows-1252.
+    /// For UTF-8 collations (SQL Server 2019+), the string bytes are used directly.
+    pub fn varchar_with_collation(
+        name: impl Into<String>,
+        value: &str,
+        collation: &Collation,
+    ) -> Self {
+        let collation_bytes = collation.to_bytes();
+        let encoded = Self::encode_varchar_bytes_for_collation(value, collation);
+        let byte_len = encoded.len();
+        let type_info = if byte_len > 8000 {
+            TypeInfo::varchar_max_with_collation(collation_bytes)
+        } else {
+            TypeInfo::varchar_with_collation(byte_len.max(1) as u16, collation_bytes)
+        };
+        Self::new(name, type_info, Bytes::from(encoded))
+    }
+
+    /// Encode a string using the collation's character encoding.
+    fn encode_varchar_bytes_for_collation(value: &str, collation: &Collation) -> Vec<u8> {
+        crate::collation::encode_str_for_collation(value, Some(collation))
     }
 
     /// Mark as output parameter.
@@ -502,13 +680,13 @@ impl RpcParam {
                     buf.put_u8(value.len() as u8);
                     buf.put_slice(value);
                 }
-                0x68 | 0x6D => {
-                    // BITNTYPE, FLTNTYPE
+                0x68 | 0x6D | 0x6E | 0x6F => {
+                    // BITNTYPE, FLTNTYPE, MONEYNTYPE, DATETIMENTYPE
                     buf.put_u8(value.len() as u8);
                     buf.put_slice(value);
                 }
-                0xE7 | 0xA5 => {
-                    // NVARCHARTYPE, BIGVARBINTYPE
+                0xE7 | 0xA7 | 0xA5 => {
+                    // NVARCHARTYPE, BIGVARCHARTYPE, BIGVARBINTYPE
                     if self.type_info.max_length == Some(0xFFFF) {
                         // MAX type - use PLP format
                         // For simplicity, send as single chunk
@@ -527,12 +705,8 @@ impl RpcParam {
                     buf.put_u8(value.len() as u8);
                     buf.put_slice(value);
                 }
-                0x28 => {
-                    // DATETYPE (fixed 3 bytes)
-                    buf.put_slice(value);
-                }
-                0x2A => {
-                    // DATETIME2TYPE
+                0x28..=0x2B => {
+                    // DATE, TIME, DATETIME2, DATETIMEOFFSET
                     buf.put_u8(value.len() as u8);
                     buf.put_slice(value);
                 }
@@ -556,7 +730,7 @@ impl RpcParam {
         } else {
             // NULL value
             match self.type_info.type_id {
-                0xE7 | 0xA5 => {
+                0xE7 | 0xA7 | 0xA5 => {
                     // Variable-length types use 0xFFFF for NULL
                     if self.type_info.max_length == Some(0xFFFF) {
                         buf.put_u64_le(0xFFFFFFFFFFFFFFFF); // PLP NULL
@@ -679,6 +853,14 @@ impl RpcRequest {
                             format!("nvarchar({len})")
                         }
                     }
+                    0xA7 => {
+                        if p.type_info.max_length == Some(0xFFFF) {
+                            "varchar(max)".to_string()
+                        } else {
+                            let len = p.type_info.max_length.unwrap_or(8000);
+                            format!("varchar({len})")
+                        }
+                    }
                     0xA5 => {
                         if p.type_info.max_length == Some(0xFFFF) {
                             "varbinary(max)".to_string()
@@ -689,15 +871,31 @@ impl RpcRequest {
                     }
                     0x24 => "uniqueidentifier".to_string(),
                     0x28 => "date".to_string(),
+                    0x29 => {
+                        let scale = p.type_info.scale.unwrap_or(7);
+                        format!("time({scale})")
+                    }
                     0x2A => {
                         let scale = p.type_info.scale.unwrap_or(7);
                         format!("datetime2({scale})")
+                    }
+                    0x2B => {
+                        let scale = p.type_info.scale.unwrap_or(7);
+                        format!("datetimeoffset({scale})")
                     }
                     0x6C => {
                         let precision = p.type_info.precision.unwrap_or(18);
                         let scale = p.type_info.scale.unwrap_or(0);
                         format!("decimal({precision}, {scale})")
                     }
+                    0x6E => match p.type_info.max_length {
+                        Some(4) => "smallmoney".to_string(),
+                        _ => "money".to_string(),
+                    },
+                    0x6F => match p.type_info.max_length {
+                        Some(4) => "smalldatetime".to_string(),
+                        _ => "datetime".to_string(),
+                    },
                     0xF3 => {
                         // TVP - Table-Valued Parameter
                         // Must be declared with the table type name and READONLY
@@ -882,6 +1080,22 @@ mod tests {
     }
 
     #[test]
+    fn test_nvarchar_param_surrogate_pair_length() {
+        // 🌍 is a supplementary character — 1 Rust char but 2 UTF-16 code units
+        // (4 bytes). TypeInfo.max_length is stored doubled internally, so
+        // the metadata must declare 2 code units for the buffer to match.
+        let param = RpcParam::nvarchar("@p", "🌍");
+        assert_eq!(param.value.as_ref().unwrap().len(), 4);
+        // TypeInfo::nvarchar(n) stores max_length as n*2 bytes.
+        assert_eq!(param.type_info.max_length, Some(4));
+
+        let param = RpcParam::nvarchar("@p", "Hello 世界 🌍");
+        // "Hello 世界 " = 9 BMP code units + 🌍 = 2 surrogate units → 11 code units, 22 bytes
+        assert_eq!(param.value.as_ref().unwrap().len(), 22);
+        assert_eq!(param.type_info.max_length, Some(22));
+    }
+
+    #[test]
     fn test_execute_sql_request() {
         let rpc = RpcRequest::execute_sql(
             "SELECT * FROM users WHERE id = @p1",
@@ -939,5 +1153,149 @@ mod tests {
 
         assert_eq!(rpc.proc_id, Some(ProcId::Unprepare));
         assert_eq!(rpc.params.len(), 1); // just the handle
+    }
+
+    #[test]
+    fn test_varchar_param() {
+        let param = RpcParam::varchar("@name", "Alice");
+        assert_eq!(param.name, "@name");
+        assert_eq!(param.type_info.type_id, 0xA7);
+        // Single-byte encoded "Alice" = 5 bytes
+        assert_eq!(param.value.as_ref().unwrap().len(), 5);
+        assert_eq!(&param.value.as_ref().unwrap()[..], b"Alice");
+    }
+
+    #[test]
+    fn test_varchar_param_max() {
+        // String > 8000 bytes should use VARCHAR(MAX)
+        let long_str = "a".repeat(9000);
+        let param = RpcParam::varchar("@big", &long_str);
+        assert_eq!(param.type_info.type_id, 0xA7);
+        assert_eq!(param.type_info.max_length, Some(0xFFFF));
+        assert_eq!(param.value.as_ref().unwrap().len(), 9000);
+    }
+
+    #[test]
+    fn test_varchar_param_declarations() {
+        let params = vec![
+            RpcParam::int("@p1", 42),
+            RpcParam::varchar("@name", "Alice"),
+        ];
+
+        let decls = RpcRequest::build_param_declarations(&params);
+        assert!(decls.contains("@p1 int"));
+        assert!(decls.contains("@name varchar(5)"));
+    }
+
+    #[test]
+    fn test_varchar_type_info_has_collation() {
+        let ti = TypeInfo::varchar(100);
+        assert_eq!(ti.type_id, 0xA7);
+        assert_eq!(ti.max_length, Some(100));
+        assert!(ti.collation.is_some());
+    }
+
+    #[test]
+    fn test_varchar_encode_round_trip() {
+        // Verify the encoded param can be serialized without panics
+        let param = RpcParam::varchar("@val", "test value");
+        let mut buf = bytes::BytesMut::new();
+        param.encode(&mut buf);
+        assert!(!buf.is_empty());
+    }
+
+    #[test]
+    fn test_collation_round_trip() {
+        let collation = Collation {
+            lcid: 0x00D0_0409,
+            sort_id: 0x34,
+        };
+        let bytes = collation.to_bytes();
+        assert_eq!(bytes, [0x09, 0x04, 0xD0, 0x00, 0x34]);
+
+        let restored = Collation::from_bytes(&bytes);
+        assert_eq!(restored.lcid, collation.lcid);
+        assert_eq!(restored.sort_id, collation.sort_id);
+    }
+
+    #[test]
+    fn test_varchar_with_collation_uses_custom_collation_bytes() {
+        // Chinese_PRC_CI_AS collation (LCID 0x0804)
+        let collation = Collation {
+            lcid: 0x0804,
+            sort_id: 0,
+        };
+        let param = RpcParam::varchar_with_collation("@val", "test", &collation);
+        assert_eq!(param.type_info.type_id, 0xA7);
+        // Collation bytes should match the custom collation, not default Latin1
+        assert_eq!(param.type_info.collation, Some(collation.to_bytes()));
+    }
+
+    #[test]
+    fn test_money_type_info() {
+        let ti = TypeInfo::money();
+        assert_eq!(ti.type_id, 0x6E);
+        assert_eq!(ti.max_length, Some(8));
+    }
+
+    #[test]
+    fn test_smallmoney_type_info() {
+        let ti = TypeInfo::smallmoney();
+        assert_eq!(ti.type_id, 0x6E);
+        assert_eq!(ti.max_length, Some(4));
+    }
+
+    #[test]
+    fn test_smalldatetime_type_info() {
+        let ti = TypeInfo::smalldatetime();
+        assert_eq!(ti.type_id, 0x6F);
+        assert_eq!(ti.max_length, Some(4));
+    }
+
+    #[test]
+    fn test_money_param_declarations() {
+        let decls = RpcRequest::build_param_declarations(&[
+            RpcParam::new("@m", TypeInfo::money(), Bytes::from_static(&[0u8; 8])),
+            RpcParam::new("@sm", TypeInfo::smallmoney(), Bytes::from_static(&[0u8; 4])),
+            RpcParam::new(
+                "@sdt",
+                TypeInfo::smalldatetime(),
+                Bytes::from_static(&[0u8; 4]),
+            ),
+        ]);
+        assert!(decls.contains("@m money"), "got: {decls}");
+        assert!(decls.contains("@sm smallmoney"), "got: {decls}");
+        assert!(decls.contains("@sdt smalldatetime"), "got: {decls}");
+    }
+
+    #[test]
+    fn test_money_typeinfo_encodes_max_length_byte() {
+        let mut buf = bytes::BytesMut::new();
+        TypeInfo::money().encode(&mut buf);
+        // type_id 0x6E + max_length byte 0x08
+        assert_eq!(&buf[..], &[0x6E, 0x08]);
+
+        let mut buf = bytes::BytesMut::new();
+        TypeInfo::smallmoney().encode(&mut buf);
+        assert_eq!(&buf[..], &[0x6E, 0x04]);
+
+        let mut buf = bytes::BytesMut::new();
+        TypeInfo::smalldatetime().encode(&mut buf);
+        assert_eq!(&buf[..], &[0x6F, 0x04]);
+    }
+
+    #[test]
+    fn test_varchar_with_collation_default_vs_custom_differ() {
+        let default_param = RpcParam::varchar("@val", "test");
+        let custom_collation = Collation {
+            lcid: 0x0419, // Russian
+            sort_id: 0,
+        };
+        let custom_param = RpcParam::varchar_with_collation("@val", "test", &custom_collation);
+        // The collation bytes should differ
+        assert_ne!(
+            default_param.type_info.collation,
+            custom_param.type_info.collation
+        );
     }
 }

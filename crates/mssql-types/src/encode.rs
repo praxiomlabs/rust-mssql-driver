@@ -78,6 +78,10 @@ impl TdsEncode for SqlValue {
                 encode_decimal(*d, buf);
                 Ok(())
             }
+            #[cfg(feature = "decimal")]
+            SqlValue::Money(d) => encode_money(*d, buf),
+            #[cfg(feature = "decimal")]
+            SqlValue::SmallMoney(d) => encode_smallmoney(*d, buf),
             #[cfg(feature = "uuid")]
             SqlValue::Uuid(u) => {
                 encode_uuid(*u, buf);
@@ -98,6 +102,8 @@ impl TdsEncode for SqlValue {
                 encode_datetime2(*dt, buf);
                 Ok(())
             }
+            #[cfg(feature = "chrono")]
+            SqlValue::SmallDateTime(dt) => encode_smalldatetime(*dt, buf),
             #[cfg(feature = "chrono")]
             SqlValue::DateTimeOffset(dto) => {
                 encode_datetimeoffset(*dto, buf);
@@ -142,6 +148,10 @@ impl TdsEncode for SqlValue {
             SqlValue::Binary(_) => 0xA5,   // BIGVARBINTYPE
             #[cfg(feature = "decimal")]
             SqlValue::Decimal(_) => 0x6C, // DECIMALTYPE
+            #[cfg(feature = "decimal")]
+            SqlValue::Money(_) => 0x6E, // MONEYNTYPE (8-byte payload)
+            #[cfg(feature = "decimal")]
+            SqlValue::SmallMoney(_) => 0x6E, // MONEYNTYPE (4-byte payload)
             #[cfg(feature = "uuid")]
             SqlValue::Uuid(_) => 0x24, // GUIDTYPE
             #[cfg(feature = "chrono")]
@@ -150,6 +160,8 @@ impl TdsEncode for SqlValue {
             SqlValue::Time(_) => 0x29, // TIMETYPE
             #[cfg(feature = "chrono")]
             SqlValue::DateTime(_) => 0x2A, // DATETIME2TYPE
+            #[cfg(feature = "chrono")]
+            SqlValue::SmallDateTime(_) => 0x6F, // DATETIMENTYPE (4-byte payload)
             #[cfg(feature = "chrono")]
             SqlValue::DateTimeOffset(_) => 0x2B, // DATETIMEOFFSETTYPE
             #[cfg(feature = "json")]
@@ -223,6 +235,154 @@ pub fn encode_decimal(decimal: rust_decimal::Decimal, buf: &mut BytesMut) {
     // Get the mantissa and encode as 128-bit integer
     let mantissa = decimal.mantissa().unsigned_abs();
     buf.put_u128_le(mantissa);
+}
+
+/// Rescale a decimal to MONEY's 4-decimal fixed-point representation.
+///
+/// Returns the signed 128-bit integer representing the value multiplied by
+/// 10_000. Excess precision past 4 decimal places is truncated toward zero.
+#[cfg(feature = "decimal")]
+fn decimal_to_money_cents(value: rust_decimal::Decimal) -> Result<i128, TypeError> {
+    let mantissa: i128 = value.mantissa();
+    let scale: u32 = value.scale();
+    if scale <= 4 {
+        let factor = 10_i128.pow(4 - scale);
+        mantissa.checked_mul(factor).ok_or(TypeError::OutOfRange {
+            target_type: "MONEY",
+        })
+    } else {
+        let factor = 10_i128.pow(scale - 4);
+        Ok(mantissa / factor)
+    }
+}
+
+/// Convert a decimal to the scaled i64 used on the MONEY wire.
+///
+/// This is the shared pre-encoding step for both RPC parameter encoding and
+/// TVP column encoding — each path knows how to frame the payload, but they
+/// agree on how to derive the scaled integer from the decimal.
+#[cfg(feature = "decimal")]
+pub fn decimal_to_money_cents_i64(value: rust_decimal::Decimal) -> Result<i64, TypeError> {
+    let cents_i128 = decimal_to_money_cents(value)?;
+    i64::try_from(cents_i128).map_err(|_| TypeError::OutOfRange {
+        target_type: "MONEY",
+    })
+}
+
+/// Convert a decimal to the scaled i32 used on the SMALLMONEY wire.
+#[cfg(feature = "decimal")]
+pub fn decimal_to_smallmoney_cents_i32(value: rust_decimal::Decimal) -> Result<i32, TypeError> {
+    let cents_i128 = decimal_to_money_cents(value)?;
+    i32::try_from(cents_i128).map_err(|_| TypeError::OutOfRange {
+        target_type: "SMALLMONEY",
+    })
+}
+
+/// Encode a decimal as MONEY (8 bytes): the signed 64-bit scaled integer is
+/// written as the high 32 bits LE followed by the low 32 bits LE, per
+/// MS-TDS §2.2.5.5.1.2.
+#[cfg(feature = "decimal")]
+pub fn encode_money(value: rust_decimal::Decimal, buf: &mut BytesMut) -> Result<(), TypeError> {
+    let cents = decimal_to_money_cents_i64(value)?;
+    let high = (cents >> 32) as i32;
+    let low = (cents & 0xFFFF_FFFF) as u32;
+    buf.put_i32_le(high);
+    buf.put_u32_le(low);
+    Ok(())
+}
+
+/// Encode a decimal as SMALLMONEY (4 bytes): the signed 32-bit scaled integer
+/// is written little-endian.
+#[cfg(feature = "decimal")]
+pub fn encode_smallmoney(
+    value: rust_decimal::Decimal,
+    buf: &mut BytesMut,
+) -> Result<(), TypeError> {
+    let cents = decimal_to_smallmoney_cents_i32(value)?;
+    buf.put_i32_le(cents);
+    Ok(())
+}
+
+/// Convert a NaiveDateTime to the DATETIME wire representation.
+///
+/// Returns `(days_since_1900_i32, ticks_u32)` where each tick is 1/300 second.
+/// This is the shared pre-encoding step for both RPC parameter encoding and
+/// TVP column encoding.
+#[cfg(feature = "chrono")]
+pub fn datetime_to_legacy_days_ticks(dt: chrono::NaiveDateTime) -> (i32, u32) {
+    use chrono::Timelike;
+    let epoch = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("epoch 1900-01-01 is valid");
+    let days = (dt.date() - epoch).num_days() as i32;
+
+    let since_midnight = dt.time().num_seconds_from_midnight() as u64 * 1000
+        + u64::from(dt.time().nanosecond()) / 1_000_000;
+    // Convert ms → 1/300s ticks: ticks = round(ms * 300 / 1000) = round(ms * 3 / 10)
+    let ticks = ((since_midnight * 3 + 5) / 10) as u32;
+    (days, ticks)
+}
+
+/// Encode a DATETIME value (8 bytes): days since 1900 (`i32` LE) + time units
+/// since midnight (`u32` LE) where each unit is 1/300 of a second.
+#[cfg(feature = "chrono")]
+pub fn encode_datetime_legacy(dt: chrono::NaiveDateTime, buf: &mut BytesMut) {
+    let (days, ticks) = datetime_to_legacy_days_ticks(dt);
+    buf.put_i32_le(days);
+    buf.put_u32_le(ticks);
+}
+
+/// Convert a NaiveDateTime to the SMALLDATETIME wire representation.
+///
+/// Returns `(days_since_1900_u16, minutes_since_midnight_u16)`. Seconds are
+/// rounded to the nearest minute (30s rounds up per SQL Server semantics); when
+/// that rounding lands on or past 24:00 the carry propagates into the next day
+/// — e.g. 23:59:45 → next day 00:00 — so the result stays within SQL Server's
+/// valid minute range of 0..1439. Returns `Err` if the resulting date is
+/// outside the SMALLDATETIME range (1900-01-01 through 2079-06-06).
+#[cfg(feature = "chrono")]
+pub fn datetime_to_smalldatetime_days_minutes(
+    dt: chrono::NaiveDateTime,
+) -> Result<(u16, u16), TypeError> {
+    use chrono::Timelike;
+    let epoch = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("epoch 1900-01-01 is valid");
+
+    let total_seconds = dt.time().hour() * 3600 + dt.time().minute() * 60 + dt.time().second();
+    let minutes_raw = (total_seconds + 30) / 60;
+    // Carry over into the next day when seconds round up past 24:00 so that
+    // the returned minute count stays within SQL Server's valid 0..1439 range.
+    // SQL Server itself does the same thing when casting 23:59:45 to
+    // SMALLDATETIME — sending minutes=1440 directly on the wire is rejected
+    // as "invalid instance of data type smalldatetime".
+    let (day_carry, minutes) = if minutes_raw >= 1440 {
+        (1i64, 0u16)
+    } else {
+        (0i64, minutes_raw as u16)
+    };
+
+    let days_i64 = (dt.date() - epoch).num_days() + day_carry;
+    let days: u16 = u16::try_from(days_i64).map_err(|_| {
+        TypeError::InvalidDateTime(format!(
+            "SMALLDATETIME year must be 1900-2079, got date with {days_i64} days since 1900-01-01"
+        ))
+    })?;
+
+    Ok((days, minutes))
+}
+
+/// Encode a SMALLDATETIME value (4 bytes): days since 1900 (`u16` LE) +
+/// minutes since midnight (`u16` LE). Seconds are rounded to the nearest
+/// minute (30s rounds up per SQL Server semantics).
+///
+/// Returns an error if the date is outside the SMALLDATETIME range
+/// (1900-01-01 through 2079-06-06).
+#[cfg(feature = "chrono")]
+pub fn encode_smalldatetime(
+    dt: chrono::NaiveDateTime,
+    buf: &mut BytesMut,
+) -> Result<(), TypeError> {
+    let (days, minutes) = datetime_to_smalldatetime_days_minutes(dt)?;
+    buf.put_u16_le(days);
+    buf.put_u16_le(minutes);
+    Ok(())
 }
 
 /// Encode a DATE value.

@@ -857,10 +857,10 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
             } else if buf.remaining() < 16 {
                 return Err(Error::Protocol("unexpected EOF reading GUID".into()));
             } else {
-                // SQL Server stores GUIDs in mixed-endian format
-                let data = bytes::Bytes::copy_from_slice(&buf[..16]);
-                buf.advance(16);
-                SqlValue::Binary(data)
+                // SQL Server stores GUIDs in mixed-endian format:
+                // first 3 groups byte-swapped, last 2 groups big-endian.
+                // Swap back to RFC 4122 big-endian format.
+                decode_guid_bytes(buf)
             }
         }
 
@@ -1272,11 +1272,8 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
             if data_len < 16 {
                 return Ok(SqlValue::Null);
             }
-            let mut guid_bytes = [0u8; 16];
-            for byte in &mut guid_bytes {
-                *byte = buf.get_u8();
-            }
-            Ok(SqlValue::Binary(bytes::Bytes::copy_from_slice(&guid_bytes)))
+            // SQL Server stores GUIDs in mixed-endian format — swap back to RFC 4122
+            Ok(decode_guid_bytes(buf))
         }
         0x28 => {
             // DATE (no properties)
@@ -1295,6 +1292,131 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
                     chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
                 let date = base + chrono::Duration::days(days as i64);
                 Ok(SqlValue::Date(date))
+            }
+            #[cfg(not(feature = "chrono"))]
+            {
+                buf.advance(data_len);
+                Ok(SqlValue::Null)
+            }
+        }
+        0x29 => {
+            // TIME - 1 prop byte (scale)
+            #[cfg_attr(not(feature = "chrono"), allow(unused_variables))]
+            let scale = if prop_count >= 1 { buf.get_u8() } else { 7 };
+            buf.advance(prop_count.saturating_sub(1));
+
+            #[cfg(feature = "chrono")]
+            {
+                if data_len == 0 {
+                    return Ok(SqlValue::Null);
+                }
+                let time_len = time_bytes_for_scale(scale);
+                if data_len < time_len {
+                    return Ok(SqlValue::Null);
+                }
+                let mut time_bytes = [0u8; 8];
+                for byte in time_bytes.iter_mut().take(time_len) {
+                    *byte = buf.get_u8();
+                }
+                // Consume any remaining data bytes beyond the time portion
+                if data_len > time_len {
+                    buf.advance(data_len - time_len);
+                }
+                let intervals = u64::from_le_bytes(time_bytes);
+                Ok(SqlValue::Time(intervals_to_time(intervals, scale)))
+            }
+            #[cfg(not(feature = "chrono"))]
+            {
+                buf.advance(data_len);
+                Ok(SqlValue::Null)
+            }
+        }
+        0x2A => {
+            // DATETIME2 - 1 prop byte (scale)
+            #[cfg_attr(not(feature = "chrono"), allow(unused_variables))]
+            let scale = if prop_count >= 1 { buf.get_u8() } else { 7 };
+            buf.advance(prop_count.saturating_sub(1));
+
+            #[cfg(feature = "chrono")]
+            {
+                let time_len = time_bytes_for_scale(scale);
+                if data_len < time_len + 3 {
+                    return Ok(SqlValue::Null);
+                }
+
+                let mut time_bytes = [0u8; 8];
+                for byte in time_bytes.iter_mut().take(time_len) {
+                    *byte = buf.get_u8();
+                }
+                let intervals = u64::from_le_bytes(time_bytes);
+
+                let days = buf.get_u8() as u32
+                    | ((buf.get_u8() as u32) << 8)
+                    | ((buf.get_u8() as u32) << 16);
+
+                // Consume any remaining data bytes
+                let consumed = time_len + 3;
+                if data_len > consumed {
+                    buf.advance(data_len - consumed);
+                }
+
+                let base =
+                    chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
+                let date = base + chrono::Duration::days(days as i64);
+                let time = intervals_to_time(intervals, scale);
+                Ok(SqlValue::DateTime(date.and_time(time)))
+            }
+            #[cfg(not(feature = "chrono"))]
+            {
+                buf.advance(data_len);
+                Ok(SqlValue::Null)
+            }
+        }
+        0x2B => {
+            // DATETIMEOFFSET - 1 prop byte (scale)
+            #[cfg_attr(not(feature = "chrono"), allow(unused_variables))]
+            let scale = if prop_count >= 1 { buf.get_u8() } else { 7 };
+            buf.advance(prop_count.saturating_sub(1));
+
+            #[cfg(feature = "chrono")]
+            {
+                let time_len = time_bytes_for_scale(scale);
+                if data_len < time_len + 3 + 2 {
+                    return Ok(SqlValue::Null);
+                }
+
+                let mut time_bytes = [0u8; 8];
+                for byte in time_bytes.iter_mut().take(time_len) {
+                    *byte = buf.get_u8();
+                }
+                let intervals = u64::from_le_bytes(time_bytes);
+
+                let days = buf.get_u8() as u32
+                    | ((buf.get_u8() as u32) << 8)
+                    | ((buf.get_u8() as u32) << 16);
+
+                let offset_minutes = buf.get_i16_le();
+
+                // Consume any remaining data bytes
+                let consumed = time_len + 3 + 2;
+                if data_len > consumed {
+                    buf.advance(data_len - consumed);
+                }
+
+                use chrono::TimeZone;
+                let base =
+                    chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
+                let date = base + chrono::Duration::days(days as i64);
+                let time = intervals_to_time(intervals, scale);
+                let offset = chrono::FixedOffset::east_opt((offset_minutes as i32) * 60)
+                    .unwrap_or_else(|| {
+                        chrono::FixedOffset::east_opt(0).expect("UTC offset 0 is valid")
+                    });
+                let datetime = offset
+                    .from_local_datetime(&date.and_time(time))
+                    .single()
+                    .unwrap_or_else(|| offset.from_utc_datetime(&date.and_time(time)));
+                Ok(SqlValue::DateTimeOffset(datetime))
             }
             #[cfg(not(feature = "chrono"))]
             {
@@ -1395,6 +1517,43 @@ fn intervals_to_time(intervals: u64, scale: u8) -> chrono::NaiveTime {
 
     chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nano_part)
         .unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(0, 0, 0).expect("midnight is valid"))
+}
+
+/// Decode 16 GUID bytes from SQL Server mixed-endian wire format to RFC 4122 format.
+///
+/// SQL Server stores UUIDs with the first 3 groups byte-swapped (little-endian)
+/// and the last 2 groups in big-endian order. This function reads 16 bytes,
+/// swaps the first 3 groups back, and returns the appropriate SqlValue.
+fn decode_guid_bytes(buf: &mut &[u8]) -> SqlValue {
+    let mut bytes = [0u8; 16];
+
+    // First 4 bytes — little-endian on wire, swap to big-endian
+    bytes[3] = buf.get_u8();
+    bytes[2] = buf.get_u8();
+    bytes[1] = buf.get_u8();
+    bytes[0] = buf.get_u8();
+
+    // Next 2 bytes — little-endian on wire, swap to big-endian
+    bytes[5] = buf.get_u8();
+    bytes[4] = buf.get_u8();
+
+    // Next 2 bytes — little-endian on wire, swap to big-endian
+    bytes[7] = buf.get_u8();
+    bytes[6] = buf.get_u8();
+
+    // Last 8 bytes — big-endian, keep as-is
+    for byte in &mut bytes[8..16] {
+        *byte = buf.get_u8();
+    }
+
+    #[cfg(feature = "uuid")]
+    {
+        SqlValue::Uuid(uuid::Uuid::from_bytes(bytes))
+    }
+    #[cfg(not(feature = "uuid"))]
+    {
+        SqlValue::Binary(bytes::Bytes::copy_from_slice(&bytes))
+    }
 }
 
 #[cfg(test)]

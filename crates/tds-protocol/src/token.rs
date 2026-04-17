@@ -11,19 +11,21 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use tds_protocol::token::{Token, TokenParser};
 //! use bytes::Bytes;
 //!
-//! let data: Bytes = /* received from server */;
-//! let mut parser = TokenParser::new(data);
+//! fn parse(data: Bytes) -> Result<(), tds_protocol::ProtocolError> {
+//!     let mut parser = TokenParser::new(data);
 //!
-//! while let Some(token) = parser.next_token()? {
-//!     match token {
-//!         Token::Done(done) => println!("Rows affected: {}", done.row_count),
-//!         Token::Error(err) => eprintln!("Error {}: {}", err.number, err.message),
-//!         _ => {}
+//!     while let Some(token) = parser.next_token()? {
+//!         match token {
+//!             Token::Done(done) => println!("Rows affected: {}", done.row_count),
+//!             Token::Error(err) => eprintln!("Error {}: {}", err.number, err.message),
+//!             _ => {}
+//!         }
 //!     }
+//!     Ok(())
 //! }
 //! ```
 
@@ -235,6 +237,24 @@ pub struct Collation {
 }
 
 impl Collation {
+    /// Create a `Collation` from the 5-byte TDS wire format.
+    ///
+    /// Format: 4 bytes LCID (little-endian u32) + 1 byte sort ID.
+    pub fn from_bytes(bytes: &[u8; 5]) -> Self {
+        Self {
+            lcid: u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+            sort_id: bytes[4],
+        }
+    }
+
+    /// Serialize to the 5-byte TDS wire format.
+    ///
+    /// Format: 4 bytes LCID (little-endian u32) + 1 byte sort ID.
+    pub fn to_bytes(&self) -> [u8; 5] {
+        let b = self.lcid.to_le_bytes();
+        [b[0], b[1], b[2], b[3], self.sort_id]
+    }
+
     /// Returns the character encoding for this collation.
     ///
     /// This method maps the collation's LCID to the appropriate character
@@ -1425,13 +1445,12 @@ impl NbcRow {
 impl ReturnValue {
     /// Decode a RETURNVALUE token from bytes.
     pub fn decode(src: &mut impl Buf) -> Result<Self, ProtocolError> {
-        // Length (2 bytes)
-        if src.remaining() < 2 {
-            return Err(ProtocolError::UnexpectedEof);
-        }
-        let _length = src.get_u16_le();
-
-        // Parameter ordinal (2 bytes)
+        // MS-TDS §2.2.7.18: the RETURNVALUE token has no length prefix —
+        // it begins directly with the 2-byte ParamOrdinal. The previous
+        // spurious 2-byte read consumed the ordinal and shifted every
+        // subsequent field, leaving the stream parser two bytes ahead and
+        // reading value bytes as the next token type (e.g. `0x74` from a
+        // Unicode name fragment was misread as an unknown token).
         if src.remaining() < 2 {
             return Err(ProtocolError::UnexpectedEof);
         }
@@ -3423,11 +3442,9 @@ mod tests {
             }
         }
 
-        // Now build the full token with the 2-byte length prefix
-        let mut buf = BytesMut::new();
-        buf.put_u16_le(inner.len() as u16);
-        buf.extend_from_slice(&inner);
-        buf
+        // RETURNVALUE has no outer length prefix (MS-TDS §2.2.7.18) — the
+        // decoder walks the inner fields directly after the 0xAC token byte.
+        inner
     }
 
     #[test]
@@ -3518,12 +3535,7 @@ mod tests {
             inner.put_u16_le(c);
         }
 
-        // Wrap with length prefix
-        let mut buf = BytesMut::new();
-        buf.put_u16_le(inner.len() as u16);
-        buf.extend_from_slice(&inner);
-
-        let mut cursor = buf.freeze();
+        let mut cursor = inner.freeze();
         let rv = ReturnValue::decode(&mut cursor).unwrap();
 
         assert_eq!(rv.param_ordinal, 1);

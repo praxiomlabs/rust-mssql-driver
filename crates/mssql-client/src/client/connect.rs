@@ -4,6 +4,7 @@
 //! TCP connection, TLS negotiation, PreLogin exchange, and Login7 authentication.
 
 use std::marker::PhantomData;
+use std::net::SocketAddr;
 
 use bytes::BytesMut;
 use mssql_codec::connection::Connection;
@@ -38,46 +39,79 @@ impl Client<Disconnected> {
     /// let client = Client::connect(config).await?;
     /// ```
     pub async fn connect(config: Config) -> Result<Client<Ready>> {
+        let retry = config.retry.clone();
         let max_redirects = config.redirect.max_redirects;
         let follow_redirects = config.redirect.follow_redirects;
-        // Overall timeout: sum of per-attempt timeouts × max attempts, capped at 5 minutes.
-        // Each attempt can take up to connect_timeout + tls_timeout + login_timeout.
+        // Overall timeout accounts for retries + redirects per attempt, capped at 5 min.
         let per_attempt = config.timeouts.connect_timeout
             + config.timeouts.tls_timeout
             + config.timeouts.login_timeout;
-        let overall = per_attempt * (max_redirects as u32 + 1);
-        let overall = overall.min(std::time::Duration::from_secs(300));
-        let mut attempts = 0;
+        let total_attempts = (retry.max_retries + 1) * (max_redirects as u32 + 1);
+        let overall = (per_attempt * total_attempts).min(std::time::Duration::from_secs(300));
         let initial_host = config.host.clone();
         let initial_port = config.port;
-        let mut current_config = config;
 
         let result = timeout(overall, async {
-            loop {
-                attempts += 1;
-                if attempts > max_redirects + 1 {
-                    return Err(Error::TooManyRedirects { max: max_redirects });
+            let mut last_error: Option<Error> = None;
+
+            for retry_attempt in 0..=retry.max_retries {
+                if retry_attempt > 0 {
+                    let backoff = retry.backoff_for_attempt(retry_attempt);
+                    tracing::info!(
+                        retry_attempt,
+                        backoff_ms = backoff.as_millis() as u64,
+                        "retrying connection after transient error"
+                    );
+                    tokio::time::sleep(backoff).await;
                 }
 
-                match Self::try_connect(&current_config).await {
-                    Ok(client) => return Ok(client),
-                    Err(Error::Routing { host, port }) => {
-                        if !follow_redirects {
-                            return Err(Error::Routing { host, port });
+                // Each retry starts fresh with original host/port
+                let mut current_config = config.clone();
+                let mut redirect_count: u8 = 0;
+
+                let attempt_result = loop {
+                    redirect_count += 1;
+                    if redirect_count > max_redirects + 1 {
+                        break Err(Error::TooManyRedirects { max: max_redirects });
+                    }
+
+                    match Self::try_connect(&current_config).await {
+                        Ok(client) => break Ok(client),
+                        Err(Error::Routing { host, port }) => {
+                            if !follow_redirects {
+                                break Err(Error::Routing { host, port });
+                            }
+                            tracing::info!(
+                                host = %host,
+                                port = port,
+                                redirect = redirect_count,
+                                max_redirects = max_redirects,
+                                "following Azure SQL routing redirect"
+                            );
+                            current_config = current_config.with_host(&host).with_port(port);
+                            continue;
                         }
-                        tracing::info!(
-                            host = %host,
-                            port = port,
-                            attempt = attempts,
-                            max_redirects = max_redirects,
-                            "following Azure SQL routing redirect"
+                        Err(e) => break Err(e),
+                    }
+                };
+
+                match attempt_result {
+                    Ok(client) => return Ok(client),
+                    Err(ref e) if e.is_transient() && retry.should_retry(retry_attempt) => {
+                        tracing::warn!(
+                            retry_attempt,
+                            max_retries = retry.max_retries,
+                            error = %e,
+                            "transient connection error, will retry"
                         );
-                        current_config = current_config.with_host(&host).with_port(port);
-                        continue;
+                        last_error = Some(attempt_result.unwrap_err());
                     }
                     Err(e) => return Err(e),
                 }
             }
+
+            // All retries exhausted — return last error
+            Err(last_error.expect("at least one attempt was made"))
         })
         .await;
 
@@ -125,20 +159,22 @@ impl Client<Disconnected> {
             &config.host
         };
 
-        let addr = format!("{host}:{port}");
-
         // Step 1: Establish TCP connection
-        tracing::debug!("establishing TCP connection to {}", addr);
-        let tcp_stream = timeout(config.timeouts.connect_timeout, TcpStream::connect(&addr))
-            .await
-            .map_err(|_| Error::ConnectTimeout {
-                host: config.host.clone(),
-                port: config.port,
-            })?
-            .map_err(Error::from)?;
-
-        // Enable TCP nodelay for better latency
-        tcp_stream.set_nodelay(true).map_err(Error::from)?;
+        let tcp_stream = if config.multi_subnet_failover {
+            Self::connect_parallel(host, port, config.timeouts.connect_timeout).await?
+        } else {
+            let addr = format!("{host}:{port}");
+            tracing::debug!("establishing TCP connection to {}", addr);
+            let stream = timeout(config.timeouts.connect_timeout, TcpStream::connect(&addr))
+                .await
+                .map_err(|_| Error::ConnectTimeout {
+                    host: config.host.clone(),
+                    port: config.port,
+                })?
+                .map_err(Error::from)?;
+            stream.set_nodelay(true).map_err(Error::from)?;
+            stream
+        };
 
         #[cfg(feature = "tls")]
         {
@@ -174,6 +210,95 @@ impl Client<Disconnected> {
             // Proceed with no-TLS connection
             Self::connect_no_tls(config, tcp_stream).await
         }
+    }
+
+    /// Resolve hostname to all IPs and race parallel TCP connections.
+    ///
+    /// Used when `MultiSubnetFailover=True` for AlwaysOn AG listeners that
+    /// span multiple subnets. First successful TCP connection wins.
+    async fn connect_parallel(
+        host: &str,
+        port: u16,
+        connect_timeout: std::time::Duration,
+    ) -> Result<TcpStream> {
+        let addr_str = format!("{host}:{port}");
+        let addrs: Vec<SocketAddr> = tokio::net::lookup_host(&addr_str)
+            .await
+            .map_err(Error::from)?
+            .collect();
+
+        if addrs.is_empty() {
+            return Err(Error::from(std::io::Error::new(
+                std::io::ErrorKind::AddrNotAvailable,
+                format!("no addresses resolved for {host}:{port}"),
+            )));
+        }
+
+        // Single address — no need to spawn tasks
+        if addrs.len() == 1 {
+            tracing::debug!(addr = %addrs[0], "MultiSubnetFailover: single address resolved");
+            let stream = timeout(connect_timeout, TcpStream::connect(addrs[0]))
+                .await
+                .map_err(|_| Error::ConnectTimeout {
+                    host: host.to_string(),
+                    port,
+                })?
+                .map_err(Error::from)?;
+            stream.set_nodelay(true).map_err(Error::from)?;
+            return Ok(stream);
+        }
+
+        let addr_count = addrs.len();
+        tracing::debug!(
+            host = host,
+            port = port,
+            resolved_count = addr_count,
+            "MultiSubnetFailover: racing parallel connections",
+        );
+
+        let mut join_set = tokio::task::JoinSet::new();
+
+        for addr in addrs {
+            let dur = connect_timeout;
+            join_set.spawn(async move {
+                let tcp = timeout(dur, TcpStream::connect(addr)).await.map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        format!("connection to {addr} timed out"),
+                    )
+                })??;
+                tcp.set_nodelay(true)?;
+                Ok::<(TcpStream, SocketAddr), std::io::Error>((tcp, addr))
+            });
+        }
+
+        let mut last_error: Option<std::io::Error> = None;
+
+        while let Some(result) = join_set.join_next().await {
+            match result {
+                Ok(Ok((stream, addr))) => {
+                    tracing::debug!(addr = %addr, "MultiSubnetFailover: connected");
+                    join_set.abort_all();
+                    return Ok(stream);
+                }
+                Ok(Err(e)) => {
+                    tracing::debug!(error = %e, "MultiSubnetFailover: attempt failed");
+                    last_error = Some(e);
+                }
+                Err(join_err) => {
+                    tracing::debug!(error = %join_err, "MultiSubnetFailover: task failed");
+                    last_error = Some(std::io::Error::other(join_err.to_string()));
+                }
+            }
+        }
+
+        // All connections failed
+        Err(Error::from(last_error.unwrap_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                format!("all {addr_count} parallel connection attempts failed for {host}:{port}"),
+            )
+        })))
     }
 
     /// Connect using TDS 8.0 strict mode.
@@ -228,7 +353,7 @@ impl Client<Disconnected> {
         Self::send_login7(&mut connection, &login).await?;
 
         // Process login response (with timeout to prevent hangs during redirect)
-        let (server_version, current_database, routing) = timeout(
+        let (server_version, current_database, routing, server_collation) = timeout(
             config.timeouts.login_timeout,
             Self::process_login_response(
                 &mut connection,
@@ -253,9 +378,11 @@ impl Client<Disconnected> {
             connection: Some(ConnectionHandle::Tls(connection)),
             server_version,
             current_database: current_database.clone(),
+            server_collation,
             statement_cache: StatementCache::with_default_size(),
             transaction_descriptor: 0, // Auto-commit mode initially
             needs_reset: false,        // Fresh connection, no reset needed
+            in_flight: false,          // No request pending
             #[cfg(feature = "otel")]
             instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
                 .with_database(current_database.clone().unwrap_or_default()),
@@ -500,7 +627,7 @@ impl Client<Disconnected> {
                 let mut connection = Connection::new(tcp_stream);
 
                 // Process login response (comes in plaintext, with timeout)
-                let (server_version, current_database, routing) = timeout(
+                let (server_version, current_database, routing, server_collation) = timeout(
                     config.timeouts.login_timeout,
                     Self::process_login_response(
                         &mut connection,
@@ -526,9 +653,11 @@ impl Client<Disconnected> {
                     connection: Some(ConnectionHandle::Plain(connection)),
                     server_version,
                     current_database: current_database.clone(),
+                    server_collation,
                     statement_cache: StatementCache::with_default_size(),
                     transaction_descriptor: 0, // Auto-commit mode initially
                     needs_reset: false,        // Fresh connection, no reset needed
+                    in_flight: false,          // No request pending
                     #[cfg(feature = "otel")]
                     instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
                         .with_database(current_database.clone().unwrap_or_default()),
@@ -558,7 +687,7 @@ impl Client<Disconnected> {
                 Self::send_login7(&mut connection, &login).await?;
 
                 // Process login response (with timeout)
-                let (server_version, current_database, routing) = timeout(
+                let (server_version, current_database, routing, server_collation) = timeout(
                     config.timeouts.login_timeout,
                     Self::process_login_response(
                         &mut connection,
@@ -583,9 +712,11 @@ impl Client<Disconnected> {
                     connection: Some(ConnectionHandle::TlsPrelogin(connection)),
                     server_version,
                     current_database: current_database.clone(),
+                    server_collation,
                     statement_cache: StatementCache::with_default_size(),
                     transaction_descriptor: 0, // Auto-commit mode initially
                     needs_reset: false,        // Fresh connection, no reset needed
+                    in_flight: false,          // No request pending
                     #[cfg(feature = "otel")]
                     instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
                         .with_database(current_database.clone().unwrap_or_default()),
@@ -620,7 +751,7 @@ impl Client<Disconnected> {
             Self::send_login7(&mut connection, &login).await?;
 
             // Process login response (with timeout)
-            let (server_version, current_database, routing) = timeout(
+            let (server_version, current_database, routing, server_collation) = timeout(
                 config.timeouts.login_timeout,
                 Self::process_login_response(
                     &mut connection,
@@ -645,9 +776,11 @@ impl Client<Disconnected> {
                 connection: Some(ConnectionHandle::Plain(connection)),
                 server_version,
                 current_database: current_database.clone(),
+                server_collation,
                 statement_cache: StatementCache::with_default_size(),
                 transaction_descriptor: 0, // Auto-commit mode initially
                 needs_reset: false,        // Fresh connection, no reset needed
+                in_flight: false,          // No request pending
                 #[cfg(feature = "otel")]
                 instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
                     .with_database(current_database.clone().unwrap_or_default()),
@@ -748,7 +881,7 @@ impl Client<Disconnected> {
         Self::send_login7(&mut connection, &login).await?;
 
         // Process login response (with timeout)
-        let (server_version, current_database, routing) = timeout(
+        let (server_version, current_database, routing, server_collation) = timeout(
             config.timeouts.login_timeout,
             Self::process_login_response(
                 &mut connection,
@@ -773,9 +906,11 @@ impl Client<Disconnected> {
             connection: Some(ConnectionHandle::Plain(connection)),
             server_version,
             current_database: current_database.clone(),
+            server_collation,
             statement_cache: StatementCache::with_default_size(),
             transaction_descriptor: 0,
             needs_reset: false,
+            in_flight: false,
             #[cfg(feature = "otel")]
             instrumentation: InstrumentationContext::new(config.host.clone(), config.port)
                 .with_database(current_database.clone().unwrap_or_default()),
@@ -984,13 +1119,19 @@ impl Client<Disconnected> {
         #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))] negotiator: Option<
             &dyn mssql_auth::SspiNegotiator,
         >,
-    ) -> Result<(Option<u32>, Option<String>, Option<(String, u16)>)>
+    ) -> Result<(
+        Option<u32>,
+        Option<String>,
+        Option<(String, u16)>,
+        Option<tds_protocol::token::Collation>,
+    )>
     where
         T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     {
         let mut server_version = None;
         let mut database = None;
         let mut routing = None;
+        let mut collation = None;
 
         'outer: loop {
             let message = connection
@@ -1013,7 +1154,7 @@ impl Client<Disconnected> {
                         server_version = Some(ack.tds_version);
                     }
                     Token::EnvChange(env) => {
-                        Self::process_env_change(&env, &mut database, &mut routing);
+                        Self::process_env_change(&env, &mut database, &mut routing, &mut collation);
                     }
                     #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
                     Token::Sspi(sspi_token) => {
@@ -1083,7 +1224,7 @@ impl Client<Disconnected> {
             break;
         }
 
-        Ok((server_version, database, routing))
+        Ok((server_version, database, routing, collation))
     }
 
     /// Process an EnvChange token.
@@ -1091,6 +1232,7 @@ impl Client<Disconnected> {
         env: &EnvChange,
         database: &mut Option<String>,
         routing: &mut Option<(String, u16)>,
+        collation: &mut Option<tds_protocol::token::Collation>,
     ) {
         use tds_protocol::token::EnvChangeValue;
 
@@ -1105,6 +1247,21 @@ impl Client<Disconnected> {
                 if let EnvChangeValue::Routing { ref host, port } = env.new_value {
                     tracing::info!(host = %host, port = port, "routing redirect received");
                     *routing = Some((host.clone(), port));
+                }
+            }
+            EnvChangeType::SqlCollation => {
+                if let EnvChangeValue::Binary(ref data) = env.new_value {
+                    if data.len() >= 5 {
+                        let c = tds_protocol::token::Collation::from_bytes(
+                            data[..5].try_into().unwrap(),
+                        );
+                        tracing::debug!(
+                            lcid = c.lcid,
+                            sort_id = c.sort_id,
+                            "server collation received"
+                        );
+                        *collation = Some(c);
+                    }
                 }
             }
             _ => {

@@ -330,8 +330,7 @@ impl Row {
     ///
     /// This constructor supports existing code that works with `SqlValue` directly.
     /// It's less efficient than the buffer-based approach but maintains compatibility.
-    #[allow(dead_code)]
-    pub(crate) fn from_values(columns: Vec<Column>, values: Vec<SqlValue>) -> Self {
+    pub fn from_values(columns: Vec<Column>, values: Vec<SqlValue>) -> Self {
         let metadata = Arc::new(ColMetaData::new(columns));
         let slices: Arc<[ColumnSlice]> = values
             .iter()

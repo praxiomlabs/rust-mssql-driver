@@ -7,6 +7,348 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-04-17
+
+> **⚠️ v0.9.0 was yanked from crates.io.** v0.9.0 contained two critical bugs
+> (LOGIN7 feature extension pointer indirection and `EncryptionContext`
+> provider loss under `Config` clone) that prevented Always Encrypted from
+> functioning at all. Both are fixed in this release. If you are evaluating
+> or using Always Encrypted, upgrade directly from v0.8.x or earlier to
+> v0.10.0 — do not use v0.9.0. Non-AE features in v0.9.0 functioned
+> correctly, but upgrading is recommended regardless for the connection
+> string, performance, and bulk insert improvements in this release.
+
+This is a **correctness release**. Integration testing against a live SQL
+Server uncovered a large number of shipped-in-release wire-format bugs across
+bulk insert, stored procedures, RPC parameters, Always Encrypted, and the
+query streams. Every such bug found is fixed and pinned by a regression test.
+In aggregate, 51 commits land between v0.9.0 and v0.10.0, spanning roughly
+100 new integration tests, 10+ critical protocol fixes, and several new
+user-facing features. See the breakdown below.
+
+### Added
+
+- **`Client::bulk_insert()` end-to-end** — the `BulkInsert` packet generator
+  shipped in v0.2.0 is now connected to an actual transport. Previously the
+  example code ended at `bulk.take_packets()` with a comment to the effect of
+  "in a real implementation these would be sent to the server." Bulk insert
+  now streams BulkLoad (0x07) packets via `BulkWriter` and reads the server
+  response. Works in both `Ready` and `InTransaction` states.
+- **`Client::query_named()` / `Client::execute_named()`** — accept
+  `&[NamedParam]` (as produced by `#[derive(ToParams)]`), closing the bridge
+  between the derive macro and the client API. Previously `to_params()`
+  returned a type the client could not consume.
+- **`SendStringParametersAsUnicode` connection string option** — when set to
+  `false`, `SqlValue::String` parameters are encoded as VARCHAR with the
+  server's collation code page instead of NVARCHAR/UTF-16. Enables index
+  seeks on VARCHAR-indexed columns. Default is `true` (NVARCHAR, unchanged).
+- **`MultiSubnetFailover` connection string option** — when `true`, resolves
+  the hostname to all addresses and races parallel TCP connects. Required
+  for Always On Availability Group listener failover.
+- **Connection retry loop** — `ConnectRetryCount` / `ConnectRetryInterval`
+  connection string keywords (parsed since v0.5.x) now actually drive a
+  retry loop in `Client::connect()` with exponential backoff for transient
+  errors.
+- **`in_params()` helper** — `mssql_client::in_params(start, count)` generates
+  `(@pN, @pN+1, …)` SQL fragments for IN-clause composition without string
+  building. Handles the eternal ergonomics gap between Rust slices and SQL
+  IN lists.
+- **`test_while_idle` pool config** — when enabled (default `false`), the
+  pool reaper proactively pings idle connections with the configured health
+  check query. Catches firewall timeouts / Azure idle disconnects before
+  checkout rather than at first-request latency.
+- **OTel pool metrics** — the `DatabaseMetrics` bridge now fires on every
+  pool lifecycle event: create, close, checkout, expiration, discard,
+  in-flight drop. Adds `PoolBuilder::pool_name()` for the
+  `db.client.pool.name` label. Enabled via the `otel` feature on both
+  `mssql-client` and `mssql-driver-pool`.
+- **`Money`, `SmallMoney`, `SmallDateTime` wrapper types** — newtype wrappers
+  around `Decimal` and `NaiveDateTime` that route to native TDS wire
+  encoding (MONEY scaled-integer, SMALLDATETIME days+minutes) instead of
+  falling back to DECIMAL / DATETIME2. `SqlValue::Money`, `SqlValue::SmallMoney`,
+  `SqlValue::SmallDateTime` variants added.
+- **`Row::from_values()` now public** — allows constructing `Row` objects for
+  unit testing without going through a live server. Requested by Tiberius
+  #383 (six years open).
+- **Native binary encoding for all temporal and numeric RPC parameters** —
+  `SqlValue::Date`, `::Time`, `::DateTime`, `::DateTimeOffset`, and
+  `::Decimal` now use native TDS wire encoding (type IDs 0x28/0x29/0x2A/0x2B,
+  and 0x6A DECIMALN) instead of serializing through NVARCHAR strings. Preserves
+  sub-millisecond precision, enables index seeks, removes culturally-
+  sensitive formatting dependencies.
+- **Lazy `QueryStream` / `ResultSet` decoding** — typed `Row` objects are now
+  constructed on demand when the caller pulls from the stream rather than
+  eagerly during response parsing. Eliminates the
+  `payload + Vec<Row>` double allocation for large result sets. Applies to
+  all three response readers: `query()`, `query_multiple()`, and
+  `call_procedure()`.
+- **TEXT / NTEXT / IMAGE bulk insert rejected with redirect error** — rather
+  than silently corrupting data on these 21-year-deprecated types, bulk
+  insert now returns `TypeError::UnsupportedType` with a message naming
+  the correct replacement (`VARCHAR(MAX)` / `NVARCHAR(MAX)` / `VARBINARY(MAX)`).
+  Reading these columns in ordinary queries is still supported; only the
+  bulk-insert write path is blocked.
+
+### Fixed
+
+- **Always Encrypted: LOGIN7 `ibExtension` pointer indirection (CRITICAL)** —
+  per MS-TDS §2.2.6.4, `ibExtension` is the absolute offset of a 4-byte u32
+  whose value is the FeatureExt data offset. The v0.9.x encoder set
+  `ibExtension = base` (skipping the pointer indirection) AND computed
+  `base` without accounting for the 4-byte pointer slot. SQL Server read
+  the first four bytes of the FeatureExt blob as a u32 offset, landed deep
+  inside the hostname string, and dropped the connection with no
+  diagnostic. Every Always Encrypted connection attempt in v0.5.x through
+  v0.9.x died at LOGIN7 as *"peer closed connection without sending TLS
+  close_notify."* Pinned by `test_login7_feature_extension_pointer_indirection`.
+- **Always Encrypted: `EncryptionContext::from_arc` dropped providers after
+  `Config` clone (CRITICAL)** — `Client::connect` clones `Config` for
+  retry/redirect handling, raising the inner `Arc<EncryptionConfig>`
+  refcount above 1. `from_arc` called `Arc::try_unwrap`, which fails when
+  refcount > 1, and fell back to an empty providers map with only a
+  tracing warning. Every user who registered `InMemoryKeyStore`,
+  `AzureKeyVaultProvider`, or `WindowsCertStoreProvider` silently got a
+  context with no providers — every CEK lookup failed as
+  `KeyStoreNotFound`. `EncryptionContext` now holds the Arc directly and
+  delegates provider lookup to it.
+- **`RETURNVALUE` token decode consumed phantom 2-byte length prefix
+  (CRITICAL)** — per MS-TDS §2.2.7.18, the RETURNVALUE token has no outer
+  length prefix; the decoder read two bytes that don't exist, shifted every
+  subsequent field by 2 bytes, and the stream parser then read value bytes
+  as the next token type. Every OUTPUT parameter value from stored
+  procedures in v0.8.0 and v0.9.0 was garbage (when decode even completed
+  at all). Test helpers authored against the buggy decoder were corrected.
+- **`call_procedure` sent `@p1`/`@p2` positional names to named procedures
+  (CRITICAL)** — the positional `call_procedure` path passed values through
+  the same name-generation helper used for `sp_executesql`, producing names
+  like `@p1`, `@p2`. SQL Server binds RPC parameters by name when names
+  are non-empty; every procedure with real parameter names (virtually all
+  of them) failed with server error 201: *"Procedure or function expects
+  parameter '@a', which was not supplied."* Positional `call_procedure`
+  now sends empty names, triggering by-position binding.
+- **NVARCHAR RPC parameters miscounted supplementary Unicode characters
+  (HIGH)** — the NVARCHAR length metadata used `value.chars().count()`
+  (Rust chars, UTF-16 scalar values). Supplementary-plane characters
+  (emoji, CJK Extension B) encode as surrogate pairs in UTF-16 and count
+  as one char but two code units. Inputs containing such characters
+  produced a length-mismatched RPC rejected by SQL Server with *"Data
+  type 0xE7 has an invalid data length or metadata length."* Now counts
+  UTF-16 code units via `encode_utf16().count()`.
+- **UUID mixed-endian byte-order in `UNIQUEIDENTIFIER` decoding** — SQL
+  Server stores `uniqueidentifier` with the first three groups byte-
+  swapped vs. RFC 4122. The v0.9.x decoder returned the raw storage bytes
+  without swapping, so reading a GUID from the database produced a UUID
+  with different bytes than what was written. Fixed in both the standalone
+  GUID column parser (`TypeId::Guid`) and the SQL_VARIANT `0x24` base-type
+  path.
+- **VARCHAR/CHAR bulk insert corrupted extended characters** — the bulk
+  insert row encoder unconditionally encoded strings as UTF-16 regardless
+  of the column's `type_id`. For VARCHAR (0xA7) / CHAR (0x2F) columns,
+  SQL Server interpreted each UTF-16 code unit's low byte as one char and
+  the padding high byte as another, so `"abc"` was stored as
+  `"a\0b\0c\0"`. Now routes through the column collation's code page.
+- **VARCHAR RPC params hardcoded Latin1_General_CI_AS / Windows-1252** —
+  captured the server collation from the login ENVCHANGE and threaded it
+  through `sql_value_to_rpc_param` so VARCHAR parameters use the server's
+  actual code page. Fixes silent corruption of extended characters on
+  Chinese/Cyrillic/Arabic-collation servers when `SendStringParametersAsUnicode=false`.
+- **PLP length marker for NVARCHAR(MAX) / VARBINARY(MAX) bulk insert** —
+  the 8-byte ULONGLONGLEN at the head of the PLP wire format was set to
+  the actual byte count. SQL Server's BulkLoad (0x07) parser only accepts
+  `PLP_UNKNOWN_LEN` (0xFFFFFFFFFFFFFFFE) here. Now emits the sentinel per
+  MS-TDS §2.2.5.2.3 and the BCP-stricter parser requirement.
+- **MONEY / SMALLMONEY / DATETIME / SMALLDATETIME bulk insert wire format** —
+  these were being encoded as DECIMAL (length-prefixed mantissa) or
+  DATETIME2 (time-then-date with scale) respectively, which SQL Server
+  silently implicit-converted. Now emits the native formats: MONEY as
+  `i64 * 10_000` (high u32 + low u32 LE), SMALLMONEY as `i32 * 10_000` LE,
+  DATETIME as `days + 1/300s-ticks` (8 bytes), SMALLDATETIME as
+  `days + minutes` (4 bytes) per MS-TDS §2.2.5.5.1.2.
+- **SMALLDATETIME type ID wrong in bulk insert** — `parse_sql_type("SMALLDATETIME")`
+  returned type ID `0x3F`, which is `TypeId::Numeric`. Correct is `0x3A`
+  (DateTime4) or `0x6F` (DateTimeN). Fixed in both `parse_sql_type` and
+  the `write_colmetadata` encoder.
+- **COLMETADATA emitted variable-width type IDs for NOT NULL columns** —
+  the hand-crafted COLMETADATA path (used when the server hasn't been
+  queried for schema) emitted nullable type IDs (0x6E, 0x6F, etc.) even
+  for columns declared NOT NULL. SQL Server rejected the resulting
+  COLMETADATA as invalid. Now emits fixed-width variants (0x38, 0x3A,
+  0x3C, 0x3D, 0x32, etc.) when the column is NOT NULL.
+- **Hand-crafted COLMETADATA hardcoded Latin1 collation** — the fallback
+  COLMETADATA path ignored `BulkColumn::with_collation()` and wrote
+  Latin1_General_CI_AS regardless. Now honors the caller-supplied collation.
+- **`(local)` host alias with named instance** — `Server=(local)\SQLEXPRESS`
+  now resolves to 127.0.0.1 matching ADO.NET behavior.
+- **PoolConfig `test_while_idle` rename semantics** — the existing
+  `health_check_interval` continues to control the reaper tick, while
+  actual idle pinging is behind the new `test_while_idle` flag (default
+  `false`).
+- **Option<T> in `#[derive(Tvp)]` now infers from inner T** — previously
+  `Option<i32>` always mapped to NVARCHAR(MAX). Now recursively unwraps
+  and infers from `T`, falling back to NVARCHAR(MAX) only when generic
+  argument parsing fails.
+- **SQL_VARIANT missing TIME / DATETIME2 / DATETIMEOFFSET base-type arms** —
+  columns embedding TIME (0x29), DATETIME2 (0x2A), or DATETIMEOFFSET (0x2B)
+  inside SQL_VARIANT fell through to the raw-bytes default instead of
+  being parsed as typed values.
+- **VARBINARY RPC param rejected empty and > 8000-byte buffers** —
+  `varbinary(0)` is invalid type metadata; oversized fixed VARBINARY
+  also fails server-side. Empty buffers now pad to `.max(1)` and buffers
+  > 8000 bytes route through VARBINARY(MAX) / PLP.
+- **`write_colmetadata` produced invalid wire format on some type
+  families** — completed a per-type audit and fixed remaining issues
+  alongside the collation/nullability fixes above. Five new live-server
+  integration tests cover MONEY / SMALLMONEY / DATETIME / SMALLDATETIME,
+  DATE / TIME(7) / DATETIME2 / DATETIMEOFFSET, UUID with asymmetric
+  bytes, VARBINARY boundary sizes, and VARCHAR Latin-1 extended
+  characters.
+- **Broken fuzz targets (`parse_rpc.rs`, `collation_decode.rs`,
+  `parse_login7.rs`)** — rewritten to match the current tds-protocol
+  API after prior refactors broke them.
+- **`test_pool_status_tracking` asserted `available == 0` without
+  `.min_connections(0)`** — pool warm-up created one connection before
+  the assertion ran. Test now configures `min_connections(0)` explicitly.
+
+### Performance
+
+- **Lazy-decode `QueryStream`** — `read_query_response` no longer eagerly
+  decodes rows during response parsing. `PendingRow::Raw` / `PendingRow::Nbc`
+  values stash cheap refcounted slices into the reassembled TDS payload;
+  typed `Row`s are constructed on demand when callers pull via `Iterator`,
+  `Stream`, or `collect_all`. Peak memory for large result sets drops from
+  roughly 2× payload to 1× payload.
+- **Lazy-decode `MultiResultStream` and `ProcedureResult`** — the same
+  pattern applied to `read_multi_result_response` and
+  `read_procedure_result`. `ResultSet` now stores `PendingRow` slices
+  alongside `Option<ColMetaData>` and `Option<Arc<ColumnDecryptor>>` so
+  Always Encrypted decryption still works in the lazy path.
+
+### Changed
+
+- **Behavior change (pre-1.0) — per-row decode errors now surface at
+  iteration time** — `QueryStream::Iterator::next` and `Stream::poll_next`,
+  `ResultSet::next_row`, and `MultiResultStream::next_row` now yield
+  `Some(Err(_))` (or equivalent) for malformed row bytes rather than
+  failing the outer `query().await?` / `call_procedure().await?` itself.
+  Callers must check per-row results. `collect_all` short-circuits on
+  first error so collector-based callers are unaffected.
+- `ResultSet::next_row` now returns `Option<Result<Row, Error>>` (was
+  `Option<Row>`).
+- `ResultSet::collect_all` now returns `Result<Vec<Row>, Error>` (was
+  `Vec<Row>`).
+- `MultiResultStream::collect_current` now returns `Result<Vec<Row>, Error>`
+  (was `Vec<Row>`).
+- `BulkColumn::new` now returns `Result<Self, TypeError>` instead of
+  `Self`, so it can reject deprecated TEXT/NTEXT/IMAGE types at
+  construction time. Callers must `?`-propagate or `.unwrap()`.
+- Extracted MONEY/DATETIME conversion helpers (`decimal_to_money_cents_i64`,
+  `decimal_to_smallmoney_cents_i32`, `datetime_to_legacy_days_ticks`,
+  `datetime_to_smalldatetime_days_minutes`) into `mssql_types::encode` so
+  RPC and bulk/TVP paths share one implementation.
+- Fixed a pre-existing carry-over bug in
+  `datetime_to_smalldatetime_days_minutes`: 23:59:45 rounded up to 1440
+  minutes, outside SQL Server's valid `[0, 1439]` range. Carry now
+  propagates into the next day.
+
+### Security
+
+- **RUSTSEC-2026-0098 / RUSTSEC-2026-0099 (rustls-webpki)** — resolved
+  via Cargo.lock update.
+
+### Breaking Changes (pre-1.0)
+
+Per STABILITY.md § Pre-1.0 Releases, breaking changes are permitted in
+pre-1.0 minor bumps. All breaking changes are listed here with migration
+notes.
+
+#### 1. Per-row decode errors surface at stream iteration
+
+- **What changed**: `QueryStream` iteration, `ResultSet::next_row`, and
+  `MultiResultStream::next_row` now yield `Result` per row.
+- **Why**: Lazy decoding eliminates the eager `Vec<Row>` double allocation,
+  but a malformed row can no longer be raised from the outer `query()`
+  future — the bytes haven't been parsed yet when `query()` returns.
+- **Migration**: Check per-row results. For streams:
+  ```rust
+  // Before (v0.9.x)
+  let rows = client.query("SELECT ...", &[]).await?;
+  for row in rows {
+      let name: String = row.get(0)?;
+  }
+
+  // After (v0.10.0)
+  let rows = client.query("SELECT ...", &[]).await?;
+  for row in rows {
+      let row = row?;                       // new: handle per-row decode error
+      let name: String = row.get(0)?;
+  }
+  ```
+  `collect_all()` short-circuits on first error, so callers using it are
+  unaffected.
+
+#### 2. `ResultSet` / `MultiResultStream` return types
+
+- **What changed**:
+  - `ResultSet::next_row` — `Option<Row>` → `Option<Result<Row, Error>>`
+  - `ResultSet::collect_all` — `Vec<Row>` → `Result<Vec<Row>, Error>`
+  - `MultiResultStream::collect_current` — `Vec<Row>` → `Result<Vec<Row>, Error>`
+- **Migration**: Add `?` to `collect_all` / `collect_current` call sites
+  and `.unwrap()` or `?` to the inner `Result` for `next_row`.
+
+#### 3. `BulkColumn::new` signature
+
+- **What changed**: `BulkColumn::new(name, sql_type, ordinal)` now returns
+  `Result<Self, TypeError>` (was `Self`). Attempting to construct a
+  `BulkColumn` for `TEXT`, `NTEXT`, or `IMAGE` returns
+  `TypeError::UnsupportedType` with a redirect to `VARCHAR(MAX)` /
+  `NVARCHAR(MAX)` / `VARBINARY(MAX)`.
+- **Migration**: `?`-propagate or `.unwrap()`.
+
+#### 4. Deprecated types rejected in bulk insert
+
+- **What changed**: `Client::bulk_insert` against a table whose server
+  COLMETADATA reports `TEXT`, `NTEXT`, or `IMAGE` columns returns
+  `TypeError::UnsupportedType`. Reading these columns in ordinary
+  queries is still supported; only the bulk-insert write path is
+  blocked.
+- **Migration**: Migrate affected columns to `VARCHAR(MAX)` /
+  `NVARCHAR(MAX)` / `VARBINARY(MAX)`:
+  ```sql
+  ALTER TABLE MyTable ALTER COLUMN Body VARCHAR(MAX);    -- was TEXT
+  ALTER TABLE MyTable ALTER COLUMN Body NVARCHAR(MAX);   -- was NTEXT
+  ALTER TABLE MyTable ALTER COLUMN Blob VARBINARY(MAX);  -- was IMAGE
+  ```
+  See `LIMITATIONS.md § TEXT / NTEXT / IMAGE`.
+
+### Testing
+
+- **~100 new integration tests** against a live SQL Server 2022 container,
+  covering the bulk insert type matrix, RPC parameter round-trip for every
+  `SqlValue` variant, Always Encrypted metadata/NULL roundtrip, non-Latin
+  VARCHAR collation (Chinese_PRC, GB18030), TVP MONEY/SMALLMONEY/DATETIME/
+  SMALLDATETIME/UUID, trigger row count, hand-crafted COLMETADATA, and
+  cancel-safety pool discard.
+- **Fuzz target expansion** — `type_roundtrip` now covers Decimal, UUID,
+  Date, Time, DateTime, DateTimeOffset, and Xml.
+- **Property tests** — 4 proptest invocations added in
+  `crates/mssql-types/src/decode.rs` for decimal encoding.
+- **Trybuild compile-fail tests** for the derive macros (6 tests).
+- **Env var standardization** — all integration tests now use
+  `MSSQL_HOST/USER/PASSWORD` (previously `edge_cases.rs` silently skipped
+  without `MSSQL_TEST_*`).
+
+### Known Limitations
+
+- **Always Encrypted parameter encryption (write path) is not yet
+  implemented.** The read path — including transparent decryption of
+  encrypted columns, CEK resolution via Azure Key Vault, Windows
+  Certificate Store, and custom providers, and NULL-value writes into
+  encrypted columns — is fully supported and live-server validated in
+  this release. Sending non-NULL plaintext into an encrypted column will
+  be rejected by SQL Server with an "Operand type clash" error. See
+  `docs/ALWAYS_ENCRYPTED.md § Limitations` and upcoming issue tracker
+  entry.
+
 ## [0.9.0] - 2026-04-15
 
 ### Added
@@ -598,7 +940,9 @@ Initial release of the rust-mssql-driver project.
 - `mssql-derive` - Procedural macros
 - `mssql-testing` - Test infrastructure
 
-[Unreleased]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.5.2...v0.6.0

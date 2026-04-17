@@ -212,10 +212,10 @@ jobs:
         # Run with all features to test full functionality
         run: cargo nextest run --all-features
         env:
-          MSSQL_TEST_HOST: localhost
-          MSSQL_TEST_PORT: 1433
-          MSSQL_TEST_USER: sa
-          MSSQL_TEST_PASSWORD: YourStrong@Passw0rd
+          MSSQL_HOST: localhost
+          MSSQL_PORT: 1433
+          MSSQL_USER: sa
+          MSSQL_PASSWORD: YourStrong@Passw0rd
 
   feature-flags:
     name: Feature Flag Validation

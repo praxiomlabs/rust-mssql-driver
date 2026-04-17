@@ -9,8 +9,12 @@ use tds_protocol::rpc::{RpcParam, TypeInfo as RpcTypeInfo};
 use tds_protocol::tvp::encode_tvp_decimal;
 use tds_protocol::tvp::{
     TvpColumnDef as TvpWireColumnDef, TvpEncoder, TvpWireType, encode_tvp_bit, encode_tvp_float,
-    encode_tvp_int, encode_tvp_null, encode_tvp_nvarchar, encode_tvp_varbinary,
+    encode_tvp_int, encode_tvp_null, encode_tvp_nvarchar, encode_tvp_varbinary, encode_tvp_varchar,
 };
+#[cfg(feature = "chrono")]
+use tds_protocol::tvp::{encode_tvp_datetime, encode_tvp_smalldatetime};
+#[cfg(feature = "decimal")]
+use tds_protocol::tvp::{encode_tvp_money, encode_tvp_smallmoney};
 
 use crate::error::{Error, Result};
 use crate::state::ConnectionState;
@@ -18,54 +22,75 @@ use crate::state::ConnectionState;
 use super::Client;
 
 impl<S: ConnectionState> Client<S> {
-    /// Convert a single `ToSql` value into an `RpcParam` with the given name.
+    /// Convert a `SqlValue` into an `RpcParam` with the given name.
     ///
-    /// This is the shared conversion logic used by both `convert_params()`
-    /// (for positional query parameters) and `ProcedureBuilder::input()`
-    /// (for named procedure parameters).
-    pub(crate) fn convert_single_param(
+    /// This is the core conversion logic shared by positional parameters
+    /// (`convert_params`), named procedure parameters (`ProcedureBuilder::input`),
+    /// and named query parameters (`convert_named_params`).
+    ///
+    /// When `send_unicode` is `false`, `SqlValue::String` values are encoded
+    /// as VARCHAR (single-byte) instead of NVARCHAR (UTF-16), which allows
+    /// SQL Server to use index seeks on VARCHAR columns.
+    pub(crate) fn sql_value_to_rpc_param(
         name: &str,
-        value: &(dyn crate::ToSql + Sync),
+        sql_value: &mssql_types::SqlValue,
+        send_unicode: bool,
+        collation: Option<&tds_protocol::token::Collation>,
     ) -> Result<RpcParam> {
         use bytes::{BufMut, BytesMut};
         use mssql_types::SqlValue;
-
-        let sql_value = value.to_sql()?;
 
         Ok(match sql_value {
             SqlValue::Null => RpcParam::null(name, RpcTypeInfo::nvarchar(1)),
             SqlValue::Bool(v) => {
                 let mut buf = BytesMut::with_capacity(1);
-                buf.put_u8(if v { 1 } else { 0 });
+                buf.put_u8(if *v { 1 } else { 0 });
                 RpcParam::new(name, RpcTypeInfo::bit(), buf.freeze())
             }
             SqlValue::TinyInt(v) => {
                 let mut buf = BytesMut::with_capacity(1);
-                buf.put_u8(v);
+                buf.put_u8(*v);
                 RpcParam::new(name, RpcTypeInfo::tinyint(), buf.freeze())
             }
             SqlValue::SmallInt(v) => {
                 let mut buf = BytesMut::with_capacity(2);
-                buf.put_i16_le(v);
+                buf.put_i16_le(*v);
                 RpcParam::new(name, RpcTypeInfo::smallint(), buf.freeze())
             }
-            SqlValue::Int(v) => RpcParam::int(name, v),
-            SqlValue::BigInt(v) => RpcParam::bigint(name, v),
+            SqlValue::Int(v) => RpcParam::int(name, *v),
+            SqlValue::BigInt(v) => RpcParam::bigint(name, *v),
             SqlValue::Float(v) => {
                 let mut buf = BytesMut::with_capacity(4);
-                buf.put_f32_le(v);
+                buf.put_f32_le(*v);
                 RpcParam::new(name, RpcTypeInfo::real(), buf.freeze())
             }
             SqlValue::Double(v) => {
                 let mut buf = BytesMut::with_capacity(8);
-                buf.put_f64_le(v);
+                buf.put_f64_le(*v);
                 RpcParam::new(name, RpcTypeInfo::float(), buf.freeze())
             }
-            SqlValue::String(ref s) => RpcParam::nvarchar(name, s),
-            SqlValue::Binary(ref b) => {
-                RpcParam::new(name, RpcTypeInfo::varbinary(b.len() as u16), b.clone())
+            SqlValue::String(s) => {
+                if send_unicode {
+                    RpcParam::nvarchar(name, s)
+                } else if let Some(c) = collation {
+                    RpcParam::varchar_with_collation(name, s, c)
+                } else {
+                    RpcParam::varchar(name, s)
+                }
             }
-            SqlValue::Xml(ref s) => RpcParam::nvarchar(name, s),
+            SqlValue::Binary(b) => {
+                // VARBINARY(n) accepts 1..=8000 — `varbinary(0)` is rejected by the
+                // server ("Data type 0xA5 has an invalid data length or metadata
+                // length") and anything larger must be VARBINARY(MAX) / PLP. Mirrors
+                // the NVARCHAR / VARCHAR size handling in `RpcParam::{nvarchar,varchar}`.
+                let type_info = if b.len() > 8000 {
+                    RpcTypeInfo::varbinary_max()
+                } else {
+                    RpcTypeInfo::varbinary(b.len().max(1) as u16)
+                };
+                RpcParam::new(name, type_info, b.clone())
+            }
+            SqlValue::Xml(s) => RpcParam::nvarchar(name, s),
             #[cfg(feature = "uuid")]
             SqlValue::Uuid(u) => {
                 let bytes = u.as_bytes();
@@ -78,25 +103,57 @@ impl<S: ConnectionState> Client<S> {
                 RpcParam::new(name, RpcTypeInfo::uniqueidentifier(), buf.freeze())
             }
             #[cfg(feature = "decimal")]
-            SqlValue::Decimal(d) => RpcParam::nvarchar(name, &d.to_string()),
+            SqlValue::Decimal(d) => {
+                let mut buf = BytesMut::with_capacity(17);
+                mssql_types::encode::encode_decimal(*d, &mut buf);
+                let scale = d.scale() as u8;
+                RpcParam::new(name, RpcTypeInfo::decimal(38, scale), buf.freeze())
+            }
+            #[cfg(feature = "decimal")]
+            SqlValue::Money(d) => {
+                let mut buf = BytesMut::with_capacity(8);
+                mssql_types::encode::encode_money(*d, &mut buf)?;
+                RpcParam::new(name, RpcTypeInfo::money(), buf.freeze())
+            }
+            #[cfg(feature = "decimal")]
+            SqlValue::SmallMoney(d) => {
+                let mut buf = BytesMut::with_capacity(4);
+                mssql_types::encode::encode_smallmoney(*d, &mut buf)?;
+                RpcParam::new(name, RpcTypeInfo::smallmoney(), buf.freeze())
+            }
             #[cfg(feature = "chrono")]
-            SqlValue::Date(_)
-            | SqlValue::Time(_)
-            | SqlValue::DateTime(_)
-            | SqlValue::DateTimeOffset(_) => {
-                let s = match &sql_value {
-                    SqlValue::Date(d) => d.to_string(),
-                    SqlValue::Time(t) => t.to_string(),
-                    SqlValue::DateTime(dt) => dt.to_string(),
-                    SqlValue::DateTimeOffset(dto) => dto.to_rfc3339(),
-                    // The outer arm restricts sql_value to Date|Time|DateTime|DateTimeOffset.
-                    _ => unreachable!("inner match is bounded by outer chrono type arm"),
-                };
-                RpcParam::nvarchar(name, &s)
+            SqlValue::Date(d) => {
+                let mut buf = BytesMut::with_capacity(3);
+                mssql_types::encode::encode_date(*d, &mut buf);
+                RpcParam::new(name, RpcTypeInfo::date(), buf.freeze())
+            }
+            #[cfg(feature = "chrono")]
+            SqlValue::Time(t) => {
+                let mut buf = BytesMut::with_capacity(5);
+                mssql_types::encode::encode_time(*t, &mut buf);
+                RpcParam::new(name, RpcTypeInfo::time(7), buf.freeze())
+            }
+            #[cfg(feature = "chrono")]
+            SqlValue::DateTime(dt) => {
+                let mut buf = BytesMut::with_capacity(8);
+                mssql_types::encode::encode_datetime2(*dt, &mut buf);
+                RpcParam::new(name, RpcTypeInfo::datetime2(7), buf.freeze())
+            }
+            #[cfg(feature = "chrono")]
+            SqlValue::SmallDateTime(dt) => {
+                let mut buf = BytesMut::with_capacity(4);
+                mssql_types::encode::encode_smalldatetime(*dt, &mut buf)?;
+                RpcParam::new(name, RpcTypeInfo::smalldatetime(), buf.freeze())
+            }
+            #[cfg(feature = "chrono")]
+            SqlValue::DateTimeOffset(dto) => {
+                let mut buf = BytesMut::with_capacity(10);
+                mssql_types::encode::encode_datetimeoffset(*dto, &mut buf);
+                RpcParam::new(name, RpcTypeInfo::datetimeoffset(7), buf.freeze())
             }
             #[cfg(feature = "json")]
-            SqlValue::Json(ref j) => RpcParam::nvarchar(name, &j.to_string()),
-            SqlValue::Tvp(ref tvp_data) => Self::encode_tvp_param(name, tvp_data)?,
+            SqlValue::Json(j) => RpcParam::nvarchar(name, &j.to_string()),
+            SqlValue::Tvp(tvp_data) => Self::encode_tvp_param(name, tvp_data)?,
             _ => {
                 return Err(Error::Type(mssql_types::TypeError::UnsupportedConversion {
                     from: sql_value.type_name().to_string(),
@@ -106,14 +163,74 @@ impl<S: ConnectionState> Client<S> {
         })
     }
 
+    /// Convert a single `ToSql` value into an `RpcParam` with the given name.
+    ///
+    /// This is the shared conversion logic used by both `convert_params()`
+    /// (for positional query parameters) and `ProcedureBuilder::input()`
+    /// (for named procedure parameters).
+    pub(crate) fn convert_single_param(
+        name: &str,
+        value: &(dyn crate::ToSql + Sync),
+        send_unicode: bool,
+        collation: Option<&tds_protocol::token::Collation>,
+    ) -> Result<RpcParam> {
+        let sql_value = value.to_sql()?;
+        Self::sql_value_to_rpc_param(name, &sql_value, send_unicode, collation)
+    }
+
     /// Convert ToSql parameters to RPC parameters with auto-generated names.
-    pub(crate) fn convert_params(params: &[&(dyn crate::ToSql + Sync)]) -> Result<Vec<RpcParam>> {
+    pub(crate) fn convert_params(
+        params: &[&(dyn crate::ToSql + Sync)],
+        send_unicode: bool,
+        collation: Option<&tds_protocol::token::Collation>,
+    ) -> Result<Vec<RpcParam>> {
         params
             .iter()
             .enumerate()
             .map(|(i, p)| {
                 let name = format!("@p{}", i + 1);
-                Self::convert_single_param(&name, *p)
+                Self::convert_single_param(&name, *p, send_unicode, collation)
+            })
+            .collect()
+    }
+
+    /// Convert ToSql parameters to RPC parameters with empty names for positional binding.
+    ///
+    /// Used by [`Client::call_procedure`](super::Client::call_procedure) because
+    /// SQL Server's RPC layer binds parameters by name when names are present and
+    /// by position when names are empty. The previous behavior of emitting
+    /// `@p1`, `@p2`, … rejected any procedure whose parameters weren't literally
+    /// named `@p1`, `@p2`, … with "Procedure or function expects parameter '@…',
+    /// which was not supplied."
+    pub(crate) fn convert_params_positional(
+        params: &[&(dyn crate::ToSql + Sync)],
+        send_unicode: bool,
+        collation: Option<&tds_protocol::token::Collation>,
+    ) -> Result<Vec<RpcParam>> {
+        params
+            .iter()
+            .map(|p| Self::convert_single_param("", *p, send_unicode, collation))
+            .collect()
+    }
+
+    /// Convert named parameters to RPC parameters.
+    ///
+    /// Ensures each parameter name has an `@` prefix as required by
+    /// `sp_executesql` parameter declarations.
+    pub(crate) fn convert_named_params(
+        params: &[crate::to_params::NamedParam],
+        send_unicode: bool,
+        collation: Option<&tds_protocol::token::Collation>,
+    ) -> Result<Vec<RpcParam>> {
+        params
+            .iter()
+            .map(|p| {
+                let name = if p.name.starts_with('@') {
+                    p.name.clone()
+                } else {
+                    format!("@{}", p.name)
+                };
+                Self::sql_value_to_rpc_param(&name, &p.value, send_unicode, collation)
             })
             .collect()
     }
@@ -213,6 +330,10 @@ impl<S: ConnectionState> Client<S> {
             mssql_types::TvpColumnType::DateTimeOffset { scale } => {
                 TvpWireType::DateTimeOffset { scale: *scale }
             }
+            mssql_types::TvpColumnType::Money => TvpWireType::Money,
+            mssql_types::TvpColumnType::SmallMoney => TvpWireType::SmallMoney,
+            mssql_types::TvpColumnType::DateTime => TvpWireType::DateTime,
+            mssql_types::TvpColumnType::SmallDateTime => TvpWireType::SmallDateTime,
             mssql_types::TvpColumnType::Xml => TvpWireType::Xml,
             _ => {
                 return Err(Error::Type(mssql_types::TypeError::UnsupportedConversion {
@@ -256,13 +377,17 @@ impl<S: ConnectionState> Client<S> {
             SqlValue::Double(v) => {
                 encode_tvp_float(*v, 8, buf);
             }
-            SqlValue::String(s) => {
-                let max_len = match wire_type {
-                    TvpWireType::NVarChar { max_length } => *max_length,
-                    _ => 4000,
-                };
-                encode_tvp_nvarchar(s, max_len, buf);
-            }
+            SqlValue::String(s) => match wire_type {
+                TvpWireType::NVarChar { max_length } => {
+                    encode_tvp_nvarchar(s, *max_length, buf);
+                }
+                TvpWireType::VarChar { max_length } => {
+                    encode_tvp_varchar(s, *max_length, buf);
+                }
+                _ => {
+                    encode_tvp_nvarchar(s, 4000, buf);
+                }
+            },
             SqlValue::Binary(b) => {
                 let max_len = match wire_type {
                     TvpWireType::VarBinary { max_length } => *max_length,
@@ -271,10 +396,44 @@ impl<S: ConnectionState> Client<S> {
                 encode_tvp_varbinary(b, max_len, buf);
             }
             #[cfg(feature = "decimal")]
-            SqlValue::Decimal(d) => {
-                let sign = if d.is_sign_negative() { 0u8 } else { 1u8 };
-                let mantissa = d.mantissa().unsigned_abs();
-                encode_tvp_decimal(sign, mantissa, buf);
+            SqlValue::Decimal(d) | SqlValue::Money(d) | SqlValue::SmallMoney(d) => {
+                // Dispatch on the column wire type so that MONEY columns receive
+                // the scaled-integer MONEYN format (not DECIMAL), DATETIME2-backed
+                // columns get DECIMAL, etc. `SqlValue::Money` coming into a
+                // DECIMAL column (or vice versa) still needs to match the column
+                // metadata, so `wire_type` — not the variant tag — is the
+                // authoritative dispatch key.
+                match wire_type {
+                    TvpWireType::Money => {
+                        let scaled = match mssql_types::encode::decimal_to_money_cents_i64(*d) {
+                            Ok(v) => v,
+                            Err(_) => {
+                                // Out-of-range values write NULL so the row
+                                // structure stays intact; the caller can
+                                // pre-validate to reject.
+                                encode_tvp_null(wire_type, buf);
+                                return;
+                            }
+                        };
+                        encode_tvp_money(scaled, buf);
+                    }
+                    TvpWireType::SmallMoney => {
+                        let scaled = match mssql_types::encode::decimal_to_smallmoney_cents_i32(*d)
+                        {
+                            Ok(v) => v,
+                            Err(_) => {
+                                encode_tvp_null(wire_type, buf);
+                                return;
+                            }
+                        };
+                        encode_tvp_smallmoney(scaled, buf);
+                    }
+                    _ => {
+                        let sign = if d.is_sign_negative() { 0u8 } else { 1u8 };
+                        let mantissa = d.mantissa().unsigned_abs();
+                        encode_tvp_decimal(sign, mantissa, buf);
+                    }
+                }
             }
             #[cfg(feature = "uuid")]
             SqlValue::Uuid(u) => {
@@ -302,21 +461,43 @@ impl<S: ConnectionState> Client<S> {
                 tds_protocol::tvp::encode_tvp_time(intervals, scale, buf);
             }
             #[cfg(feature = "chrono")]
-            SqlValue::DateTime(dt) => {
-                use chrono::Timelike;
-                // Time component
-                let nanos = dt.time().num_seconds_from_midnight() as u64 * 1_000_000_000
-                    + dt.time().nanosecond() as u64;
-                let intervals = nanos / 100;
-                // Date component
-                let base =
-                    chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
-                let days = dt.date().signed_duration_since(base).num_days() as u32;
-                let scale = match wire_type {
-                    TvpWireType::DateTime2 { scale } => *scale,
-                    _ => 7,
-                };
-                tds_protocol::tvp::encode_tvp_datetime2(intervals, days, scale, buf);
+            SqlValue::DateTime(dt) | SqlValue::SmallDateTime(dt) => {
+                // Dispatch on the column wire type. DATETIME columns use the
+                // legacy days+ticks wire format; SMALLDATETIME uses the
+                // 4-byte days+minutes format; anything else (DATETIME2 column)
+                // gets the DATETIME2 time+date format.
+                match wire_type {
+                    TvpWireType::DateTime => {
+                        let (days, ticks) = mssql_types::encode::datetime_to_legacy_days_ticks(*dt);
+                        encode_tvp_datetime(days, ticks, buf);
+                    }
+                    TvpWireType::SmallDateTime => {
+                        match mssql_types::encode::datetime_to_smalldatetime_days_minutes(*dt) {
+                            Ok((days, minutes)) => {
+                                encode_tvp_smalldatetime(days, minutes, buf);
+                            }
+                            Err(_) => {
+                                encode_tvp_null(wire_type, buf);
+                            }
+                        }
+                    }
+                    _ => {
+                        use chrono::Timelike;
+                        // Time component
+                        let nanos = dt.time().num_seconds_from_midnight() as u64 * 1_000_000_000
+                            + dt.time().nanosecond() as u64;
+                        let intervals = nanos / 100;
+                        // Date component
+                        let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1)
+                            .expect("epoch 0001-01-01 is valid");
+                        let days = dt.date().signed_duration_since(base).num_days() as u32;
+                        let scale = match wire_type {
+                            TvpWireType::DateTime2 { scale } => *scale,
+                            _ => 7,
+                        };
+                        tds_protocol::tvp::encode_tvp_datetime2(intervals, days, scale, buf);
+                    }
+                }
             }
             #[cfg(feature = "chrono")]
             SqlValue::DateTimeOffset(dto) => {

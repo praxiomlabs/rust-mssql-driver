@@ -27,10 +27,10 @@ cargo test --package mssql-client --test stress_tests -- --nocapture
 
 ```bash
 # Set environment variables
-export MSSQL_TEST_HOST=localhost
-export MSSQL_TEST_PORT=1433
-export MSSQL_TEST_USER=sa
-export MSSQL_TEST_PASSWORD=YourPassword123!
+export MSSQL_HOST=localhost
+export MSSQL_PORT=1433
+export MSSQL_USER=sa
+export MSSQL_PASSWORD=YourPassword123!
 
 # Run all stress tests including live ones
 cargo test --package mssql-client --test stress_tests -- --ignored --nocapture
@@ -126,8 +126,8 @@ Tests connection pool behavior under concurrent load:
 
 ```bash
 # Requires SQL Server
-MSSQL_TEST_HOST=localhost \
-MSSQL_TEST_PASSWORD=YourPassword123! \
+MSSQL_HOST=localhost \
+MSSQL_PASSWORD=YourPassword123! \
 cargo test --package mssql-client --test stress_tests stress_concurrent_pool_usage -- --ignored --nocapture
 ```
 

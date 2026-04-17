@@ -31,9 +31,21 @@ pub enum SqlValue {
     String(String),
     /// Binary value (BINARY, VARBINARY, IMAGE).
     Binary(Bytes),
-    /// Decimal value (DECIMAL, NUMERIC, MONEY, SMALLMONEY).
+    /// Decimal value (DECIMAL, NUMERIC).
     #[cfg(feature = "decimal")]
     Decimal(rust_decimal::Decimal),
+    /// Money value (MONEY — fixed-point scaled by 10_000, signed 64-bit range).
+    ///
+    /// Distinct from [`Self::Decimal`] so that RPC parameter encoding can
+    /// select the MONEY wire format (type 0x6E, 8-byte scaled integer) rather
+    /// than the generic DECIMAL format. MONEY columns returned from queries
+    /// decode back to [`Self::Decimal`] — the distinction is only meaningful
+    /// on the send path.
+    #[cfg(feature = "decimal")]
+    Money(rust_decimal::Decimal),
+    /// SmallMoney value (SMALLMONEY — fixed-point scaled by 10_000, signed 32-bit range).
+    #[cfg(feature = "decimal")]
+    SmallMoney(rust_decimal::Decimal),
     /// UUID value (UNIQUEIDENTIFIER).
     #[cfg(feature = "uuid")]
     Uuid(uuid::Uuid),
@@ -43,9 +55,17 @@ pub enum SqlValue {
     /// Time value (TIME).
     #[cfg(feature = "chrono")]
     Time(chrono::NaiveTime),
-    /// DateTime value (DATETIME, DATETIME2, SMALLDATETIME).
+    /// DateTime value (DATETIME, DATETIME2).
     #[cfg(feature = "chrono")]
     DateTime(chrono::NaiveDateTime),
+    /// SmallDateTime value (SMALLDATETIME — minute precision, 1900-01-01..2079-06-06).
+    ///
+    /// Distinct from [`Self::DateTime`] so that RPC parameter encoding can
+    /// select the SMALLDATETIME wire format (type 0x6F, 4-byte days+minutes)
+    /// rather than DATETIME2. SMALLDATETIME columns returned from queries
+    /// decode back to [`Self::DateTime`].
+    #[cfg(feature = "chrono")]
+    SmallDateTime(chrono::NaiveDateTime),
     /// DateTimeOffset value (DATETIMEOFFSET).
     #[cfg(feature = "chrono")]
     DateTimeOffset(chrono::DateTime<chrono::FixedOffset>),
@@ -145,6 +165,10 @@ impl SqlValue {
             Self::Binary(_) => "VARBINARY",
             #[cfg(feature = "decimal")]
             Self::Decimal(_) => "DECIMAL",
+            #[cfg(feature = "decimal")]
+            Self::Money(_) => "MONEY",
+            #[cfg(feature = "decimal")]
+            Self::SmallMoney(_) => "SMALLMONEY",
             #[cfg(feature = "uuid")]
             Self::Uuid(_) => "UNIQUEIDENTIFIER",
             #[cfg(feature = "chrono")]
@@ -153,6 +177,8 @@ impl SqlValue {
             Self::Time(_) => "TIME",
             #[cfg(feature = "chrono")]
             Self::DateTime(_) => "DATETIME2",
+            #[cfg(feature = "chrono")]
+            Self::SmallDateTime(_) => "SMALLDATETIME",
             #[cfg(feature = "chrono")]
             Self::DateTimeOffset(_) => "DATETIMEOFFSET",
             #[cfg(feature = "json")]
@@ -270,5 +296,53 @@ impl From<serde_json::Value> for SqlValue {
 impl From<TvpData> for SqlValue {
     fn from(v: TvpData) -> Self {
         Self::Tvp(Box::new(v))
+    }
+}
+
+/// Wrapper that sends its inner [`rust_decimal::Decimal`] as SQL Server MONEY
+/// (signed 64-bit fixed-point scaled by 10_000) instead of DECIMAL.
+///
+/// Wrap a `Decimal` in `Money` when binding RPC parameters to force the MONEY
+/// wire format (type 0x6E, 8 bytes) — a plain `Decimal` would bind as the
+/// generic DECIMAL type (0x6C) and incur an implicit conversion on the server.
+#[cfg(feature = "decimal")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Money(pub rust_decimal::Decimal);
+
+/// Wrapper that sends its inner [`rust_decimal::Decimal`] as SQL Server
+/// SMALLMONEY (signed 32-bit fixed-point scaled by 10_000).
+#[cfg(feature = "decimal")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmallMoney(pub rust_decimal::Decimal);
+
+/// Wrapper that sends its inner [`chrono::NaiveDateTime`] as SQL Server
+/// SMALLDATETIME (4-byte days-since-1900 + minutes-since-midnight) instead of
+/// DATETIME2.
+///
+/// SMALLDATETIME has minute precision — seconds are rounded to the nearest
+/// minute on the wire (30s rounds up per SQL Server semantics). The valid
+/// range is 1900-01-01 through 2079-06-06.
+#[cfg(feature = "chrono")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmallDateTime(pub chrono::NaiveDateTime);
+
+#[cfg(feature = "decimal")]
+impl From<Money> for SqlValue {
+    fn from(v: Money) -> Self {
+        Self::Money(v.0)
+    }
+}
+
+#[cfg(feature = "decimal")]
+impl From<SmallMoney> for SqlValue {
+    fn from(v: SmallMoney) -> Self {
+        Self::SmallMoney(v.0)
+    }
+}
+
+#[cfg(feature = "chrono")]
+impl From<SmallDateTime> for SqlValue {
+    fn from(v: SmallDateTime) -> Self {
+        Self::SmallDateTime(v.0)
     }
 }

@@ -173,8 +173,11 @@ Application Name=MyApp-v1.2.3;ApplicationIntent=ReadOnly;
 |---------|---------|------|---------|-------------|
 | `ConnectRetryCount` | `Connect Retry Count` | Number | `3` | Number of reconnect attempts on idle connection failure |
 | `ConnectRetryInterval` | `Connect Retry Interval` | Seconds | `0` | Seconds between reconnect attempts |
+| `MultiSubnetFailover` | `Multi Subnet Failover` | Boolean | `false` | Race parallel TCP connections to all resolved IPs |
 
-These wire to the driver's `RetryPolicy.max_retries` and `RetryPolicy.initial_backoff` respectively.
+`ConnectRetryCount`/`ConnectRetryInterval` wire to the driver's `RetryPolicy.max_retries` and `RetryPolicy.initial_backoff` respectively.
+
+`MultiSubnetFailover=True` resolves the server hostname to all IP addresses and attempts parallel TCP connections simultaneously. The first successful connection wins and all others are cancelled. Use this when connecting to AlwaysOn AG listeners that span multiple subnets.
 
 ### Advanced Options
 
@@ -182,6 +185,9 @@ These wire to the driver's `RetryPolicy.max_retries` and `RetryPolicy.initial_ba
 |---------|---------|------|---------|-------------|
 | `MultipleActiveResultSets` | `MARS` | Boolean | `false` | Enable MARS (not fully supported) |
 | `Packet Size` | — | Number | `4096` | TDS packet size in bytes |
+| `SendStringParametersAsUnicode` | `Send String Parameters As Unicode` | Boolean | `true` | Send string params as VARCHAR instead of NVARCHAR |
+
+`SendStringParametersAsUnicode=false` sends `String`/`&str` parameters as VARCHAR (single-byte, Windows-1252) instead of NVARCHAR (UTF-16). This allows SQL Server to use index seeks on VARCHAR columns, which are blocked by the implicit NVARCHAR→VARCHAR conversion that occurs when Unicode parameters are used against VARCHAR columns. Only affects `String`/`&str` parameters — explicit NVARCHAR types always use Unicode.
 
 ### Recognized but Not Supported
 
@@ -190,7 +196,7 @@ The following ADO.NET keywords are recognized (logged at info level) but not pro
 | Keyword | Guidance |
 |---------|----------|
 | `Max Pool Size`, `Min Pool Size`, `Pooling`, `Connection Lifetime`, `Load Balance Timeout` | Use `PoolConfig` instead of connection string |
-| `Failover Partner`, `MultiSubnetFailover` | Database mirroring/AG failover not implemented |
+| `Failover Partner` | Database mirroring failover not implemented |
 | `Persist Security Info` | Password is never returned in connection strings |
 | `Network Library`, `Enlist`, `Replication`, `Transaction Binding`, `Type System Version`, `User Instance`, `AttachDbFilename`, `Context Connection`, `Asynchronous Processing` | .NET-specific features not applicable |
 

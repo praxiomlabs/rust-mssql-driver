@@ -1,0 +1,7 @@
+error: FromRow can only be derived for structs with named fields
+ --> tests/compile-fail/from_row_tuple_struct.rs:3:1
+  |
+3 | / /// FromRow requires named fields, not tuple structs.
+4 | | #[derive(FromRow)]
+5 | | struct TupleStruct(i32, String);
+  | |________________________________^

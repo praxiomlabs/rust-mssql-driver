@@ -25,7 +25,6 @@ bitflags = "2.6"
 encoding_rs = { version = "0.8", optional = true }
 
 [dev-dependencies]
-proptest = { workspace = true }
 criterion = { workspace = true }
 
 [[bench]]
@@ -33,8 +32,8 @@ name = "protocol"
 harness = false
 
 [package.metadata.cargo-machete]
-# proptest is for property-based tests, criterion for benchmarks
-ignored = ["proptest", "criterion"]
+# criterion for benchmarks
+ignored = ["criterion"]
 
 [lints]
 workspace = true

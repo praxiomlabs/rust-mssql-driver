@@ -10,11 +10,11 @@ use crate::error::Error;
 
 /// Regex pattern for valid SQL Server identifiers.
 ///
-/// Must start with a letter or underscore, followed by up to 127 characters
-/// of alphanumerics, underscore, @, #, or $.
+/// Must start with a letter, underscore, `@` (variable), or `#` (temp table),
+/// followed by up to 127 characters of alphanumerics, underscore, @, #, or $.
 #[allow(clippy::expect_used)] // Static regex compilation with known-valid pattern
 static IDENTIFIER_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_@#$]{0,127}$").expect("valid regex"));
+    Lazy::new(|| Regex::new(r"^[a-zA-Z_@#][a-zA-Z0-9_@#$]{0,127}$").expect("valid regex"));
 
 /// Validate a single SQL identifier to prevent SQL injection.
 ///
@@ -95,6 +95,9 @@ mod tests {
         assert!(validate_identifier("sp_test").is_ok());
         assert!(validate_identifier("column@name").is_ok());
         assert!(validate_identifier("temp#table").is_ok());
+        assert!(validate_identifier("#TempTable").is_ok());
+        assert!(validate_identifier("##GlobalTemp").is_ok());
+        assert!(validate_identifier("@variable").is_ok());
     }
 
     #[test]
