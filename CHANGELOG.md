@@ -7,10 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-> The entry below is the draft v0.10.0 release notes. Content accumulates
-> here until the next tag is cut; at that point this section will be renamed
-> `## [0.10.0] - <date>` and a fresh `## [Unreleased]` section will be added
-> above it.
+## [0.10.0] - 2026-04-17
+
+> **⚠️ v0.9.0 was yanked from crates.io.** v0.9.0 contained two critical bugs
+> (LOGIN7 feature extension pointer indirection and `EncryptionContext`
+> provider loss under `Config` clone) that prevented Always Encrypted from
+> functioning at all. Both are fixed in this release. If you are evaluating
+> or using Always Encrypted, upgrade directly from v0.8.x or earlier to
+> v0.10.0 — do not use v0.9.0. Non-AE features in v0.9.0 functioned
+> correctly, but upgrading is recommended regardless for the connection
+> string, performance, and bulk insert improvements in this release.
 
 This is a **correctness release**. Integration testing against a live SQL
 Server uncovered a large number of shipped-in-release wire-format bugs across
@@ -934,7 +940,8 @@ Initial release of the rust-mssql-driver project.
 - `mssql-derive` - Procedural macros
 - `mssql-testing` - Test infrastructure
 
-[Unreleased]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.6.0...v0.7.0
