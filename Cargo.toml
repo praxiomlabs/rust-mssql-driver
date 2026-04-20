@@ -30,7 +30,7 @@ mssql-derive = { version = "0.10.0", path = "crates/mssql-derive" }
 mssql-testing = { version = "0.10.0", path = "crates/mssql-testing" }
 
 # Async runtime
-tokio = { version = "1.48", features = ["net", "io-util", "sync", "time", "macros", "rt", "rt-multi-thread"] }
+tokio = { version = "1.52", features = ["net", "io-util", "sync", "time", "macros", "rt", "rt-multi-thread"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 tokio-rustls = "0.26"
 
