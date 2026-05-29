@@ -514,16 +514,18 @@ impl Connection {
 **Handling Multiple Result Sets:** Stored procedures returning multiple result sets (e.g., `sp_help`) are supported via sequential result set consumption:
 
 ```rust
-let mut results = client.query("EXEC sp_help 'Users'").await?;
+let mut results = client.query("EXEC sp_help 'Users'", &[]).await?;
 
-// First result set
-while let Some(row) = results.next().await? {
+// First result set (QueryStream is a synchronous iterator of Result<Row>)
+while let Some(row) = results.next() {
+    let _row = row?;
     // Process row
 }
 
-// Advance to next result set
-if results.next_result_set().await? {
-    while let Some(row) = results.next().await? {
+// Advance to the next result set
+if results.next_result().await? {
+    while let Some(row) = results.next() {
+        let _row = row?;
         // Process next result set
     }
 }
@@ -541,8 +543,9 @@ if results.next_result_set().await? {
 
 **Streaming (Default):**
 ```rust
-let mut rows = client.query("SELECT * FROM large_table").await?;
-while let Some(row) = rows.next().await? {
+let rows = client.query("SELECT * FROM large_table", &[]).await?;
+for row in rows {
+    let _row = row?;
     // Process row - memory usage stays constant
 }
 ```
@@ -550,22 +553,23 @@ while let Some(row) = rows.next().await? {
 **Buffered (Explicit):**
 ```rust
 let rows: Vec<Row> = client
-    .query("SELECT * FROM small_table")
+    .query("SELECT * FROM small_table", &[])
     .await?
-    .collect()
+    .collect_all()
     .await?;
 ```
 
 **Large Object Streaming:**
 ```rust
 let mut stream = client
-    .query("SELECT blob_column FROM documents WHERE id = @p1")
-    .bind(doc_id)
+    .query("SELECT blob_column FROM documents WHERE id = @p1", &[&doc_id])
     .await?;
 
-if let Some(row) = stream.next().await? {
-    let mut blob_reader = row.get_stream::<BlobReader>(0)?;
-    tokio::io::copy(&mut blob_reader, &mut file).await?;
+if let Some(row) = stream.next() {
+    let row = row?;
+    if let Some(mut blob_reader) = row.get_stream(0) {
+        tokio::io::copy(&mut blob_reader, &mut file).await?;
+    }
 }
 ```
 
@@ -922,12 +926,11 @@ Always Encrypted provides **client-side encryption** where keys never reach the 
 **Example:**
 ```rust
 // Automatic instrumentation when feature enabled
-let client = Client::connect_with_tracing(config, tracer).await?;
+// With the `otel` feature enabled, instrumentation is automatic.
+let client = Client::connect(config).await?;
 
-// Spans automatically created
-client.query("SELECT * FROM users WHERE id = @p1")
-    .bind(user_id)
-    .await?;
+// Spans are created automatically for each query
+client.query("SELECT * FROM users WHERE id = @p1", &[&user_id]).await?;
 ```
 
 ---
@@ -1415,23 +1418,15 @@ When a connection is returned to the pool:
 #### Usage Example
 
 ```rust
-// Automatic statement caching (default behavior)
+// Automatic statement caching (the only mode — there is no explicit prepare API)
 for user_id in user_ids {
     // First iteration: sp_prepare + sp_execute
     // Subsequent iterations: sp_execute only (cache hit)
-    let row = client.query("SELECT name FROM users WHERE id = @p1")
-        .bind(user_id)
-        .await?
-        .next()
+    let mut rows = client
+        .query("SELECT name FROM users WHERE id = @p1", &[&user_id])
         .await?;
+    let _row = rows.next();
 }
-
-// Explicit prepared statement (for fine-grained control)
-let stmt = client.prepare("SELECT name FROM users WHERE id = @p1").await?;
-for user_id in user_ids {
-    let row = stmt.query().bind(user_id).await?.next().await?;
-}
-// stmt dropped: sp_unprepare called automatically
 ```
 
 ---
@@ -1663,16 +1658,14 @@ impl std::fmt::Debug for SecretString {
 **Parameterized Queries (Required):**
 ```rust
 // GOOD - Parameterized
-client.query("SELECT * FROM users WHERE id = @p1")
-    .bind(user_id)
-    .await?;
+client.query("SELECT * FROM users WHERE id = @p1", &[&user_id]).await?;
 
 // BAD - String interpolation (no API support for this pattern)
-// client.query(format!("SELECT * FROM users WHERE id = {}", user_id))
+// client.query(&format!("SELECT * FROM users WHERE id = {}", user_id), &[])
 ```
 
 **Parameter Binding:**
-- All user values must be bound via `.bind()` method
+- All user values must be passed as parameters in the `&[...]` parameter slice
 - No API for raw SQL string execution with interpolation
 - Parameters sent via RPC protocol, never interpolated into SQL text
 
@@ -1830,7 +1823,8 @@ use tokio::runtime::Runtime;
 fn query_benchmark(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let client = rt.block_on(async {
-        Client::connect("Server=localhost;...").await.unwrap()
+        let config = Config::from_connection_string("Server=localhost;...").unwrap();
+        Client::connect(config).await.unwrap()
     });
     
     let mut group = c.benchmark_group("query");
@@ -1842,9 +1836,9 @@ fn query_benchmark(c: &mut Criterion) {
             |b, &rows| {
                 b.to_async(&rt).iter(|| async {
                     let sql = format!("SELECT TOP {} * FROM test_data", rows);
-                    let mut stream = client.query(&sql).await.unwrap();
+                    let mut stream = client.query(&sql, &[]).await.unwrap();
                     let mut count = 0;
-                    while let Some(_) = stream.next().await.unwrap() {
+                    while let Some(_) = stream.next() {
                         count += 1;
                     }
                     count
@@ -1893,10 +1887,12 @@ criterion_main!(benches);
 ///
 /// ```rust
 /// # async fn example() -> Result<(), mssql_client::Error> {
-/// let mut client = mssql_client::Client::connect("...").await?;
-/// 
-/// let mut rows = client.query("SELECT id, name FROM users").await?;
-/// while let Some(row) = rows.next().await? {
+/// # let config = mssql_client::Config::from_connection_string("Server=localhost")?;
+/// let mut client = mssql_client::Client::connect(config).await?;
+///
+/// let rows = client.query("SELECT id, name FROM users", &[]).await?;
+/// for row in rows {
+///     let row = row?;
 ///     let id: i32 = row.get(0)?;
 ///     let name: String = row.get(1)?;
 ///     println!("{}: {}", id, name);
@@ -2149,8 +2145,8 @@ let stream = client.query("SELECT @P1", &[&1i32]).await?;
 let row = stream.into_row().await?.unwrap();
 
 // This driver
-let mut stream = client.query("SELECT @p1").bind(1i32).await?;
-let row = stream.next().await?.unwrap();
+let mut stream = client.query("SELECT @p1", &[&1i32]).await?;
+let row = stream.next().unwrap()?;
 ```
 
 **Transactions:**
@@ -2162,7 +2158,7 @@ client.execute("COMMIT", &[]).await?;
 
 // This driver (type-safe)
 let tx = client.begin_transaction().await?;
-tx.execute("INSERT INTO ...").await?;
+tx.execute("INSERT INTO ...", &[]).await?;
 tx.commit().await?; // Returns Client<Ready>
 ```
 
@@ -2176,19 +2172,9 @@ let stream = client.query("SELECT @P1", &[&user_id]).await?;
 // First call: sp_prepare + sp_execute
 // Subsequent calls: sp_execute only (cache hit)
 for user_id in user_ids {
-    let row = client.query("SELECT @p1")
-        .bind(user_id)
-        .await?
-        .next()
-        .await?;
+    let mut rows = client.query("SELECT @p1", &[&user_id]).await?;
+    let _row = rows.next();
 }
-
-// Or explicit prepared statement for fine-grained control
-let stmt = client.prepare("SELECT @p1").await?;
-for user_id in user_ids {
-    let row = stmt.query().bind(user_id).await?.next().await?;
-}
-// sp_unprepare called automatically when stmt is dropped
 ```
 
 **Azure SQL Redirects:**
