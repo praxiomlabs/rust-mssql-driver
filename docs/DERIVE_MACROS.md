@@ -17,8 +17,9 @@ struct User {
 }
 
 let rows = client.query("SELECT id, name, email FROM users", &[]).await?;
-for row in rows.iter() {
-    let user = User::from_row(row)?;
+for row in rows {
+    let row = row?; // QueryStream yields Result<Row, Error>
+    let user = User::from_row(&row)?;
 }
 ```
 

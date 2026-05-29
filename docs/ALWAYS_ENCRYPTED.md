@@ -30,6 +30,7 @@ let mut client = Client::connect(config).await?;
 // 3. Query normally — decryption is transparent
 let rows = client.query("SELECT SSN, Name FROM Patients", &[]).await?;
 for row in rows {
+    let row = row?; // QueryStream yields Result<Row, Error>
     let ssn: String = row.get(0)?; // decrypted automatically
     println!("{ssn}");
 }
