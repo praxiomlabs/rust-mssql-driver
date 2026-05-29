@@ -9,7 +9,7 @@ This guide helps you migrate from [tiberius](https://github.com/prisma/tiberius)
 | Runtime | Any async runtime | Tokio only |
 | Type-state | No | Yes (compile-time safety) |
 | Connection pooling | External (bb8/deadpool) | Built-in |
-| TDS 8.0 strict | Limited | First-class |
+| TDS 8.0 strict | Not supported | First-class |
 | Prepared statements | Manual | Auto-cached LRU |
 | Azure redirects | Manual handling | Automatic |
 | Result streaming | Iterator | Stream with collect |
@@ -200,7 +200,7 @@ while let Some(row) = results.next().await {
 }
 
 // Advance to next result set
-if results.next_result_set().await? {
+if results.next_result().await? {
     while let Some(row) = results.next().await {
         let row = row?;
         // ...
@@ -307,13 +307,14 @@ conn.query("SELECT 1", &[]).await?;
 ### rust-mssql-driver Built-in Pool
 
 ```rust
-use mssql_pool::{Pool, PoolConfig};
+use mssql_driver_pool::Pool;
 
 let pool = Pool::builder()
+    .client_config(config)
     .max_connections(10)
     .min_connections(2)
-    .connect_timeout(Duration::from_secs(30))
-    .build(config)
+    .connection_timeout(Duration::from_secs(30))
+    .build()
     .await?;
 
 let mut conn = pool.get().await?;
@@ -386,13 +387,6 @@ for user_id in user_ids {
         &[&user_id]
     ).await?;
 }
-
-// Or explicit prepared statement for control
-let stmt = client.prepare("SELECT * FROM users WHERE id = @p1").await?;
-for user_id in user_ids {
-    let stream = stmt.query(&[&user_id]).await?;
-}
-// sp_unprepare called when stmt dropped
 ```
 
 ## Error Handling
@@ -467,7 +461,7 @@ tiberius = { version = "0.12", features = ["chrono", "rust_decimal"] }
 
 ```toml
 [dependencies]
-mssql-client = { version = "0.5", features = ["chrono", "decimal", "uuid"] }
+mssql-client = { version = "0.10", features = ["chrono", "decimal", "uuid"] }
 ```
 
 Available features:
@@ -511,7 +505,7 @@ let name: &str = row.get("name").unwrap();
 ```rust
 let name: String = row.get_by_name("name")?;  // Owned
 // Or borrow from the row:
-let name: &str = row.get_str(0)?;  // Borrowed from row's buffer
+let name: Option<Cow<'_, str>> = row.get_str(0);  // Borrowed from row's buffer
 ```
 
 ### 3. Missing `compat_write()`
@@ -563,7 +557,7 @@ let client = tx.commit().await?;  // Capture the returned client
 | `stream.into_first_result()` | `stream.collect_all()` |
 | `row.get(0).unwrap()` | `row.get(0)?` |
 | `@P1` | `@p1` |
-| `bb8::Pool` + `bb8_tiberius` | `mssql_pool::Pool` |
+| `bb8::Pool` + `bb8_tiberius` | `mssql_driver_pool::Pool` |
 | `execute("BEGIN TRANSACTION")` | `begin_transaction()` |
 | `execute("COMMIT")` | `commit()` → returns client |
 | Manual Azure redirect | Automatic |
