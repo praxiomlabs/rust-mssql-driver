@@ -36,9 +36,7 @@ values here cause confusion and were the root cause of the v0.5.1 incident.
 | `README.md` | MSRV badge (if MSRV bumped) | Update badge URL and label |
 | `STABILITY.md` | No current version refs; updates only when MSRV changes | MSRV section only |
 | `SECURITY.md` | § Supported Versions table | Add new row, mark old as EOL per policy |
-| `SECURITY.md` | § Audit History | Add any new audit entries |
-| `PRODUCTION_READINESS.md` | § Release Timeline | Add new row |
-| `docs/BENCHMARKS.md` | `--save-baseline vX.Y.Z` / `--baseline vX.Y.Z` | Update to new version |
+| `SECURITY.md` | § Audit History | Add any new audit entries || `docs/BENCHMARKS.md` | `--save-baseline vX.Y.Z` / `--baseline vX.Y.Z` | Update to new version |
 
 ### 3. **Historical** — Must NOT be updated
 
@@ -52,9 +50,7 @@ Updating them would rewrite history and destroy context.
 | `RELEASING.md` § Git Hygiene examples | Example commit/branch names use historical versions — keep |
 | `ARCHITECTURE.md` § Document History | Version history log — only append |
 | `STABILITY.md` § Example Deprecation | Illustrative `since` / removal versions — keep |
-| `docs/CONNECTION_RECOVERY.md` | "(v0.5.1)" / "(v0.5.0)" marking when features were added — keep |
-| `PRODUCTION_READINESS.md` | "v0.5.0+" marking when features were added — keep |
-| `docs/SQL_SERVER_COMPATIBILITY.md` | Support matrix entries for historical versions — keep |
+| `docs/CONNECTION_RECOVERY.md` | "(v0.5.1)" / "(v0.5.0)" marking when features were added — keep || `docs/SQL_SERVER_COMPATIBILITY.md` | Support matrix entries for historical versions — keep |
 | `docs/TEST_FAILURE_AUDIT.md` | Test audit history — keep |
 
 ---
@@ -102,10 +98,7 @@ these files consistently.
 | `CONTRIBUTING.md` | Prerequisites table |
 | `CONTRIBUTING.md` | "version-pinned tools compatible with Rust X.Y" |
 | `RELEASING.md` | Header `**MSRV:**` |
-| `RELEASING.md` | CI Parity table `cargo +X.Y check` example |
-| `PRODUCTION_READINESS.md` | "MSRV verification (X.Y)" and "MSRV X.Y documented" |
-| `PRODUCTION_READINESS.md` | `cargo +X.Y check` example |
-| `docs/BENCHMARKS.md` | Prerequisites "Rust X.Y+" |
+| `RELEASING.md` | CI Parity table `cargo +X.Y check` example || `docs/BENCHMARKS.md` | Prerequisites "Rust X.Y+" |
 | `docs/BENCHMARKS.md` | "Benchmarks run on Linux with Rust X.Y" footer |
 | `docs/BENCHMARKS.md` | Environment spec "Rust: X.Y.0" |
 | `xtask/src/main.rs` | `rustup run X.Y` example string in ci() output |

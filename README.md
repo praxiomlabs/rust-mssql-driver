@@ -315,7 +315,6 @@ See the [`examples/`](crates/mssql-client/examples/) directory:
 - [STABILITY.md](STABILITY.md) - API stability guarantees and versioning policy
 - [SECURITY.md](SECURITY.md) - Security policy, threat model, and best practices
 - [LIMITATIONS.md](LIMITATIONS.md) - Known limitations and explicit non-goals
-- [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) - Production readiness checklist
 
 ### Operational Docs
 
