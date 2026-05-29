@@ -26,7 +26,7 @@ This page compares `mssql-driver` with the other Rust options for SQL Server con
 | Azure SQL redirect | Yes | Yes | N/A | No |
 | Output parameters | Yes | Limited | Yes | No |
 | JSON type | Yes | No | Via ODBC driver | Via NVARCHAR |
-| `deny(unsafe_code)` | Yes (workspace-wide) | No (4 unsafe blocks) | No (372 unsafe) | No |
+| `deny(unsafe_code)` | Yes, with audited FFI exceptions | No (4 unsafe blocks) | No (372 unsafe) | No |
 | Fuzz testing | 11 targets | No | No | No |
 | Property testing | Yes (proptest) | No | No | No |
 | Compile-time query checking | No | No | No | Yes (limited) |
@@ -64,7 +64,7 @@ sqlx-oldapi's lack of Windows authentication was called a "blocker" by enterpris
 |---|---|---|---|---|
 | Crate structure | 9-crate workspace | Monolith | 2-crate workspace | 7-crate workspace |
 | `no_std` support | Yes (`tds-protocol`) | No | No | No |
-| Unsafe discipline | `deny(unsafe_code)` | 4 blocks | 372 blocks (FFI) | 0 in MSSQL code |
+| Unsafe discipline | deny baseline, audited FFI exceptions | 4 blocks | 372 blocks (FFI) | 0 in MSSQL code |
 | Error model | `thiserror`, `#[non_exhaustive]` | `thiserror` | `thiserror` + ODBC diags | SQLx errors |
 | Type-state connections | Yes (compile-time) | No | No | No |
 | TODO/FIXME in source | Zero (CI-enforced) | Several | 1 | Several (inherited) |
