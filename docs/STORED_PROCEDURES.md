@@ -8,18 +8,27 @@ This guide covers stored procedure support in `mssql-client`.
 
 Use `call_procedure()` for the common case of calling a procedure with positional input parameters:
 
-```rust,ignore
-let result = client.call_procedure("dbo.GetUser", &[&1i32]).await?;
+```rust,no_run
+use mssql_client::{Client, Config};
 
-// Check the return value (from the proc's RETURN statement)
-assert_eq!(result.return_value, 0);
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string("Server=localhost;Database=db;User Id=sa;Password=Password123")?;
+    let mut client = Client::connect(config).await?;
 
-// Access result sets
-for mut rs in result.result_sets {
-    while let Some(row) = rs.next_row() {
-        let name: String = row.get_by_name("name")?;
-        println!("User: {name}");
+    let result = client.call_procedure("dbo.GetUser", &[&1i32]).await?;
+
+    // Check the return value (from the proc's RETURN statement)
+    assert_eq!(result.return_value, 0);
+
+    // Access result sets
+    for mut rs in result.result_sets {
+        while let Some(row) = rs.next_row() {
+            let name: String = row?.get_by_name("name")?;
+            println!("User: {name}");
+        }
     }
+    Ok(())
 }
 ```
 
@@ -27,16 +36,26 @@ for mut rs in result.result_sets {
 
 Use `procedure()` when you need named parameters or output parameters:
 
-```rust,ignore
-let result = client.procedure("dbo.CalculateSum")?
-    .input("@a", &10i32)
-    .input("@b", &20i32)
-    .output_int("@result")
-    .execute().await?;
+```rust,no_run
+use mssql_client::{Client, Config};
 
-// Access output parameter (case-insensitive, @-prefix tolerant)
-let output = result.get_output("@result").expect("output param");
-// output.value is a SqlValue::Int(30)
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string("Server=localhost;Database=db;User Id=sa;Password=Password123")?;
+    let mut client = Client::connect(config).await?;
+
+    let result = client.procedure("dbo.CalculateSum")?
+        .input("@a", &10i32)
+        .input("@b", &20i32)
+        .output_int("@result")
+        .execute().await?;
+
+    // Access output parameter (case-insensitive, @-prefix tolerant)
+    let output = result.get_output("@result").expect("output param");
+    // output.value is a SqlValue::Int(30)
+    let _ = output;
+    Ok(())
+}
 ```
 
 ## API Reference
@@ -88,20 +107,30 @@ The builder supports chained calls:
 
 Both `call_procedure()` and `procedure()` work in transactions:
 
-```rust,ignore
-let mut tx = client.begin_transaction().await?;
+```rust,no_run
+use mssql_client::{Client, Config};
 
-let result = tx.call_procedure("dbo.InsertOrder", &[&customer_id, &total]).await?;
-assert_eq!(result.return_value, 0);
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string("Server=localhost;Database=db;User Id=sa;Password=Password123")?;
+    let client = Client::connect(config).await?;
+    let mut tx = client.begin_transaction().await?;
 
-let client = tx.commit().await?;
+    let customer_id = 1i32;
+    let total = 99i32;
+    let result = tx.call_procedure("dbo.InsertOrder", &[&customer_id, &total]).await?;
+    assert_eq!(result.return_value, 0);
+
+    let _client = tx.commit().await?;
+    Ok(())
+}
 ```
 
 ## Output Parameter Types
 
 Output parameters are declared with a type that tells SQL Server what type to return. The server fills in the value and sends it back as a `ReturnValue` token.
 
-```rust,ignore
+```text
 // Common output types
 builder.output_int("@count")                   // INT
 builder.output_bigint("@total")                // BIGINT
@@ -129,14 +158,23 @@ Parameter values are sent as typed TDS RPC parameters and are never interpolated
 
 ## Error Handling
 
-```rust,ignore
-// Nonexistent procedure
-let result = client.call_procedure("dbo.NoSuchProc", &[]).await;
-assert!(result.is_err()); // Server error: "Could not find stored procedure"
+```rust,no_run
+use mssql_client::{Client, Config};
 
-// Invalid procedure name (caught before any network call)
-let result = client.procedure("invalid;name");
-assert!(result.is_err()); // InvalidIdentifier error
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string("Server=localhost;Database=db;User Id=sa;Password=Password123")?;
+    let mut client = Client::connect(config).await?;
+
+    // Nonexistent procedure
+    let result = client.call_procedure("dbo.NoSuchProc", &[]).await;
+    assert!(result.is_err()); // Server error: "Could not find stored procedure"
+
+    // Invalid procedure name (caught before any network call)
+    let result = client.procedure("invalid;name");
+    assert!(result.is_err()); // InvalidIdentifier error
+    Ok(())
+}
 ```
 
 ## How It Works

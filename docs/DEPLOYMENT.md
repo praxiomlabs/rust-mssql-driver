@@ -19,17 +19,25 @@ This guide covers best practices for deploying rust-mssql-driver in production e
 
 ### Connection String Best Practices
 
-```rust
-// Production connection string
-let conn_str = "Server=db.example.com,1433;\
-    Database=production;\
-    User Id=app_user;\
-    Password=<secret>;\
-    Encrypt=strict;\
-    TrustServerCertificate=false;\
-    Connect Timeout=30;\
-    Command Timeout=60;\
-    Application Name=MyApp-v1.2.3";
+```rust,no_run
+use mssql_client::Config;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Production connection string
+    let conn_str = "Server=db.example.com,1433;\
+        Database=production;\
+        User Id=app_user;\
+        Password=secret;\
+        Encrypt=strict;\
+        TrustServerCertificate=false;\
+        Connect Timeout=30;\
+        Command Timeout=60;\
+        Application Name=MyApp-v1.2.3";
+    let config = Config::from_connection_string(conn_str)?;
+    let _ = config;
+    Ok(())
+}
 ```
 
 ### Required Settings for Production
@@ -44,7 +52,8 @@ let conn_str = "Server=db.example.com,1433;\
 
 ### Environment-Specific Configuration
 
-```rust
+```rust,no_run
+use mssql_client::{Config, Error};
 use std::env;
 
 fn get_config() -> Result<Config, Error> {
@@ -82,33 +91,43 @@ fn get_config() -> Result<Config, Error> {
 
 ### Recommended Configuration
 
-```rust
+```rust,no_run
+use mssql_client::Config;
 use mssql_driver_pool::{Pool, PoolConfig};
 use std::time::Duration;
 
-let pool = Pool::builder()
-    .client_config(config)
-    // Size based on expected concurrency
-    .min_connections(2)                       // Minimum warm connections
-    .max_connections(20)                      // Maximum connections
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
 
-    // Timeouts
-    .acquire_timeout(Duration::from_secs(30)) // Max wait for connection
-    .idle_timeout(Duration::from_secs(600))   // Close idle connections after 10 min
-    .max_lifetime(Duration::from_secs(3600))  // Recycle connections after 1 hour
+    // Settings without a builder method are set via PoolConfig.
+    let pool_config = PoolConfig::new()
+        .max_lifetime(Duration::from_secs(3600)) // Recycle connections after 1 hour
+        .test_on_checkout(true); // Verify before use
 
-    // Health checking
-    .test_on_borrow(true)                     // Verify before use
-
-    .build()
-    .await?;
+    let pool = Pool::builder()
+        .client_config(config)
+        .pool_config(pool_config)
+        // Size based on expected concurrency
+        .min_connections(2) // Minimum warm connections
+        .max_connections(20) // Maximum connections
+        // Timeouts
+        .connection_timeout(Duration::from_secs(30)) // Max wait for connection
+        .idle_timeout(Duration::from_secs(600)) // Close idle connections after 10 min
+        .build()
+        .await?;
+    let _ = pool;
+    Ok(())
+}
 ```
 
 ### Pool Sizing Formula
 
 For web applications:
 
-```
+```text
 max_connections = (average_concurrent_requests × average_query_time_ms) / 1000 + buffer
 
 Example:
@@ -121,23 +140,34 @@ max_connections = (100 × 50) / 1000 + 10 = 15 connections
 
 ### Avoiding Pool Exhaustion
 
-```rust
-// Always use timeouts to prevent pool exhaustion
-match tokio::time::timeout(
-    Duration::from_secs(5),
-    pool.get()
-).await {
-    Ok(Ok(conn)) => {
-        // Use connection
+```rust,no_run
+use mssql_client::Config;
+use mssql_driver_pool::Pool;
+use std::time::Duration;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let pool = Pool::builder().client_config(config).build().await?;
+
+    // Always use timeouts to prevent pool exhaustion
+    match tokio::time::timeout(Duration::from_secs(5), pool.get()).await {
+        Ok(Ok(conn)) => {
+            // Use connection
+            let _ = conn;
+        }
+        Ok(Err(e)) => {
+            // Pool error (e.g., all connections unhealthy)
+            eprintln!("Pool error: {}", e);
+        }
+        Err(_) => {
+            // Timeout waiting for connection
+            eprintln!("Connection pool timeout - consider increasing pool size");
+        }
     }
-    Ok(Err(e)) => {
-        // Pool error (e.g., all connections unhealthy)
-        tracing::error!("Pool error: {}", e);
-    }
-    Err(_) => {
-        // Timeout waiting for connection
-        tracing::warn!("Connection pool timeout - consider increasing pool size");
-    }
+    Ok(())
 }
 ```
 
@@ -147,11 +177,14 @@ match tokio::time::timeout(
 
 ### Error Categories
 
-```rust
+```rust,no_run
 use mssql_client::Error;
+use mssql_driver_pool::Pool;
+use std::future::Future;
+use std::time::Duration;
 
 async fn execute_with_retry<T, F, Fut>(
-    pool: &Pool,
+    _pool: &Pool,
     operation: F,
 ) -> Result<T, Error>
 where
@@ -167,7 +200,7 @@ where
             Err(e) if is_transient(&e) && attempts < max_attempts => {
                 attempts += 1;
                 let delay = Duration::from_millis(100 * 2u64.pow(attempts));
-                tracing::warn!("Transient error, retrying in {:?}: {}", delay, e);
+                eprintln!("Transient error, retrying in {:?}: {}", delay, e);
                 tokio::time::sleep(delay).await;
             }
             Err(e) => return Err(e),
@@ -202,7 +235,7 @@ fn is_transient(error: &Error) -> bool {
 
 ### Graceful Degradation
 
-```rust
+```text
 async fn query_with_fallback(
     pool: &Pool,
     sql: &str,
@@ -234,7 +267,7 @@ async fn query_with_fallback(
 mssql-client = { version = "0.10", features = ["otel"] }
 ```
 
-```rust
+```text
 use opentelemetry::global;
 use opentelemetry_sdk::trace::TracerProvider;
 
@@ -254,7 +287,7 @@ fn init_tracing() {
 
 ### Logging Configuration
 
-```rust
+```text
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 fn init_logging() {
@@ -284,7 +317,7 @@ fn init_logging() {
 
 ### TLS Configuration
 
-```rust
+```text
 // Always use encryption in production
 let config = Config::builder()
     .host("db.example.com")
@@ -295,7 +328,7 @@ let config = Config::builder()
 
 ### Credential Management
 
-```rust
+```text
 // Never log passwords
 let password = env::var("DB_PASSWORD")?;
 
@@ -334,33 +367,48 @@ GRANT SELECT ON SCHEMA::dbo TO app_readonly;
 
 ### Azure SQL Database
 
-```rust
-// Azure SQL handles failover automatically
-// Connection string automatically follows redirects
-let conn_str = "Server=your-server.database.windows.net;\
-    Database=your-db;\
-    User Id=user;\
-    Password=pass;\
-    Encrypt=strict";
+```rust,no_run
+use mssql_client::Config;
 
-let config = Config::from_connection_string(conn_str)?;
-// Driver handles Azure SQL Gateway redirects automatically
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Azure SQL handles failover automatically
+    // Connection string automatically follows redirects
+    let conn_str = "Server=your-server.database.windows.net;\
+        Database=your-db;\
+        User Id=user;\
+        Password=pass;\
+        Encrypt=strict";
+
+    let config = Config::from_connection_string(conn_str)?;
+    // Driver handles Azure SQL Gateway redirects automatically
+    let _ = config;
+    Ok(())
+}
 ```
 
 ### On-Premises Always On
 
-```rust
-// Connect to availability group listener
-let conn_str = "Server=ag-listener.example.com;\
-    Database=your-db;\
-    User Id=user;\
-    Password=pass;\
-    ApplicationIntent=ReadOnly";  // For read replicas
+```rust,no_run
+use mssql_client::Config;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Connect to availability group listener
+    let conn_str = "Server=ag-listener.example.com;\
+        Database=your-db;\
+        User Id=user;\
+        Password=pass;\
+        ApplicationIntent=ReadOnly"; // For read replicas
+    let config = Config::from_connection_string(conn_str)?;
+    let _ = config;
+    Ok(())
+}
 ```
 
 ### Connection Resilience
 
-```rust
+```text
 // Pool automatically handles connection failures
 let pool = Pool::builder()
     .client_config(config)
@@ -383,49 +431,86 @@ let result = retry_with_backoff(|| async {
 
 ### Query Optimization
 
-```rust
-// Use parameterized queries (enables plan caching)
-// GOOD
-client.query(
-    "SELECT * FROM users WHERE id = @p1",
-    &[&user_id]
-).await?;
+```rust,no_run
+use mssql_client::{Client, Config};
 
-// BAD (new plan for each query)
-client.query(
-    &format!("SELECT * FROM users WHERE id = {}", user_id),
-    &[]
-).await?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
+    let user_id = 1i32;
+
+    // Use parameterized queries (enables plan caching)
+    // GOOD
+    client.query(
+        "SELECT * FROM users WHERE id = @p1",
+        &[&user_id],
+    ).await?;
+
+    // BAD (new plan for each query)
+    client.query(
+        &format!("SELECT * FROM users WHERE id = {}", user_id),
+        &[],
+    ).await?;
+    Ok(())
+}
 ```
 
 ### Batch Operations
 
-```rust
-// Batch multiple inserts in a transaction
-let mut tx = client.begin_transaction().await?;
+```rust,no_run
+use mssql_client::{Client, Config};
 
-for chunk in records.chunks(1000) {
-    for record in chunk {
-        tx.execute(
-            "INSERT INTO table (a, b) VALUES (@p1, @p2)",
-            &[&record.a, &record.b]
-        ).await?;
+struct Record { a: i32, b: i32 }
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
+    let records: Vec<Record> = Vec::new();
+
+    // Batch multiple inserts in a transaction
+    let mut tx = client.begin_transaction().await?;
+
+    for chunk in records.chunks(1000) {
+        for record in chunk {
+            tx.execute(
+                "INSERT INTO table (a, b) VALUES (@p1, @p2)",
+                &[&record.a, &record.b],
+            ).await?;
+        }
     }
-}
 
-tx.commit().await?;
+    tx.commit().await?;
+    Ok(())
+}
 ```
 
 ### Memory Management
 
-```rust
-// For large result sets, process rows as they stream
-let rows = client.query("SELECT * FROM large_table", &[]).await?;
+```rust,no_run
+use mssql_client::{Client, Config};
 
-// Process one row at a time (doesn't load all into memory)
-for result in rows {
-    let row = result?;
-    process_row(&row)?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
+
+    // For large result sets, process rows as they stream
+    let rows = client.query("SELECT * FROM large_table", &[]).await?;
+
+    // Process one row at a time (doesn't load all into memory)
+    for result in rows {
+        let row = result?;
+        let _ = row;
+    }
+    Ok(())
 }
 ```
 
@@ -436,7 +521,7 @@ for result in rows {
 ### Common Issues
 
 #### Connection Timeout
-```
+```text
 Error: Connection timeout
 ```
 **Causes:**
@@ -450,7 +535,7 @@ Error: Connection timeout
 3. Check firewall rules
 
 #### TLS Handshake Failure
-```
+```text
 Error: TLS handshake failed
 ```
 **Causes:**
@@ -464,7 +549,7 @@ Error: TLS handshake failed
 3. For development only: `TrustServerCertificate=true`
 
 #### Pool Exhaustion
-```
+```text
 Error: Connection pool timeout
 ```
 **Causes:**

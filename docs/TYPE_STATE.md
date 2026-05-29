@@ -6,7 +6,7 @@ This document explains the type-state pattern used in rust-mssql-driver and how 
 
 Type-state is a design pattern where the compiler enforces valid state transitions at compile time. Instead of runtime checks, invalid operations become compile-time errors.
 
-```rust
+```text
 // Traditional approach - runtime check
 client.query(...)?;  // May fail if not connected
 
@@ -19,7 +19,7 @@ connected_client.query(...)?;  // Guaranteed to be connected
 
 rust-mssql-driver uses five connection states:
 
-```
+```text
 ┌──────────────┐
 │ Disconnected │
 └──────┬───────┘
@@ -58,43 +58,66 @@ Back to Ready (or InTransaction if in tx)
 
 ### Connecting
 
-```rust
-use mssql_client::{Client, Config};
+```rust,no_run
+use mssql_client::{Client, Config, Ready};
 
-// Client::connect returns Client<Ready>
-let mut client: Client<Ready> = Client::connect(config).await?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string("Server=localhost;Database=db;User Id=sa;Password=Password123")?;
+    // Client::connect returns Client<Ready>
+    let _client: Client<Ready> = Client::connect(config).await?;
+    Ok(())
+}
 ```
 
 ### Querying
 
-```rust
-// query() is only available on Client<Ready>
-let rows = client.query("SELECT * FROM users", &[]).await?;
+```rust,no_run
+use mssql_client::{Client, Config};
 
-for result in rows {
-    let row = result?;
-    // Process row
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string("Server=localhost;Database=db;User Id=sa;Password=Password123")?;
+    let mut client = Client::connect(config).await?;
+
+    // query() is only available on Client<Ready>
+    let rows = client.query("SELECT * FROM users", &[]).await?;
+
+    for result in rows {
+        let _row = result?;
+        // Process row
+    }
+    Ok(())
 }
 ```
 
 ### Transactions
 
-```rust
-// begin_transaction() transforms Client<Ready> into Client<InTransaction>
-let mut tx: Client<InTransaction> = client.begin_transaction().await?;
+```rust,no_run
+use mssql_client::{Client, Config, InTransaction, Ready};
 
-// Execute within transaction
-tx.execute("INSERT INTO users (name) VALUES (@p1)", &[&"Alice"]).await?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string("Server=localhost;Database=db;User Id=sa;Password=Password123")?;
+    let client = Client::connect(config).await?;
 
-// commit() transforms Client<InTransaction> back to Client<Ready>
-let mut client: Client<Ready> = tx.commit().await?;
+    // begin_transaction() transforms Client<Ready> into Client<InTransaction>
+    let mut tx: Client<InTransaction> = client.begin_transaction().await?;
+
+    // Execute within transaction
+    tx.execute("INSERT INTO users (name) VALUES (@p1)", &[&"Alice"]).await?;
+
+    // commit() transforms Client<InTransaction> back to Client<Ready>
+    let _client: Client<Ready> = tx.commit().await?;
+    Ok(())
+}
 ```
 
 ## Compile-Time Safety
 
 ### Prevents Use-Before-Connect
 
-```rust
+```text
 // This won't compile - can't query without connecting
 let client = Client::<Disconnected>::new();
 client.query("SELECT 1", &[]).await?;  // ERROR: no method `query` on Client<Disconnected>
@@ -102,7 +125,7 @@ client.query("SELECT 1", &[]).await?;  // ERROR: no method `query` on Client<Dis
 
 ### Prevents Nested Transactions
 
-```rust
+```text
 let mut tx = client.begin_transaction().await?;
 
 // This won't compile - can't begin transaction when already in one
@@ -111,7 +134,7 @@ tx.begin_transaction().await?;  // ERROR: no method `begin_transaction` on Clien
 
 ### Enforces Transaction Completion
 
-```rust
+```text
 {
     let tx = client.begin_transaction().await?;
     tx.execute("INSERT ...", &[]).await?;
@@ -124,25 +147,32 @@ tx.begin_transaction().await?;  // ERROR: no method `begin_transaction` on Clien
 
 ### Basic Transaction
 
-```rust
-let mut client = Client::connect(config).await?;
+```rust,no_run
+use mssql_client::{Client, Config};
 
-// Begin transaction - client is moved into tx
-let mut tx = client.begin_transaction().await?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string("Server=localhost;Database=db;User Id=sa;Password=Password123")?;
+    let client = Client::connect(config).await?;
 
-tx.execute("UPDATE accounts SET balance = balance - 100 WHERE id = 1", &[]).await?;
-tx.execute("UPDATE accounts SET balance = balance + 100 WHERE id = 2", &[]).await?;
+    // Begin transaction - client is moved into tx
+    let mut tx = client.begin_transaction().await?;
 
-// Commit returns the client
-let mut client = tx.commit().await?;
+    tx.execute("UPDATE accounts SET balance = balance - 100 WHERE id = 1", &[]).await?;
+    tx.execute("UPDATE accounts SET balance = balance + 100 WHERE id = 2", &[]).await?;
 
-// Can use client again
-let rows = client.query("SELECT * FROM accounts", &[]).await?;
+    // Commit returns the client
+    let mut client = tx.commit().await?;
+
+    // Can use client again
+    let _rows = client.query("SELECT * FROM accounts", &[]).await?;
+    Ok(())
+}
 ```
 
 ### Transaction with Rollback
 
-```rust
+```text
 let mut tx = client.begin_transaction().await?;
 
 match perform_operations(&mut tx).await {
@@ -159,7 +189,7 @@ match perform_operations(&mut tx).await {
 
 ### Savepoints
 
-```rust
+```text
 let mut tx = client.begin_transaction().await?;
 
 tx.execute("INSERT INTO orders ...", &[]).await?;
@@ -179,7 +209,7 @@ tx.commit().await?;
 
 ### Isolation Levels
 
-```rust
+```text
 use mssql_client::IsolationLevel;
 
 let mut tx = client
@@ -194,7 +224,7 @@ let mut tx = client
 
 Write functions that work with any connection state:
 
-```rust
+```text
 use mssql_client::{Client, ConnectionState, Ready, InTransaction};
 
 // Function that works with any queryable state
@@ -215,7 +245,7 @@ get_user_count(&mut tx).await?;
 
 When writing helper functions, be explicit about state transitions:
 
-```rust
+```text
 // This function consumes a Ready client and returns it
 async fn perform_queries(
     client: Client<Ready>
@@ -232,7 +262,7 @@ let (users, client) = perform_queries(client).await?;
 
 ### Transaction Wrapper Pattern
 
-```rust
+```text
 async fn in_transaction<F, T>(
     client: Client<Ready>,
     f: F,
@@ -267,7 +297,7 @@ let (result, client) = in_transaction(client, |tx| {
 
 ### Forgetting to Use Returned Client
 
-```rust
+```text
 // WRONG - client is consumed
 let tx = client.begin_transaction().await?;
 tx.commit().await?;  // Returns new client, but we ignore it
@@ -281,7 +311,7 @@ let client = tx.commit().await?;  // Capture returned client
 
 ### Trying to Reuse Moved Client
 
-```rust
+```text
 // WRONG
 let tx = client.begin_transaction().await?;
 client.query(...);  // ERROR: client was moved into tx
@@ -293,7 +323,7 @@ tx.query(...).await?;  // Use tx, not client
 
 ### Mixing States
 
-```rust
+```text
 // WRONG - can't store different states in same variable
 let client = Client::connect(config).await?;
 let client = client.begin_transaction().await?;  // Now it's Client<InTransaction>

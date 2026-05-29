@@ -18,7 +18,7 @@ The driver supports multiple timeout types:
 
 Set timeouts via connection string keywords:
 
-```
+```text
 Server=localhost;Connect Timeout=15;Command Timeout=60
 ```
 
@@ -26,7 +26,7 @@ Server=localhost;Connect Timeout=15;Command Timeout=60
 
 Time limit for establishing the TCP connection to SQL Server.
 
-```rust
+```text
 // Connection string
 "Server=localhost;Connect Timeout=15"
 
@@ -46,7 +46,7 @@ Config::builder()
 
 Default timeout for query and execute operations.
 
-```rust
+```text
 // Connection string
 "Server=localhost;Command Timeout=60"
 
@@ -68,7 +68,7 @@ Config::builder()
 
 Configure pool-level timeouts:
 
-```rust
+```text
 use mssql_driver_pool::{Pool, PoolConfig};
 use std::time::Duration;
 
@@ -130,25 +130,33 @@ Maximum time a connection can be reused before being closed.
 
 For fine-grained control, use Tokio timeouts:
 
-```rust
+```rust,no_run
+use mssql_client::{Client, Config};
 use tokio::time::{timeout, Duration};
 
-// Per-query timeout (overrides command timeout)
-let result = timeout(
-    Duration::from_secs(5),
-    client.query("SELECT * FROM users", &[])
-).await;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string("Server=localhost;Database=db;User Id=sa;Password=Password123")?;
+    let mut client = Client::connect(config).await?;
 
-match result {
-    Ok(Ok(rows)) => { /* Success */ }
-    Ok(Err(db_error)) => { /* Database error */ }
-    Err(_) => { /* Timeout exceeded */ }
+    // Per-query timeout (overrides command timeout)
+    let result = timeout(
+        Duration::from_secs(5),
+        client.query("SELECT * FROM users", &[]),
+    ).await;
+
+    match result {
+        Ok(Ok(_rows)) => { /* Success */ }
+        Ok(Err(_db_error)) => { /* Database error */ }
+        Err(_) => { /* Timeout exceeded */ }
+    }
+    Ok(())
 }
 ```
 
 ### Timeout Wrapper Function
 
-```rust
+```text
 async fn query_with_timeout<T, F, Fut>(
     timeout_secs: u64,
     operation: F,
@@ -178,7 +186,7 @@ let rows = query_with_timeout(10, || async {
 
 Fast failure for responsive UX:
 
-```rust
+```text
 let config = Config::from_connection_string(
     "Server=db;Connect Timeout=5;Command Timeout=10"
 )?;
@@ -194,7 +202,7 @@ let pool = Pool::builder()
 
 Longer timeouts for batch operations:
 
-```rust
+```text
 let config = Config::from_connection_string(
     "Server=db;Connect Timeout=30;Command Timeout=300"
 )?;
@@ -211,7 +219,7 @@ let pool = Pool::builder()
 
 Account for cold starts and throttling:
 
-```rust
+```text
 let config = Config::from_connection_string(
     "Server=x.database.windows.net;Connect Timeout=60;Command Timeout=60"
 )?;
@@ -229,7 +237,7 @@ let pool = Pool::builder()
 
 Long-running analytical queries:
 
-```rust
+```text
 let config = Config::from_connection_string(
     "Server=reporting-db;Connect Timeout=15;Command Timeout=3600"
 )?;
@@ -248,7 +256,7 @@ let result = timeout(
 
 ## Timeout Error Handling
 
-```rust
+```text
 use mssql_client::Error;
 
 match client.query(sql, params).await {
@@ -286,23 +294,28 @@ match client.query(sql, params).await {
 
 Never run production workloads without timeouts:
 
-```rust
-// BAD: No timeouts - query can hang forever
-let config = Config::from_connection_string(
-    "Server=db;Command Timeout=0"
-)?;
+```rust,no_run
+use mssql_client::Config;
 
-// GOOD: Explicit timeouts
-let config = Config::from_connection_string(
-    "Server=db;Connect Timeout=15;Command Timeout=30"
-)?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // BAD: No timeouts - query can hang forever
+    let _config = Config::from_connection_string(
+        "Server=db;Command Timeout=0"
+    )?;
+
+    // GOOD: Explicit timeouts
+    let _config = Config::from_connection_string(
+        "Server=db;Connect Timeout=15;Command Timeout=30"
+    )?;
+    Ok(())
+}
 ```
 
 ### 2. Timeout Hierarchy
 
 Set timeouts at multiple levels for defense in depth:
 
-```
+```text
 Application Timeout (shortest)
     └── Command Timeout (medium)
         └── Pool Acquire Timeout (longest or equal)
@@ -313,7 +326,7 @@ Application Timeout (shortest)
 
 Track timeout occurrences:
 
-```rust
+```text
 static TIMEOUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 async fn query_with_metrics(client: &mut Client, sql: &str) -> Result<Vec<Row>, Error> {
@@ -332,7 +345,7 @@ async fn query_with_metrics(client: &mut Client, sql: &str) -> Result<Vec<Row>, 
 
 Different queries need different timeouts:
 
-```rust
+```text
 async fn lookup_user(client: &mut Client, id: i32) -> Result<User, Error> {
     // Fast indexed lookup
     timeout(Duration::from_secs(2), async {

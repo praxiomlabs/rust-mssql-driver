@@ -1,0 +1,25 @@
+[package]
+name = "doc-tests"
+description = "Compile-tests for the project's Markdown documentation examples (not published)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# Referenced only from Markdown doctests via #[doc = include_str!]. Features are
+# the cross-platform set so the doc examples compile on every CI OS. OS-specific
+# APIs (sspi-auth, integrated-auth, filestream) are demonstrated in `text` blocks.
+mssql-client = { workspace = true, features = ["json", "otel", "always-encrypted", "zeroize"] }
+mssql-driver-pool = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+bytes = { workspace = true }
+
+[package.metadata.cargo-machete]
+# All deps are used only from Markdown doctests, which cargo-machete cannot see.
+ignored = ["mssql-client", "mssql-driver-pool", "tokio", "bytes"]
+
+[lints]
+workspace = true

@@ -39,24 +39,33 @@ The connection pool provides the primary recovery mechanism:
 
 ### Health Checks
 
-```rust
+```rust,no_run
+use mssql_client::Config;
 use mssql_driver_pool::{Pool, PoolConfig};
 use std::time::Duration;
 
-let pool_config = PoolConfig::new()
-    // How often to check idle connections
-    .idle_timeout(Duration::from_secs(300))
-    // Maximum connection lifetime (forces refresh)
-    .max_lifetime(Duration::from_secs(3600))
-    // Health check query executed before returning connection
-    .health_check_query("SELECT 1");
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let pool_config = PoolConfig::new()
+        // How often to check idle connections
+        .idle_timeout(Duration::from_secs(300))
+        // Maximum connection lifetime (forces refresh)
+        .max_lifetime(Duration::from_secs(3600))
+        // Health check query executed before returning connection
+        .health_check_query("SELECT 1");
 
-let pool = Pool::new(config, pool_config).await?;
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let pool = Pool::new(pool_config, config).await?;
+    let _ = pool;
+    Ok(())
+}
 ```
 
 ### How Pool Recovery Works
 
-```
+```text
 Connection Requested
         │
         ▼
@@ -85,7 +94,7 @@ New       Release                    Conn
 
 When a connection is returned to the pool:
 
-```rust
+```text
 // Automatically executed by pool:
 // 1. Reset session state
 sp_reset_connection
@@ -103,7 +112,7 @@ For transient errors during query execution, the retry policy handles recovery:
 
 ### Transient Error Detection
 
-```rust
+```text
 impl Error {
     /// Check if this error is transient and should be retried.
     pub fn is_transient(&self) -> bool {
@@ -132,17 +141,22 @@ impl Error {
 
 ### Retry Configuration
 
-```rust
+```rust,no_run
 use mssql_client::{Config, RetryPolicy};
 use std::time::Duration;
 
-let config = Config::new()
-    .host("server")
-    .retry(RetryPolicy::new()
-        .max_retries(3)
-        .initial_backoff(Duration::from_millis(100))
-        .max_backoff(Duration::from_secs(30))
-        .jitter(true));
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::new()
+        .host("server")
+        .retry(RetryPolicy::new()
+            .max_retries(3)
+            .initial_backoff(Duration::from_millis(100))
+            .max_backoff(Duration::from_secs(30))
+            .jitter(true));
+    let _ = config;
+    Ok(())
+}
 ```
 
 ## Azure SQL-Specific Recovery
@@ -153,11 +167,18 @@ Azure SQL has additional recovery scenarios:
 
 Azure SQL Gateway may redirect connections to the actual database server:
 
-```rust
-// Automatic redirect handling (default)
-let config = Config::new()
-    .host("myserver.database.windows.net")
-    .max_redirects(2);  // Allow up to 2 redirect hops
+```rust,no_run
+use mssql_client::Config;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Automatic redirect handling (default)
+    let config = Config::new()
+        .host("myserver.database.windows.net")
+        .max_redirects(2); // Allow up to 2 redirect hops
+    let _ = config;
+    Ok(())
+}
 ```
 
 ### Failover Recovery
@@ -169,15 +190,23 @@ During Azure SQL failover:
 3. New connection established to replica
 4. Application continues with minimal disruption
 
-```rust
-// Recommended Azure SQL configuration
-let config = Config::new()
-    .host("myserver.database.windows.net")
-    .retry(RetryPolicy::new()
-        .max_retries(5)
-        .initial_backoff(Duration::from_millis(100))
-        .max_backoff(Duration::from_secs(60))
-        .jitter(true));
+```rust,no_run
+use mssql_client::{Config, RetryPolicy};
+use std::time::Duration;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Recommended Azure SQL configuration
+    let config = Config::new()
+        .host("myserver.database.windows.net")
+        .retry(RetryPolicy::new()
+            .max_retries(5)
+            .initial_backoff(Duration::from_millis(100))
+            .max_backoff(Duration::from_secs(60))
+            .jitter(true));
+    let _ = config;
+    Ok(())
+}
 ```
 
 ## Application-Level Recovery
@@ -186,7 +215,7 @@ For scenarios not handled automatically, implement application-level recovery:
 
 ### Pattern: Retry with Fresh Connection
 
-```rust
+```text
 use mssql_driver_pool::Pool;
 use std::time::Duration;
 
@@ -229,7 +258,7 @@ where
 
 ### Pattern: Transaction Retry
 
-```rust
+```text
 async fn transaction_with_retry<F, T>(
     pool: &Pool,
     operation: F,
@@ -276,7 +305,7 @@ fn is_retriable_in_transaction(e: &Error) -> bool {
 
 The driver does **not** support automatic reconnection during a long network outage:
 
-```
+```text
 Client ─────────X───────── SQL Server
                 │
            Network Partition
@@ -294,16 +323,26 @@ Application must handle reconnection.
 
 Transactions cannot be recovered after connection loss:
 
-```rust
-let mut client = Client::connect(config).await?;
-let mut tx = client.begin_transaction().await?;
+```rust,no_run
+use mssql_client::{Client, Config};
 
-tx.execute("INSERT INTO orders ...", &[]).await?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
+    let mut tx = client.begin_transaction().await?;
 
-// Network interruption here ─ transaction is LOST
-// Cannot recover to complete or rollback
+    tx.execute("INSERT INTO orders DEFAULT VALUES", &[]).await?;
 
-// After reconnection, previous transaction state is gone
+    // Network interruption here — transaction is LOST
+    // Cannot recover to complete or rollback
+
+    // After reconnection, previous transaction state is gone
+    tx.commit().await?;
+    Ok(())
+}
 ```
 
 **Reason**: Transaction state is held on the server. Connection loss means server-side rollback.
@@ -329,31 +368,52 @@ Some connection state is **not** preserved after recovery:
 
 Always use the pool instead of direct connections:
 
-```rust
-// Good: Pool handles recovery
-let pool = Pool::new(config, pool_config).await?;
-let mut conn = pool.get().await?;
+```rust,no_run
+use mssql_client::{Client, Config};
+use mssql_driver_pool::{Pool, PoolConfig};
 
-// Avoid: No automatic recovery
-let mut client = Client::connect(config).await?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let pool_config = PoolConfig::new();
+
+    // Good: Pool handles recovery
+    let pool = Pool::new(pool_config, config.clone()).await?;
+    let _conn = pool.get().await?;
+
+    // Avoid: No automatic recovery
+    let _client = Client::connect(config).await?;
+    Ok(())
+}
 ```
 
 ### 2. Configure Appropriate Timeouts
 
-```rust
-let config = Config::new()
-    .host("server")
-    .connect_timeout(Duration::from_secs(30))
-    .command_timeout(Duration::from_secs(60));
+```rust,no_run
+use mssql_client::{Config, TimeoutConfig};
+use mssql_driver_pool::PoolConfig;
+use std::time::Duration;
 
-let pool_config = PoolConfig::new()
-    .acquire_timeout(Duration::from_secs(10))
-    .idle_timeout(Duration::from_secs(300));
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::new()
+        .host("server")
+        .connect_timeout(Duration::from_secs(30))
+        .timeouts(TimeoutConfig::new().command_timeout(Duration::from_secs(60)));
+
+    let pool_config = PoolConfig::new()
+        .connection_timeout(Duration::from_secs(10))
+        .idle_timeout(Duration::from_secs(300));
+    let _ = (config, pool_config);
+    Ok(())
+}
 ```
 
 ### 3. Handle Connection Errors Explicitly
 
-```rust
+```text
 match pool.get().await {
     Ok(conn) => { /* use connection */ }
     Err(PoolError::Timeout) => {
@@ -387,7 +447,7 @@ Track these metrics for observability:
 
 Include these in your test suite:
 
-```rust
+```text
 #[tokio::test]
 async fn test_recovery_after_connection_kill() {
     let pool = create_test_pool().await;

@@ -52,7 +52,7 @@ SELECT * FROM users WHERE email = ? AND password = ?
 
 ## Setup Example
 
-```rust
+```text
 use mssql_client::{Client, Config};
 use opentelemetry::global;
 use opentelemetry_sdk::trace::TracerProvider;
@@ -139,24 +139,26 @@ Metrics instrumentation is available via the `DatabaseMetrics` struct when the `
 
 ### Usage Example
 
-```rust
+```rust,no_run
 use mssql_client::instrumentation::DatabaseMetrics;
 
-// Create metrics collector (typically done once at pool creation)
-let metrics = DatabaseMetrics::new(
-    Some("main-pool"),  // Pool name for labeling
-    "db.example.com",   // Server address
-    1433                // Port
-);
+fn main() {
+    // Create metrics collector (typically done once at pool creation)
+    let metrics = DatabaseMetrics::new(
+        Some("main-pool"),  // Pool name for labeling
+        "db.example.com",   // Server address
+        1433,               // Port
+    );
 
-// Record pool status (called periodically or on change)
-metrics.record_pool_status(5, 10, 20);  // in_use, idle, max
+    // Record pool status (called periodically or on change)
+    metrics.record_pool_status(5, 10, 20);  // in_use, idle, max
 
-// Record operation timing
-metrics.record_operation("SELECT", 0.025, true);  // operation, duration_secs, success
+    // Record operation timing
+    metrics.record_operation("SELECT", 0.025, true);  // operation, duration_secs, success
 
-// Record connection wait time
-metrics.record_connection_wait(0.003);  // seconds
+    // Record connection wait time
+    metrics.record_connection_wait(0.003);  // seconds
+}
 ```
 
 ## Performance Impact
@@ -177,7 +179,7 @@ For high-throughput scenarios, consider:
 
 The driver uses the `tracing` crate, so it integrates seamlessly with existing tracing infrastructure:
 
-```rust
+```text
 use tracing::{info_span, Instrument};
 
 async fn process_user(pool: &Pool, user_id: i32) -> Result<(), Error> {
@@ -220,7 +222,7 @@ Some attributes are only available in certain contexts:
 
 Avoid including user input directly in span names. The driver sanitizes SQL, but custom attributes should also be sanitized:
 
-```rust
+```text
 // Good: Low cardinality
 span.record("user_type", user.role);
 

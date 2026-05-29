@@ -17,7 +17,7 @@ rust-mssql-driver prioritizes:
 
 When rows are received from SQL Server:
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                    Network Buffer                            │
 │  ┌──────────┬──────────┬──────────┬──────────┬──────────┐  │
@@ -56,7 +56,7 @@ Each `Row` holds:
 
 ### Code Pattern
 
-```rust
+```text
 // Internal implementation (simplified)
 pub struct Row {
     data: Arc<Bytes>,       // Shared buffer
@@ -77,7 +77,7 @@ impl Row {
 
 ### Memory Lifecycle
 
-```
+```text
 1. TDS packet received → BytesMut (tokio buffer)
 2. Packet parsed → Bytes::freeze() (immutable, refcounted)
 3. Row created → Arc<Bytes> clone (ref increment, no copy)
@@ -103,30 +103,61 @@ SQL Server uses UTF-16LE for strings. Conversion happens on access:
 
 **Optimization:** For repeated access, store the result:
 
-```rust
-// Inefficient - decodes twice
-let name1 = row.get::<String>(0)?;
-let name2 = row.get::<String>(0)?;
+```rust,no_run
+use mssql_client::{Client, Config};
 
-// Efficient - decode once, clone if needed
-let name = row.get::<String>(0)?;
-let name_copy = name.clone();
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
+    let rows = client.query("SELECT name FROM users", &[]).await?;
+    for row in rows {
+        let row = row?;
+
+        // Inefficient - decodes twice
+        let name1 = row.get::<String>(0)?;
+        let name2 = row.get::<String>(0)?;
+        let _ = (name1, name2);
+
+        // Efficient - decode once, clone if needed
+        let name = row.get::<String>(0)?;
+        let name_copy = name.clone();
+        let _ = (name, name_copy);
+    }
+    Ok(())
+}
 ```
 
 ### Binary Data
 
 Binary columns return `Bytes` which shares the underlying buffer:
 
-```rust
-// No allocation - returns slice of Arc<Bytes>
-let data: Bytes = row.get(0)?;
+```rust,no_run
+use mssql_client::{Client, Config};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
+    let rows = client.query("SELECT data FROM files", &[]).await?;
+    for row in rows {
+        let row = row?;
+        let data: Vec<u8> = row.get(0)?;
+        let _ = data;
+    }
+    Ok(())
+}
 ```
 
 ## Connection Pool Memory
 
 ### Pool Structure
 
-```
+```text
 ┌─────────────────────────────────────────────┐
 │                    Pool                      │
 │  ┌─────────────────────────────────────┐   │
@@ -178,7 +209,7 @@ let total_kb = connections * per_conn_kb + pool_overhead_kb;
 
 Prepared statements are cached to avoid repeated `sp_prepare` calls:
 
-```
+```text
 ┌─────────────────────────────────────────┐
 │           Statement Cache               │
 │  ┌───────────────────────────────────┐ │
@@ -206,7 +237,7 @@ Prepared statements are cached to avoid repeated `sp_prepare` calls:
 
 ### Cache Configuration
 
-```rust
+```text
 let config = StatementCacheConfig {
     capacity: 100,      // Max statements
     // Memory: ~50KB for 100 statements
@@ -219,22 +250,47 @@ let config = StatementCacheConfig {
 
 **Buffered (default for small results):**
 
-```rust
-// Collects all rows into memory
-let rows: Vec<Row> = stream.collect_all().await?;
-// Memory: O(total_data_size)
+```rust,no_run
+use mssql_client::{Client, Config, Row};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
+    let stream = client.query("SELECT * FROM t", &[]).await?;
+
+    // Collects all rows into memory
+    let rows: Vec<Row> = stream.collect_all().await?;
+    // Memory: O(total_data_size)
+    let _ = rows;
+    Ok(())
+}
 ```
 
 **Streaming (for large results):**
 
-```rust
-// Process one row at a time
-while let Some(row) = stream.next().await {
-    let row = row?;
-    process(row);
-    // row dropped here, memory freed
+```rust,no_run
+use mssql_client::{Client, Config};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
+    let mut stream = client.query("SELECT * FROM t", &[]).await?;
+
+    // Process one row at a time (QueryStream is a synchronous iterator)
+    while let Some(row) = stream.next() {
+        let row = row?;
+        let _ = row;
+        // row dropped here, memory freed
+    }
+    // Memory: O(packet_size) ≈ 4-64KB
+    Ok(())
 }
-// Memory: O(packet_size) ≈ 4-64KB
 ```
 
 ### Memory Comparison
@@ -246,7 +302,7 @@ while let Some(row) = stream.next().await {
 
 ### Recommendation
 
-```rust
+```text
 // Small results (< 10K rows): Buffer for convenience
 let rows = stream.collect_all().await?;
 
@@ -262,10 +318,25 @@ while let Some(row) = stream.next().await {
 
 LOBs (VARCHAR(MAX), VARBINARY(MAX), etc.) are currently loaded into memory:
 
-```rust
-// Loads entire LOB into memory
-let data: Bytes = row.get(0)?;
-// Memory: O(lob_size)
+```rust,no_run
+use mssql_client::{Client, Config};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
+    let rows = client.query("SELECT data FROM lobs", &[]).await?;
+    for row in rows {
+        let row = row?;
+        // Loads entire LOB into memory
+        let data: Vec<u8> = row.get(0)?;
+        // Memory: O(lob_size)
+        let _ = data;
+    }
+    Ok(())
+}
 ```
 
 ### Memory Limits
@@ -312,7 +383,7 @@ Typical allocation sources:
 
 ### Do
 
-```rust
+```text
 // ✓ Use connection pool
 let conn = pool.get().await?;
 
@@ -333,7 +404,7 @@ for id in ids {
 
 ### Don't
 
-```rust
+```text
 // ✗ Create new connections per query
 let conn = Client::connect(config).await?;  // Expensive!
 
@@ -359,7 +430,7 @@ conn.query(&format!("SELECT * FROM t WHERE id = {}", id), &[]).await?;  // No ca
 
 ### Low-Memory Configuration
 
-```rust
+```text
 let pool = Pool::builder()
     .client_config(config)
     .max_connections(5)           // Fewer connections
@@ -371,7 +442,7 @@ let pool = Pool::builder()
 
 ### High-Throughput Configuration
 
-```rust
+```text
 let pool = Pool::builder()
     .client_config(config)
     .max_connections(50)          // More connections

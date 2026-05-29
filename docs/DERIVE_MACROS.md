@@ -6,7 +6,7 @@
 
 Maps a SQL Server result row to a Rust struct.
 
-```rust
+```text
 use mssql_client::FromRow;
 
 #[derive(FromRow)]
@@ -31,7 +31,7 @@ for row in rows {
 
 Supported `rename_all` values: `snake_case`, `camelCase`, `PascalCase`, `SCREAMING_SNAKE_CASE`.
 
-```rust
+```text
 #[derive(FromRow)]
 #[mssql(rename_all = "PascalCase")]
 struct User {
@@ -49,7 +49,7 @@ struct User {
 | `#[mssql(default)]` | Use `Default::default()` if the column is NULL or missing |
 | `#[mssql(flatten)]` | Recursively apply `FromRow` on this field using the same row |
 
-```rust
+```text
 #[derive(FromRow)]
 struct Order {
     #[mssql(rename = "OrderID")]
@@ -82,7 +82,7 @@ Fields typed as `Option<T>` automatically return `None` for NULL values. Non-`Op
 
 Converts a struct into named query parameters.
 
-```rust
+```text
 use mssql_client::ToParams;
 
 #[derive(ToParams)]
@@ -115,7 +115,7 @@ let named = params.to_params()?;
 | `#[mssql(rename = "param_name")]` | Override the parameter name |
 | `#[mssql(skip)]` | Exclude this field from parameters |
 
-```rust
+```text
 #[derive(ToParams)]
 #[mssql(rename_all = "PascalCase")]
 struct UpdateUser {
@@ -137,7 +137,7 @@ struct UpdateUser {
 
 Defines a struct as a Table-Valued Parameter row type.
 
-```rust
+```text
 use mssql_client::Tvp;
 
 #[derive(Tvp)]

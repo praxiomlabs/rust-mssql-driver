@@ -17,7 +17,7 @@ rust-mssql-driver uses **rustls** for TLS, providing:
 
 For SQL Server 2019 and earlier, or SQL Server 2022+ with `Encrypt=true`:
 
-```
+```text
 TCP Connect → PreLogin (cleartext) → TLS Handshake → Login7 (encrypted)
 ```
 
@@ -27,7 +27,7 @@ The PreLogin packet is sent unencrypted, but all subsequent traffic (including c
 
 For SQL Server 2022+ with `Encrypt=strict`:
 
-```
+```text
 TCP Connect → TLS Handshake → PreLogin (encrypted) → Login7 (encrypted)
 ```
 
@@ -54,7 +54,7 @@ TCP Connect → TLS Handshake → PreLogin (encrypted) → Login7 (encrypted)
 
 ### Connection String
 
-```
+```text
 # Standard encryption (TDS 7.x) - all SQL Server versions
 Encrypt=true;TrustServerCertificate=false
 
@@ -67,7 +67,7 @@ Encrypt=true;TrustServerCertificate=true
 
 ### Programmatic Configuration
 
-```rust
+```text
 use mssql_tls::{TlsConfig, TlsVersion, TlsConnector};
 
 // Secure production configuration
@@ -93,7 +93,7 @@ No TLS encryption. All traffic including credentials is sent in plaintext.
 
 **Security Risk:** Network sniffing, credential theft, data interception.
 
-```
+```text
 # Never use in production
 Encrypt=false
 ```
@@ -104,7 +104,7 @@ Completely disables TLS for SQL Server 2008-2016 instances that don't support TL
 
 **Security Risk:** Network sniffing, credential theft, data interception.
 
-```
+```text
 # For legacy SQL Server (2008-2016) on trusted networks only
 Server=legacy-server;User Id=sa;Password=pwd;Encrypt=no_tls
 ```
@@ -120,7 +120,7 @@ Server=legacy-server;User Id=sa;Password=pwd;Encrypt=no_tls
 
 TLS encryption with certificate validation. PreLogin is sent cleartext, but Login7 and all subsequent traffic is encrypted.
 
-```
+```text
 # Recommended for SQL Server 2019 and earlier
 Encrypt=true;TrustServerCertificate=false
 ```
@@ -129,7 +129,7 @@ Encrypt=true;TrustServerCertificate=false
 
 TDS 8.0 strict mode. TLS handshake occurs before any TDS traffic.
 
-```
+```text
 # Recommended for SQL Server 2022+
 Encrypt=strict;TrustServerCertificate=false
 ```
@@ -145,7 +145,7 @@ Encrypt=strict;TrustServerCertificate=false
 
 By default, the driver validates the server certificate against the Mozilla root CA store.
 
-```rust
+```text
 // Default: validates against Mozilla root CAs
 let tls_config = TlsConfig::new();
 
@@ -159,7 +159,7 @@ let tls_config = TlsConfig::new();
 
 For self-signed certificates or internal CAs:
 
-```rust
+```text
 use rustls::pki_types::CertificateDer;
 use std::fs;
 
@@ -175,7 +175,7 @@ let tls_config = TlsConfig::new()
 
 The server's hostname must match the certificate's Common Name (CN) or Subject Alternative Name (SAN).
 
-```rust
+```text
 // Override hostname for certificate validation
 let tls_config = TlsConfig::new()
     .with_server_name("actual-hostname.example.com");
@@ -185,7 +185,7 @@ let tls_config = TlsConfig::new()
 
 Disables certificate validation entirely. **Never use in production.**
 
-```rust
+```text
 // WARNING: This is insecure!
 let tls_config = TlsConfig::new()
     .trust_server_certificate(true);
@@ -193,7 +193,7 @@ let tls_config = TlsConfig::new()
 
 When enabled, the driver logs a warning:
 
-```
+```text
 WARN TrustServerCertificate is enabled - certificate validation is DISABLED.
      This is insecure and should only be used for development/testing.
      Connections are vulnerable to man-in-the-middle attacks.
@@ -203,7 +203,7 @@ WARN TrustServerCertificate is enabled - certificate validation is DISABLED.
 
 TDS 8.0 supports mutual TLS (client certificate authentication):
 
-```rust
+```text
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::fs;
 
@@ -226,7 +226,7 @@ let tls_config = TlsConfig::new()
 
 ### Minimum Version
 
-```rust
+```text
 // Require TLS 1.2 minimum (recommended)
 let tls_config = TlsConfig::new()
     .min_protocol_version(TlsVersion::Tls12);
@@ -238,7 +238,7 @@ let tls_config = TlsConfig::new()
 
 ### Version Range
 
-```rust
+```text
 // Allow TLS 1.2 and 1.3
 let tls_config = TlsConfig::new()
     .min_protocol_version(TlsVersion::Tls12)
@@ -257,7 +257,7 @@ let tls_config = TlsConfig::new()
 3. Hostname mismatch
 
 **Solutions:**
-```rust
+```text
 // Option 1: Add your CA certificate
 let tls_config = TlsConfig::new()
     .add_root_certificate(your_ca_cert);
@@ -294,7 +294,7 @@ let tls_config = TlsConfig::new()
 2. Version range configured incorrectly
 
 **Solutions:**
-```rust
+```text
 // Allow broader version range
 let tls_config = TlsConfig::new()
     .min_protocol_version(TlsVersion::Tls12)
@@ -308,7 +308,7 @@ let tls_config = TlsConfig::new()
 **Cause:** Using `Encrypt=strict` with older SQL Server.
 
 **Solution:** Use `Encrypt=true` instead:
-```
+```text
 # For SQL Server 2019 and earlier
 Encrypt=true;TrustServerCertificate=false
 ```
@@ -319,7 +319,7 @@ Azure SQL Database has specific TLS requirements:
 
 ### Connection String
 
-```
+```text
 Server=yourserver.database.windows.net;
 Database=yourdb;
 User Id=user@yourserver;
@@ -370,7 +370,7 @@ Azure SQL may redirect connections. The driver handles this automatically, perfo
 
 ### TlsConfig
 
-```rust
+```text
 pub struct TlsConfig {
     /// Skip certificate validation (development only)
     pub trust_server_certificate: bool,
@@ -397,7 +397,7 @@ pub struct TlsConfig {
 
 ### TlsVersion
 
-```rust
+```text
 pub enum TlsVersion {
     /// TLS 1.2
     Tls12,
@@ -408,7 +408,7 @@ pub enum TlsVersion {
 
 ### TlsNegotiationMode
 
-```rust
+```text
 pub enum TlsNegotiationMode {
     /// TDS 7.x: TLS after PreLogin
     PostPreLogin,

@@ -60,7 +60,7 @@ tokio = { version = "1.48", features = ["full"] }
 
 ## Quick Start
 
-```rust
+```rust,no_run
 use mssql_client::{Client, Config};
 
 #[tokio::main]
@@ -91,7 +91,7 @@ async fn main() -> Result<(), mssql_client::Error> {
 
 The driver supports ADO.NET-compatible connection strings:
 
-```
+```text
 Server=hostname,port;Database=dbname;User Id=user;Password=pass;Encrypt=strict;
 ```
 
@@ -120,8 +120,8 @@ See [docs/CONNECTION_STRINGS.md](docs/CONNECTION_STRINGS.md) for the full ADO.NE
 
 Use the built-in connection pool for production applications:
 
-```rust
-use mssql_driver_pool::{Pool, PoolConfig};
+```rust,no_run
+use mssql_driver_pool::Pool;
 use mssql_client::Config;
 
 #[tokio::main]
@@ -147,14 +147,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Transactions
 
-```rust
+```rust,no_run
 use mssql_client::{Client, Config, IsolationLevel};
 
-async fn transfer_funds(client: &mut Client) -> Result<(), mssql_client::Error> {
-    // Begin transaction with isolation level
-    let mut tx = client.begin_transaction()
-        .isolation_level(IsolationLevel::Serializable)
-        .await?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string("Server=localhost;Database=mydb;User Id=sa;Password=Password123!")?;
+    let client = Client::connect(config).await?;
+
+    // Begin transaction with a specific isolation level
+    let mut tx = client.begin_transaction_with_isolation(IsolationLevel::Serializable).await?;
 
     tx.execute("UPDATE accounts SET balance = balance - 100 WHERE id = @p1", &[&1i32]).await?;
     tx.execute("UPDATE accounts SET balance = balance + 100 WHERE id = @p1", &[&2i32]).await?;
@@ -168,27 +170,35 @@ async fn transfer_funds(client: &mut Client) -> Result<(), mssql_client::Error> 
 
 ### Savepoints
 
-```rust
-let mut tx = client.begin_transaction().await?;
+```rust,no_run
+use mssql_client::{Client, Config};
 
-tx.execute("INSERT INTO orders ...", &[]).await?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string("Server=localhost;Database=mydb;User Id=sa;Password=Password123!")?;
+    let client = Client::connect(config).await?;
+    let mut tx = client.begin_transaction().await?;
 
-// Create a savepoint
-let sp = tx.save_point("before_items").await?;
+    tx.execute("INSERT INTO orders DEFAULT VALUES", &[]).await?;
 
-tx.execute("INSERT INTO order_items ...", &[]).await?;
+    // Create a savepoint
+    let sp = tx.save_point("before_items").await?;
 
-// Rollback to savepoint if needed
-tx.rollback_to(&sp).await?;
+    tx.execute("INSERT INTO order_items DEFAULT VALUES", &[]).await?;
 
-tx.commit().await?;
+    // Rollback to savepoint if needed
+    tx.rollback_to(&sp).await?;
+
+    tx.commit().await?;
+    Ok(())
+}
 ```
 
 ## Derive Macros
 
 Map rows to structs automatically:
 
-```rust
+```text
 use mssql_derive::FromRow;
 
 #[derive(FromRow)]
