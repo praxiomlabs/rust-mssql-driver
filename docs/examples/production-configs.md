@@ -28,13 +28,14 @@ async fn azure_sql_config() -> Result<Pool, Error> {
 
     // Production pool settings for Azure SQL
     let pool = Pool::builder()
-        .min_size(2)
-        .max_size(30)                              // Azure SQL default max is 100
+        .client_config(config)
+        .min_connections(2)
+        .max_connections(30)                       // Azure SQL default max is 100
         .acquire_timeout(Duration::from_secs(30))
         .idle_timeout(Duration::from_secs(300))   // Azure closes idle after 30 min
         .max_lifetime(Duration::from_secs(1800))  // Recycle before Azure timeout
         .test_on_borrow(true)
-        .build(config)
+        .build()
         .await?;
 
     Ok(pool)
@@ -45,7 +46,7 @@ async fn azure_sql_config() -> Result<Pool, Error> {
 
 ```rust
 // Requires the `azure-identity` feature:
-// mssql-auth = { version = "0.5", features = ["azure-identity"] }
+// mssql-auth = { version = "0.10", features = ["azure-identity"] }
 
 use azure_identity::DefaultAzureCredential;
 use mssql_auth::AzureIdentityAuth;
@@ -61,8 +62,9 @@ async fn azure_sql_managed_identity() -> Result<Pool, Error> {
         .encryption(Encryption::Strict);
 
     Pool::builder()
-        .max_size(30)
-        .build(config)
+        .client_config(config)
+        .max_connections(30)
+        .build()
         .await
 }
 ```
@@ -83,12 +85,13 @@ async fn azure_sql_serverless() -> Result<Pool, Error> {
 
     // Smaller pool for serverless (auto-pause consideration)
     let pool = Pool::builder()
-        .min_size(0)                              // Allow full scale-down
-        .max_size(10)
+        .client_config(config)
+        .min_connections(0)                       // Allow full scale-down
+        .max_connections(10)
         .acquire_timeout(Duration::from_secs(60)) // Cold start can be slow
         .idle_timeout(Duration::from_secs(60))    // Quick release for serverless
         .test_on_borrow(true)
-        .build(config)
+        .build()
         .await?;
 
     Ok(pool)
@@ -116,13 +119,14 @@ async fn onprem_sql_config() -> Result<Pool, Error> {
     )?;
 
     let pool = Pool::builder()
-        .min_size(5)
-        .max_size(50)
+        .client_config(config)
+        .min_connections(5)
+        .max_connections(50)
         .acquire_timeout(Duration::from_secs(15))
         .idle_timeout(Duration::from_secs(600))
         .max_lifetime(Duration::from_secs(3600))
         .test_on_borrow(true)
-        .build(config)
+        .build()
         .await?;
 
     Ok(pool)
@@ -146,8 +150,9 @@ async fn sql_2022_strict_mode() -> Result<Pool, Error> {
     )?;
 
     Pool::builder()
-        .max_size(50)
-        .build(config)
+        .client_config(config)
+        .max_connections(50)
+        .build()
         .await
 }
 ```
@@ -170,9 +175,10 @@ async fn dev_sql_config() -> Result<Pool, Error> {
 
     // Smaller pool for development
     let pool = Pool::builder()
-        .min_size(1)
-        .max_size(5)
-        .build(config)
+        .client_config(config)
+        .min_connections(1)
+        .max_connections(5)
+        .build()
         .await?;
 
     Ok(pool)
@@ -202,11 +208,12 @@ async fn always_on_config() -> Result<Pool, Error> {
 
     // Larger pool with faster recycling for HA
     let pool = Pool::builder()
-        .min_size(5)
-        .max_size(50)
+        .client_config(config)
+        .min_connections(5)
+        .max_connections(50)
         .max_lifetime(Duration::from_secs(1800))  // More frequent recycling
         .test_on_borrow(true)                     // Always verify after failover
-        .build(config)
+        .build()
         .await?;
 
     Ok(pool)
@@ -229,9 +236,10 @@ async fn read_replica_pools() -> Result<(Pool, Pool), Error> {
     )?;
 
     let primary_pool = Pool::builder()
-        .min_size(2)
-        .max_size(20)
-        .build(primary_config)
+        .client_config(primary_config)
+        .min_connections(2)
+        .max_connections(20)
+        .build()
         .await?;
 
     // Secondary pool for reads
@@ -246,9 +254,10 @@ async fn read_replica_pools() -> Result<(Pool, Pool), Error> {
     )?;
 
     let secondary_pool = Pool::builder()
-        .min_size(5)
-        .max_size(50)  // More capacity for reads
-        .build(secondary_config)
+        .client_config(secondary_config)
+        .min_connections(5)
+        .max_connections(50)  // More capacity for reads
+        .build()
         .await?;
 
     Ok((primary_pool, secondary_pool))
@@ -268,11 +277,12 @@ async fn web_api_config() -> Result<Pool, Error> {
     // Sized for typical web API workload
     // Assumes 4 CPU cores, ~100 concurrent requests
     let pool = Pool::builder()
-        .min_size(4)
-        .max_size(20)
+        .client_config(config)
+        .min_connections(4)
+        .max_connections(20)
         .acquire_timeout(Duration::from_secs(5))  // Fail fast for web requests
         .idle_timeout(Duration::from_secs(300))
-        .build(config)
+        .build()
         .await?;
 
     Ok(pool)
@@ -288,11 +298,12 @@ async fn worker_config() -> Result<Pool, Error> {
     // Background workers typically need fewer connections
     // but longer timeouts for batch operations
     let pool = Pool::builder()
-        .min_size(1)
-        .max_size(5)
+        .client_config(config)
+        .min_connections(1)
+        .max_connections(5)
         .acquire_timeout(Duration::from_secs(30))
         .idle_timeout(Duration::from_secs(600))
-        .build(config)
+        .build()
         .await?;
 
     Ok(pool)
@@ -312,11 +323,12 @@ async fn batch_config() -> Result<Pool, Error> {
 
     // Batch processing needs more connections for parallel work
     let pool = Pool::builder()
-        .min_size(5)
-        .max_size(30)
+        .client_config(config)
+        .min_connections(5)
+        .max_connections(30)
         .acquire_timeout(Duration::from_secs(60))
         .max_lifetime(Duration::from_secs(7200))  // Longer lifetime for batch
-        .build(config)
+        .build()
         .await?;
 
     Ok(pool)
@@ -395,9 +407,10 @@ async fn kubernetes_config() -> Result<Pool, Error> {
     let config = Config::from_connection_string(&db_config.connection_string())?;
 
     Pool::builder()
-        .min_size(db_config.pool_min)
-        .max_size(db_config.pool_max)
-        .build(config)
+        .client_config(config)
+        .min_connections(db_config.pool_min)
+        .max_connections(db_config.pool_max)
+        .build()
         .await
 }
 ```
@@ -449,9 +462,10 @@ mod tests {
         ).expect("Invalid test connection string");
 
         Pool::builder()
-            .min_size(1)
-            .max_size(5)
-            .build(config)
+            .client_config(config)
+            .min_connections(1)
+            .max_connections(5)
+            .build()
             .await
             .expect("Failed to create test pool")
     }

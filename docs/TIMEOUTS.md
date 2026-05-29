@@ -73,6 +73,7 @@ use mssql_driver_pool::{Pool, PoolConfig};
 use std::time::Duration;
 
 let pool = Pool::builder()
+    .client_config(config)
     // Time to wait for a connection from the pool
     .acquire_timeout(Duration::from_secs(30))
 
@@ -82,7 +83,7 @@ let pool = Pool::builder()
     // Maximum connection lifetime (recycle)
     .max_lifetime(Duration::from_secs(3600))
 
-    .build(config)
+    .build()
     .await?;
 ```
 
@@ -183,8 +184,9 @@ let config = Config::from_connection_string(
 )?;
 
 let pool = Pool::builder()
+    .client_config(config)
     .acquire_timeout(Duration::from_secs(5))
-    .build(config)
+    .build()
     .await?;
 ```
 
@@ -198,9 +200,10 @@ let config = Config::from_connection_string(
 )?;
 
 let pool = Pool::builder()
+    .client_config(config)
     .acquire_timeout(Duration::from_secs(60))
     .max_lifetime(Duration::from_secs(7200))  // 2 hours
-    .build(config)
+    .build()
     .await?;
 ```
 
@@ -214,10 +217,11 @@ let config = Config::from_connection_string(
 )?;
 
 let pool = Pool::builder()
+    .client_config(config)
     .acquire_timeout(Duration::from_secs(60))
     .idle_timeout(Duration::from_secs(300))  // Before Azure kills it
     .max_lifetime(Duration::from_secs(1800))
-    .build(config)
+    .build()
     .await?;
 ```
 

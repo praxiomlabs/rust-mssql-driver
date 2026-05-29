@@ -129,9 +129,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_connection_string("...")?;
 
     let pool = Pool::builder()
-        .max_size(10)
-        .min_size(2)
-        .build(config)
+        .client_config(config)
+        .max_connections(10)
+        .min_connections(2)
+        .build()
         .await?;
 
     // Get a connection from the pool

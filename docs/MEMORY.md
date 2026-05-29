@@ -361,10 +361,11 @@ conn.query(&format!("SELECT * FROM t WHERE id = {}", id), &[]).await?;  // No ca
 
 ```rust
 let pool = Pool::builder()
+    .client_config(config)
     .max_connections(5)           // Fewer connections
     .min_connections(1)           // Don't pre-allocate
     .statement_cache_size(20)     // Smaller cache
-    .build(config)
+    .build()
     .await?;
 ```
 
@@ -372,9 +373,10 @@ let pool = Pool::builder()
 
 ```rust
 let pool = Pool::builder()
+    .client_config(config)
     .max_connections(50)          // More connections
     .min_connections(10)          // Pre-warm
     .statement_cache_size(500)    // Larger cache
-    .build(config)
+    .build()
     .await?;
 ```

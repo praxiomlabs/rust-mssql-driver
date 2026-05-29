@@ -14,8 +14,9 @@ use tokio::signal;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = Pool::builder()
+        .client_config(config)
         .max_connections(10)
-        .build(config)
+        .build()
         .await?;
 
     // Start your application
@@ -105,15 +106,16 @@ async fn process_request(
 
 ```rust
 use std::time::Duration;
-use mssql_pool::{Pool, PoolConfig};
+use mssql_driver_pool::{Pool, PoolConfig};
 
 let pool = Pool::builder()
+    .client_config(config)
     // Size limits
     .max_connections(20)          // Max connections in pool
     .min_connections(5)           // Keep at least 5 warm connections
 
     // Timeouts
-    .connect_timeout(Duration::from_secs(30))    // Connection establishment
+    .connection_timeout(Duration::from_secs(30)) // Connection establishment
     .acquire_timeout(Duration::from_secs(5))     // Wait for available connection
     .idle_timeout(Duration::from_secs(300))      // Close idle connections after 5 min
     .max_lifetime(Duration::from_secs(1800))     // Recycle connections every 30 min
@@ -131,7 +133,7 @@ let pool = Pool::builder()
         jitter: true,
     })
 
-    .build(config)
+    .build()
     .await?;
 ```
 
@@ -151,6 +153,7 @@ let pool = Pool::builder()
 ```rust
 // Azure SQL has connection limits based on tier
 let pool = Pool::builder()
+    .client_config(config)
     .max_connections(match azure_tier {
         "Basic" => 30,
         "S0" => 60,
@@ -159,8 +162,8 @@ let pool = Pool::builder()
         "P1" => 200,
         _ => 20,
     } / 2)  // Leave headroom for other apps
-    .connect_timeout(Duration::from_secs(60))  // Azure can be slower
-    .build(config)
+    .connection_timeout(Duration::from_secs(60))  // Azure can be slower
+    .build()
     .await?;
 ```
 
@@ -201,7 +204,7 @@ Enable the `otel` feature for distributed tracing:
 
 ```toml
 [dependencies]
-mssql-client = { version = "0.5", features = ["otel"] }
+mssql-client = { version = "0.10", features = ["otel"] }
 ```
 
 ```rust
@@ -230,7 +233,7 @@ fn setup_tracing() -> Result<(), Box<dyn std::error::Error>> {
 ### Metrics Collection
 
 ```rust
-use mssql_pool::PoolMetrics;
+use mssql_driver_pool::PoolMetrics;
 
 async fn export_metrics(pool: &Pool) {
     let metrics = pool.metrics();
@@ -384,7 +387,7 @@ let app = Router::new()
 .max_connections(50)
 
 // Increase timeouts
-.connect_timeout(Duration::from_secs(60))
+.connection_timeout(Duration::from_secs(60))
 .acquire_timeout(Duration::from_secs(10))
 
 // Enable connection health checks

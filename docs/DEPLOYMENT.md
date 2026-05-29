@@ -87,9 +87,10 @@ use mssql_driver_pool::{Pool, PoolConfig};
 use std::time::Duration;
 
 let pool = Pool::builder()
+    .client_config(config)
     // Size based on expected concurrency
-    .min_size(2)                              // Minimum warm connections
-    .max_size(20)                             // Maximum connections
+    .min_connections(2)                       // Minimum warm connections
+    .max_connections(20)                      // Maximum connections
 
     // Timeouts
     .acquire_timeout(Duration::from_secs(30)) // Max wait for connection
@@ -99,7 +100,7 @@ let pool = Pool::builder()
     // Health checking
     .test_on_borrow(true)                     // Verify before use
 
-    .build(config)
+    .build()
     .await?;
 ```
 
@@ -230,7 +231,7 @@ async fn query_with_fallback(
 ```toml
 # Cargo.toml
 [dependencies]
-mssql-client = { version = "0.5", features = ["otel"] }
+mssql-client = { version = "0.10", features = ["otel"] }
 ```
 
 ```rust
@@ -362,10 +363,11 @@ let conn_str = "Server=ag-listener.example.com;\
 ```rust
 // Pool automatically handles connection failures
 let pool = Pool::builder()
-    .max_size(20)
+    .client_config(config)
+    .max_connections(20)
     .test_on_borrow(true)        // Verify connection health
     .max_lifetime(Duration::from_secs(1800))  // Refresh connections
-    .build(config)
+    .build()
     .await?;
 
 // Implement retry logic for transient failures

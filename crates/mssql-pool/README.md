@@ -27,6 +27,7 @@ use mssql_driver_pool::{Pool, PoolConfig};
 use std::time::Duration;
 
 let pool = Pool::builder()
+    .client_config(config)
     .min_connections(5)
     .max_connections(20)
     .idle_timeout(Duration::from_secs(300))

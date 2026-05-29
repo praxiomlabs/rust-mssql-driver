@@ -60,7 +60,7 @@ let azure_auth = AzureAdAuth::with_token("eyJ0eXAi...");
 Enable the `zeroize` feature for secure credential handling:
 
 ```toml
-mssql-auth = { version = "0.5", features = ["zeroize"] }
+mssql-auth = { version = "0.10", features = ["zeroize"] }
 ```
 
 This automatically zeroes sensitive data from memory when credentials are dropped.

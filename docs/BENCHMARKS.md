@@ -203,8 +203,9 @@ fn bench_real_queries(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let pool = rt.block_on(async {
         Pool::builder()
+            .client_config(config)
             .max_connections(10)
-            .build(config)
+            .build()
             .await
             .unwrap()
     });
