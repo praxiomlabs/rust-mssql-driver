@@ -2,7 +2,7 @@
 
 This document describes the benchmarks included with rust-mssql-driver, performance targets, and how to interpret results.
 
-For architecture comparison with Tiberius, see [COMPARATIVE_BENCHMARKS.md](COMPARATIVE_BENCHMARKS.md).
+For a feature and architecture comparison with Tiberius and other drivers, see [COMPARISON.md](COMPARISON.md).
 
 ---
 
@@ -458,4 +458,4 @@ First comprehensive benchmark suite added with 26 benchmark cases across connect
 - [Criterion.rs Documentation](https://bheisler.github.io/criterion.rs/book/)
 - [Rust Performance Book](https://nnethercote.github.io/perf-book/)
 - [ADR-004: Arc<Bytes> Pattern](../ARCHITECTURE.md)
-- [Comparative Benchmarks](COMPARATIVE_BENCHMARKS.md)
+- [Driver Comparison](COMPARISON.md)

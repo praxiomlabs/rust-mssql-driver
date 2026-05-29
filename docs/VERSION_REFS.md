@@ -51,8 +51,6 @@ Updating them would rewrite history and destroy context.
 | `ARCHITECTURE.md` § Document History | Version history log — only append |
 | `STABILITY.md` § Example Deprecation | Illustrative `since` / removal versions — keep |
 | `docs/CONNECTION_RECOVERY.md` | "(v0.5.1)" / "(v0.5.0)" marking when features were added — keep || `docs/SQL_SERVER_COMPATIBILITY.md` | Support matrix entries for historical versions — keep |
-| `docs/TEST_FAILURE_AUDIT.md` | Test audit history — keep |
-
 ---
 
 ## Crate-Specific Versions
