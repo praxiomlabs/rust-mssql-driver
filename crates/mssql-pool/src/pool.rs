@@ -41,7 +41,7 @@ use crate::lifecycle::ConnectionMetadata;
 ///     .max_connections(20);
 ///
 /// let pool = Pool::builder()
-///     .connection_config(client_config)
+///     .client_config(client_config)
 ///     .pool_config(pool_config)
 ///     .build()
 ///     .await?;
