@@ -265,6 +265,19 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 See [STABILITY.md](STABILITY.md) for details on what's considered stable.
 
+## Project Status
+
+**Actively maintained**, currently pre-1.0. The driver is feature-complete for
+the scenarios in the [Feature Status](#feature-status-v010x) table above, and an
+integration suite runs against a real SQL Server instance in CI on every change.
+
+Maintenance is **best-effort by a single maintainer** (see
+[MAINTAINERS.md](MAINTAINERS.md)); the aim is a first response to issues and pull
+requests within about a week. The road to **1.0** is about settling the public
+API surface (see [STABILITY.md](STABILITY.md)) and closing the gaps in
+[LIMITATIONS.md](LIMITATIONS.md) — once the API is proven in real deployments,
+the 1.0 backward-compatibility guarantee follows.
+
 ## Comparison with Tiberius
 
 | Feature | rust-mssql-driver | tiberius |
@@ -356,6 +369,21 @@ Licensed under either of:
 - MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.
+
+## Development
+
+This project is built with heavy AI assistance (coding agents) under human
+review — what Simon Willison terms ["vibe engineering"](https://simonwillison.net/tags/ai-assisted-programming/):
+a maintainer directs and is accountable for every change, rather than merging
+unreviewed generated output. We say so plainly because we'd rather you know than
+guess.
+
+What backs that up instead of asking for trust: the public API is documented on
+[docs.rs](https://docs.rs/mssql-client), the protocol layer has unit and
+property tests, and an integration suite runs against a real SQL Server in CI on
+every change. Known gaps are documented honestly in
+[LIMITATIONS.md](LIMITATIONS.md). If something doesn't hold up, please
+[open an issue](https://github.com/praxiomlabs/rust-mssql-driver/issues).
 
 ## Acknowledgments
 

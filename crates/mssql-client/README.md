@@ -140,6 +140,13 @@ See the `examples/` directory for complete examples:
 - `derive_macros.rs` - Using `#[derive(FromRow)]` and `#[derive(ToParams)]`
 - `streaming.rs` - Processing large result sets
 
+## Development
+
+Built with AI assistance under human review ("vibe engineering"): a maintainer
+directs and is accountable for every change. The protocol layer has unit and
+property tests, and an integration suite runs against a real SQL Server in CI;
+known gaps are tracked in [LIMITATIONS.md](https://github.com/praxiomlabs/rust-mssql-driver/blob/main/LIMITATIONS.md).
+
 ## License
 
 MIT OR Apache-2.0

@@ -420,6 +420,24 @@ In your PR that introduces a breaking change:
 2. Update any affected examples
 3. Update any affected documentation
 
+## AI-Assisted Contributions
+
+AI coding tools are welcome here — this project is itself built with them. What
+we ask is **disclosure and accountability**, not abstinence:
+
+- **Disclose** meaningful AI assistance in your PR description (one sentence is
+  enough). You don't need to flag routine autocomplete.
+- **Stand behind your code.** You should understand every line you submit and be
+  able to explain *why* it's correct when a reviewer asks. "The AI wrote it" is
+  not an answer a reviewer can act on.
+- **Do the review pass yourself first.** Run the tests, read the diff, and
+  confirm it actually does what the PR claims before opening it.
+
+Contributions that are clearly unreviewed generated output — plausible-looking
+code the author can't explain, or PRs that don't compile or pass tests — will be
+closed. This isn't about where code comes from; it's about whether a human is
+accountable for it. See [Coding Standards](#coding-standards) for the quality bar.
+
 ## Pull Request Process
 
 1. **Before submitting:**
