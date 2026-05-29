@@ -114,7 +114,7 @@ Server=legacy-server;User Id=sa;Password=pwd;Encrypt=no_tls
 - Isolated, trusted network environments
 - Development/testing against legacy instances
 
-**⚠️ Warning:** This option transmits all data including credentials in plaintext. Only use on isolated networks where TLS 1.2+ is not available.
+**Warning:** This option transmits all data including credentials in plaintext. Only use on isolated networks where TLS 1.2+ is not available.
 
 ### `Encrypt=true` (Standard)
 

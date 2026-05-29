@@ -21,30 +21,30 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| SQL Authentication | ✅ | Username/password |
-| Azure AD Token | ✅ | Pre-acquired tokens |
-| Queries & Parameters | ✅ | Full support |
-| Transactions | ✅ | Commit, rollback, savepoints |
-| Connection Pooling | ✅ | Built-in via `mssql-driver-pool` |
-| Bulk Insert | ✅ | High-performance batch loading via `Client::bulk_insert()` |
-| `#[derive(FromRow)]` / `#[derive(ToParams)]` | ✅ | Row-to-struct and struct-to-params mapping |
-| TDS 7.3 (Legacy) | ✅ | SQL Server 2008/2008 R2 |
-| TDS 8.0 Strict Mode | ✅ | SQL Server 2022+ |
-| Azure Managed Identity | ✅ | Via `azure-identity` |
-| Kerberos/GSSAPI | ✅ | Unix via `libgssapi` |
-| Windows SSPI | ✅ | Via `sspi-auth` feature |
-| Table-Valued Parameters | ✅ | Via `Tvp` type |
-| OpenTelemetry Metrics | ✅ | Query + pool lifecycle via `otel` feature |
-| Always Encrypted (read) | ✅ | Transparent decryption with Azure Key Vault and Windows CertStore providers |
-| Always Encrypted (write) | ⚠️ | `NULL` writes only; ciphertext write path pending — see [docs/ALWAYS_ENCRYPTED.md](docs/ALWAYS_ENCRYPTED.md#limitations) |
-| Query Cancellation | ✅ | ATTENTION signal + in-flight pool discard |
-| Collation-Aware Decoding | ✅ | 14+ character encodings |
-| Collation-Aware VARCHAR Params | ✅ | Via `SendStringParametersAsUnicode=false` |
-| Stored Procedures | ✅ | RPC-based with OUTPUT params and RETURN value |
-| Named Instance Resolution | ✅ | SQL Browser service (UDP 1434) |
-| MultiSubnetFailover (AG) | ✅ | Parallel TCP connect for listener failover |
-| Connection Retry | ✅ | `ConnectRetryCount` / `ConnectRetryInterval` |
-| FILESTREAM BLOB Access | ✅ | Windows only, via `filestream` feature |
+| SQL Authentication | Yes | Username/password |
+| Azure AD Token | Yes | Pre-acquired tokens |
+| Queries & Parameters | Yes | Full support |
+| Transactions | Yes | Commit, rollback, savepoints |
+| Connection Pooling | Yes | Built-in via `mssql-driver-pool` |
+| Bulk Insert | Yes | High-performance batch loading via `Client::bulk_insert()` |
+| `#[derive(FromRow)]` / `#[derive(ToParams)]` | Yes | Row-to-struct and struct-to-params mapping |
+| TDS 7.3 (Legacy) | Yes | SQL Server 2008/2008 R2 |
+| TDS 8.0 Strict Mode | Yes | SQL Server 2022+ |
+| Azure Managed Identity | Yes | Via `azure-identity` |
+| Kerberos/GSSAPI | Yes | Unix via `libgssapi` |
+| Windows SSPI | Yes | Via `sspi-auth` feature |
+| Table-Valued Parameters | Yes | Via `Tvp` type |
+| OpenTelemetry Metrics | Yes | Query + pool lifecycle via `otel` feature |
+| Always Encrypted (read) | Yes | Transparent decryption with Azure Key Vault and Windows CertStore providers |
+| Always Encrypted (write) | Partial | `NULL` writes only; ciphertext write path pending — see [docs/ALWAYS_ENCRYPTED.md](docs/ALWAYS_ENCRYPTED.md#limitations) |
+| Query Cancellation | Yes | ATTENTION signal + in-flight pool discard |
+| Collation-Aware Decoding | Yes | 14+ character encodings |
+| Collation-Aware VARCHAR Params | Yes | Via `SendStringParametersAsUnicode=false` |
+| Stored Procedures | Yes | RPC-based with OUTPUT params and RETURN value |
+| Named Instance Resolution | Yes | SQL Browser service (UDP 1434) |
+| MultiSubnetFailover (AG) | Yes | Parallel TCP connect for listener failover |
+| Connection Retry | Yes | `ConnectRetryCount` / `ConnectRetryInterval` |
+| FILESTREAM BLOB Access | Yes | Windows only, via `filestream` feature |
 
 ## Installation
 
@@ -254,16 +254,16 @@ mssql-auth = { version = "0.10", features = ["sspi-auth"] }
 
 | SQL Server Version | Supported | TDS Version | Notes |
 |-------------------|-----------|-------------|-------|
-| 2008 | ✅ | 7.3A | Legacy support |
-| 2008 R2 | ✅ | 7.3B | Legacy support |
-| 2012 | ✅ | 7.4 | |
-| 2014 | ✅ | 7.4 | |
-| 2016 | ✅ | 7.4 | |
-| 2017 | ✅ | 7.4 | Full TLS support |
-| 2019 | ✅ | 7.4 | |
-| 2022+ | ✅ | 8.0 | Strict TLS mode |
-| Azure SQL Database | ✅ | 7.4/8.0 | |
-| Azure SQL Managed Instance | ✅ | 7.4/8.0 | |
+| 2008 | Yes | 7.3A | Legacy support |
+| 2008 R2 | Yes | 7.3B | Legacy support |
+| 2012 | Yes | 7.4 | |
+| 2014 | Yes | 7.4 | |
+| 2016 | Yes | 7.4 | |
+| 2017 | Yes | 7.4 | Full TLS support |
+| 2019 | Yes | 7.4 | |
+| 2022+ | Yes | 8.0 | Strict TLS mode |
+| Azure SQL Database | Yes | 7.4/8.0 | |
+| Azure SQL Managed Instance | Yes | 7.4/8.0 | |
 
 **Legacy Support (SQL Server 2008-2016):** Use `Encrypt=no_tls` for servers that don't support TLS 1.2. See [LIMITATIONS.md](LIMITATIONS.md) and [docs/SQL_SERVER_COMPATIBILITY.md](docs/SQL_SERVER_COMPATIBILITY.md) for details.
 
@@ -386,9 +386,9 @@ Contributions are welcome! A few quick pointers:
 
 ## Community
 
-- 💬 **Questions and discussions**: [GitHub Discussions](https://github.com/praxiomlabs/rust-mssql-driver/discussions)
-- 🐛 **Bugs and feature requests**: [GitHub Issues](https://github.com/praxiomlabs/rust-mssql-driver/issues)
-- 🔒 **Security vulnerabilities**: [Private Security Advisory](https://github.com/praxiomlabs/rust-mssql-driver/security/advisories/new) — see [SECURITY.md](SECURITY.md)
+- **Questions and discussions**: [GitHub Discussions](https://github.com/praxiomlabs/rust-mssql-driver/discussions)
+- **Bugs and feature requests**: [GitHub Issues](https://github.com/praxiomlabs/rust-mssql-driver/issues)
+- **Security vulnerabilities**: [Private Security Advisory](https://github.com/praxiomlabs/rust-mssql-driver/security/advisories/new) — see [SECURITY.md](SECURITY.md)
 
 ## License
 
@@ -401,17 +401,12 @@ at your option.
 
 ## Development
 
-This project is built with heavy AI assistance (coding agents) under human
-review — what Simon Willison terms ["vibe engineering"](https://simonwillison.net/tags/ai-assisted-programming/):
-a maintainer directs and is accountable for every change, rather than merging
-unreviewed generated output. We say so plainly because we'd rather you know than
-guess.
-
-What backs that up instead of asking for trust: the public API is documented on
+This project is built with heavy AI assistance, with a human maintainer
+reviewing and accountable for every change. The public API is documented on
 [docs.rs](https://docs.rs/mssql-client), the protocol layer has unit and
-property tests, and an integration suite runs against a real SQL Server in CI on
-every change. Known gaps are documented honestly in
-[LIMITATIONS.md](LIMITATIONS.md). If something doesn't hold up, please
+property tests, and an integration suite runs against a real SQL Server in CI
+on every change. Known gaps are documented in [LIMITATIONS.md](LIMITATIONS.md);
+if something doesn't hold up, please
 [open an issue](https://github.com/praxiomlabs/rust-mssql-driver/issues).
 
 ## Acknowledgments

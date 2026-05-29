@@ -201,13 +201,13 @@ match maybe_data {
 ### Memory Management
 
 ```text
-// ✓ Process and drop promptly
+// Process and drop promptly
 {
     let data: Bytes = row.get(0)?;
     write_to_file(&data)?;
 } // data dropped, memory freed
 
-// ✗ Don't hold multiple large LOBs
+// Don't hold multiple large LOBs
 let all_files: Vec<Bytes> = rows
     .iter()
     .map(|r| r.get::<Bytes>(0).unwrap())
@@ -419,9 +419,9 @@ Writing large LOBs:
 
 | Feature | rust-mssql-driver | Tiberius | ODBC |
 |---------|-------------------|----------|------|
-| In-memory LOB | ✅ | ✅ | ✅ |
-| Streaming read API | ✅ (BlobReader) | No | Yes |
+| In-memory LOB | Yes | Yes | Yes |
+| Streaming read API | Yes (BlobReader) | No | Yes |
 | Streaming write | Planned | No | Yes |
 | Max size | 2 GB | 2 GB | 2 GB |
-| Zero-copy slice | ✅ | Partial | No |
-| Progress tracking | ✅ | No | Partial |
+| Zero-copy slice | Yes | Partial | No |
+| Progress tracking | Yes | No | Partial |

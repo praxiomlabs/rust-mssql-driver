@@ -6,7 +6,7 @@ Comprehensive guide for releasing new versions of rust-mssql-driver to crates.io
 
 ---
 
-## ⚠️ CRITICAL: Read Before Any Release
+## CRITICAL: Read Before Any Release
 
 ### The Cardinal Rules
 
@@ -194,8 +194,8 @@ git push -u origin release/v0.5.2 # ← Only 1 CI run on branch
 ### Quick Reference
 
 ```
-✅ DO:  release branch → batch changes → local checks → ONE push → squash-merge
-❌ DON'T: commit → push → commit → push → commit → push (directly to main)
+DO:  release branch → batch changes → local checks → ONE push → squash-merge
+DON'T: commit → push → commit → push → commit → push (directly to main)
 ```
 
 ---
@@ -547,7 +547,7 @@ gh run watch    # Watch publish workflow
 
 ## Manual Publishing
 
-> **⚠️ WARNING: Manual publishing should be a LAST RESORT only.**
+> **WARNING: Manual publishing should be a LAST RESORT only.**
 >
 > The automated GitHub Actions workflow is the **only** sanctioned way to publish.
 > Manual publishing bypasses CI checks and has historically caused broken releases.
@@ -718,7 +718,7 @@ Some features require additional system dependencies:
 
 | Checklist Section | Recipe | What It Does |
 |-------------------|--------|--------------|
-| **Pre-flight (REQUIRED)** | `just release-check` | Full validation with ALL features ⭐ |
+| **Pre-flight (REQUIRED)** | `just release-check` | Full validation with ALL features |
 | Pre-flight | `just ci-status` | Verify CI passed on main branch |
 | Code hygiene | `just wip-check` | TODO/FIXME/todo!/unimplemented! |
 | Code hygiene | `just panic-audit` | .unwrap()/.expect() audit |
@@ -736,7 +736,7 @@ Some features require additional system dependencies:
 | Publishing | `just url-check` | Repository URLs |
 | Publishing | `just dep-graph` | Dependency tier visualization |
 | Git | `just tag` | Create annotated version tag |
-| Full CI | `just ci-release-all` | Full release validation with ALL features ⭐ |
+| Full CI | `just ci-release-all` | Full release validation with ALL features |
 
 ---
 

@@ -863,7 +863,7 @@ let result = bulk.finish().await?;
 
 ### ADR-013: Always Encrypted Support
 
-**Status:** Implemented ✅
+**Status:** Implemented
 
 **Decision:** Always Encrypted client-side encryption is fully implemented with production-ready key providers.
 
@@ -887,12 +887,12 @@ Always Encrypted provides **client-side encryption** where keys never reach the 
 
 | Threat | Always Encrypted | T-SQL Encryption (`ENCRYPTBYKEY`) |
 |--------|------------------|-----------------------------------|
-| Malicious DBA | ✅ Protected | ❌ Vulnerable |
-| Server Compromise | ✅ Protected | ❌ Vulnerable |
-| Cloud Operator Access | ✅ Protected | ❌ Vulnerable |
-| Keys Stored On Server | ❌ Never | ✅ Yes |
+| Malicious DBA | Protected | Vulnerable |
+| Server Compromise | Protected | Vulnerable |
+| Cloud Operator Access | Protected | Vulnerable |
+| Keys Stored On Server | Never | Yes |
 
-**⚠️ Important:** T-SQL encryption functions (`ENCRYPTBYKEY`/`DECRYPTBYKEY`) provide **server-side encryption** where keys exist within SQL Server. They do **NOT** provide the same security guarantees as Always Encrypted and should not be considered a substitute.
+**Important:** T-SQL encryption functions (`ENCRYPTBYKEY`/`DECRYPTBYKEY`) provide **server-side encryption** where keys exist within SQL Server. They do **NOT** provide the same security guarantees as Always Encrypted and should not be considered a substitute.
 
 **Available Key Providers:**
 - **For development/testing:** Use the `InMemoryKeyStore` with the `always-encrypted` feature
@@ -900,7 +900,7 @@ Always Encrypted provides **client-side encryption** where keys never reach the 
 - **For Windows Certificate Store:** Use `WindowsCertStoreProvider` with the `windows-certstore` feature
 - **For custom key storage:** Implement the `KeyStoreProvider` trait for your key management solution
 
-**⚠️ Do NOT use `ENCRYPTBYKEY`** as a workaround - it does not provide the same security guarantees
+**Do NOT use `ENCRYPTBYKEY`** as a workaround - it does not provide the same security guarantees
 
 **References:**
 - [Always Encrypted Overview](https://learn.microsoft.com/en-us/sql/relational-databases/security/encryption/always-encrypted-database-engine)
@@ -1949,7 +1949,7 @@ msrv:
 - [x] Set up CI pipeline (GitHub Actions)
 - [x] Create `mssql-testing` crate scaffolding
 
-### Phase 2: Protocol Layer ✅ Complete
+### Phase 2: Protocol Layer Complete
 
 **`tds-protocol` crate:**
 - [x] Implement `PacketHeader` and `PacketStatus` bitflags
@@ -1960,7 +1960,7 @@ msrv:
 - [x] Verify strict `no_std` + `alloc` compatibility
 - [x] Fuzz testing for packet/token parsing (11 fuzz targets)
 
-### Phase 3: TLS Layer ✅ Complete
+### Phase 3: TLS Layer Complete
 
 **`mssql-tls` crate:**
 - [x] Implement TDS 7.x TLS negotiation (post-prelogin)
@@ -1968,7 +1968,7 @@ msrv:
 - [x] Certificate validation and hostname verification
 - [x] `TrustServerCertificate` support with warnings
 
-### Phase 4: Codec Layer ✅ Complete
+### Phase 4: Codec Layer Complete
 
 **`mssql-codec` crate:**
 - [x] Implement `tokio_util::codec::Decoder` for TDS packets
@@ -1976,7 +1976,7 @@ msrv:
 - [x] Implement IO splitting for cancellation
 - [x] Integration tests with mock server
 
-### Phase 5: Authentication ✅ Complete
+### Phase 5: Authentication Complete
 
 **`mssql-auth` crate:**
 - [x] Implement SQL Authentication (Login7 flow)
@@ -1986,7 +1986,7 @@ msrv:
 - [x] Add `sspi-auth` feature (cross-platform SSPI via sspi-rs)
 - [x] Add `cert-auth` feature (client certificate authentication)
 
-### Phase 6: Client API ✅ Complete
+### Phase 6: Client API Complete
 
 **`mssql-client` crate:**
 - [x] Implement connection string parser
@@ -1996,7 +1996,7 @@ msrv:
 - [x] Implement parameterized queries
 - [x] Implement transaction support with savepoints
 
-### Phase 7: Type System ✅ Complete
+### Phase 7: Type System Complete
 
 **`mssql-types` crate:**
 - [x] Implement basic type mappings (integers, strings)
@@ -2006,7 +2006,7 @@ msrv:
 - [x] Implement PLP chunk decoding for large objects
 - [x] Implement streaming blob reader
 
-### Phase 8: Production Features ✅ Complete
+### Phase 8: Production Features Complete
 
 - [x] Implement `mssql-driver-pool` with `sp_reset_connection`
 - [x] Implement bulk copy (BCP) support
@@ -2015,14 +2015,14 @@ msrv:
 - [x] Performance optimization and benchmarking
 - [x] Documentation and examples
 
-### Phase 9: Derive Macros ✅ Complete
+### Phase 9: Derive Macros Complete
 
 **`mssql-derive` crate:**
 - [x] Implement `#[derive(FromRow)]`
 - [x] Implement `#[derive(ToParams)]`
 - [x] Implement `#[derive(Tvp)]`
 
-### Phase 10: Release Preparation ✅ v0.2.0 Released
+### Phase 10: Release Preparation v0.2.0 Released
 
 - [x] API review and stabilization
 - [x] Security audit (cargo-deny, cargo-audit)
@@ -2086,17 +2086,17 @@ msrv:
 
 | SQL Server Version | Supported | Notes |
 |-------------------|-----------|-------|
-| 2008 | ✅ | TDS 7.3A, requires `Encrypt=no_tls` |
-| 2008 R2 | ✅ | TDS 7.3B, requires `Encrypt=no_tls` |
-| 2012 | ✅ | TDS 7.4, requires `Encrypt=no_tls` |
-| 2014 | ✅ | TDS 7.4, requires `Encrypt=no_tls` |
-| 2016 | ✅ | TDS 7.4, requires `Encrypt=no_tls` |
-| 2017 | ✅ | TDS 7.4 |
-| 2019 | ✅ | TDS 7.4 |
-| 2022 | ✅ | TDS 7.4/8.0 |
-| 2025 | ✅ | TDS 7.4/8.0, Managed Identity enhancements |
-| Azure SQL Database | ✅ | All authentication methods |
-| Azure SQL Managed Instance | ✅ | All authentication methods |
+| 2008 | Yes | TDS 7.3A, requires `Encrypt=no_tls` |
+| 2008 R2 | Yes | TDS 7.3B, requires `Encrypt=no_tls` |
+| 2012 | Yes | TDS 7.4, requires `Encrypt=no_tls` |
+| 2014 | Yes | TDS 7.4, requires `Encrypt=no_tls` |
+| 2016 | Yes | TDS 7.4, requires `Encrypt=no_tls` |
+| 2017 | Yes | TDS 7.4 |
+| 2019 | Yes | TDS 7.4 |
+| 2022 | Yes | TDS 7.4/8.0 |
+| 2025 | Yes | TDS 7.4/8.0, Managed Identity enhancements |
+| Azure SQL Database | Yes | All authentication methods |
+| Azure SQL Managed Instance | Yes | All authentication methods |
 
 ### 8.3 Feature Flag Matrix
 
@@ -2104,19 +2104,19 @@ Features are defined on `mssql-client` and forwarded to internal crates as neede
 
 | Feature | Default | Crate(s) Activated | Platform | Dependencies Added |
 |---------|---------|-------------------|----------|-------------------|
-| `chrono` | ✅ | mssql-types | All | `chrono` |
-| `uuid` | ✅ | mssql-types | All | `uuid` |
-| `decimal` | ✅ | mssql-types | All | `rust_decimal` |
-| `encoding` | ✅ | tds-protocol, mssql-types | All | `encoding_rs` |
-| `tls` | ✅ | mssql-tls | All | `rustls`, `tokio-rustls` |
-| `json` | ❌ | mssql-types | All | `serde_json` |
-| `otel` | ❌ | (local to mssql-client) | All | `opentelemetry`, `tracing-opentelemetry` |
-| `zeroize` | ❌ | mssql-auth | All | `zeroize` |
-| `always-encrypted` | ❌ | mssql-auth | All | `aes`, `cbc`, `hmac`, `sha2`, `rsa`, `rand` |
-| `azure-identity` | ❌ | mssql-auth | All | `azure_identity` (pulls OpenSSL transitively) |
-| `integrated-auth` | ❌ | mssql-auth | Linux/macOS | `gssapi`, `libkrb5-dev` |
-| `sspi-auth` | ❌ | mssql-auth | Windows | `sspi-rs` |
-| `cert-auth` | ❌ | mssql-auth | All | None (uses rustls) |
+| `chrono` | Yes | mssql-types | All | `chrono` |
+| `uuid` | Yes | mssql-types | All | `uuid` |
+| `decimal` | Yes | mssql-types | All | `rust_decimal` |
+| `encoding` | Yes | tds-protocol, mssql-types | All | `encoding_rs` |
+| `tls` | Yes | mssql-tls | All | `rustls`, `tokio-rustls` |
+| `json` | No | mssql-types | All | `serde_json` |
+| `otel` | No | (local to mssql-client) | All | `opentelemetry`, `tracing-opentelemetry` |
+| `zeroize` | No | mssql-auth | All | `zeroize` |
+| `always-encrypted` | No | mssql-auth | All | `aes`, `cbc`, `hmac`, `sha2`, `rsa`, `rand` |
+| `azure-identity` | No | mssql-auth | All | `azure_identity` (pulls OpenSSL transitively) |
+| `integrated-auth` | No | mssql-auth | Linux/macOS | `gssapi`, `libkrb5-dev` |
+| `sspi-auth` | No | mssql-auth | Windows | `sspi-rs` |
+| `cert-auth` | No | mssql-auth | All | None (uses rustls) |
 
 Features on `mssql-auth` only (not exposed via `mssql-client`):
 

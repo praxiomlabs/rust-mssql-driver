@@ -384,19 +384,19 @@ Typical allocation sources:
 ### Do
 
 ```text
-// ✓ Use connection pool
+// Use connection pool
 let conn = pool.get().await?;
 
-// ✓ Stream large results
+// Stream large results
 while let Some(row) = stream.next().await { ... }
 
-// ✓ Drop connections promptly
+// Drop connections promptly
 {
     let conn = pool.get().await?;
     // use conn
 } // dropped here
 
-// ✓ Reuse queries (enables statement caching)
+// Reuse queries (enables statement caching)
 for id in ids {
     conn.query("SELECT * FROM t WHERE id = @p1", &[&id]).await?;
 }
@@ -405,18 +405,18 @@ for id in ids {
 ### Don't
 
 ```text
-// ✗ Create new connections per query
+// Create new connections per query
 let conn = Client::connect(config).await?;  // Expensive!
 
-// ✗ Collect huge result sets
+// Collect huge result sets
 let million_rows = stream.collect_all().await?;  // OOM risk
 
-// ✗ Hold connections during slow operations
+// Hold connections during slow operations
 let conn = pool.get().await?;
 slow_external_api_call().await;  // Blocks pool
 conn.query(...).await?;
 
-// ✗ Different SQL strings for same query
+// Different SQL strings for same query
 conn.query(&format!("SELECT * FROM t WHERE id = {}", id), &[]).await?;  // No caching!
 ```
 

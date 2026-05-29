@@ -170,13 +170,13 @@ Encrypt=true;TrustServerCertificate=false
 
 | Threat | Protection Level | How |
 |--------|------------------|-----|
-| Network eavesdropping | ✅ Strong | TLS 1.2/1.3 encryption |
-| MITM attacks | ✅ Strong | Certificate validation |
-| SQL injection via parameters | ✅ Strong | RPC protocol binding |
-| Credential logging | ✅ Strong | Never logged at any level |
-| Credential memory exposure | ✅ Moderate | `zeroize` feature (opt-in) |
-| Savepoint injection | ✅ Strong | Identifier validation |
-| Protocol parsing bugs | ✅ Moderate | Fuzz testing, memory safety |
+| Network eavesdropping | Strong | TLS 1.2/1.3 encryption |
+| MITM attacks | Strong | Certificate validation |
+| SQL injection via parameters | Strong | RPC protocol binding |
+| Credential logging | Strong | Never logged at any level |
+| Credential memory exposure | Moderate | `zeroize` feature (opt-in) |
+| Savepoint injection | Strong | Identifier validation |
+| Protocol parsing bugs | Moderate | Fuzz testing, memory safety |
 
 #### What We Do NOT Protect Against
 
@@ -191,7 +191,7 @@ Encrypt=true;TrustServerCertificate=false
 
 ### Always Encrypted Considerations
 
-**Status:** Full support in v0.3.0 (cryptography ✅, key providers ✅)
+**Status:** Full support in v0.3.0 (cryptography, key providers)
 
 The driver supports Always Encrypted client-side encryption via the `always-encrypted` feature:
 
@@ -208,10 +208,10 @@ Always Encrypted provides **client-side encryption** for data that remains encry
 
 | Threat | Standard TLS | Always Encrypted |
 |--------|--------------|------------------|
-| Network attackers | ✅ Protected | ✅ Protected |
-| Compromised DBAs | ❌ Exposed | ✅ Protected |
-| Server memory access | ❌ Exposed | ✅ Protected |
-| Backup theft | ❌ Exposed | ✅ Protected |
+| Network attackers | Protected | Protected |
+| Compromised DBAs | Exposed | Protected |
+| Server memory access | Exposed | Protected |
+| Backup theft | Exposed | Protected |
 
 **If your threat model includes malicious DBAs or server compromise:**
 1. Use the `always-encrypted` feature with `InMemoryKeyStore` for dev/test
