@@ -48,6 +48,8 @@ jobs:
       - uses: ./.github/actions/setup-linux-deps
       - name: Run tests
         run: cargo nextest run ${{ matrix.features }}
+      - name: Run doctests
+        run: cargo test --doc ${{ matrix.features }}
 
   lint:
     name: Lint

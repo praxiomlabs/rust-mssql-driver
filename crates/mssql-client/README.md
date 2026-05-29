@@ -30,23 +30,25 @@ InTransaction -> Ready (via commit() or rollback())
 
 ## Usage
 
-```rust
+```rust,no_run
 use mssql_client::{Client, Config};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_connection_string(
-        "Server=localhost;Database=test;User Id=sa;Password=Password123;"
+        "Server=localhost;Database=test;User Id=sa;Password=Password123",
     )?;
 
     let mut client = Client::connect(config).await?;
 
     // Execute a query with parameters
     let rows = client
-        .query("SELECT * FROM users WHERE id = @p1", &[&1])
+        .query("SELECT * FROM users WHERE id = @p1", &[&1i32])
         .await?;
 
-    for row in rows {
+    // QueryStream yields Result<Row, Error>
+    for result in rows {
+        let row = result?;
         let name: String = row.get(0)?;
         println!("User: {}", name);
     }
@@ -57,47 +59,80 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Transactions with Savepoints
 
-```rust
-let mut tx = client.begin_transaction().await?;
-tx.execute("INSERT INTO users (name) VALUES (@p1)", &[&"Alice"]).await?;
+```rust,no_run
+use mssql_client::{Client, Config};
 
-// Create a savepoint for partial rollback
-let sp = tx.save_point("before_update").await?;
-tx.execute("UPDATE users SET active = 1", &[]).await?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=test;User Id=sa;Password=Password123",
+    )?;
+    let client = Client::connect(config).await?;
 
-// Rollback to savepoint if needed
-// tx.rollback_to(&sp).await?;
+    // begin_transaction() consumes the client and returns Client<InTransaction>
+    let mut tx = client.begin_transaction().await?;
+    tx.execute("INSERT INTO users (name) VALUES (@p1)", &[&"Alice"]).await?;
 
-tx.commit().await?;
+    // Create a savepoint for partial rollback
+    let sp = tx.save_point("before_update").await?;
+    tx.execute("UPDATE users SET active = 1", &[]).await?;
+
+    // Rollback to savepoint if needed
+    tx.rollback_to(&sp).await?;
+
+    tx.commit().await?;
+    Ok(())
+}
 ```
 
 ## Streaming Large Results
 
-```rust
-use futures::StreamExt;
+```rust,no_run
+use mssql_client::{Client, Config};
 
-let mut stream = client
-    .query_stream("SELECT * FROM large_table", &[])
-    .await?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=test;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
 
-while let Some(row) = stream.next().await {
-    let row = row?;
-    // Process row without loading entire result into memory
+    // QueryStream decodes rows lazily as they are consumed.
+    let stream = client.query("SELECT * FROM large_table", &[]).await?;
+
+    for result in stream {
+        let row = result?;
+        let _ = row; // Process row without loading entire result into memory
+    }
+    Ok(())
 }
 ```
 
 ## Bulk Insert
 
-```rust
-use mssql_client::{BulkInsert, BulkColumn};
+```rust,no_run
+use mssql_client::{BulkColumn, BulkInsertBuilder, Client, Config, SqlValue};
 
-let bulk = BulkInsert::builder("dbo.users")
-    .column(BulkColumn::new("id", "INT"))
-    .column(BulkColumn::new("name", "NVARCHAR(100)"))
-    .build();
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=test;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
 
-let result = client.bulk_insert(bulk, rows).await?;
-println!("Inserted {} rows", result.rows_affected);
+    let builder = BulkInsertBuilder::new("dbo.users").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0)?,
+        BulkColumn::new("name", "NVARCHAR(100)", 1)?,
+    ]);
+
+    let mut writer = client.bulk_insert(&builder).await?;
+    writer.send_row_values(&[SqlValue::Int(1), SqlValue::String("Alice".into())])?;
+    writer.send_row_values(&[SqlValue::Int(2), SqlValue::String("Bob".into())])?;
+
+    let result = writer.finish().await?;
+    println!("Inserted {} rows", result.rows_affected);
+    Ok(())
+}
 ```
 
 ## Feature Flags
