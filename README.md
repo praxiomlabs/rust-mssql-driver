@@ -289,8 +289,8 @@ the 1.0 backward-compatibility guarantee follows.
 | Prepared statement cache | Automatic LRU | Per-execution |
 | Azure SQL redirects | Automatic | Manual handling |
 | Type-state connections | Yes | No |
-| Stored procedures (RPC) | Yes (OUTPUT params, RETURN value) | No (todo!()) |
-| Named instance resolution | Yes (SQL Browser) | No |
+| Stored procedures (RPC) | First-class API (OUTPUT params, RETURN value) | Via `EXEC` in SQL only; no dedicated API |
+| Named instance resolution | Automatic (SQL Browser) | Yes (`SqlBrowser` trait) |
 
 ## Examples
 
