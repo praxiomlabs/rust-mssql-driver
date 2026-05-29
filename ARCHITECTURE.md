@@ -2127,77 +2127,10 @@ Features on `mssql-auth` only (not exposed via `mssql-client`):
 
 ### 8.4 Migration Guide from Tiberius
 
-**Connection String:**
-```rust
-// Tiberius
-let config = Config::from_ado_string(&connection_string)?;
-let tcp = TcpStream::connect(config.get_addr()).await?;
-let client = Client::connect(config, tcp.compat_write()).await?;
-
-// This driver
-let client = Client::connect(&connection_string).await?;
-```
-
-**Query Execution:**
-```rust
-// Tiberius
-let stream = client.query("SELECT @P1", &[&1i32]).await?;
-let row = stream.into_row().await?.unwrap();
-
-// This driver
-let mut stream = client.query("SELECT @p1", &[&1i32]).await?;
-let row = stream.next().unwrap()?;
-```
-
-**Transactions:**
-```rust
-// Tiberius (manual)
-client.execute("BEGIN TRANSACTION", &[]).await?;
-client.execute("INSERT INTO ...", &[]).await?;
-client.execute("COMMIT", &[]).await?;
-
-// This driver (type-safe)
-let tx = client.begin_transaction().await?;
-tx.execute("INSERT INTO ...", &[]).await?;
-tx.commit().await?; // Returns Client<Ready>
-```
-
-**Prepared Statements:**
-```rust
-// Tiberius (implicit, no caching control)
-// Statements are prepared per-execution
-let stream = client.query("SELECT @P1", &[&user_id]).await?;
-
-// This driver (automatic caching with LRU eviction)
-// First call: sp_prepare + sp_execute
-// Subsequent calls: sp_execute only (cache hit)
-for user_id in user_ids {
-    let mut rows = client.query("SELECT @p1", &[&user_id]).await?;
-    let _row = rows.next();
-}
-```
-
-**Azure SQL Redirects:**
-```rust
-// Tiberius (manual handling required)
-loop {
-    match Client::connect(config, tcp.compat_write()).await {
-        Ok(client) => break client,
-        Err(Error::Routing { host, port }) => {
-            // Manual reconnection logic required
-            config = config.with_server(format!("{}:{}", host, port));
-            tcp = TcpStream::connect(&config).await?;
-            continue;
-        }
-        Err(e) => return Err(e),
-    }
-}
-
-// This driver (automatic, transparent handling)
-let client = Client::connect(&connection_string).await?;
-// Azure SQL gateway redirects handled automatically
-// No manual intervention required
-```
+See [docs/MIGRATION_FROM_TIBERIUS.md](docs/MIGRATION_FROM_TIBERIUS.md) for the
+full migration guide — connection setup, query execution, transactions,
+connection pooling, Azure SQL routing, error handling, type mappings, and a
+quick-reference cheat sheet.
 
 ### 8.5 Glossary
 
