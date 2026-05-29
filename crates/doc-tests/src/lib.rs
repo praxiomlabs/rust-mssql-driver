@@ -17,7 +17,7 @@
 //! The guides below contain complete, runnable usage examples and are
 //! compile-tested. Pure-reference docs that consist of short illustrative
 //! fragments (e.g. `CONNECTION_STRINGS.md` connection-string formats,
-//! `VERSION_REFS.md`, `DEPENDENCY_POLICY.md`, `BENCHMARKS.md`, `COMPARISON.md`,
+//! `DEPENDENCY_POLICY.md`, `BENCHMARKS.md`, `COMPARISON.md`,
 //! `FEATURES.md`, `SQL_SERVER_COMPATIBILITY.md`, `FILESTREAM.md` Windows APIs)
 //! keep their Rust syntax highlighting but are intentionally not included here.
 

@@ -18,7 +18,7 @@ Comprehensive guide for releasing new versions of rust-mssql-driver to crates.io
 
 4. **Publishing to crates.io is IRREVERSIBLE** — You can yank a version, but you cannot delete or re-upload it. A yanked version still counts as "used" forever.
 
-5. **ALWAYS run `just version-refs-check` before tagging** — Verify that ALL version references in documentation are updated to the new version. See [docs/VERSION_REFS.md](docs/VERSION_REFS.md) for a complete list of files to check. The `just release-check` recipe includes this automatically.
+5. **ALWAYS run `just version-refs-check` before tagging** — Verify that ALL version references in documentation are updated to the new version. See [§ Version Consistency](#2-version-consistency) for the complete list of files to check. The `just release-check` recipe includes this automatically.
 
 6. **NEVER cancel a release workflow mid-publish** — If you cancel after some crates are published, you'll have a partial release requiring manual recovery. Either let it complete or don't start it.
 
@@ -309,14 +309,60 @@ just typos          # Spell checking
 ### 2. Version Consistency
 
 ```bash
-just version-sync   # Check README matches Cargo.toml
+just version-sync         # README ↔ Cargo.toml
+just version-refs-check   # scan for common stale-version patterns
 ```
 
-Verify version is consistent in:
-- [ ] `Cargo.toml` (workspace.package.version)
-- [ ] All workspace members inherit correctly
-- [ ] README.md installation instructions
-- [ ] CHANGELOG.md has entry with correct date
+`just version-refs-check` is a floor, not a ceiling: it catches the common cases
+but cannot judge historical-vs-current context, the MSRV ripple, or example
+snippets. Use the checklists below for everything it can't catch.
+
+**Authoritative** (single source of truth — update every release):
+
+| File | Location | Rule |
+|------|----------|------|
+| `Cargo.toml` (root) | `workspace.package.version` | Must match the new release |
+| `CHANGELOG.md` | `[Unreleased]` → `[X.Y.Z] - YYYY-MM-DD` | Add dated release section |
+
+All workspace crates inherit `workspace.package.version` — no individual crate
+`Cargo.toml` edits are needed (`xtask` and `mssql-testing` are `publish = false`).
+
+**Secondary** (display/docs — update every release; stale values here caused the v0.5.1 incident):
+
+| File | What to check |
+|------|---------------|
+| `RELEASING.md` | Header `**Version:** X.Y.Z` |
+| `ARCHITECTURE.md` | Header `**Status:** … (vX.Y.Z Released)`; example `Cargo.toml` version snippets |
+| `README.md` | Feature Status header `(vX.Y.x)` |
+| `SECURITY.md` | § Supported Versions table; § Audit History |
+| `docs/BENCHMARKS.md` | `--save-baseline vX.Y.Z` / `--baseline vX.Y.Z` |
+
+**Historical** (do NOT update — that would rewrite history): CHANGELOG prior
+entries; the Lessons Learned / Git Hygiene incident references in this doc;
+ARCHITECTURE.md § Document History; STABILITY.md example deprecation versions; and
+the `(v0.5.x)` feature-introduction markers in `docs/CONNECTION_RECOVERY.md` and
+`docs/SQL_SERVER_COMPATIBILITY.md`.
+
+#### MSRV bump ripple
+
+When the MSRV changes (per [STABILITY.md](STABILITY.md) § MSRV Increase Policy),
+update **all** of these — `just version-refs-check` does not cover this, but
+`just doc-consistency` enforces MSRV agreement across the key files:
+
+| File | What to update |
+|------|----------------|
+| `Cargo.toml` (root) | `workspace.package.rust-version` |
+| `xtask/Cargo.toml` | `rust-version` |
+| `rust-toolchain.toml` | `channel` |
+| `Justfile` | `msrv := "X.Y"` + version-pinned-tools comments |
+| `README.md` | MSRV badge (label + Rust release-blog URL) and the "MSRV X.Y" feature bullet |
+| `CLAUDE.md` | "MSRV X.Y" references |
+| `ARCHITECTURE.md` | § 1 MSRV Policy line, § 6.6 Current MSRV + toolchain/`rust-version` examples |
+| `STABILITY.md` | § Current MSRV |
+| `CONTRIBUTING.md` | Prerequisites table + "tools compatible with Rust X.Y" |
+| `RELEASING.md` | Header `**MSRV:**` + CI-parity `cargo +X.Y check` example |
+| `docs/BENCHMARKS.md` | Prerequisites / environment "Rust X.Y" |
+| `xtask/src/main.rs` | `rustup run X.Y` example in `ci()` output |
 
 ### 3. Security & Dependency Audit
 
