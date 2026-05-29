@@ -9,7 +9,7 @@ This guide helps you migrate from [tiberius](https://github.com/prisma/tiberius)
 | Runtime | Any async runtime | Tokio only |
 | Type-state | No | Yes (compile-time safety) |
 | Connection pooling | External (bb8/deadpool) | Built-in |
-| TDS 8.0 strict | Not supported | First-class |
+| TDS 8.0 strict | Not supported | Yes |
 | Prepared statements | Manual | Auto-cached LRU |
 | Azure redirects | Manual handling | Automatic |
 | Result streaming | Iterator | Stream with collect |

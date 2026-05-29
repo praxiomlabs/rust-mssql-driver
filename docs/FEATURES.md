@@ -330,7 +330,7 @@ Only basic types supported. No date/time, UUID, decimal, or JSON.
 mssql-client = { version = "0.10" }
 ```
 
-All default features enabled for comprehensive type support.
+All default features enabled for broad type support.
 
 ### Production with Observability
 

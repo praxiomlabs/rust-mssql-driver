@@ -1,4 +1,4 @@
-# Architectural Reference: High-Performance Rust MS SQL Driver
+# Architectural Reference: Rust MS SQL Driver
 
 **Version:** 1.6.0
 **Status:** Design Complete (v0.8.0 Released)
@@ -27,9 +27,9 @@ This project aims to build the definitive Microsoft SQL Server driver for the Ru
 
 ### 1.1 Core Tenets
 
-1. **Tokio-Native:** Unapologetically built on Tokio 1.48+ to leverage the standard Rust async runtime ecosystem without compatibility shims or abstraction overhead.
+1. **Tokio-Native:** Unapologetically built on Tokio 1.48+ to use the standard Rust async runtime ecosystem without compatibility shims or abstraction overhead.
 
-2. **TDS 8.0 First-Class:** Designed for the strict TLS 1.3 architecture of SQL Server 2022+ where TLS handshake precedes all TDS messages, while maintaining support for legacy TDS 7.4 encryption negotiation.
+2. **TDS 8.0 Strict Mode:** Designed for the strict TLS 1.3 architecture of SQL Server 2022+ where TLS handshake precedes all TDS messages, while maintaining support for legacy TDS 7.4 encryption negotiation.
 
 3. **Minimal Allocation Churn:** Reduces memory allocation pressure through strategic use of reference counting (`Arc<Bytes>`) and buffer slicing. Note: This is *reduced*-copy rather than true zero-copy, which would require arena allocation or self-referential structures.
 
@@ -823,7 +823,7 @@ src/
 
 **Status:** Accepted
 
-**Decision:** First-class support for bulk insert operations using the TDS Bulk Load protocol.
+**Decision:** Native support for bulk insert operations using the TDS Bulk Load protocol.
 
 **API:**
 ```rust
@@ -912,7 +912,7 @@ Always Encrypted provides **client-side encryption** where keys never reach the 
 
 **Status:** Accepted
 
-**Decision:** First-class OpenTelemetry tracing support via optional feature flag.
+**Decision:** OpenTelemetry tracing support via an optional feature flag.
 
 **Feature:** `otel` (optional, not default)
 
@@ -2152,7 +2152,7 @@ quick-reference cheat sheet.
 
 | Version | Date | Changes |
 |---------|------|---------|
-| 1.0.0 | 2025-12-11 | Initial comprehensive specification |
+| 1.0.0 | 2025-12-11 | Initial specification |
 | 1.1.0 | 2025-12-11 | Security guidance corrections (ADR-013 Always Encrypted), savepoint validation, prepared statement lifecycle (§4.5), Azure SQL routing (§4.6), OpenTelemetry 0.31, version constraint policy, cargo-deny/hakari integration, native async trait guidance, migration guide updates |
 | 1.2.0 | 2025-12-24 | Updated for v0.2.0 release: Phase 5 auth complete, ADR-013 status updated (cryptography implemented), feature flag matrix expanded, v0.2.0 delivered features documented, v0.3.0 roadmap updated |
 | 1.3.0 | 2025-12-25 | Updated for v0.3.0 release: Always Encrypted key providers (InMemoryKeyStore, KeyStoreProvider trait), true LOB streaming (LobStream), Change Tracking integration, all 12 data type parsing fixes complete |

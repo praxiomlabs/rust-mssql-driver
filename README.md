@@ -1,6 +1,6 @@
 # rust-mssql-driver
 
-A high-performance, async Microsoft SQL Server driver for Rust.
+An async Microsoft SQL Server driver for Rust.
 
 [![Crates.io](https://img.shields.io/crates/v/mssql-client.svg)](https://crates.io/crates/mssql-client)
 [![Documentation](https://docs.rs/mssql-client/badge.svg)](https://docs.rs/mssql-client)
@@ -26,7 +26,7 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 | Queries & Parameters | Yes | Full support |
 | Transactions | Yes | Commit, rollback, savepoints |
 | Connection Pooling | Yes | Built-in via `mssql-driver-pool` |
-| Bulk Insert | Yes | High-performance batch loading via `Client::bulk_insert()` |
+| Bulk Insert | Yes | Batch loading via `Client::bulk_insert()` |
 | `#[derive(FromRow)]` / `#[derive(ToParams)]` | Yes | Row-to-struct and struct-to-params mapping |
 | TDS 7.3 (Legacy) | Yes | SQL Server 2008/2008 R2 |
 | TDS 8.0 Strict Mode | Yes | SQL Server 2022+ |
@@ -294,13 +294,13 @@ the 1.0 backward-compatibility guarantee follows.
 | Feature | rust-mssql-driver | tiberius |
 |---------|-------------------|----------|
 | TDS 7.3 (SQL 2008) | Configurable | Supported |
-| TDS 8.0 (strict mode) | First-class | Not supported |
+| TDS 8.0 (strict mode) | Yes | Not supported |
 | Connection pooling | Built-in | External (bb8/deadpool) |
 | Runtime | Tokio-native | Runtime agnostic |
 | Prepared statement cache | Automatic LRU | Per-execution |
 | Azure SQL redirects | Automatic | Manual handling |
 | Type-state connections | Yes | No |
-| Stored procedures (RPC) | First-class API (OUTPUT params, RETURN value) | Via `EXEC` in SQL only; no dedicated API |
+| Stored procedures (RPC) | Dedicated API (OUTPUT params, RETURN value) | Via `EXEC` in SQL only; no dedicated API |
 | Named instance resolution | Automatic (SQL Browser) | Yes (`SqlBrowser` trait) |
 
 ## Examples

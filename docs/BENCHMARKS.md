@@ -444,7 +444,7 @@ Initial baselines established for all performance targets.
 
 ### 2025-12-16 Initial Measurements
 
-First comprehensive benchmark suite added with 26 benchmark cases across connection string parsing, type conversions, Arc<Bytes> operations, and SqlValue creation.
+First benchmark suite added with 26 benchmark cases across connection string parsing, type conversions, Arc<Bytes> operations, and SqlValue creation.
 
 **Highlights:**
 - Zero-copy architecture validated: Arc<Bytes> clone is O(1) regardless of buffer size

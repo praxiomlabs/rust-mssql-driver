@@ -14,7 +14,7 @@ This is the primary public API surface for the rust-mssql-driver project. It pro
 - **Transactions**: Full transaction support with savepoints
 - **Azure support**: Automatic routing and failover handling
 - **Streaming results**: Memory-efficient processing of large result sets
-- **Bulk insert**: High-performance bulk data loading
+- **Bulk insert**: Bulk data loading via BCP
 - **Table-valued parameters**: Pass collections to stored procedures
 
 ## Type-State Connection Management
@@ -171,7 +171,7 @@ See the `examples/` directory for complete examples:
 
 - `basic.rs` - Simple queries and parameter binding
 - `transactions.rs` - Transaction handling with savepoints
-- `bulk_insert.rs` - High-performance bulk loading
+- `bulk_insert.rs` - Bulk loading
 - `derive_macros.rs` - Using `#[derive(FromRow)]` and `#[derive(ToParams)]`
 - `streaming.rs` - Processing large result sets
 

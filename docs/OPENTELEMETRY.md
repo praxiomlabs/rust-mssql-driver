@@ -177,7 +177,7 @@ For high-throughput scenarios, consider:
 
 ## Integration with Existing Tracing
 
-The driver uses the `tracing` crate, so it integrates seamlessly with existing tracing infrastructure:
+The driver uses the `tracing` crate, so it integrates with existing tracing infrastructure:
 
 ```text
 use tracing::{info_span, Instrument};
