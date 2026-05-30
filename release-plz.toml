@@ -1,0 +1,51 @@
+# release-plz configuration — https://release-plz.dev/docs/config
+#
+# Constrained "Release PR" model: release-plz opens a Release PR with the version
+# bump + CHANGELOG, and nothing is published until a human merges that PR.
+#
+# This workspace releases all 8 publishable crates in lockstep (they inherit
+# `workspace.package.version`), as ONE product with ONE `vX.Y.Z` tag, ONE GitHub
+# Release, and ONE root CHANGELOG.md — matching the 15 existing releases.
+# release-plz's defaults assume independently-versioned crates (per-crate tags,
+# releases, and changelogs), so the workspace section disables those and
+# mssql-client (the product's primary crate) carries them instead.
+
+[workspace]
+# Publish ONLY for commits that come from a merged release PR — a normal feature
+# merge (or a stray manual version edit) never triggers a publish. The merge of
+# the Release PR is the human gate.
+release_always = false
+
+# Disabled at workspace level; re-enabled on mssql-client below so we get ONE
+# tag/release/changelog per version instead of eight.
+git_tag_enable = false
+git_release_enable = false
+changelog_update = false
+
+# Match the proven publish path: the previous release workflow published with
+# --no-verify (each crate is already built/tested by CI on the same commit), and
+# re-verifying 8 crates would multiply publish time for no added signal.
+publish_no_verify = true
+
+[[package]]
+name = "mssql-client"
+# The single source-of-truth tag + GitHub Release for each workspace version.
+git_tag_enable = true
+git_tag_name = "v{{ version }}"
+git_release_enable = true
+git_release_name = "v{{ version }}"
+# Maintain the single root CHANGELOG.md (Keep a Changelog format, as before),
+# including commits from every publishable crate in the workspace.
+changelog_update = true
+changelog_path = "./CHANGELOG.md"
+changelog_include = [
+  "tds-protocol",
+  "mssql-types",
+  "mssql-tls",
+  "mssql-codec",
+  "mssql-auth",
+  "mssql-derive",
+  "mssql-driver-pool",
+]
+
+# xtask and mssql-testing are `publish = false` and are skipped automatically.

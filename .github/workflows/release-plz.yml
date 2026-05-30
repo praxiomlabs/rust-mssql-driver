@@ -1,0 +1,85 @@
+# Release automation via release-plz (https://release-plz.dev).
+#
+# Two jobs, both on push to the trunk:
+#   - release-plz-pr:      opens/updates a "Release PR" that bumps the workspace
+#                          version and writes the CHANGELOG. Nothing is published
+#                          by this job.
+#   - release-plz-release: publishes to crates.io and creates the GitHub Release.
+#                          With `release_always = false` (see release-plz.toml) it
+#                          ONLY publishes for the commit that merges a Release PR,
+#                          so a normal feature merge never triggers a publish.
+#
+# The human gate is merging the Release PR. Until then, nothing reaches crates.io.
+#
+# Tokens:
+#   - RELEASE_PLZ_TOKEN (fine-grained PAT: contents + pull-requests write) is
+#     used instead of the default GITHUB_TOKEN because PRs opened with the
+#     default token do NOT trigger CI workflows — the Release PR would sit with
+#     zero checks and could never satisfy required status checks.
+#   - CARGO_REGISTRY_TOKEN authenticates the crates.io publish. The planned
+#     follow-up (after the first release-plz-driven release is verified) is to
+#     switch to crates.io Trusted Publishing (OIDC) via
+#     rust-lang/crates-io-auth-action and delete the token secret — at which
+#     point the `release` job gains `permissions: id-token: write` and drops the
+#     CARGO_REGISTRY_TOKEN env.
+
+name: Release-plz
+
+on:
+  push:
+    branches: [main]
+
+# Do not run more than one release-plz instance per ref at a time.
+concurrency:
+  group: release-plz-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-plz-release:
+    name: Release-plz release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install Kerberos headers
+        run: sudo apt-get update && sudo apt-get install -y libkrb5-dev
+      - name: Run release-plz
+        uses: release-plz/[email protected]
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  release-plz-pr:
+    name: Release-plz PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install Kerberos headers
+        run: sudo apt-get update && sudo apt-get install -y libkrb5-dev
+      - name: Run release-plz
+        uses: release-plz/[email protected]
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
