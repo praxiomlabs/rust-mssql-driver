@@ -257,6 +257,6 @@ if [ "$ERRORS" -eq 0 ]; then
 else
     echo "${RED}[FAIL]${RESET}  $ERRORS of $CHECKS consistency checks failed"
     echo ""
-    echo "${YELLOW}[TIP]${RESET}  See docs/VERSION_REFS.md for the canonical list of files that must agree."
+    echo "${YELLOW}[TIP]${RESET}  See RELEASING.md (section: Version Consistency) for the canonical list of files that must agree."
     exit 1
 fi

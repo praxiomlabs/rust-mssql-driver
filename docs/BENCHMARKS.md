@@ -2,7 +2,7 @@
 
 This document describes the benchmarks included with rust-mssql-driver, performance targets, and how to interpret results.
 
-For architecture comparison with Tiberius, see [COMPARATIVE_BENCHMARKS.md](COMPARATIVE_BENCHMARKS.md).
+For a feature and architecture comparison with Tiberius and other drivers, see [COMPARISON.md](COMPARISON.md).
 
 ---
 
@@ -203,8 +203,9 @@ fn bench_real_queries(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let pool = rt.block_on(async {
         Pool::builder()
+            .client_config(config)
             .max_connections(10)
-            .build(config)
+            .build()
             .await
             .unwrap()
     });
@@ -315,39 +316,39 @@ Benchmarks are not run in CI by default (too slow, variable). For regression det
 
 | Operation | Target | Acceptable | Current | Notes |
 |-----------|--------|------------|---------|-------|
-| Connection string (simple) | < 500 ns | < 2 μs | 264 ns | ✅ |
-| Connection string (full Azure) | < 1 μs | < 5 μs | 554 ns | ✅ |
-| Config builder (minimal) | < 500 ns | < 1 μs | 94 ns | ✅ |
-| Config builder (full) | < 1 μs | < 2 μs | 117 ns | ✅ |
+| Connection string (simple) | < 500 ns | < 2 μs | 264 ns | Yes |
+| Connection string (full Azure) | < 1 μs | < 5 μs | 554 ns | Yes |
+| Config builder (minimal) | < 500 ns | < 1 μs | 94 ns | Yes |
+| Config builder (full) | < 1 μs | < 2 μs | 117 ns | Yes |
 
 ### Type Conversions
 
 | Operation | Target | Acceptable | Current | Notes |
 |-----------|--------|------------|---------|-------|
-| i32 from INT | < 10 ns | < 50 ns | 2.7 ns | ✅ |
-| i64 from BIGINT | < 10 ns | < 50 ns | 2.7 ns | ✅ |
-| String from NVARCHAR | < 100 ns | < 500 ns | 9.1 ns | ✅ |
-| Option<T> from non-null | < 15 ns | < 50 ns | 6.2 ns | ✅ |
-| Option<T> from NULL | < 5 ns | < 20 ns | 2.0 ns | ✅ |
-| f64 from FLOAT | < 10 ns | < 50 ns | 3.1 ns | ✅ |
-| bool from BIT | < 5 ns | < 20 ns | 3.0 ns | ✅ |
+| i32 from INT | < 10 ns | < 50 ns | 2.7 ns | Yes |
+| i64 from BIGINT | < 10 ns | < 50 ns | 2.7 ns | Yes |
+| String from NVARCHAR | < 100 ns | < 500 ns | 9.1 ns | Yes |
+| Option<T> from non-null | < 15 ns | < 50 ns | 6.2 ns | Yes |
+| Option<T> from NULL | < 5 ns | < 20 ns | 2.0 ns | Yes |
+| f64 from FLOAT | < 10 ns | < 50 ns | 3.1 ns | Yes |
+| bool from BIT | < 5 ns | < 20 ns | 3.0 ns | Yes |
 
 ### Memory Operations (ADR-004)
 
 | Operation | Target | Acceptable | Current | Notes |
 |-----------|--------|------------|---------|-------|
-| Arc<Bytes> clone (any size) | < 20 ns | < 50 ns | 12.7 ns | ✅ O(1) |
-| Buffer slice (zero-copy) | < 5 ns | < 20 ns | 0.55 ns | ✅ |
-| SqlValue null check | < 2 ns | < 10 ns | 0.44 ns | ✅ |
+| Arc<Bytes> clone (any size) | < 20 ns | < 50 ns | 12.7 ns | Yes (O(1)) |
+| Buffer slice (zero-copy) | < 5 ns | < 20 ns | 0.55 ns | Yes |
+| SqlValue null check | < 2 ns | < 10 ns | 0.44 ns | Yes |
 
 ### Protocol Operations
 
 | Operation | Target | Acceptable | Current | Notes |
 |-----------|--------|------------|---------|-------|
-| Packet header encode | < 50 ns | < 100 ns | ~24 ns | ✅ |
-| Packet header decode | < 50 ns | < 100 ns | ~30 ns | ✅ |
-| UTF-16 encode (short) | < 100 ns | < 200 ns | ~45 ns | ✅ |
-| UTF-16 decode (short) | < 100 ns | < 200 ns | ~35 ns | ✅ |
+| Packet header encode | < 50 ns | < 100 ns | ~24 ns | Yes |
+| Packet header decode | < 50 ns | < 100 ns | ~30 ns | Yes |
+| UTF-16 encode (short) | < 100 ns | < 200 ns | ~45 ns | Yes |
+| UTF-16 decode (short) | < 100 ns | < 200 ns | ~35 ns | Yes |
 | Encode small packet (< 1KB) | < 500 ns | < 1 μs | - | |
 | Encode medium packet (~4KB) | < 2 μs | < 5 μs | - | |
 
@@ -443,7 +444,7 @@ Initial baselines established for all performance targets.
 
 ### 2025-12-16 Initial Measurements
 
-First comprehensive benchmark suite added with 26 benchmark cases across connection string parsing, type conversions, Arc<Bytes> operations, and SqlValue creation.
+First benchmark suite added with 26 benchmark cases across connection string parsing, type conversions, Arc<Bytes> operations, and SqlValue creation.
 
 **Highlights:**
 - Zero-copy architecture validated: Arc<Bytes> clone is O(1) regardless of buffer size
@@ -458,4 +459,4 @@ First comprehensive benchmark suite added with 26 benchmark cases across connect
 - [Criterion.rs Documentation](https://bheisler.github.io/criterion.rs/book/)
 - [Rust Performance Book](https://nnethercote.github.io/perf-book/)
 - [ADR-004: Arc<Bytes> Pattern](../ARCHITECTURE.md)
-- [Comparative Benchmarks](COMPARATIVE_BENCHMARKS.md)
+- [Driver Comparison](COMPARISON.md)

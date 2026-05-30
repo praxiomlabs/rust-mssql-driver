@@ -10,17 +10,32 @@
 
 Obtain a `CancelHandle` before starting a query, then cancel from another task:
 
-```rust
-let cancel = client.cancel_handle();
+```rust,no_run
+use mssql_client::{Client, Config};
+use std::time::Duration;
 
-// Spawn the query
-let query_handle = tokio::spawn(async move {
-    client.query("SELECT * FROM large_table", &[]).await
-});
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
 
-// Cancel after timeout
-tokio::time::sleep(Duration::from_secs(5)).await;
-cancel.cancel().await?;
+    let cancel = client.cancel_handle();
+
+    // Spawn the query (consume the stream inside the task so it stays 'static)
+    let query_handle = tokio::spawn(async move {
+        let rows = client.query("SELECT * FROM large_table", &[]).await?;
+        let count = rows.into_iter().count();
+        Ok::<_, mssql_client::Error>(count)
+    });
+
+    // Cancel after timeout
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    cancel.cancel().await?;
+    let _ = query_handle.await;
+    Ok(())
+}
 ```
 
 When `cancel()` is called:
@@ -32,15 +47,27 @@ When `cancel()` is called:
 
 ## The Unsafe Path: Future Drops
 
-```rust
-// WARNING: NOT cancel-safe
-tokio::select! {
-    result = client.query("SELECT ...", &[]) => { /* ... */ }
-    _ = tokio::time::sleep(Duration::from_secs(5)) => {
-        // The query future is DROPPED here.
-        // The TCP stream has partially-consumed response data.
-        // The connection is now dirty.
+```rust,no_run
+use mssql_client::{Client, Config};
+use std::time::Duration;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
+
+    // WARNING: NOT cancel-safe
+    tokio::select! {
+        result = client.query("SELECT 1", &[]) => { let _ = result; }
+        _ = tokio::time::sleep(Duration::from_secs(5)) => {
+            // The query future is DROPPED here.
+            // The TCP stream has partially-consumed response data.
+            // The connection is now dirty.
+        }
     }
+    Ok(())
 }
 ```
 
@@ -80,18 +107,30 @@ The connection pool detects dirty connections and discards them automatically:
 
 ### Safe Timeout Pattern
 
-```rust
-let cancel = client.cancel_handle();
+```rust,no_run
+use mssql_client::{Client, Config, Error};
+use std::time::Duration;
 
-let result = tokio::select! {
-    result = client.query("SELECT ...", &[]) => result,
-    _ = async {
-        tokio::time::sleep(Duration::from_secs(30)).await;
-        let _ = cancel.cancel().await;
-    } => {
-        Err(Error::Timeout)
-    }
-};
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
+    let cancel = client.cancel_handle();
+
+    let result = tokio::select! {
+        result = client.query("SELECT 1", &[]) => result,
+        _ = async {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            let _ = cancel.cancel().await;
+        } => {
+            Err(Error::CommandTimeout)
+        }
+    };
+    let _ = result;
+    Ok(())
+}
 ```
 
 In this pattern, the cancel branch sends an attention packet *before* the query future is dropped, ensuring the connection drains cleanly.

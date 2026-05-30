@@ -20,20 +20,36 @@ This document describes how rust-mssql-driver handles Large Objects (LOBs) such 
 
 LOBs are currently loaded entirely into memory when accessed:
 
-```rust
-// Reading a VARBINARY(MAX) column
-let binary_data: Bytes = row.get(0)?;
+```rust,no_run
+use mssql_client::{Client, Config};
 
-// Reading a VARCHAR(MAX) column
-let text_data: String = row.get(0)?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
+    let rows = client.query("SELECT bin, txt, xml FROM lobs", &[]).await?;
+    for row in rows {
+        let row = row?;
 
-// Reading XML
-let xml_data: String = row.get(0)?;
+        // Reading a VARBINARY(MAX) column
+        let binary_data: Vec<u8> = row.get(0)?;
+
+        // Reading a VARCHAR(MAX) column
+        let text_data: String = row.get(1)?;
+
+        // Reading XML
+        let xml_data: String = row.get(2)?;
+        let _ = (binary_data, text_data, xml_data);
+    }
+    Ok(())
+}
 ```
 
 ### Memory Characteristics
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                   TDS Response Stream                        │
 │  ┌─────────────────────────────────────────────────────┐   │
@@ -71,17 +87,30 @@ let xml_data: String = row.get(0)?;
 
 ### Reading LOBs
 
-```rust
-// Simple LOB reading
-let mut stream = client.query(
-    "SELECT document FROM files WHERE id = @p1",
-    &[&file_id]
-).await?;
+```rust,no_run
+use mssql_client::{Client, Config};
 
-if let Some(row) = stream.next().await {
-    let row = row?;
-    let document: Bytes = row.get(0)?;
-    // Process document...
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
+    let file_id = 1i32;
+
+    // Simple LOB reading (QueryStream is a synchronous iterator)
+    let mut stream = client.query(
+        "SELECT document FROM files WHERE id = @p1",
+        &[&file_id],
+    ).await?;
+
+    if let Some(row) = stream.next() {
+        let row = row?;
+        let document: Vec<u8> = row.get(0)?;
+        // Process document...
+        let _ = document;
+    }
+    Ok(())
 }
 ```
 
@@ -89,23 +118,34 @@ if let Some(row) = stream.next().await {
 
 For large binary data, use `get_stream()` to get a `BlobReader` that implements `AsyncRead`:
 
-```rust
+```rust,no_run
+use mssql_client::{Client, Config};
 use tokio::io::copy;
 
-let mut stream = client.query(
-    "SELECT data FROM files WHERE id = @p1",
-    &[&file_id]
-).await?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
+    let file_id = 1i32;
 
-if let Some(row) = stream.next().await {
-    let row = row?;
+    let mut stream = client.query(
+        "SELECT data FROM files WHERE id = @p1",
+        &[&file_id],
+    ).await?;
 
-    // Get streaming reader for the VARBINARY(MAX) column
-    if let Some(mut reader) = row.get_stream(0) {
-        // Stream directly to a file
-        let mut file = tokio::fs::File::create("output.bin").await?;
-        copy(&mut reader, &mut file).await?;
+    if let Some(row) = stream.next() {
+        let row = row?;
+
+        // Get streaming reader for the VARBINARY(MAX) column
+        if let Some(mut reader) = row.get_stream(0) {
+            // Stream directly to any AsyncWrite sink
+            let mut sink: Vec<u8> = Vec::new();
+            copy(&mut reader, &mut sink).await?;
+        }
     }
+    Ok(())
 }
 ```
 
@@ -117,25 +157,36 @@ The `BlobReader` provides:
 
 ### Writing LOBs
 
-```rust
-// Insert binary data
-let data: Vec<u8> = load_file("large_file.bin")?;
-client.execute(
-    "INSERT INTO files (name, data) VALUES (@p1, @p2)",
-    &[&"file.bin", &data.as_slice()]
-).await?;
+```rust,no_run
+use mssql_client::{Client, Config};
 
-// Insert text data
-let text: String = load_text("large_document.txt")?;
-client.execute(
-    "INSERT INTO documents (title, content) VALUES (@p1, @p2)",
-    &[&"My Document", &text.as_str()]
-).await?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
+
+    // Insert binary data
+    let data: Vec<u8> = vec![0u8; 1024];
+    client.execute(
+        "INSERT INTO files (name, data) VALUES (@p1, @p2)",
+        &[&"file.bin", &data.as_slice()],
+    ).await?;
+
+    // Insert text data
+    let text: String = "large document contents".to_string();
+    client.execute(
+        "INSERT INTO documents (title, content) VALUES (@p1, @p2)",
+        &[&"My Document", &text.as_str()],
+    ).await?;
+    Ok(())
+}
 ```
 
 ### NULL Handling
 
-```rust
+```text
 // LOBs can be NULL
 let maybe_data: Option<Bytes> = row.get(0)?;
 
@@ -149,14 +200,14 @@ match maybe_data {
 
 ### Memory Management
 
-```rust
-// ✓ Process and drop promptly
+```text
+// Process and drop promptly
 {
     let data: Bytes = row.get(0)?;
     write_to_file(&data)?;
 } // data dropped, memory freed
 
-// ✗ Don't hold multiple large LOBs
+// Don't hold multiple large LOBs
 let all_files: Vec<Bytes> = rows
     .iter()
     .map(|r| r.get::<Bytes>(0).unwrap())
@@ -177,18 +228,32 @@ CREATE TABLE file_chunks (
 );
 ```
 
-```rust
-// Read in chunks
-let mut stream = client.query(
-    "SELECT chunk_data FROM file_chunks WHERE file_id = @p1 ORDER BY chunk_index",
-    &[&file_id]
-).await?;
+```rust,no_run
+use mssql_client::{Client, Config};
+use std::fs::File;
+use std::io::Write;
 
-let mut file = File::create("output.bin")?;
-while let Some(row) = stream.next().await {
-    let chunk: Bytes = row?.get(0)?;
-    file.write_all(&chunk)?;
-    // chunk dropped, memory freed
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let mut client = Client::connect(config).await?;
+    let file_id = 1i32;
+
+    // Read in chunks
+    let mut stream = client.query(
+        "SELECT chunk_data FROM file_chunks WHERE file_id = @p1 ORDER BY chunk_index",
+        &[&file_id],
+    ).await?;
+
+    let mut file = File::create("output.bin")?;
+    while let Some(row) = stream.next() {
+        let chunk: Vec<u8> = row?.get(0)?;
+        file.write_all(&chunk)?;
+        // chunk dropped, memory freed
+    }
+    Ok(())
 }
 ```
 
@@ -196,7 +261,7 @@ while let Some(row) = stream.next().await {
 
 Protect against memory exhaustion:
 
-```rust
+```text
 // Check size before loading
 let size: i64 = row.get::<i64>("data_length")?;
 if size > MAX_ALLOWED_SIZE {
@@ -240,7 +305,7 @@ FROM large_table
 
 LOBs use partial length prefixed (PLP) encoding in TDS:
 
-```
+```text
 ┌────────────────────────────────────────────────────┐
 │                   PLP Format                        │
 ├────────────────────────────────────────────────────┤
@@ -272,29 +337,35 @@ SQL Server sends LOBs in chunks:
 
 The `BlobReader` type provides an `AsyncRead` interface for processing LOB data in chunks:
 
-```rust
+```rust,no_run
 use mssql_client::blob::BlobReader;
-use tokio::io::AsyncReadExt;
+use bytes::Bytes;
+use tokio::io::{AsyncReadExt, copy};
 
-// Get binary data from a row
-let data: Bytes = row.get(0)?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Binary data, e.g. obtained via `row.get::<Vec<u8>>(0)?`
+    let data: Bytes = Bytes::from(vec![0u8; 16384]);
 
-// Create a streaming reader
-let mut reader = BlobReader::from_bytes(data);
+    // Create a streaming reader
+    let mut reader = BlobReader::from_bytes(data);
 
-// Option 1: Read in chunks
-let mut buffer = vec![0u8; 8192];
-loop {
-    let n = reader.read(&mut buffer).await?;
-    if n == 0 {
-        break;  // EOF
+    // Option 1: Read in chunks
+    let mut buffer = vec![0u8; 8192];
+    loop {
+        let n = reader.read(&mut buffer).await?;
+        if n == 0 {
+            break; // EOF
+        }
+        let _chunk = &buffer[..n];
     }
-    process_chunk(&buffer[..n]);
-}
 
-// Option 2: Stream directly to file
-let mut file = tokio::fs::File::create("output.bin").await?;
-tokio::io::copy(&mut reader, &mut file).await?;
+    // Option 2: Stream directly to any AsyncWrite sink
+    reader.rewind();
+    let mut sink: Vec<u8> = Vec::new();
+    copy(&mut reader, &mut sink).await?;
+    Ok(())
+}
 ```
 
 ### BlobReader Features
@@ -348,9 +419,9 @@ Writing large LOBs:
 
 | Feature | rust-mssql-driver | Tiberius | ODBC |
 |---------|-------------------|----------|------|
-| In-memory LOB | ✅ | ✅ | ✅ |
-| Streaming read API | ✅ (BlobReader) | No | Yes |
+| In-memory LOB | Yes | Yes | Yes |
+| Streaming read API | Yes (BlobReader) | No | Yes |
 | Streaming write | Planned | No | Yes |
 | Max size | 2 GB | 2 GB | 2 GB |
-| Zero-copy slice | ✅ | Partial | No |
-| Progress tracking | ✅ | No | Partial |
+| Zero-copy slice | Yes | Partial | No |
+| Progress tracking | Yes | No | Partial |

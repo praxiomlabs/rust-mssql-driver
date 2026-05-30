@@ -1,6 +1,6 @@
 # rust-mssql-driver
 
-A high-performance, async Microsoft SQL Server driver for Rust.
+An async Microsoft SQL Server driver for Rust.
 
 [![Crates.io](https://img.shields.io/crates/v/mssql-client.svg)](https://crates.io/crates/mssql-client)
 [![Documentation](https://docs.rs/mssql-client/badge.svg)](https://docs.rs/mssql-client)
@@ -21,30 +21,30 @@ A high-performance, async Microsoft SQL Server driver for Rust.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| SQL Authentication | ✅ | Username/password |
-| Azure AD Token | ✅ | Pre-acquired tokens |
-| Queries & Parameters | ✅ | Full support |
-| Transactions | ✅ | Commit, rollback, savepoints |
-| Connection Pooling | ✅ | Built-in via `mssql-driver-pool` |
-| Bulk Insert | ✅ | High-performance batch loading via `Client::bulk_insert()` |
-| `#[derive(FromRow)]` / `#[derive(ToParams)]` | ✅ | Row-to-struct and struct-to-params mapping |
-| TDS 7.3 (Legacy) | ✅ | SQL Server 2008/2008 R2 |
-| TDS 8.0 Strict Mode | ✅ | SQL Server 2022+ |
-| Azure Managed Identity | ✅ | Via `azure-identity` |
-| Kerberos/GSSAPI | ✅ | Unix via `libgssapi` |
-| Windows SSPI | ✅ | Via `sspi-auth` feature |
-| Table-Valued Parameters | ✅ | Via `Tvp` type |
-| OpenTelemetry Metrics | ✅ | Query + pool lifecycle via `otel` feature |
-| Always Encrypted (read) | ✅ | Transparent decryption with Azure Key Vault and Windows CertStore providers |
-| Always Encrypted (write) | ⚠️ | `NULL` writes only; ciphertext write path pending — see [docs/ALWAYS_ENCRYPTED.md](docs/ALWAYS_ENCRYPTED.md#limitations) |
-| Query Cancellation | ✅ | ATTENTION signal + in-flight pool discard |
-| Collation-Aware Decoding | ✅ | 14+ character encodings |
-| Collation-Aware VARCHAR Params | ✅ | Via `SendStringParametersAsUnicode=false` |
-| Stored Procedures | ✅ | RPC-based with OUTPUT params and RETURN value |
-| Named Instance Resolution | ✅ | SQL Browser service (UDP 1434) |
-| MultiSubnetFailover (AG) | ✅ | Parallel TCP connect for listener failover |
-| Connection Retry | ✅ | `ConnectRetryCount` / `ConnectRetryInterval` |
-| FILESTREAM BLOB Access | ✅ | Windows only, via `filestream` feature |
+| SQL Authentication | Yes | Username/password |
+| Azure AD Token | Yes | Pre-acquired tokens |
+| Queries & Parameters | Yes | Full support |
+| Transactions | Yes | Commit, rollback, savepoints |
+| Connection Pooling | Yes | Built-in via `mssql-driver-pool` |
+| Bulk Insert | Yes | Batch loading via `Client::bulk_insert()` |
+| `#[derive(FromRow)]` / `#[derive(ToParams)]` | Yes | Row-to-struct and struct-to-params mapping |
+| TDS 7.3 (Legacy) | Yes | SQL Server 2008/2008 R2 |
+| TDS 8.0 Strict Mode | Yes | SQL Server 2022+ |
+| Azure Managed Identity | Yes | Via `azure-identity` |
+| Kerberos/GSSAPI | Yes | Unix via `libgssapi` |
+| Windows SSPI | Yes | Via `sspi-auth` feature |
+| Table-Valued Parameters | Yes | Via `Tvp` type |
+| OpenTelemetry Metrics | Yes | Query + pool lifecycle via `otel` feature |
+| Always Encrypted (read) | Yes | Transparent decryption with Azure Key Vault and Windows CertStore providers |
+| Always Encrypted (write) | Partial | `NULL` writes only; ciphertext write path pending — see [docs/ALWAYS_ENCRYPTED.md](docs/ALWAYS_ENCRYPTED.md#limitations) |
+| Query Cancellation | Yes | ATTENTION signal + in-flight pool discard |
+| Collation-Aware Decoding | Yes | 14+ character encodings |
+| Collation-Aware VARCHAR Params | Yes | Via `SendStringParametersAsUnicode=false` |
+| Stored Procedures | Yes | RPC-based with OUTPUT params and RETURN value |
+| Named Instance Resolution | Yes | SQL Browser service (UDP 1434) |
+| MultiSubnetFailover (AG) | Yes | Parallel TCP connect for listener failover |
+| Connection Retry | Yes | `ConnectRetryCount` / `ConnectRetryInterval` |
+| FILESTREAM BLOB Access | Yes | Windows only, via `filestream` feature |
 
 ## Installation
 
@@ -60,7 +60,7 @@ tokio = { version = "1.48", features = ["full"] }
 
 ## Quick Start
 
-```rust
+```rust,no_run
 use mssql_client::{Client, Config};
 
 #[tokio::main]
@@ -91,7 +91,7 @@ async fn main() -> Result<(), mssql_client::Error> {
 
 The driver supports ADO.NET-compatible connection strings:
 
-```
+```text
 Server=hostname,port;Database=dbname;User Id=user;Password=pass;Encrypt=strict;
 ```
 
@@ -120,8 +120,8 @@ See [docs/CONNECTION_STRINGS.md](docs/CONNECTION_STRINGS.md) for the full ADO.NE
 
 Use the built-in connection pool for production applications:
 
-```rust
-use mssql_driver_pool::{Pool, PoolConfig};
+```rust,no_run
+use mssql_driver_pool::Pool;
 use mssql_client::Config;
 
 #[tokio::main]
@@ -129,9 +129,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_connection_string("...")?;
 
     let pool = Pool::builder()
-        .max_size(10)
-        .min_size(2)
-        .build(config)
+        .client_config(config)
+        .max_connections(10)
+        .min_connections(2)
+        .build()
         .await?;
 
     // Get a connection from the pool
@@ -146,14 +147,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Transactions
 
-```rust
+```rust,no_run
 use mssql_client::{Client, Config, IsolationLevel};
 
-async fn transfer_funds(client: &mut Client) -> Result<(), mssql_client::Error> {
-    // Begin transaction with isolation level
-    let mut tx = client.begin_transaction()
-        .isolation_level(IsolationLevel::Serializable)
-        .await?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string("Server=localhost;Database=mydb;User Id=sa;Password=Password123!")?;
+    let client = Client::connect(config).await?;
+
+    // Begin transaction with a specific isolation level
+    let mut tx = client.begin_transaction_with_isolation(IsolationLevel::Serializable).await?;
 
     tx.execute("UPDATE accounts SET balance = balance - 100 WHERE id = @p1", &[&1i32]).await?;
     tx.execute("UPDATE accounts SET balance = balance + 100 WHERE id = @p1", &[&2i32]).await?;
@@ -167,27 +170,35 @@ async fn transfer_funds(client: &mut Client) -> Result<(), mssql_client::Error> 
 
 ### Savepoints
 
-```rust
-let mut tx = client.begin_transaction().await?;
+```rust,no_run
+use mssql_client::{Client, Config};
 
-tx.execute("INSERT INTO orders ...", &[]).await?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string("Server=localhost;Database=mydb;User Id=sa;Password=Password123!")?;
+    let client = Client::connect(config).await?;
+    let mut tx = client.begin_transaction().await?;
 
-// Create a savepoint
-let sp = tx.save_point("before_items").await?;
+    tx.execute("INSERT INTO orders DEFAULT VALUES", &[]).await?;
 
-tx.execute("INSERT INTO order_items ...", &[]).await?;
+    // Create a savepoint
+    let sp = tx.save_point("before_items").await?;
 
-// Rollback to savepoint if needed
-tx.rollback_to(&sp).await?;
+    tx.execute("INSERT INTO order_items DEFAULT VALUES", &[]).await?;
 
-tx.commit().await?;
+    // Rollback to savepoint if needed
+    tx.rollback_to(&sp).await?;
+
+    tx.commit().await?;
+    Ok(())
+}
 ```
 
 ## Derive Macros
 
 Map rows to structs automatically:
 
-```rust
+```text
 use mssql_derive::FromRow;
 
 #[derive(FromRow)]
@@ -243,16 +254,16 @@ mssql-auth = { version = "0.10", features = ["sspi-auth"] }
 
 | SQL Server Version | Supported | TDS Version | Notes |
 |-------------------|-----------|-------------|-------|
-| 2008 | ✅ | 7.3A | Legacy support |
-| 2008 R2 | ✅ | 7.3B | Legacy support |
-| 2012 | ✅ | 7.4 | |
-| 2014 | ✅ | 7.4 | |
-| 2016 | ✅ | 7.4 | |
-| 2017 | ✅ | 7.4 | Full TLS support |
-| 2019 | ✅ | 7.4 | |
-| 2022+ | ✅ | 8.0 | Strict TLS mode |
-| Azure SQL Database | ✅ | 7.4/8.0 | |
-| Azure SQL Managed Instance | ✅ | 7.4/8.0 | |
+| 2008 | Yes | 7.3A | Legacy support |
+| 2008 R2 | Yes | 7.3B | Legacy support |
+| 2012 | Yes | 7.4 | |
+| 2014 | Yes | 7.4 | |
+| 2016 | Yes | 7.4 | |
+| 2017 | Yes | 7.4 | Full TLS support |
+| 2019 | Yes | 7.4 | |
+| 2022+ | Yes | 8.0 | Strict TLS mode |
+| Azure SQL Database | Yes | 7.4/8.0 | |
+| Azure SQL Managed Instance | Yes | 7.4/8.0 | |
 
 **Legacy Support (SQL Server 2008-2016):** Use `Encrypt=no_tls` for servers that don't support TLS 1.2. See [LIMITATIONS.md](LIMITATIONS.md) and [docs/SQL_SERVER_COMPATIBILITY.md](docs/SQL_SERVER_COMPATIBILITY.md) for details.
 
@@ -265,19 +276,32 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 See [STABILITY.md](STABILITY.md) for details on what's considered stable.
 
+## Project Status
+
+**Actively maintained**, currently pre-1.0. The driver is feature-complete for
+the scenarios in the [Feature Status](#feature-status-v010x) table above, and an
+integration suite runs against a real SQL Server instance in CI on every change.
+
+Maintenance is **best-effort by a single maintainer** (see
+[MAINTAINERS.md](MAINTAINERS.md)); the aim is a first response to issues and pull
+requests within about a week. The road to **1.0** is about settling the public
+API surface (see [STABILITY.md](STABILITY.md)) and closing the gaps in
+[LIMITATIONS.md](LIMITATIONS.md) — once the API is proven in real deployments,
+the 1.0 backward-compatibility guarantee follows.
+
 ## Comparison with Tiberius
 
 | Feature | rust-mssql-driver | tiberius |
 |---------|-------------------|----------|
 | TDS 7.3 (SQL 2008) | Configurable | Supported |
-| TDS 8.0 (strict mode) | First-class | Not supported |
+| TDS 8.0 (strict mode) | Yes | Not supported |
 | Connection pooling | Built-in | External (bb8/deadpool) |
 | Runtime | Tokio-native | Runtime agnostic |
 | Prepared statement cache | Automatic LRU | Per-execution |
 | Azure SQL redirects | Automatic | Manual handling |
 | Type-state connections | Yes | No |
-| Stored procedures (RPC) | Yes (OUTPUT params, RETURN value) | No (todo!()) |
-| Named instance resolution | Yes (SQL Browser) | No |
+| Stored procedures (RPC) | Dedicated API (OUTPUT params, RETURN value) | Via `EXEC` in SQL only; no dedicated API |
+| Named instance resolution | Automatic (SQL Browser) | Yes (`SqlBrowser` trait) |
 
 ## Examples
 
@@ -302,7 +326,22 @@ See the [`examples/`](crates/mssql-client/examples/) directory:
 - [STABILITY.md](STABILITY.md) - API stability guarantees and versioning policy
 - [SECURITY.md](SECURITY.md) - Security policy, threat model, and best practices
 - [LIMITATIONS.md](LIMITATIONS.md) - Known limitations and explicit non-goals
-- [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) - Production readiness checklist
+- [docs/COMPARISON.md](docs/COMPARISON.md) - Feature comparison vs Tiberius, odbc-api, and sqlx-oldapi
+
+### Feature & Usage Guides
+
+- [docs/TYPE_STATE.md](docs/TYPE_STATE.md) - Type-state connection pattern
+- [docs/CONNECTION_STRINGS.md](docs/CONNECTION_STRINGS.md) - ADO.NET connection string reference
+- [docs/STORED_PROCEDURES.md](docs/STORED_PROCEDURES.md) - Stored procedure (RPC) calls
+- [docs/DERIVE_MACROS.md](docs/DERIVE_MACROS.md) - `FromRow` / `ToParams` derive macros
+- [docs/DDL.md](docs/DDL.md) - Executing DDL (CREATE/ALTER/DROP)
+- [docs/LOB.md](docs/LOB.md) - Large object (MAX / XML) handling
+- [docs/CANCEL_SAFETY.md](docs/CANCEL_SAFETY.md) - Query cancellation and cancel safety
+- [docs/ALWAYS_ENCRYPTED.md](docs/ALWAYS_ENCRYPTED.md) - Always Encrypted (transparent decryption)
+- [docs/FILESTREAM.md](docs/FILESTREAM.md) - FILESTREAM BLOB access (Windows)
+- [docs/OPENTELEMETRY.md](docs/OPENTELEMETRY.md) - OpenTelemetry instrumentation
+- [docs/FEATURES.md](docs/FEATURES.md) - Feature flag reference
+- [docs/MEMORY.md](docs/MEMORY.md) - Memory and allocation design (`Arc<Bytes>`)
 
 ### Operational Docs
 
@@ -314,6 +353,9 @@ See the [`examples/`](crates/mssql-client/examples/) directory:
 - [docs/TIMEOUTS.md](docs/TIMEOUTS.md) - Timeout configuration
 - [docs/POOL_METRICS.md](docs/POOL_METRICS.md) - Pool metrics and monitoring
 - [docs/MIGRATION_FROM_TIBERIUS.md](docs/MIGRATION_FROM_TIBERIUS.md) - Migration guide
+- [docs/TLS.md](docs/TLS.md) - TLS configuration
+- [docs/OPERATIONS.md](docs/OPERATIONS.md) - Operations and graceful shutdown
+- [docs/BENCHMARKS.md](docs/BENCHMARKS.md) - Performance benchmarks and targets
 
 ### Crate-Specific Documentation
 
@@ -344,9 +386,9 @@ Contributions are welcome! A few quick pointers:
 
 ## Community
 
-- 💬 **Questions and discussions**: [GitHub Discussions](https://github.com/praxiomlabs/rust-mssql-driver/discussions)
-- 🐛 **Bugs and feature requests**: [GitHub Issues](https://github.com/praxiomlabs/rust-mssql-driver/issues)
-- 🔒 **Security vulnerabilities**: [Private Security Advisory](https://github.com/praxiomlabs/rust-mssql-driver/security/advisories/new) — see [SECURITY.md](SECURITY.md)
+- **Questions and discussions**: [GitHub Discussions](https://github.com/praxiomlabs/rust-mssql-driver/discussions)
+- **Bugs and feature requests**: [GitHub Issues](https://github.com/praxiomlabs/rust-mssql-driver/issues)
+- **Security vulnerabilities**: [Private Security Advisory](https://github.com/praxiomlabs/rust-mssql-driver/security/advisories/new) — see [SECURITY.md](SECURITY.md)
 
 ## License
 
@@ -356,6 +398,16 @@ Licensed under either of:
 - MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.
+
+## Development
+
+This project is built with heavy AI assistance, with a human maintainer
+reviewing and accountable for every change. The public API is documented on
+[docs.rs](https://docs.rs/mssql-client), the protocol layer has unit and
+property tests, and an integration suite runs against a real SQL Server in CI
+on every change. Known gaps are documented in [LIMITATIONS.md](LIMITATIONS.md);
+if something doesn't hold up, please
+[open an issue](https://github.com/praxiomlabs/rust-mssql-driver/issues).
 
 ## Acknowledgments
 

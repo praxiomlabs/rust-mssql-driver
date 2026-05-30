@@ -13,14 +13,24 @@ The pool provides two types of observability data:
 
 Get the current pool state with `pool.status()`:
 
-```rust
-let status = pool.status();
+```rust,no_run
+use mssql_driver_pool::Pool;
+use mssql_client::Config;
 
-println!("Available connections: {}", status.available);
-println!("In-use connections: {}", status.in_use);
-println!("Total connections: {}", status.total);
-println!("Maximum connections: {}", status.max);
-println!("Utilization: {:.1}%", status.utilization() * 100.0);
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string("Server=localhost;Database=db;User Id=sa;Password=Password123")?;
+    let pool = Pool::builder().client_config(config).max_connections(10).build().await?;
+
+    let status = pool.status();
+
+    println!("Available connections: {}", status.available);
+    println!("In-use connections: {}", status.in_use);
+    println!("Total connections: {}", status.total);
+    println!("Maximum connections: {}", status.max);
+    println!("Utilization: {:.1}%", status.utilization());
+    Ok(())
+}
 ```
 
 ### Status Fields
@@ -34,9 +44,9 @@ println!("Utilization: {:.1}%", status.utilization() * 100.0);
 
 ### Computed Values
 
-```rust
+```text
 impl PoolStatus {
-    /// Calculate utilization as a ratio (0.0 to 1.0)
+    /// Calculate utilization as a percentage (0.0 to 100.0)
     pub fn utilization(&self) -> f64;
 }
 ```
@@ -45,13 +55,23 @@ impl PoolStatus {
 
 Get cumulative metrics with `pool.metrics()`:
 
-```rust
-let metrics = pool.metrics();
+```rust,no_run
+use mssql_driver_pool::Pool;
+use mssql_client::Config;
 
-println!("Connections created: {}", metrics.connections_created);
-println!("Checkout success rate: {:.2}%", metrics.checkout_success_rate() * 100.0);
-println!("Health check success rate: {:.2}%", metrics.health_check_success_rate() * 100.0);
-println!("Pool uptime: {:?}", metrics.uptime);
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string("Server=localhost;Database=db;User Id=sa;Password=Password123")?;
+    let pool = Pool::builder().client_config(config).max_connections(10).build().await?;
+
+    let metrics = pool.metrics();
+
+    println!("Connections created: {}", metrics.connections_created);
+    println!("Checkout success rate: {:.2}%", metrics.checkout_success_rate() * 100.0);
+    println!("Health check success rate: {:.2}%", metrics.health_check_success_rate() * 100.0);
+    println!("Pool uptime: {:?}", metrics.uptime);
+    Ok(())
+}
 ```
 
 ### Metrics Fields
@@ -70,7 +90,7 @@ println!("Pool uptime: {:?}", metrics.uptime);
 
 ### Computed Values
 
-```rust
+```text
 impl PoolMetrics {
     /// Calculate checkout success rate (0.0 to 1.0)
     pub fn checkout_success_rate(&self) -> f64;
@@ -78,11 +98,8 @@ impl PoolMetrics {
     /// Calculate health check success rate (0.0 to 1.0)
     pub fn health_check_success_rate(&self) -> f64;
 
-    /// Calculate reset success rate (0.0 to 1.0)
-    pub fn reset_success_rate(&self) -> f64;
-
-    /// Calculate connections per second throughput
-    pub fn checkout_throughput(&self) -> f64;
+    /// Average connection acquisition time as a Duration
+    pub fn avg_acquisition_time(&self) -> Duration;
 }
 ```
 
@@ -92,9 +109,9 @@ impl PoolMetrics {
 
 Export metrics in Prometheus format:
 
-```rust
+```rust,no_run
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use mssql_driver_pool::Pool;
 
 struct MetricsExporter {
     pool: Arc<Pool>,
@@ -157,7 +174,7 @@ mssql_pool_uptime_seconds {}
 
 ### Logging Periodic Status
 
-```rust
+```text
 use tokio::time::{interval, Duration};
 use tracing::info;
 
@@ -268,7 +285,7 @@ groups:
 
 Key metrics for a monitoring dashboard:
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │ Connection Pool Health                                       │
 ├─────────────────────────────────────────────────────────────┤

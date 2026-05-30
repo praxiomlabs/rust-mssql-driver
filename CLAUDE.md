@@ -229,10 +229,9 @@ This is an actively maintained project with documented processes for contributio
 
 ### Release and policy documents
 
-- [`RELEASING.md`](RELEASING.md) — the Cardinal Rules, the tier-based publish order, the Lessons Learned section (including the v0.5.1 and v0.7.0 incidents), and the Token Health section
+- [`RELEASING.md`](RELEASING.md) — the Cardinal Rules, the tier-based publish order, the Lessons Learned section (including the v0.5.1 and v0.7.0 incidents), the Token Health section, and the comprehensive version/MSRV reference checklist (§ Version Consistency)
 - [`STABILITY.md`](STABILITY.md) — API stability guarantees, MSRV Increase Policy (**authoritative: MSRV bumps are NOT breaking changes**), supported versions
 - [`SECURITY.md`](SECURITY.md) — security policy, threat model, supported versions for security fixes
-- [`docs/VERSION_REFS.md`](docs/VERSION_REFS.md) — comprehensive checklist of every file that must agree on version/MSRV at release time
 - [`docs/DEPENDENCY_POLICY.md`](docs/DEPENDENCY_POLICY.md) — when and how to take dep bumps, handle advisories, bump MSRV
 
 ### Release observability tooling
@@ -318,7 +317,6 @@ Primary references (in the repository):
 - `MAINTAINERS.md` — Maintainer list and contact channels
 - `CODE_OF_CONDUCT.md` — Rust Code of Conduct
 - `docs/DEPENDENCY_POLICY.md` — Dependency management policy
-- `docs/VERSION_REFS.md` — Release-time version reference checklist
 - `docs/MIGRATION_FROM_TIBERIUS.md` — Migration guide from Tiberius
 - `docs/CONNECTION_STRINGS.md` — ADO.NET connection string keyword reference (full spec conformance)
 - `docs/ALWAYS_ENCRYPTED.md` — Always Encrypted user guide (key providers, transparent decryption)

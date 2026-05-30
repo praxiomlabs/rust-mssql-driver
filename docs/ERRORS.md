@@ -6,7 +6,7 @@ This document covers error types, categorization, and recommended retry strategi
 
 The driver uses a single `Error` enum that categorizes all possible failures:
 
-```rust
+```text
 pub enum Error {
     // Connection errors
     Connection(String),
@@ -67,21 +67,25 @@ pub enum Error {
 
 The `Error` type provides built-in methods for classification:
 
-```rust
-// Check if error may succeed on retry
-if error.is_transient() {
-    // Implement retry logic
-}
+```rust,no_run
+use mssql_client::Error;
 
-// Check if error will never succeed
-if error.is_terminal() {
-    // Don't retry, report to user
-}
+fn classify(error: &Error) {
+    // Check if error may succeed on retry
+    if error.is_transient() {
+        // Implement retry logic
+    }
 
-// Get server error severity (0-25)
-if let Some(severity) = error.severity() {
-    if severity >= 20 {
-        // Connection-terminating error
+    // Check if error will never succeed
+    if error.is_terminal() {
+        // Don't retry, report to user
+    }
+
+    // Get server error severity (0-25)
+    if let Some(severity) = error.severity() {
+        if severity >= 20 {
+            // Connection-terminating error
+        }
     }
 }
 ```
@@ -146,14 +150,18 @@ SQL Server error classes (0-25):
 | 17-19 | Resource/hardware | Connection OK |
 | 20-25 | System errors | Connection terminated |
 
-```rust
-if let Some(severity) = error.severity() {
-    match severity {
-        0..=10 => println!("Informational"),
-        11..=16 => println!("User error - check query"),
-        17..=19 => println!("Resource issue"),
-        20..=25 => println!("Fatal - connection closed"),
-        _ => unreachable!(),
+```rust,no_run
+use mssql_client::Error;
+
+fn report_severity(error: &Error) {
+    if let Some(severity) = error.severity() {
+        match severity {
+            0..=10 => println!("Informational"),
+            11..=16 => println!("User error - check query"),
+            17..=19 => println!("Resource issue"),
+            20..=25 => println!("Fatal - connection closed"),
+            _ => println!("Unknown severity"),
+        }
     }
 }
 ```
@@ -164,7 +172,7 @@ if let Some(severity) = error.severity() {
 
 Recommended for transient errors:
 
-```rust
+```text
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -217,7 +225,7 @@ where
 
 ### Usage Example
 
-```rust
+```text
 let result = with_retry(3, || async {
     let mut conn = pool.get().await?;
     conn.query("SELECT * FROM users WHERE id = @p1", &[&user_id]).await
@@ -228,7 +236,7 @@ let result = with_retry(3, || async {
 
 Azure SQL has specific transient error patterns:
 
-```rust
+```text
 async fn azure_retry<T, F, Fut>(operation: F) -> Result<T, Error>
 where
     F: Fn() -> Fut,
@@ -324,7 +332,7 @@ impl CircuitBreaker {
 
 ### Match by Category
 
-```rust
+```text
 match result {
     Ok(rows) => process_rows(rows),
 
@@ -364,7 +372,7 @@ match result {
 
 ### Structured Logging
 
-```rust
+```text
 fn log_error(error: &Error) {
     match error {
         Error::Server { number, class, message, procedure, line, .. } => {
@@ -394,7 +402,7 @@ fn log_error(error: &Error) {
 
 For web applications:
 
-```rust
+```text
 use axum::response::{IntoResponse, Response};
 use axum::http::StatusCode;
 
@@ -429,32 +437,41 @@ impl IntoResponse for AppError {
 
 ### Connection Failures
 
-```rust
-match client.connect(config).await {
-    Ok(client) => client,
-    Err(Error::ConnectTimeout { host, port }) => {
-        // Network unreachable or firewall blocking
-        panic!("Cannot reach {}:{} - check network/firewall", host, port);
-    }
-    Err(Error::TlsTimeout { host, port }) => {
-        // TLS handshake timed out
-        panic!("TLS handshake timed out for {}:{} - check certificates", host, port);
-    }
-    Err(Error::LoginTimeout { host, port }) => {
-        // Login/authentication phase timed out
-        panic!("Login timed out for {}:{} - check server load", host, port);
-    }
-    Err(Error::Authentication(e)) => {
-        // Wrong credentials
-        panic!("Authentication failed: {}", e);
-    }
-    Err(e) => panic!("Connection failed: {}", e),
+```rust,no_run
+use mssql_client::{Client, Config, Error};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::from_connection_string(
+        "Server=localhost;Database=db;User Id=sa;Password=Password123",
+    )?;
+    let _client = match Client::connect(config).await {
+        Ok(client) => client,
+        Err(Error::ConnectTimeout { host, port }) => {
+            // Network unreachable or firewall blocking
+            panic!("Cannot reach {}:{} - check network/firewall", host, port);
+        }
+        Err(Error::TlsTimeout { host, port }) => {
+            // TLS handshake timed out
+            panic!("TLS handshake timed out for {}:{} - check certificates", host, port);
+        }
+        Err(Error::LoginTimeout { host, port }) => {
+            // Login/authentication phase timed out
+            panic!("Login timed out for {}:{} - check server load", host, port);
+        }
+        Err(Error::Authentication(e)) => {
+            // Wrong credentials
+            panic!("Authentication failed: {}", e);
+        }
+        Err(e) => panic!("Connection failed: {}", e),
+    };
+    Ok(())
 }
 ```
 
 ### Query Execution Failures
 
-```rust
+```text
 match client.query(sql, params).await {
     Ok(rows) => Ok(rows),
     Err(Error::CommandTimeout) => {
@@ -475,7 +492,7 @@ match client.query(sql, params).await {
 
 ### Transaction Failures
 
-```rust
+```text
 match tx.commit().await {
     Ok(()) => Ok(()),
     Err(Error::Server { number: 1205, .. }) => {

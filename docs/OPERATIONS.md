@@ -8,14 +8,15 @@ Proper shutdown handling prevents connection leaks and ensures transactions comp
 
 ### Basic Shutdown
 
-```rust
+```text
 use tokio::signal;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = Pool::builder()
+        .client_config(config)
         .max_connections(10)
-        .build(config)
+        .build()
         .await?;
 
     // Start your application
@@ -38,7 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Shutdown with Timeout
 
-```rust
+```text
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -66,7 +67,7 @@ async fn graceful_shutdown(pool: Pool, app_handle: JoinHandle<()>) {
 
 ### Transaction Safety During Shutdown
 
-```rust
+```text
 // Use CancellationToken for coordinated shutdown
 use tokio_util::sync::CancellationToken;
 
@@ -103,17 +104,18 @@ async fn process_request(
 
 ### Production Settings
 
-```rust
+```text
 use std::time::Duration;
-use mssql_pool::{Pool, PoolConfig};
+use mssql_driver_pool::{Pool, PoolConfig};
 
 let pool = Pool::builder()
+    .client_config(config)
     // Size limits
     .max_connections(20)          // Max connections in pool
     .min_connections(5)           // Keep at least 5 warm connections
 
     // Timeouts
-    .connect_timeout(Duration::from_secs(30))    // Connection establishment
+    .connection_timeout(Duration::from_secs(30)) // Connection establishment
     .acquire_timeout(Duration::from_secs(5))     // Wait for available connection
     .idle_timeout(Duration::from_secs(300))      // Close idle connections after 5 min
     .max_lifetime(Duration::from_secs(1800))     // Recycle connections every 30 min
@@ -131,7 +133,7 @@ let pool = Pool::builder()
         jitter: true,
     })
 
-    .build(config)
+    .build()
     .await?;
 ```
 
@@ -148,9 +150,10 @@ let pool = Pool::builder()
 
 ### Azure SQL Specific Settings
 
-```rust
+```text
 // Azure SQL has connection limits based on tier
 let pool = Pool::builder()
+    .client_config(config)
     .max_connections(match azure_tier {
         "Basic" => 30,
         "S0" => 60,
@@ -159,8 +162,8 @@ let pool = Pool::builder()
         "P1" => 200,
         _ => 20,
     } / 2)  // Leave headroom for other apps
-    .connect_timeout(Duration::from_secs(60))  // Azure can be slower
-    .build(config)
+    .connection_timeout(Duration::from_secs(60))  // Azure can be slower
+    .build()
     .await?;
 ```
 
@@ -168,7 +171,7 @@ let pool = Pool::builder()
 
 ### Logging Configuration
 
-```rust
+```text
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 fn setup_logging() {
@@ -201,10 +204,10 @@ Enable the `otel` feature for distributed tracing:
 
 ```toml
 [dependencies]
-mssql-client = { version = "0.5", features = ["otel"] }
+mssql-client = { version = "0.10", features = ["otel"] }
 ```
 
-```rust
+```text
 use opentelemetry::global;
 use opentelemetry_sdk::runtime::Tokio;
 use opentelemetry_otlp::WithExportConfig;
@@ -229,8 +232,8 @@ fn setup_tracing() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Metrics Collection
 
-```rust
-use mssql_pool::PoolMetrics;
+```text
+use mssql_driver_pool::PoolMetrics;
 
 async fn export_metrics(pool: &Pool) {
     let metrics = pool.metrics();
@@ -247,7 +250,7 @@ async fn export_metrics(pool: &Pool) {
 
 ### Prometheus Metrics Endpoint
 
-```rust
+```text
 use axum::{routing::get, Router};
 use prometheus::{Encoder, TextEncoder, register_gauge, register_counter};
 
@@ -281,17 +284,19 @@ async fn metrics_handler(pool: Pool) -> String {
 
 ### Basic Health Check
 
-```rust
-async fn health_check(pool: &Pool) -> Result<(), Error> {
+```rust,no_run
+use mssql_driver_pool::Pool;
+
+async fn health_check(pool: &Pool) -> Result<(), Box<dyn std::error::Error>> {
     let mut conn = pool.get().await?;
-    conn.simple_query("SELECT 1").await?;
+    conn.query("SELECT 1", &[]).await?;
     Ok(())
 }
 ```
 
 ### Detailed Health Check
 
-```rust
+```text
 #[derive(serde::Serialize)]
 struct HealthStatus {
     status: &'static str,
@@ -339,7 +344,7 @@ async fn detailed_health_check(pool: &Pool) -> HealthStatus {
 
 ### Kubernetes Probes
 
-```rust
+```text
 use axum::{routing::get, Router, response::IntoResponse, http::StatusCode};
 
 async fn liveness() -> impl IntoResponse {
@@ -379,12 +384,12 @@ let app = Router::new()
 - SQL Server under load
 
 **Solutions:**
-```rust
+```text
 // Increase pool size
 .max_connections(50)
 
 // Increase timeouts
-.connect_timeout(Duration::from_secs(60))
+.connection_timeout(Duration::from_secs(60))
 .acquire_timeout(Duration::from_secs(10))
 
 // Enable connection health checks
@@ -401,7 +406,7 @@ let app = Router::new()
 - Azure SQL maintenance
 
 **Solutions:**
-```rust
+```text
 // Reduce idle timeout
 .idle_timeout(Duration::from_secs(120))
 
@@ -417,7 +422,7 @@ let app = Router::new()
 **Symptoms:** `Error::Server { number: 1205 }` (deadlock victim).
 
 **Solutions:**
-```rust
+```text
 // Retry deadlocks automatically
 if error.is_transient() {
     // Safe to retry
@@ -439,7 +444,7 @@ if error.is_transient() {
 - Statement cache growing
 
 **Solutions:**
-```rust
+```text
 // Ensure connections are returned (use RAII)
 {
     let conn = pool.get().await?;
@@ -512,7 +517,7 @@ RUST_LOG=mssql_client=trace,tds_protocol=trace cargo run
 
 ### Query Optimization
 
-```rust
+```text
 // Bad: Fetching all rows then filtering
 let all_rows = conn.query("SELECT * FROM large_table", &[])
     .await?
@@ -529,7 +534,7 @@ let rows = conn.query(
 
 ### Batch Operations
 
-```rust
+```text
 // Bad: Individual inserts
 for item in items {
     conn.execute("INSERT INTO items VALUES (@p1)", &[&item]).await?;
@@ -555,7 +560,7 @@ bulk.finish().await?;
 
 ### Connection Reuse
 
-```rust
+```text
 // Bad: New connection per request
 async fn handle_request(config: Config) {
     let conn = Client::connect(config).await?;

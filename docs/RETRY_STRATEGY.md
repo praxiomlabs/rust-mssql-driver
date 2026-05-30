@@ -44,7 +44,7 @@ The driver automatically retries operations that fail with transient errors. Thi
 
 ## Backoff Calculation
 
-```
+```text
 backoff_ms = min(initial_backoff * (multiplier ^ (attempt - 1)), max_backoff)
 
 if jitter:
@@ -68,52 +68,65 @@ Not directly configurable via connection string. Use programmatic configuration.
 
 ### Programmatic Configuration
 
-```rust
+```rust,no_run
 use mssql_client::{Config, RetryPolicy};
 use std::time::Duration;
 
-// Custom retry policy
-let retry = RetryPolicy::new()
-    .max_retries(5)
-    .initial_backoff(Duration::from_millis(200))
-    .max_backoff(Duration::from_secs(60))
-    .backoff_multiplier(2.5)
-    .jitter(true);
+fn main() {
+    // Custom retry policy
+    let retry = RetryPolicy::new()
+        .max_retries(5)
+        .initial_backoff(Duration::from_millis(200))
+        .max_backoff(Duration::from_secs(60))
+        .backoff_multiplier(2.5)
+        .jitter(true);
 
-let config = Config::new()
-    .host("server")
-    .retry(retry);
+    let _config = Config::new()
+        .host("server")
+        .retry(retry);
+}
 ```
 
 ### Disable Retries
 
-```rust
-let config = Config::new()
-    .host("server")
-    .retry(RetryPolicy::no_retry());
+```rust,no_run
+use mssql_client::{Config, RetryPolicy};
+
+fn main() {
+    let _config = Config::new()
+        .host("server")
+        .retry(RetryPolicy::no_retry());
+}
 ```
 
 ### Per-Operation Retry
 
-```rust
-use mssql_client::RetryPolicy;
+```rust,no_run
+use mssql_client::Config;
 
-let config = Config::new()
-    .host("server")
-    .max_retries(5);  // Shorthand for default policy with different max
+fn main() {
+    let _config = Config::new()
+        .host("server")
+        .max_retries(5);  // Shorthand for default policy with different max
+}
 ```
 
 ## Azure SQL Recommendations
 
 Azure SQL has specific transient error patterns. Recommended settings:
 
-```rust
-let azure_retry = RetryPolicy::new()
-    .max_retries(5)                           // More retries for cloud
-    .initial_backoff(Duration::from_millis(100))
-    .max_backoff(Duration::from_secs(60))     // Allow longer waits
-    .backoff_multiplier(2.0)
-    .jitter(true);                            // Essential for cloud
+```rust,no_run
+use mssql_client::RetryPolicy;
+use std::time::Duration;
+
+fn main() {
+    let _azure_retry = RetryPolicy::new()
+        .max_retries(5)                           // More retries for cloud
+        .initial_backoff(Duration::from_millis(100))
+        .max_backoff(Duration::from_secs(60))     // Allow longer waits
+        .backoff_multiplier(2.0)
+        .jitter(true);                            // Essential for cloud
+}
 ```
 
 ### Azure-Specific Error Codes
@@ -132,18 +145,23 @@ let azure_retry = RetryPolicy::new()
 
 For on-premises SQL Server with stable network:
 
-```rust
-let onprem_retry = RetryPolicy::new()
-    .max_retries(3)                           // Fewer retries
-    .initial_backoff(Duration::from_millis(50))
-    .max_backoff(Duration::from_secs(10))
-    .backoff_multiplier(2.0)
-    .jitter(false);                           // Less critical on-prem
+```rust,no_run
+use mssql_client::RetryPolicy;
+use std::time::Duration;
+
+fn main() {
+    let _onprem_retry = RetryPolicy::new()
+        .max_retries(3)                           // Fewer retries
+        .initial_backoff(Duration::from_millis(50))
+        .max_backoff(Duration::from_secs(10))
+        .backoff_multiplier(2.0)
+        .jitter(false);                           // Less critical on-prem
+}
 ```
 
 ## Retry Flow
 
-```
+```text
 Initial Request
        │
        ▼
@@ -192,7 +210,7 @@ Success   Failure
 
 ### 1. Always Use Jitter for Cloud
 
-```rust
+```text
 // Good: Prevents thundering herd
 .jitter(true)
 
@@ -202,7 +220,7 @@ Success   Failure
 
 ### 2. Set Appropriate Max Backoff
 
-```rust
+```text
 // Good: Reasonable maximum wait
 .max_backoff(Duration::from_secs(60))
 
@@ -212,7 +230,7 @@ Success   Failure
 
 ### 3. Log Retry Attempts
 
-```rust
+```text
 // Enable at info level for retry visibility
 RUST_LOG=mssql_client=info cargo run
 
@@ -224,7 +242,7 @@ RUST_LOG=mssql_client=info cargo run
 
 For high-throughput systems, combine retries with circuit breaker:
 
-```rust
+```text
 // Pseudocode - integrate with circuit breaker library
 if circuit_breaker.is_open() {
     return Err(Error::CircuitOpen);
@@ -246,7 +264,7 @@ match client.query(sql, params).await {
 
 ### 5. Handle Non-Retriable Errors Promptly
 
-```rust
+```text
 match client.query(sql, params).await {
     Ok(result) => handle_result(result),
     Err(e) if e.is_transient() => {
@@ -266,7 +284,7 @@ match client.query(sql, params).await {
 
 Retries interact with timeouts. Ensure total retry time fits within acceptable latency:
 
-```
+```text
 Total Time = sum(backoff[i] for i in 1..max_retries) + execution_time * (max_retries + 1)
 
 Example with defaults:
@@ -278,7 +296,7 @@ Example with defaults:
 
 ### Recommended Settings for User-Facing APIs
 
-```rust
+```text
 let api_retry = RetryPolicy::new()
     .max_retries(2)                          // Faster failure
     .initial_backoff(Duration::from_millis(50))
@@ -306,7 +324,7 @@ Track retry metrics for observability:
 
 In some scenarios, you may want to disable retries:
 
-```rust
+```text
 // Disable for idempotency-sensitive operations
 let config = Config::new()
     .host("server")

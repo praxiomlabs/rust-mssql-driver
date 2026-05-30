@@ -150,7 +150,7 @@ let config = Config::from_connection_string(
 )?;
 ```
 
-⚠️ **Security Warning:** `no_tls` transmits credentials in plaintext.
+**Security Warning:** `no_tls` transmits credentials in plaintext.
 
 ### Not Supported
 

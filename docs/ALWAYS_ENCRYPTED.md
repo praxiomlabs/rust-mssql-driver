@@ -6,7 +6,7 @@ client side.
 
 ## Quick Start
 
-```rust,ignore
+```text
 use mssql_client::{Client, Config};
 use mssql_auth::key_store::InMemoryKeyStore;
 
@@ -30,6 +30,7 @@ let mut client = Client::connect(config).await?;
 // 3. Query normally — decryption is transparent
 let rows = client.query("SELECT SSN, Name FROM Patients", &[]).await?;
 for row in rows {
+    let row = row?; // QueryStream yields Result<Row, Error>
     let ssn: String = row.get(0)?; // decrypted automatically
     println!("{ssn}");
 }
@@ -61,7 +62,7 @@ for row in rows {
 
 For development and testing. You provide the raw CEK bytes directly.
 
-```rust,ignore
+```text
 use mssql_auth::key_store::InMemoryKeyStore;
 
 let mut store = InMemoryKeyStore::new();
@@ -72,7 +73,7 @@ store.add_key("MyCMK", raw_cek_bytes);
 
 For production with Azure Key Vault. Requires the `azure-identity` feature.
 
-```rust,ignore
+```text
 use mssql_auth::azure_keyvault::AzureKeyVaultProvider;
 
 let provider = AzureKeyVaultProvider::new(
@@ -85,7 +86,7 @@ let provider = AzureKeyVaultProvider::new(
 For production with the Windows Certificate Store. Requires the `sspi-auth`
 feature and Windows.
 
-```rust,ignore
+```text
 use mssql_auth::windows_certstore::WindowsCertStoreProvider;
 
 let provider = WindowsCertStoreProvider::new();
@@ -95,7 +96,7 @@ let provider = WindowsCertStoreProvider::new();
 
 Implement the `KeyStoreProvider` trait for custom key storage:
 
-```rust,ignore
+```text
 use mssql_auth::key_store::KeyStoreProvider;
 
 struct MyHsmProvider { /* ... */ }
@@ -137,7 +138,7 @@ Encrypted.
 
 Transparent decryption is supported in all query paths:
 
-- `client.query()` / `client.query_stream()`
+- `client.query()`
 - `client.call_procedure()` / `client.procedure().execute()`
 - `client.query_multiple()`
 

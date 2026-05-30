@@ -23,14 +23,14 @@ Closes #
 
 <!-- Check all that apply. -->
 
-- [ ] 🐛 Bug fix (non-breaking change that fixes an issue)
-- [ ] ✨ New feature (non-breaking change that adds functionality)
-- [ ] 💥 Breaking change (fix or feature that changes existing API — see breaking-change checklist below)
-- [ ] 📝 Documentation only
-- [ ] 🔧 Refactoring (no behavioral change)
-- [ ] 🚀 Performance improvement
-- [ ] ✅ Test-only change
-- [ ] 🏗️ Build / CI / tooling
+- [ ] Bug fix (non-breaking change that fixes an issue)
+- [ ] New feature (non-breaking change that adds functionality)
+- [ ] Breaking change (fix or feature that changes existing API — see breaking-change checklist below)
+- [ ] Documentation only
+- [ ] Refactoring (no behavioral change)
+- [ ] Performance improvement
+- [ ] Test-only change
+- [ ] Build / CI / tooling
 
 ## Test plan
 

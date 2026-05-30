@@ -1,4 +1,4 @@
-# Architectural Reference: High-Performance Rust MS SQL Driver
+# Architectural Reference: Rust MS SQL Driver
 
 **Version:** 1.6.0
 **Status:** Design Complete (v0.8.0 Released)
@@ -27,9 +27,9 @@ This project aims to build the definitive Microsoft SQL Server driver for the Ru
 
 ### 1.1 Core Tenets
 
-1. **Tokio-Native:** Unapologetically built on Tokio 1.48+ to leverage the standard Rust async runtime ecosystem without compatibility shims or abstraction overhead.
+1. **Tokio-Native:** Unapologetically built on Tokio 1.48+ to use the standard Rust async runtime ecosystem without compatibility shims or abstraction overhead.
 
-2. **TDS 8.0 First-Class:** Designed for the strict TLS 1.3 architecture of SQL Server 2022+ where TLS handshake precedes all TDS messages, while maintaining support for legacy TDS 7.4 encryption negotiation.
+2. **TDS 8.0 Strict Mode:** Designed for the strict TLS 1.3 architecture of SQL Server 2022+ where TLS handshake precedes all TDS messages, while maintaining support for legacy TDS 7.4 encryption negotiation.
 
 3. **Minimal Allocation Churn:** Reduces memory allocation pressure through strategic use of reference counting (`Arc<Bytes>`) and buffer slicing. Note: This is *reduced*-copy rather than true zero-copy, which would require arena allocation or self-referential structures.
 
@@ -514,16 +514,18 @@ impl Connection {
 **Handling Multiple Result Sets:** Stored procedures returning multiple result sets (e.g., `sp_help`) are supported via sequential result set consumption:
 
 ```rust
-let mut results = client.query("EXEC sp_help 'Users'").await?;
+let mut results = client.query("EXEC sp_help 'Users'", &[]).await?;
 
-// First result set
-while let Some(row) = results.next().await? {
+// First result set (QueryStream is a synchronous iterator of Result<Row>)
+while let Some(row) = results.next() {
+    let _row = row?;
     // Process row
 }
 
-// Advance to next result set
-if results.next_result_set().await? {
-    while let Some(row) = results.next().await? {
+// Advance to the next result set
+if results.next_result().await? {
+    while let Some(row) = results.next() {
+        let _row = row?;
         // Process next result set
     }
 }
@@ -541,8 +543,9 @@ if results.next_result_set().await? {
 
 **Streaming (Default):**
 ```rust
-let mut rows = client.query("SELECT * FROM large_table").await?;
-while let Some(row) = rows.next().await? {
+let rows = client.query("SELECT * FROM large_table", &[]).await?;
+for row in rows {
+    let _row = row?;
     // Process row - memory usage stays constant
 }
 ```
@@ -550,22 +553,23 @@ while let Some(row) = rows.next().await? {
 **Buffered (Explicit):**
 ```rust
 let rows: Vec<Row> = client
-    .query("SELECT * FROM small_table")
+    .query("SELECT * FROM small_table", &[])
     .await?
-    .collect()
+    .collect_all()
     .await?;
 ```
 
 **Large Object Streaming:**
 ```rust
 let mut stream = client
-    .query("SELECT blob_column FROM documents WHERE id = @p1")
-    .bind(doc_id)
+    .query("SELECT blob_column FROM documents WHERE id = @p1", &[&doc_id])
     .await?;
 
-if let Some(row) = stream.next().await? {
-    let mut blob_reader = row.get_stream::<BlobReader>(0)?;
-    tokio::io::copy(&mut blob_reader, &mut file).await?;
+if let Some(row) = stream.next() {
+    let row = row?;
+    if let Some(mut blob_reader) = row.get_stream(0) {
+        tokio::io::copy(&mut blob_reader, &mut file).await?;
+    }
 }
 ```
 
@@ -819,7 +823,7 @@ src/
 
 **Status:** Accepted
 
-**Decision:** First-class support for bulk insert operations using the TDS Bulk Load protocol.
+**Decision:** Native support for bulk insert operations using the TDS Bulk Load protocol.
 
 **API:**
 ```rust
@@ -859,7 +863,7 @@ let result = bulk.finish().await?;
 
 ### ADR-013: Always Encrypted Support
 
-**Status:** Implemented ✅
+**Status:** Implemented
 
 **Decision:** Always Encrypted client-side encryption is fully implemented with production-ready key providers.
 
@@ -883,12 +887,12 @@ Always Encrypted provides **client-side encryption** where keys never reach the 
 
 | Threat | Always Encrypted | T-SQL Encryption (`ENCRYPTBYKEY`) |
 |--------|------------------|-----------------------------------|
-| Malicious DBA | ✅ Protected | ❌ Vulnerable |
-| Server Compromise | ✅ Protected | ❌ Vulnerable |
-| Cloud Operator Access | ✅ Protected | ❌ Vulnerable |
-| Keys Stored On Server | ❌ Never | ✅ Yes |
+| Malicious DBA | Protected | Vulnerable |
+| Server Compromise | Protected | Vulnerable |
+| Cloud Operator Access | Protected | Vulnerable |
+| Keys Stored On Server | Never | Yes |
 
-**⚠️ Important:** T-SQL encryption functions (`ENCRYPTBYKEY`/`DECRYPTBYKEY`) provide **server-side encryption** where keys exist within SQL Server. They do **NOT** provide the same security guarantees as Always Encrypted and should not be considered a substitute.
+**Important:** T-SQL encryption functions (`ENCRYPTBYKEY`/`DECRYPTBYKEY`) provide **server-side encryption** where keys exist within SQL Server. They do **NOT** provide the same security guarantees as Always Encrypted and should not be considered a substitute.
 
 **Available Key Providers:**
 - **For development/testing:** Use the `InMemoryKeyStore` with the `always-encrypted` feature
@@ -896,7 +900,7 @@ Always Encrypted provides **client-side encryption** where keys never reach the 
 - **For Windows Certificate Store:** Use `WindowsCertStoreProvider` with the `windows-certstore` feature
 - **For custom key storage:** Implement the `KeyStoreProvider` trait for your key management solution
 
-**⚠️ Do NOT use `ENCRYPTBYKEY`** as a workaround - it does not provide the same security guarantees
+**Do NOT use `ENCRYPTBYKEY`** as a workaround - it does not provide the same security guarantees
 
 **References:**
 - [Always Encrypted Overview](https://learn.microsoft.com/en-us/sql/relational-databases/security/encryption/always-encrypted-database-engine)
@@ -908,7 +912,7 @@ Always Encrypted provides **client-side encryption** where keys never reach the 
 
 **Status:** Accepted
 
-**Decision:** First-class OpenTelemetry tracing support via optional feature flag.
+**Decision:** OpenTelemetry tracing support via an optional feature flag.
 
 **Feature:** `otel` (optional, not default)
 
@@ -922,12 +926,11 @@ Always Encrypted provides **client-side encryption** where keys never reach the 
 **Example:**
 ```rust
 // Automatic instrumentation when feature enabled
-let client = Client::connect_with_tracing(config, tracer).await?;
+// With the `otel` feature enabled, instrumentation is automatic.
+let client = Client::connect(config).await?;
 
-// Spans automatically created
-client.query("SELECT * FROM users WHERE id = @p1")
-    .bind(user_id)
-    .await?;
+// Spans are created automatically for each query
+client.query("SELECT * FROM users WHERE id = @p1", &[&user_id]).await?;
 ```
 
 ---
@@ -1415,23 +1418,15 @@ When a connection is returned to the pool:
 #### Usage Example
 
 ```rust
-// Automatic statement caching (default behavior)
+// Automatic statement caching (the only mode — there is no explicit prepare API)
 for user_id in user_ids {
     // First iteration: sp_prepare + sp_execute
     // Subsequent iterations: sp_execute only (cache hit)
-    let row = client.query("SELECT name FROM users WHERE id = @p1")
-        .bind(user_id)
-        .await?
-        .next()
+    let mut rows = client
+        .query("SELECT name FROM users WHERE id = @p1", &[&user_id])
         .await?;
+    let _row = rows.next();
 }
-
-// Explicit prepared statement (for fine-grained control)
-let stmt = client.prepare("SELECT name FROM users WHERE id = @p1").await?;
-for user_id in user_ids {
-    let row = stmt.query().bind(user_id).await?.next().await?;
-}
-// stmt dropped: sp_unprepare called automatically
 ```
 
 ---
@@ -1663,16 +1658,14 @@ impl std::fmt::Debug for SecretString {
 **Parameterized Queries (Required):**
 ```rust
 // GOOD - Parameterized
-client.query("SELECT * FROM users WHERE id = @p1")
-    .bind(user_id)
-    .await?;
+client.query("SELECT * FROM users WHERE id = @p1", &[&user_id]).await?;
 
 // BAD - String interpolation (no API support for this pattern)
-// client.query(format!("SELECT * FROM users WHERE id = {}", user_id))
+// client.query(&format!("SELECT * FROM users WHERE id = {}", user_id), &[])
 ```
 
 **Parameter Binding:**
-- All user values must be bound via `.bind()` method
+- All user values must be passed as parameters in the `&[...]` parameter slice
 - No API for raw SQL string execution with interpolation
 - Parameters sent via RPC protocol, never interpolated into SQL text
 
@@ -1830,7 +1823,8 @@ use tokio::runtime::Runtime;
 fn query_benchmark(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let client = rt.block_on(async {
-        Client::connect("Server=localhost;...").await.unwrap()
+        let config = Config::from_connection_string("Server=localhost;...").unwrap();
+        Client::connect(config).await.unwrap()
     });
     
     let mut group = c.benchmark_group("query");
@@ -1842,9 +1836,9 @@ fn query_benchmark(c: &mut Criterion) {
             |b, &rows| {
                 b.to_async(&rt).iter(|| async {
                     let sql = format!("SELECT TOP {} * FROM test_data", rows);
-                    let mut stream = client.query(&sql).await.unwrap();
+                    let mut stream = client.query(&sql, &[]).await.unwrap();
                     let mut count = 0;
-                    while let Some(_) = stream.next().await.unwrap() {
+                    while let Some(_) = stream.next() {
                         count += 1;
                     }
                     count
@@ -1893,10 +1887,12 @@ criterion_main!(benches);
 ///
 /// ```rust
 /// # async fn example() -> Result<(), mssql_client::Error> {
-/// let mut client = mssql_client::Client::connect("...").await?;
-/// 
-/// let mut rows = client.query("SELECT id, name FROM users").await?;
-/// while let Some(row) = rows.next().await? {
+/// # let config = mssql_client::Config::from_connection_string("Server=localhost")?;
+/// let mut client = mssql_client::Client::connect(config).await?;
+///
+/// let rows = client.query("SELECT id, name FROM users", &[]).await?;
+/// for row in rows {
+///     let row = row?;
 ///     let id: i32 = row.get(0)?;
 ///     let name: String = row.get(1)?;
 ///     println!("{}: {}", id, name);
@@ -1944,129 +1940,8 @@ msrv:
 
 ## 7. Implementation Roadmap
 
-### Phase 1: Workspace Foundation (Week 1-2)
-
-- [x] Initialize flat workspace with virtual manifest
-- [x] Configure `[workspace.lints]` and `[workspace.dependencies]`
-- [x] Initialize `xtask` crate with basic commands
-- [x] Configure `cargo-deny` and `cargo-hakari`
-- [x] Set up CI pipeline (GitHub Actions)
-- [x] Create `mssql-testing` crate scaffolding
-
-### Phase 2: Protocol Layer ✅ Complete
-
-**`tds-protocol` crate:**
-- [x] Implement `PacketHeader` and `PacketStatus` bitflags
-- [x] Implement token parser framework
-- [x] Implement core tokens: `ColMetaData`, `Row`, `Done`, `Error`, `Info`
-- [x] Implement Login7 packet construction
-- [x] Implement Prelogin packet construction
-- [x] Verify strict `no_std` + `alloc` compatibility
-- [x] Fuzz testing for packet/token parsing (11 fuzz targets)
-
-### Phase 3: TLS Layer ✅ Complete
-
-**`mssql-tls` crate:**
-- [x] Implement TDS 7.x TLS negotiation (post-prelogin)
-- [x] Implement TDS 8.0 strict mode (TLS-first)
-- [x] Certificate validation and hostname verification
-- [x] `TrustServerCertificate` support with warnings
-
-### Phase 4: Codec Layer ✅ Complete
-
-**`mssql-codec` crate:**
-- [x] Implement `tokio_util::codec::Decoder` for TDS packets
-- [x] Implement packet reassembly logic
-- [x] Implement IO splitting for cancellation
-- [x] Integration tests with mock server
-
-### Phase 5: Authentication ✅ Complete
-
-**`mssql-auth` crate:**
-- [x] Implement SQL Authentication (Login7 flow)
-- [x] Implement Azure AD token authentication
-- [x] Add `azure-identity` feature for Managed Identity
-- [x] Add `integrated-auth` feature (Kerberos/GSSAPI)
-- [x] Add `sspi-auth` feature (cross-platform SSPI via sspi-rs)
-- [x] Add `cert-auth` feature (client certificate authentication)
-
-### Phase 6: Client API ✅ Complete
-
-**`mssql-client` crate:**
-- [x] Implement connection string parser
-- [x] Implement `Client<S>` type-state machine
-- [x] Implement basic query execution
-- [x] Implement `Row` struct with `Arc<Bytes>` pattern
-- [x] Implement parameterized queries
-- [x] Implement transaction support with savepoints
-
-### Phase 7: Type System ✅ Complete
-
-**`mssql-types` crate:**
-- [x] Implement basic type mappings (integers, strings)
-- [x] Implement date/time type mappings
-- [x] Implement `Decimal` mapping
-- [x] Implement `Uuid` mapping
-- [x] Implement PLP chunk decoding for large objects
-- [x] Implement streaming blob reader
-
-### Phase 8: Production Features ✅ Complete
-
-- [x] Implement `mssql-driver-pool` with `sp_reset_connection`
-- [x] Implement bulk copy (BCP) support
-- [x] Add OpenTelemetry instrumentation feature
-- [x] Implement retry policies
-- [x] Performance optimization and benchmarking
-- [x] Documentation and examples
-
-### Phase 9: Derive Macros ✅ Complete
-
-**`mssql-derive` crate:**
-- [x] Implement `#[derive(FromRow)]`
-- [x] Implement `#[derive(ToParams)]`
-- [x] Implement `#[derive(Tvp)]`
-
-### Phase 10: Release Preparation ✅ v0.2.0 Released
-
-- [x] API review and stabilization
-- [x] Security audit (cargo-deny, cargo-audit)
-- [x] Documentation review
-- [x] Migration guide from `tiberius`
-- [x] Publish to crates.io
-
-### v0.2.0 Delivered Features
-
-- [x] Table-Valued Parameters (TVP) via `Tvp` type
-- [x] Azure Managed Identity (`azure-identity` feature)
-- [x] Integrated authentication (`integrated-auth` feature)
-- [x] SSPI authentication (`sspi-auth` feature)
-- [x] Client certificate authentication (`cert-auth` feature)
-- [x] Query cancellation with ATTENTION packets
-- [x] Per-query timeouts
-- [x] OpenTelemetry metrics (`DatabaseMetrics`)
-- [x] Always Encrypted cryptography (AEAD, RSA-OAEP, CEK caching)
-
-### Future Releases
-
-**v0.3.0 Delivered:**
-- [x] Always Encrypted key providers (Azure KeyVault, Windows CertStore)
-- [x] Streaming LOB API (`Row::get_stream()` → `BlobReader`)
-- [x] Change Tracking integration (`ChangeTrackingQuery`, `ChangeOperation`)
-
-**v0.4.0 Delivered:**
-- [x] TDS 7.3 protocol support (SQL Server 2008/2008 R2)
-- [x] `TdsVersion` configuration API
-- [x] Version negotiation and detection
-
-**v0.5.0 Delivered:**
-- [x] Collation-aware VARCHAR decoding (`encoding` feature)
-- [x] `Column` struct marked `#[non_exhaustive]`
-- [x] Windows code page support (1252, 1251, 1250, etc.)
-
-**v1.0.0+ Roadmap:**
-- [x] `#[derive(Tvp)]` macro (procedural) - Completed in v0.5.0
-- [ ] True network-level LOB streaming (currently buffered up to 100MB)
-- [ ] Connection resiliency improvements (automatic reconnection)
+Completed milestones are recorded in [CHANGELOG.md](CHANGELOG.md). Known
+gaps and planned work toward 1.0 are tracked in [LIMITATIONS.md](LIMITATIONS.md).
 
 ---
 
@@ -2090,17 +1965,17 @@ msrv:
 
 | SQL Server Version | Supported | Notes |
 |-------------------|-----------|-------|
-| 2008 | ✅ | TDS 7.3A, requires `Encrypt=no_tls` |
-| 2008 R2 | ✅ | TDS 7.3B, requires `Encrypt=no_tls` |
-| 2012 | ✅ | TDS 7.4, requires `Encrypt=no_tls` |
-| 2014 | ✅ | TDS 7.4, requires `Encrypt=no_tls` |
-| 2016 | ✅ | TDS 7.4, requires `Encrypt=no_tls` |
-| 2017 | ✅ | TDS 7.4 |
-| 2019 | ✅ | TDS 7.4 |
-| 2022 | ✅ | TDS 7.4/8.0 |
-| 2025 | ✅ | TDS 7.4/8.0, Managed Identity enhancements |
-| Azure SQL Database | ✅ | All authentication methods |
-| Azure SQL Managed Instance | ✅ | All authentication methods |
+| 2008 | Yes | TDS 7.3A, requires `Encrypt=no_tls` |
+| 2008 R2 | Yes | TDS 7.3B, requires `Encrypt=no_tls` |
+| 2012 | Yes | TDS 7.4, requires `Encrypt=no_tls` |
+| 2014 | Yes | TDS 7.4, requires `Encrypt=no_tls` |
+| 2016 | Yes | TDS 7.4, requires `Encrypt=no_tls` |
+| 2017 | Yes | TDS 7.4 |
+| 2019 | Yes | TDS 7.4 |
+| 2022 | Yes | TDS 7.4/8.0 |
+| 2025 | Yes | TDS 7.4/8.0, Managed Identity enhancements |
+| Azure SQL Database | Yes | All authentication methods |
+| Azure SQL Managed Instance | Yes | All authentication methods |
 
 ### 8.3 Feature Flag Matrix
 
@@ -2108,19 +1983,19 @@ Features are defined on `mssql-client` and forwarded to internal crates as neede
 
 | Feature | Default | Crate(s) Activated | Platform | Dependencies Added |
 |---------|---------|-------------------|----------|-------------------|
-| `chrono` | ✅ | mssql-types | All | `chrono` |
-| `uuid` | ✅ | mssql-types | All | `uuid` |
-| `decimal` | ✅ | mssql-types | All | `rust_decimal` |
-| `encoding` | ✅ | tds-protocol, mssql-types | All | `encoding_rs` |
-| `tls` | ✅ | mssql-tls | All | `rustls`, `tokio-rustls` |
-| `json` | ❌ | mssql-types | All | `serde_json` |
-| `otel` | ❌ | (local to mssql-client) | All | `opentelemetry`, `tracing-opentelemetry` |
-| `zeroize` | ❌ | mssql-auth | All | `zeroize` |
-| `always-encrypted` | ❌ | mssql-auth | All | `aes`, `cbc`, `hmac`, `sha2`, `rsa`, `rand` |
-| `azure-identity` | ❌ | mssql-auth | All | `azure_identity` (pulls OpenSSL transitively) |
-| `integrated-auth` | ❌ | mssql-auth | Linux/macOS | `gssapi`, `libkrb5-dev` |
-| `sspi-auth` | ❌ | mssql-auth | Windows | `sspi-rs` |
-| `cert-auth` | ❌ | mssql-auth | All | None (uses rustls) |
+| `chrono` | Yes | mssql-types | All | `chrono` |
+| `uuid` | Yes | mssql-types | All | `uuid` |
+| `decimal` | Yes | mssql-types | All | `rust_decimal` |
+| `encoding` | Yes | tds-protocol, mssql-types | All | `encoding_rs` |
+| `tls` | Yes | mssql-tls | All | `rustls`, `tokio-rustls` |
+| `json` | No | mssql-types | All | `serde_json` |
+| `otel` | No | (local to mssql-client) | All | `opentelemetry`, `tracing-opentelemetry` |
+| `zeroize` | No | mssql-auth | All | `zeroize` |
+| `always-encrypted` | No | mssql-auth | All | `aes`, `cbc`, `hmac`, `sha2`, `rsa`, `rand` |
+| `azure-identity` | No | mssql-auth | All | `azure_identity` (pulls OpenSSL transitively) |
+| `integrated-auth` | No | mssql-auth | Linux/macOS | `gssapi`, `libkrb5-dev` |
+| `sspi-auth` | No | mssql-auth | Windows | `sspi-rs` |
+| `cert-auth` | No | mssql-auth | All | None (uses rustls) |
 
 Features on `mssql-auth` only (not exposed via `mssql-client`):
 
@@ -2131,87 +2006,10 @@ Features on `mssql-auth` only (not exposed via `mssql-client`):
 
 ### 8.4 Migration Guide from Tiberius
 
-**Connection String:**
-```rust
-// Tiberius
-let config = Config::from_ado_string(&connection_string)?;
-let tcp = TcpStream::connect(config.get_addr()).await?;
-let client = Client::connect(config, tcp.compat_write()).await?;
-
-// This driver
-let client = Client::connect(&connection_string).await?;
-```
-
-**Query Execution:**
-```rust
-// Tiberius
-let stream = client.query("SELECT @P1", &[&1i32]).await?;
-let row = stream.into_row().await?.unwrap();
-
-// This driver
-let mut stream = client.query("SELECT @p1").bind(1i32).await?;
-let row = stream.next().await?.unwrap();
-```
-
-**Transactions:**
-```rust
-// Tiberius (manual)
-client.execute("BEGIN TRANSACTION", &[]).await?;
-client.execute("INSERT INTO ...", &[]).await?;
-client.execute("COMMIT", &[]).await?;
-
-// This driver (type-safe)
-let tx = client.begin_transaction().await?;
-tx.execute("INSERT INTO ...").await?;
-tx.commit().await?; // Returns Client<Ready>
-```
-
-**Prepared Statements:**
-```rust
-// Tiberius (implicit, no caching control)
-// Statements are prepared per-execution
-let stream = client.query("SELECT @P1", &[&user_id]).await?;
-
-// This driver (automatic caching with LRU eviction)
-// First call: sp_prepare + sp_execute
-// Subsequent calls: sp_execute only (cache hit)
-for user_id in user_ids {
-    let row = client.query("SELECT @p1")
-        .bind(user_id)
-        .await?
-        .next()
-        .await?;
-}
-
-// Or explicit prepared statement for fine-grained control
-let stmt = client.prepare("SELECT @p1").await?;
-for user_id in user_ids {
-    let row = stmt.query().bind(user_id).await?.next().await?;
-}
-// sp_unprepare called automatically when stmt is dropped
-```
-
-**Azure SQL Redirects:**
-```rust
-// Tiberius (manual handling required)
-loop {
-    match Client::connect(config, tcp.compat_write()).await {
-        Ok(client) => break client,
-        Err(Error::Routing { host, port }) => {
-            // Manual reconnection logic required
-            config = config.with_server(format!("{}:{}", host, port));
-            tcp = TcpStream::connect(&config).await?;
-            continue;
-        }
-        Err(e) => return Err(e),
-    }
-}
-
-// This driver (automatic, transparent handling)
-let client = Client::connect(&connection_string).await?;
-// Azure SQL gateway redirects handled automatically
-// No manual intervention required
-```
+See [docs/MIGRATION_FROM_TIBERIUS.md](docs/MIGRATION_FROM_TIBERIUS.md) for the
+full migration guide — connection setup, query execution, transactions,
+connection pooling, Azure SQL routing, error handling, type mappings, and a
+quick-reference cheat sheet.
 
 ### 8.5 Glossary
 
@@ -2233,7 +2031,7 @@ let client = Client::connect(&connection_string).await?;
 
 | Version | Date | Changes |
 |---------|------|---------|
-| 1.0.0 | 2025-12-11 | Initial comprehensive specification |
+| 1.0.0 | 2025-12-11 | Initial specification |
 | 1.1.0 | 2025-12-11 | Security guidance corrections (ADR-013 Always Encrypted), savepoint validation, prepared statement lifecycle (§4.5), Azure SQL routing (§4.6), OpenTelemetry 0.31, version constraint policy, cargo-deny/hakari integration, native async trait guidance, migration guide updates |
 | 1.2.0 | 2025-12-24 | Updated for v0.2.0 release: Phase 5 auth complete, ADR-013 status updated (cryptography implemented), feature flag matrix expanded, v0.2.0 delivered features documented, v0.3.0 roadmap updated |
 | 1.3.0 | 2025-12-25 | Updated for v0.3.0 release: Always Encrypted key providers (InMemoryKeyStore, KeyStoreProvider trait), true LOB streaming (LobStream), Change Tracking integration, all 12 data type parsing fixes complete |

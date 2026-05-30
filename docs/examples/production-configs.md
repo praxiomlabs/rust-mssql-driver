@@ -8,12 +8,12 @@ This document provides ready-to-use configuration examples for common production
 
 ### Standard Configuration
 
-```rust
-use mssql_client::{Client, Config};
-use mssql_driver_pool::{Pool, PoolConfig};
+```rust,no_run
+use mssql_client::Config;
+use mssql_driver_pool::Pool;
 use std::time::Duration;
 
-async fn azure_sql_config() -> Result<Pool, Error> {
+async fn azure_sql_config() -> Result<Pool, Box<dyn std::error::Error>> {
     // Azure SQL Database connection string
     let config = Config::from_connection_string(
         "Server=your-server.database.windows.net,1433;\
@@ -28,13 +28,13 @@ async fn azure_sql_config() -> Result<Pool, Error> {
 
     // Production pool settings for Azure SQL
     let pool = Pool::builder()
-        .min_size(2)
-        .max_size(30)                              // Azure SQL default max is 100
-        .acquire_timeout(Duration::from_secs(30))
-        .idle_timeout(Duration::from_secs(300))   // Azure closes idle after 30 min
-        .max_lifetime(Duration::from_secs(1800))  // Recycle before Azure timeout
-        .test_on_borrow(true)
-        .build(config)
+        .client_config(config)
+        .min_connections(2)
+        .max_connections(30)                          // Azure SQL default max is 100
+        .connection_timeout(Duration::from_secs(30))
+        .idle_timeout(Duration::from_secs(300))       // Azure closes idle after 30 min
+        .test_while_idle(true)
+        .build()
         .await?;
 
     Ok(pool)
@@ -43,9 +43,9 @@ async fn azure_sql_config() -> Result<Pool, Error> {
 
 ### Azure SQL with Managed Identity
 
-```rust
+```text
 // Requires the `azure-identity` feature:
-// mssql-auth = { version = "0.5", features = ["azure-identity"] }
+// mssql-auth = { version = "0.10", features = ["azure-identity"] }
 
 use azure_identity::DefaultAzureCredential;
 use mssql_auth::AzureIdentityAuth;
@@ -61,16 +61,21 @@ async fn azure_sql_managed_identity() -> Result<Pool, Error> {
         .encryption(Encryption::Strict);
 
     Pool::builder()
-        .max_size(30)
-        .build(config)
+        .client_config(config)
+        .max_connections(30)
+        .build()
         .await
 }
 ```
 
 ### Azure SQL Serverless
 
-```rust
-async fn azure_sql_serverless() -> Result<Pool, Error> {
+```rust,no_run
+use mssql_client::Config;
+use mssql_driver_pool::Pool;
+use std::time::Duration;
+
+async fn azure_sql_serverless() -> Result<Pool, Box<dyn std::error::Error>> {
     // Azure SQL Serverless may have cold start delays
     let config = Config::from_connection_string(
         "Server=your-server.database.windows.net;\
@@ -83,12 +88,13 @@ async fn azure_sql_serverless() -> Result<Pool, Error> {
 
     // Smaller pool for serverless (auto-pause consideration)
     let pool = Pool::builder()
-        .min_size(0)                              // Allow full scale-down
-        .max_size(10)
-        .acquire_timeout(Duration::from_secs(60)) // Cold start can be slow
-        .idle_timeout(Duration::from_secs(60))    // Quick release for serverless
-        .test_on_borrow(true)
-        .build(config)
+        .client_config(config)
+        .min_connections(0)                          // Allow full scale-down
+        .max_connections(10)
+        .connection_timeout(Duration::from_secs(60)) // Cold start can be slow
+        .idle_timeout(Duration::from_secs(60))       // Quick release for serverless
+        .test_while_idle(true)
+        .build()
         .await?;
 
     Ok(pool)
@@ -101,8 +107,12 @@ async fn azure_sql_serverless() -> Result<Pool, Error> {
 
 ### Standard Configuration
 
-```rust
-async fn onprem_sql_config() -> Result<Pool, Error> {
+```rust,no_run
+use mssql_client::Config;
+use mssql_driver_pool::Pool;
+use std::time::Duration;
+
+async fn onprem_sql_config() -> Result<Pool, Box<dyn std::error::Error>> {
     let config = Config::from_connection_string(
         "Server=sql-server.internal.company.com,1433;\
          Database=production;\
@@ -116,13 +126,13 @@ async fn onprem_sql_config() -> Result<Pool, Error> {
     )?;
 
     let pool = Pool::builder()
-        .min_size(5)
-        .max_size(50)
-        .acquire_timeout(Duration::from_secs(15))
+        .client_config(config)
+        .min_connections(5)
+        .max_connections(50)
+        .connection_timeout(Duration::from_secs(15))
         .idle_timeout(Duration::from_secs(600))
-        .max_lifetime(Duration::from_secs(3600))
-        .test_on_borrow(true)
-        .build(config)
+        .test_while_idle(true)
+        .build()
         .await?;
 
     Ok(pool)
@@ -131,8 +141,11 @@ async fn onprem_sql_config() -> Result<Pool, Error> {
 
 ### SQL Server with TDS 8.0 Strict Mode
 
-```rust
-async fn sql_2022_strict_mode() -> Result<Pool, Error> {
+```rust,no_run
+use mssql_client::Config;
+use mssql_driver_pool::{Pool, PoolError};
+
+async fn sql_2022_strict_mode() -> Result<Pool, PoolError> {
     // SQL Server 2022+ with strict TLS encryption
     let config = Config::from_connection_string(
         "Server=sql2022.internal.company.com,1433;\
@@ -143,19 +156,23 @@ async fn sql_2022_strict_mode() -> Result<Pool, Error> {
          TrustServerCertificate=false;\
          Connect Timeout=15;\
          Application Name=MyApp-v1.0.0"
-    )?;
+    ).expect("valid connection string");
 
     Pool::builder()
-        .max_size(50)
-        .build(config)
+        .client_config(config)
+        .max_connections(50)
+        .build()
         .await
 }
 ```
 
 ### Internal Development Server
 
-```rust
-async fn dev_sql_config() -> Result<Pool, Error> {
+```rust,no_run
+use mssql_client::Config;
+use mssql_driver_pool::Pool;
+
+async fn dev_sql_config() -> Result<Pool, Box<dyn std::error::Error>> {
     // Development only - relaxed security settings
     let config = Config::from_connection_string(
         "Server=localhost,1433;\
@@ -170,9 +187,10 @@ async fn dev_sql_config() -> Result<Pool, Error> {
 
     // Smaller pool for development
     let pool = Pool::builder()
-        .min_size(1)
-        .max_size(5)
-        .build(config)
+        .client_config(config)
+        .min_connections(1)
+        .max_connections(5)
+        .build()
         .await?;
 
     Ok(pool)
@@ -185,8 +203,11 @@ async fn dev_sql_config() -> Result<Pool, Error> {
 
 ### Always On Availability Group
 
-```rust
-async fn always_on_config() -> Result<Pool, Error> {
+```rust,no_run
+use mssql_client::Config;
+use mssql_driver_pool::Pool;
+
+async fn always_on_config() -> Result<Pool, Box<dyn std::error::Error>> {
     // Connect to AG listener for automatic failover
     let config = Config::from_connection_string(
         "Server=ag-listener.company.com,1433;\
@@ -200,13 +221,13 @@ async fn always_on_config() -> Result<Pool, Error> {
          Application Name=MyApp-v1.0.0"
     )?;
 
-    // Larger pool with faster recycling for HA
+    // Larger pool with health checks for HA
     let pool = Pool::builder()
-        .min_size(5)
-        .max_size(50)
-        .max_lifetime(Duration::from_secs(1800))  // More frequent recycling
-        .test_on_borrow(true)                     // Always verify after failover
-        .build(config)
+        .client_config(config)
+        .min_connections(5)
+        .max_connections(50)
+        .test_while_idle(true)  // Verify idle connections after failover
+        .build()
         .await?;
 
     Ok(pool)
@@ -215,8 +236,11 @@ async fn always_on_config() -> Result<Pool, Error> {
 
 ### Read Scale-Out (Read Replicas)
 
-```rust
-async fn read_replica_pools() -> Result<(Pool, Pool), Error> {
+```rust,no_run
+use mssql_client::Config;
+use mssql_driver_pool::Pool;
+
+async fn read_replica_pools() -> Result<(Pool, Pool), Box<dyn std::error::Error>> {
     // Primary pool for writes
     let primary_config = Config::from_connection_string(
         "Server=ag-listener.company.com;\
@@ -229,9 +253,10 @@ async fn read_replica_pools() -> Result<(Pool, Pool), Error> {
     )?;
 
     let primary_pool = Pool::builder()
-        .min_size(2)
-        .max_size(20)
-        .build(primary_config)
+        .client_config(primary_config)
+        .min_connections(2)
+        .max_connections(20)
+        .build()
         .await?;
 
     // Secondary pool for reads
@@ -246,9 +271,10 @@ async fn read_replica_pools() -> Result<(Pool, Pool), Error> {
     )?;
 
     let secondary_pool = Pool::builder()
-        .min_size(5)
-        .max_size(50)  // More capacity for reads
-        .build(secondary_config)
+        .client_config(secondary_config)
+        .min_connections(5)
+        .max_connections(50)  // More capacity for reads
+        .build()
         .await?;
 
     Ok((primary_pool, secondary_pool))
@@ -261,18 +287,23 @@ async fn read_replica_pools() -> Result<(Pool, Pool), Error> {
 
 ### Web API Service
 
-```rust
-async fn web_api_config() -> Result<Pool, Error> {
+```rust,no_run
+use mssql_client::Config;
+use mssql_driver_pool::Pool;
+use std::time::Duration;
+
+async fn web_api_config() -> Result<Pool, Box<dyn std::error::Error>> {
     let config = Config::from_connection_string(&std::env::var("DATABASE_URL")?)?;
 
     // Sized for typical web API workload
     // Assumes 4 CPU cores, ~100 concurrent requests
     let pool = Pool::builder()
-        .min_size(4)
-        .max_size(20)
-        .acquire_timeout(Duration::from_secs(5))  // Fail fast for web requests
+        .client_config(config)
+        .min_connections(4)
+        .max_connections(20)
+        .connection_timeout(Duration::from_secs(5))  // Fail fast for web requests
         .idle_timeout(Duration::from_secs(300))
-        .build(config)
+        .build()
         .await?;
 
     Ok(pool)
@@ -281,18 +312,23 @@ async fn web_api_config() -> Result<Pool, Error> {
 
 ### Background Job Worker
 
-```rust
-async fn worker_config() -> Result<Pool, Error> {
+```rust,no_run
+use mssql_client::Config;
+use mssql_driver_pool::Pool;
+use std::time::Duration;
+
+async fn worker_config() -> Result<Pool, Box<dyn std::error::Error>> {
     let config = Config::from_connection_string(&std::env::var("DATABASE_URL")?)?;
 
     // Background workers typically need fewer connections
     // but longer timeouts for batch operations
     let pool = Pool::builder()
-        .min_size(1)
-        .max_size(5)
-        .acquire_timeout(Duration::from_secs(30))
+        .client_config(config)
+        .min_connections(1)
+        .max_connections(5)
+        .connection_timeout(Duration::from_secs(30))
         .idle_timeout(Duration::from_secs(600))
-        .build(config)
+        .build()
         .await?;
 
     Ok(pool)
@@ -301,8 +337,12 @@ async fn worker_config() -> Result<Pool, Error> {
 
 ### Batch Processing Service
 
-```rust
-async fn batch_config() -> Result<Pool, Error> {
+```rust,no_run
+use mssql_client::Config;
+use mssql_driver_pool::Pool;
+use std::time::Duration;
+
+async fn batch_config() -> Result<Pool, Box<dyn std::error::Error>> {
     let config = Config::from_connection_string(
         &format!(
             "{}Command Timeout=300",  // 5 minute query timeout for batch
@@ -312,11 +352,11 @@ async fn batch_config() -> Result<Pool, Error> {
 
     // Batch processing needs more connections for parallel work
     let pool = Pool::builder()
-        .min_size(5)
-        .max_size(30)
-        .acquire_timeout(Duration::from_secs(60))
-        .max_lifetime(Duration::from_secs(7200))  // Longer lifetime for batch
-        .build(config)
+        .client_config(config)
+        .min_connections(5)
+        .max_connections(30)
+        .connection_timeout(Duration::from_secs(60))
+        .build()
         .await?;
 
     Ok(pool)
@@ -329,7 +369,9 @@ async fn batch_config() -> Result<Pool, Error> {
 
 ### Environment Variable Configuration
 
-```rust
+```rust,no_run
+use mssql_client::Config;
+use mssql_driver_pool::Pool;
 use std::env;
 
 #[derive(Debug)]
@@ -388,17 +430,19 @@ impl DbConfig {
     }
 }
 
-async fn kubernetes_config() -> Result<Pool, Error> {
+async fn kubernetes_config() -> Result<Pool, Box<dyn std::error::Error>> {
     let db_config = DbConfig::from_env()
         .expect("Database configuration missing");
 
     let config = Config::from_connection_string(&db_config.connection_string())?;
 
-    Pool::builder()
-        .min_size(db_config.pool_min)
-        .max_size(db_config.pool_max)
-        .build(config)
-        .await
+    let pool = Pool::builder()
+        .client_config(config)
+        .min_connections(db_config.pool_min)
+        .max_connections(db_config.pool_max)
+        .build()
+        .await?;
+    Ok(pool)
 }
 ```
 
@@ -433,7 +477,7 @@ stringData:
 
 ### Integration Test Configuration
 
-```rust
+```text
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,9 +493,10 @@ mod tests {
         ).expect("Invalid test connection string");
 
         Pool::builder()
-            .min_size(1)
-            .max_size(5)
-            .build(config)
+            .client_config(config)
+            .min_connections(1)
+            .max_connections(5)
+            .build()
             .await
             .expect("Failed to create test pool")
     }

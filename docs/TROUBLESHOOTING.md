@@ -274,18 +274,20 @@ This guide helps diagnose and resolve common issues with rust-mssql-driver.
 1. **Check connection lifetime:**
    ```rust
    let pool = Pool::builder()
+       .client_config(config)
        .max_lifetime(Duration::from_secs(300))  // 5 minutes
        .idle_timeout(Duration::from_secs(60))   // 1 minute
-       .build(config)
+       .build()
        .await?;
    ```
 
 2. **Enable health checks:**
    ```rust
    let pool = Pool::builder()
+       .client_config(config)
        .test_on_checkout(true)
        .health_check_interval(Duration::from_secs(30))
-       .build(config)
+       .build()
        .await?;
    ```
 

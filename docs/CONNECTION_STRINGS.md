@@ -342,22 +342,22 @@ Server=production-db;User Id=app;Password=secret;Encrypt=true;TrustServerCertifi
 
 | Feature | rust-mssql-driver | ADO.NET |
 |---------|-------------------|---------|
-| Basic keywords | ✅ | ✅ |
-| Integrated Security | ❌ | ✅ |
-| AttachDbFilename | ❌ | ✅ |
-| Pooling keywords | ❌ (use Pool config) | ✅ |
-| Failover Partner | ❌ | ✅ |
-| Encrypt=strict | ✅ | ✅ (SQL Server 2022+) |
+| Basic keywords | Yes | Yes |
+| Integrated Security | No | Yes |
+| AttachDbFilename | No | Yes |
+| Pooling keywords | No (use Pool config) | Yes |
+| Failover Partner | No | Yes |
+| Encrypt=strict | Yes | Yes (SQL Server 2022+) |
 
 ## Comparison with Tiberius
 
 | Feature | rust-mssql-driver | Tiberius |
 |---------|-------------------|----------|
-| ADO.NET format | ✅ | ✅ |
-| Comma port syntax | ✅ | ✅ |
-| Named instances | ✅ | ✅ |
-| JDBC format | ❌ | ❌ |
-| Builder alternative | ✅ | ✅ |
+| ADO.NET format | Yes | Yes |
+| Comma port syntax | Yes | Yes |
+| Named instances | Yes | Yes |
+| JDBC format | No | No |
+| Builder alternative | Yes | Yes |
 
 ## Debugging Connection Strings
 
