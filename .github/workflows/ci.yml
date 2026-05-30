@@ -240,3 +240,46 @@ jobs:
           cargo test -p mssql-client --features otel --lib -- instrumentation::tests
 
           echo "Feature-specific tests passed!"
+
+  adr-011-mod-rs:
+    name: ADR-011 (no mod.rs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Forbid mod.rs files (ADR-011)
+        run: |
+          if find crates xtask -name mod.rs -not -path '*/target/*' | grep -q .; then
+            echo "::error::ADR-011 violation: mod.rs files are banned. Use file-alongside modules (foo.rs + foo/)."
+            find crates xtask -name mod.rs -not -path '*/target/*'
+            exit 1
+          fi
+          echo "No mod.rs files found (ADR-011 compliant)."
+
+  doc-consistency:
+    name: Doc Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check documentation consistency
+        run: bash scripts/check-doc-consistency.sh
+
+  commit-branding:
+    name: No AI Branding in Commits
+    # PR-only: needs a base..head commit range. History is permanent, so this
+    # guards forward against reintroducing AI co-author/branding trailers.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Reject AI co-author / branding trailers
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          if git log --format='%B' "$base..$head" \
+              | grep -iE 'co-authored-by:.*(claude|anthropic|openai|chatgpt|copilot|gpt-)'; then
+            echo "::error::AI-branding trailer found in a PR commit message. Remove it (see CONTRIBUTING.md -> AI-Assisted Contributions)."
+            exit 1
+          fi
+          echo "No AI-branding trailers in PR commit range."
