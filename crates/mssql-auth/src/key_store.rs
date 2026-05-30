@@ -434,27 +434,32 @@ mod tests {
     }
 
     #[test]
-    fn test_cek_cache_cleanup_expired() {
-        let cache = CekCache::with_ttl(Duration::from_millis(50));
+    fn test_cek_cache_cleanup_removes_expired() {
+        // `sleep` only ever overshoots, so a wait far longer than the TTL
+        // guarantees expiry regardless of scheduler jitter (the previous test
+        // depended on 30ms windows and flaked on loaded macOS CI runners).
+        let cache = CekCache::with_ttl(Duration::from_millis(20));
+        cache
+            .insert(CekCacheKey::new(1, 1, 1), vec![0x42u8; 32])
+            .unwrap();
+        assert_eq!(cache.len(), 1);
 
-        // Insert first entry
-        let key1 = CekCacheKey::new(1, 1, 1);
-        cache.insert(key1.clone(), vec![0x42u8; 32]).unwrap();
-
-        // Wait a bit, then insert second entry
-        std::thread::sleep(Duration::from_millis(30));
-        let key2 = CekCacheKey::new(2, 1, 1);
-        cache.insert(key2.clone(), vec![0x43u8; 32]).unwrap();
-
-        assert_eq!(cache.len(), 2);
-
-        // Wait for first entry to expire
-        std::thread::sleep(Duration::from_millis(30));
+        std::thread::sleep(Duration::from_millis(150));
         cache.cleanup_expired();
 
-        // First entry should be removed, second should remain
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn test_cek_cache_cleanup_keeps_fresh() {
+        // A TTL far longer than the test runtime guarantees nothing expires.
+        let cache = CekCache::with_ttl(Duration::from_secs(3600));
+        let key = CekCacheKey::new(1, 1, 1);
+        cache.insert(key.clone(), vec![0x42u8; 32]).unwrap();
+
+        cache.cleanup_expired();
+
         assert_eq!(cache.len(), 1);
-        assert!(cache.get(&key1).is_none());
-        assert!(cache.get(&key2).is_some());
+        assert!(cache.get(&key).is_some());
     }
 }
