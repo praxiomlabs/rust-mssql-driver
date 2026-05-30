@@ -27,13 +27,13 @@ Report code-of-conduct violations privately via the [GitHub Security Advisory](h
 
 If this is your first time contributing to the project, here's the shortest path from clone to green CI:
 
-1. **Pick an issue.** Browse [open issues](https://github.com/praxiomlabs/rust-mssql-driver/issues) — look for ones labelled `good first issue` if they exist, or ask on an issue for guidance before starting.
+1. **Pick an issue.** Browse [open issues](https://github.com/praxiomlabs/rust-mssql-driver/issues), or ask on an issue for guidance before starting.
 2. **Fork and clone.** See [Getting Started](#getting-started) below.
 3. **Bootstrap your environment.** Run `just bootstrap` (or `just setup-all` if you don't want sudo for Kerberos deps).
 4. **Make your change.** Keep commits small and focused. Use [conventional commit format](#commit-messages).
 5. **Verify locally.** Run `just ci-all` before pushing — this mirrors what CI will run and is your fastest feedback loop.
 6. **Open a PR.** The [PR template](.github/pull_request_template.md) will walk you through what reviewers need to know. File a draft PR if you want early feedback.
-7. **Respond to review.** CODEOWNERS will automatically request review from the right maintainers. See [When Your PR Needs Review](#when-your-pr-needs-review) below.
+7. **Respond to review.** CODEOWNERS automatically requests review from the right maintainers. See [When Your PR Needs Review](#when-your-pr-needs-review) below.
 
 Don't worry if your first PR needs several rounds of revision — that's normal and expected. We try to keep review feedback kind, specific, and actionable.
 
@@ -70,6 +70,8 @@ just setup-all   # Cargo tools + git hooks only
 just ci          # CI with default features
 ```
 
+`just setup` reports what's installed and what's missing. `just setup-tools` installs the version-pinned cargo extensions (`cargo-nextest`, `cargo-llvm-cov`, `cargo-audit`, `cargo-deny`, `cargo-machete`, `cargo-semver-checks`, `cargo-watch`). `just setup-hooks` installs a pre-commit hook (format check, clippy, `cargo check`).
+
 ### Prerequisites
 
 | Tool | Version | Required | Notes |
@@ -80,42 +82,6 @@ just ci          # CI with default features
 | Docker | any | No | For integration tests |
 | MSVC C++ Build Tools | any | Windows only | Required for TLS (ring/aws-lc-sys). Free via [VS Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) |
 | libkrb5-dev | any | Linux only | Required for `integrated-auth` feature |
-
-### Step-by-Step Setup
-
-#### 1. Check Your Environment
-
-```bash
-just setup
-```
-
-This shows what's installed and what's missing.
-
-#### 2. Install Cargo Extensions
-
-```bash
-just setup-tools
-```
-
-Installs version-pinned tools compatible with Rust 1.88:
-- `cargo-nextest` - Fast test runner
-- `cargo-llvm-cov` - Code coverage
-- `cargo-audit` - Security auditing
-- `cargo-deny` - License/dependency checking
-- `cargo-machete` - Unused dependency detection
-- `cargo-semver-checks` - API compatibility
-- `cargo-watch` - File watching
-
-#### 3. Install Git Hooks
-
-```bash
-just setup-hooks
-```
-
-Installs a pre-commit hook that runs:
-- Format check (`cargo fmt --check`)
-- Clippy lints
-- Type check (`cargo check`)
 
 #### 4. Platform-Specific: Windows C++ Build Tools
 
@@ -147,15 +113,12 @@ sudo dnf install krb5-devel clang-devel
 just setup-linux
 ```
 
-The `integrated-auth` feature requires:
-- `libkrb5-dev`: Kerberos/GSSAPI headers
-- `libclang-dev`: Required by bindgen to generate FFI bindings
-
-This is **Linux-only**.
+The `integrated-auth` feature requires `libkrb5-dev` (Kerberos/GSSAPI headers) and
+`libclang-dev` (bindgen FFI generation). This is **Linux-only**.
 
 ### Justfile Recipe Naming Convention
 
-This project uses a dual-recipe pattern to handle platform differences:
+This project uses a dual-recipe pattern to handle platform differences. Base recipes (`build`, `test`, `nextest`, `ci`) use default features and work everywhere; the `-all` variants (`build-all`, `test-all`, `nextest-all`, `ci-all`) use `--all-features` and need `libkrb5-dev` on Linux.
 
 | Recipe | Features | Platform | Notes |
 |--------|----------|----------|-------|
@@ -168,68 +131,7 @@ This project uses a dual-recipe pattern to handle platform differences:
 | `just ci` | Default | Works everywhere | fmt + clippy + nextest + docs + examples |
 | `just ci-all` | All features | Matches GitHub Actions | Full CI pipeline |
 
-**Use base recipes for day-to-day development.** Use `-all` variants when you need to test Kerberos integration or match CI exactly.
-
-**CI Alignment:** The `just ci-all` recipe mirrors GitHub Actions exactly:
-- Uses `cargo-nextest` for tests (same as CI)
-- Includes `--locked` flag (ensures Cargo.lock is respected)
-- Builds examples with `--all-features`
-- Runs documentation checks with `-D warnings`
-
-### Building
-
-```bash
-# Build (default features - works everywhere)
-just build
-
-# Build with all features (requires libkrb5-dev on Linux)
-just build-all
-
-# Build in release mode
-just release
-```
-
-### Running Tests
-
-```bash
-# Unit tests with cargo test (default features)
-just test
-
-# Unit tests with cargo test (all features)
-just test-all
-
-# Fast parallel tests with cargo-nextest (recommended)
-just nextest
-
-# Fast parallel tests with all features
-just nextest-all
-
-# Tests with locked dependencies (matches CI)
-just nextest-locked
-just nextest-locked-all
-
-# Run specific crate tests
-just test-crate mssql-client
-
-# Run Miri tests for unsafe code detection (requires nightly)
-just miri
-```
-
-### Code Quality
-
-```bash
-# Format code
-just fmt
-
-# Check formatting
-just fmt-check
-
-# Run clippy
-just clippy
-
-# Full CI pipeline (matches what runs on PRs)
-just ci
-```
+Use base recipes for day-to-day development; use `-all` when you need Kerberos integration or to match CI exactly. `just ci-all` mirrors GitHub Actions (nextest, `--locked`, examples with `--all-features`, docs with `-D warnings`). Run `just --list` for the full recipe set, including `release`, `miri`, and the `nextest-locked*` variants.
 
 ### Setting Up SQL Server for Testing
 
@@ -240,32 +142,17 @@ just sql-server-start
 # Or start all versions (2017, 2019, 2022) for compatibility testing
 just sql-server-all
 
-# Check container status
+# Check container status / stop containers
 just sql-server-status
-
-# Stop containers when done
 just sql-server-stop
 ```
 
-Environment variables (set automatically by just recipes):
+Environment variables (set automatically by the just recipes):
 ```bash
 export MSSQL_HOST=localhost
 export MSSQL_PORT=1433
 export MSSQL_USER=sa
 export MSSQL_PASSWORD=YourStrong@Passw0rd
-```
-
-### Watch Mode (Auto-Rebuild on Save)
-
-```bash
-# Re-run tests on file changes
-just watch
-
-# Re-run type check on file changes
-just watch-check
-
-# Re-run clippy on file changes
-just watch-clippy
 ```
 
 ### Build Automation (`cargo xtask`)
@@ -283,20 +170,7 @@ The project includes custom build commands via `cargo xtask`:
 | `cargo xtask coverage` | Generate code coverage report |
 | `cargo xtask semver` | Check for semver-breaking API changes |
 
-### Release-Adjacent Just Recipes
-
-For maintainers preparing a release (or for contributors who want to understand what release validation looks like):
-
-| Recipe | Purpose |
-|--------|---------|
-| `just release-status` | Dashboard of dev↔main divergence, last tag, open PRs, CI status, token health |
-| `just release-preflight` | Run all Cardinal Rules gate checks in sequence (working copy clean, audit, deny, wip-check, metadata, tier-0 publish dry-run) |
-| `just release-check` | Full release validation: ci-release-all + check-feature-flags + wip-check + panic-audit + version-sync + version-refs-check + doc-consistency + typos + machete + metadata-check + url-check |
-| `just doc-consistency` | Run the documentation consistency linter (`scripts/check-doc-consistency.sh`) — catches MSRV drift, version mismatches, policy contradictions |
-| `just ci-status-all` | Verify all three workflows (CI, Security Audit, Benchmarks) passed on `main` at the current HEAD — required before tagging |
-| `just tag` | Create an annotated release tag (verifies workflows are green first) |
-
-See [RELEASING.md](RELEASING.md) for the full release process and the Cardinal Rules that govern it.
+Maintainers preparing a release should follow [RELEASING.md](RELEASING.md), which documents the release-validation recipes (`just release-status`, `release-preflight`, `release-check`, `doc-consistency`, `tag`) and the Cardinal Rules that govern them.
 
 ## Making Changes
 
@@ -312,33 +186,17 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 [optional footer(s)]
 ```
 
-**Types:**
-- `feat`: New feature
-- `fix`: Bug fix
-- `docs`: Documentation only
-- `style`: Code style (formatting, semicolons, etc.)
-- `refactor`: Code change that neither fixes a bug nor adds a feature
-- `perf`: Performance improvement
-- `test`: Adding or correcting tests
-- `chore`: Build process or auxiliary tool changes
+**Types:** `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`.
 
-**Scopes:**
-- `client`: mssql-client crate
-- `pool`: mssql-pool crate
-- `protocol`: tds-protocol crate
-- `types`: mssql-types crate
-- `derive`: mssql-derive crate
-- `auth`: mssql-auth crate
-- `tls`: mssql-tls crate
-- `codec`: mssql-codec crate
+**Scopes** map to the crates: `client`, `pool`, `protocol`, `types`, `derive`, `auth`, `tls`, `codec`.
 
 **Examples:**
 ```
 feat(client): add streaming query support
 fix(pool): prevent connection leak on timeout
-docs(readme): add transaction examples
-refactor(protocol): simplify token parsing
 ```
+
+Do not include AI-tool branding (e.g. `Co-Authored-By` trailers naming an AI assistant) in commit messages — CI rejects them. See [AI-Assisted Contributions](#ai-assisted-contributions).
 
 ### Branch Naming
 
@@ -375,50 +233,9 @@ Breaking changes are changes that may require users to modify their code when up
 - Documentation changes
 - **MSRV increases** — see [STABILITY.md § MSRV Increase Policy](STABILITY.md#minimum-supported-rust-version-msrv). MSRV bumps are allowed in minor releases when necessary for security fixes, critical bug fixes, or features requiring new language/stdlib capabilities. This aligns with the broader Rust ecosystem (Tokio, serde, etc.) and is consistent with our rolling 6-month MSRV window.
 
-### Breaking Change Policy
+### Policy
 
-#### During 0.x Development
-
-1. Breaking changes are allowed in minor version bumps (0.x.0)
-2. All breaking changes must be:
-   - Documented in CHANGELOG.md under "Breaking Changes"
-   - Accompanied by a migration guide if the change is significant
-   - Discussed in a GitHub issue before implementation
-
-#### Post-1.0 Release
-
-1. Breaking changes require a major version bump
-2. Deprecated APIs must remain for at least one minor release
-3. Breaking changes require:
-   - RFC-style discussion for significant changes
-   - Approval from maintainers
-   - Comprehensive migration documentation
-
-### Proposing a Breaking Change
-
-1. Open an issue with the `breaking-change` label
-2. Describe:
-   - Current behavior
-   - Proposed new behavior
-   - Rationale for the change
-   - Migration path for existing users
-   - Alternatives considered
-3. Wait for maintainer feedback before implementing
-
-### Documenting Breaking Changes
-
-In your PR that introduces a breaking change:
-
-1. Add to CHANGELOG.md:
-```markdown
-### Breaking Changes
-
-- **client**: `Config::new()` removed, use `Config::builder()` instead
-  - Migration: Replace `Config::new().host("...")` with `Config::builder().host("...").build()`
-```
-
-2. Update any affected examples
-3. Update any affected documentation
+[STABILITY.md](STABILITY.md) is authoritative for the versioning and breaking-change policy. In short: during 0.x, breaking changes are allowed in minor bumps (0.x.0) and must be documented in [CHANGELOG.md](CHANGELOG.md) under "Breaking Changes" (with a migration note when the change is significant). Discuss a non-trivial breaking change in an issue before implementing it. The PR template has a breaking-change checklist to fill in.
 
 ## AI-Assisted Contributions
 
@@ -440,84 +257,32 @@ accountable for it. See [Coding Standards](#coding-standards) for the quality ba
 
 ## Pull Request Process
 
-1. **Before submitting:**
-   - Ensure all tests pass: `cargo test --workspace --all-features`
-   - Run lints: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-   - Format code: `cargo fmt --all`
-   - Verify doc consistency: `just doc-consistency`
-   - Update documentation if needed
-   - Or simply run `just ci-all` which does all of the above in one command
-
-2. **PR Description should use the [template](.github/pull_request_template.md).** The template includes:
-   - Summary and linked issues
-   - Type of change
-   - Test plan checklist
-   - Documentation updates checklist
-   - Breaking changes section (when applicable) with a pointer to STABILITY.md
-   - Security considerations section (for auth/TLS/SQL-gen changes)
-
-3. **Review process:**
-   - At least one maintainer approval required
-   - All CI checks must pass (on all three platforms: Linux, macOS, Windows)
-   - Breaking changes require additional review
-   - CODEOWNERS automatically requests review from the right maintainers based on which files you touched
-
-4. **After approval:**
-   - Squash commits if requested
-   - Maintainer will merge
+1. **Before submitting:** run `just ci-all`. It runs the full gate (tests, clippy `-D warnings`, `cargo fmt --check`, doc build, doc-consistency) in one command — the same checks CI runs.
+2. **Describe the PR using the [template](.github/pull_request_template.md).** It covers the summary, linked issues, type of change, test plan, documentation updates, breaking-change details (pointing to STABILITY.md), and security considerations.
+3. **Review:** at least one approval plus green CI on all three platforms (Linux, macOS, Windows). CODEOWNERS automatically requests review from the right maintainers based on the files you touched.
 
 ## When Your PR Needs Review
 
-CODEOWNERS automatically requests review from the appropriate maintainers based on the files you touched. You don't need to manually tag anyone — ownership rules in [`.github/CODEOWNERS`](.github/CODEOWNERS) handle that.
-
-**Expected response time**: maintainers aim to respond to new PRs within one week, even if it's just acknowledging the PR is in the review queue. If your PR hasn't received any response after one week, it's reasonable to leave a polite ping comment on the PR.
-
-**If your PR spans multiple areas** (e.g., protocol layer AND auth AND client API), all relevant CODEOWNERS entries will be requested and any one of them can start the review. Reviewers should coordinate via PR comments if the change needs combined expertise.
-
-**For substantial contributions** (roughly, PRs over ~500 lines or touching architectural decisions), consider opening a draft PR early for architectural feedback before polishing the implementation. This avoids situations where a contributor invests significant effort in an approach that doesn't align with the project's direction.
-
-**Large feature PRs**: review will often take longer than small ones. We'd rather take several weeks to review a 2,500-line feature carefully than rush it and merge something that needs significant follow-up. If your feature PR is a non-trivial addition, please be patient and engage constructively with review feedback.
+CODEOWNERS automatically requests review based on the files you touched — you don't need to tag anyone. For substantial or architectural changes (roughly, PRs over ~500 lines), open a **draft PR early** for direction before polishing the implementation; large feature PRs naturally take longer to review than small ones.
 
 ## Coding Standards
 
-### General Guidelines
+- **Safety:** `unsafe` is denied by default (`unsafe_code = "deny"`); any necessary unsafe must be documented with a `// SAFETY:` rationale and covered by Miri tests where possible.
+- **Panics:** never panic in library code — return `Result<T, Error>`. Error types use `thiserror`.
+- **API evolution:** add `#[non_exhaustive]` to public enums and structs that may grow; `#[must_use]` where the return value matters.
+- **Docs:** all public APIs must be documented (`missing_docs` is enforced in CI).
+- **Performance:** use `Arc<Bytes>` for shared row data; profile before optimizing.
 
-- Follow Rust API Guidelines: https://rust-lang.github.io/api-guidelines/
-- Use `#[must_use]` for functions with important return values
-- Prefer `impl Trait` in return position for complex types
-- Document all public APIs
-- Add `#[non_exhaustive]` to public enums and structs that may grow
-
-### Error Handling
-
-- Use `thiserror` for error types
-- Provide context in error messages
-- Never panic in library code (except for unrecoverable bugs)
-- Use `Result<T, Error>` for fallible operations
-
-### Unsafe Code
-
-- `unsafe` code is denied by default
-- Any necessary unsafe must be:
-  - Thoroughly documented
-  - Reviewed by maintainers
-  - Covered by miri tests if possible
-
-### Performance
-
-- Avoid unnecessary allocations
-- Use `Arc<Bytes>` for shared data
-- Profile before optimizing
-- Document performance-critical code
+Follow the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/) for anything not covered here.
 
 ## Testing
 
 ### Test Organization
 
-- Unit tests: `src/*.rs` (in the same file)
+- Unit tests: in the same `src/*.rs` file
 - Integration tests: `tests/`
-- Property tests: Use `proptest`
-- Fuzz tests: `fuzz/` directory
+- Property tests: `proptest`
+- Fuzz tests: `fuzz/`
 
 #### Integration Test Taxonomy (`crates/mssql-client/tests/`)
 
@@ -537,30 +302,9 @@ Tests are organized by functional domain:
 | `collation_test.rs` | Character encoding and collation handling |
 | `edge_cases.rs` | Boundary conditions (empty results, large values, etc.) |
 
-### Test Naming
-
-```rust
-#[test]
-fn should_[expected_behavior]_when_[condition]() {
-    // Arrange
-    // Act
-    // Assert
-}
-```
-
-### Test Coverage
-
-- Aim for high coverage of public APIs
-- All bug fixes should include a regression test
-- Property tests for encoding/decoding
-
 ### Test Patterns for Database Drivers
 
-This project uses specific patterns for tests and documentation examples:
-
-#### Integration Tests with `#[ignore]`
-
-Tests that require a live SQL Server are marked with `#[ignore = "Requires SQL Server"]`:
+Tests that require a live SQL Server are marked `#[ignore = "Requires SQL Server"]`. They run automatically in CI (with Docker SQL Server) and are skipped locally unless you run `cargo test -- --ignored` (start a server first with `just sql-server-start`).
 
 ```rust
 #[tokio::test]
@@ -570,79 +314,18 @@ async fn test_query_execution() {
 }
 ```
 
-These tests:
-- Run automatically in CI (with Docker SQL Server)
-- Are skipped locally unless you run `cargo test -- --ignored`
-- Can be run locally with `just sql-server-start` first
+Documentation examples that need an async runtime or a database connection use ` ```rust,ignore ` — they are syntax-checked by `cargo doc` but not executed. This is standard practice for database-driver docs.
 
-#### Doc Examples with `rust,ignore`
-
-Documentation examples that require async runtime or SQL Server use `rust,ignore`:
-
-```rust
-/// Execute a query against the database.
-///
-/// # Examples
-///
-/// ```rust,ignore
-/// let mut client = Client::connect(config).await?;
-/// let rows = client.query("SELECT 1", &[]).await?;
-/// ```
-pub async fn query(&mut self, sql: &str) -> Result<QueryResult, Error> {
-    // ...
-}
-```
-
-Why `ignore`?
-- **Async context**: Examples need `#[tokio::main]` or async runtime
-- **SQL Server connection**: Examples would fail without a database
-- **Illustrative**: The code shows usage patterns, not runnable tests
-
-This is standard practice for database driver documentation. The examples are
-syntactically checked by `cargo doc` but not executed as tests.
+All bug fixes should include a regression test; encoding/decoding paths should have property tests.
 
 ## Documentation
 
-### Doc Comments
-
-```rust
-/// Brief description of the item.
-///
-/// Longer description with details about behavior,
-/// panics, errors, and examples.
-///
-/// # Arguments
-///
-/// * `param` - Description of parameter
-///
-/// # Returns
-///
-/// Description of return value
-///
-/// # Errors
-///
-/// * `Error::Kind` - When this error occurs
-///
-/// # Examples
-///
-/// ```rust
-/// let result = function(arg);
-/// assert!(result.is_ok());
-/// ```
-pub fn function(param: Type) -> Result<Output, Error> {
-    // ...
-}
-```
-
-### README Updates
-
-- Keep examples up to date
-- Update feature tables when adding features
-- Ensure compatibility tables are current
+- Public items need doc comments. Document behavior, `# Errors`, and `# Panics` where relevant, with an example for non-trivial APIs.
+- Keep README examples, feature tables, and compatibility tables current when you change the relevant behavior.
 
 ## Architecture Decision Records (ADRs)
 
-ARCHITECTURE.md contains architectural decisions that guide the project's design. When making significant architectural changes, you should document them as ADRs.
+[ARCHITECTURE.md](ARCHITECTURE.md) holds the architectural decisions that guide the project's design, in ADR form — it is the canonical home for both the ADR format and the full list of accepted ADRs.
 
 ### When to Create an ADR
 
@@ -653,57 +336,17 @@ Create a new ADR when:
 - Changing security boundaries or trust model
 - Selecting between multiple reasonable approaches
 
-### ADR Format
-
-ADRs follow this format in ARCHITECTURE.md:
-
-```markdown
-### ADR-NNN: Title
-
-**Status**: Proposed | Accepted | Deprecated | Superseded by ADR-XXX
-**Date**: YYYY-MM-DD
-
-**Context**: What is the issue we're addressing?
-
-**Decision**: What have we decided to do?
-
-**Consequences**: What are the trade-offs?
-
-**Alternatives Considered**: What else was considered?
-```
-
 ### ADR Process
 
-1. **Propose**: Open a PR with the new ADR in ARCHITECTURE.md
-2. **Discuss**: Get feedback from maintainers and community
-3. **Refine**: Update based on feedback
-4. **Accept**: Merge PR when approved
-5. **Implement**: Reference the ADR in relevant code changes
-
-### Existing ADRs
-
-| ADR | Topic |
-|-----|-------|
-| ADR-001 | Tokio as sole runtime |
-| ADR-002 | TDS 8.0 first-class support |
-| ADR-003 | Built-in connection pooling |
-| ADR-004 | Arc<Bytes> for row data |
-| ADR-005 | IO splitting for cancellation |
-| ADR-006 | Authentication strategy pattern |
-| ADR-007 | Type-state pattern for connections |
-| ADR-008 | OpenTelemetry version alignment |
-| ADR-009 | rustls for TLS |
-| ADR-010 | thiserror for error handling |
-| ADR-011 | Minimum version constraints |
-| ADR-012 | Retry policy design |
-| ADR-013 | Always Encrypted roadmap |
-
-See ARCHITECTURE.md for full details on each decision.
+1. **Propose**: open a PR adding the new ADR to ARCHITECTURE.md (follow the ADR format used there).
+2. **Discuss**: get feedback from maintainers.
+3. **Refine**: update based on feedback.
+4. **Accept**: merge when approved.
+5. **Implement**: reference the ADR in relevant code changes.
 
 ## Questions?
 
-- Open a GitHub Discussion for questions
-- Join the community chat (if available)
+- Open a [GitHub Discussion](https://github.com/praxiomlabs/rust-mssql-driver/discussions) for questions
 - Check existing issues and PRs
 
 Thank you for contributing!
