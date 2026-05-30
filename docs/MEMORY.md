@@ -11,7 +11,7 @@ rust-mssql-driver prioritizes:
 3. **Predictable allocation** - Avoid unbounded growth
 4. **Cache-friendly access** - Contiguous memory for row data
 
-## Row Data: Arc<Bytes> Pattern
+## Row Data: `Arc<Bytes>` Pattern
 
 ### How It Works
 
@@ -92,7 +92,7 @@ impl Row {
 
 SQL Server uses UTF-16LE for strings. Conversion happens on access:
 
-```rust
+```text
 // When you call row.get::<String>(0)?
 // 1. Slice UTF-16 bytes from Arc<Bytes> (no copy)
 // 2. Decode to Rust String (allocation)

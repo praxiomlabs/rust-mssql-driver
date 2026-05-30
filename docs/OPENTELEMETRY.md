@@ -142,23 +142,21 @@ Metrics instrumentation is available via the `DatabaseMetrics` struct when the `
 ```rust,no_run
 use mssql_client::instrumentation::DatabaseMetrics;
 
-fn main() {
-    // Create metrics collector (typically done once at pool creation)
-    let metrics = DatabaseMetrics::new(
-        Some("main-pool"),  // Pool name for labeling
-        "db.example.com",   // Server address
-        1433,               // Port
-    );
+// Create metrics collector (typically done once at pool creation)
+let metrics = DatabaseMetrics::new(
+    Some("main-pool"),  // Pool name for labeling
+    "db.example.com",   // Server address
+    1433,               // Port
+);
 
-    // Record pool status (called periodically or on change)
-    metrics.record_pool_status(5, 10, 20);  // in_use, idle, max
+// Record pool status (called periodically or on change)
+metrics.record_pool_status(5, 10, 20);  // in_use, idle, max
 
-    // Record operation timing
-    metrics.record_operation("SELECT", 0.025, true);  // operation, duration_secs, success
+// Record operation timing
+metrics.record_operation("SELECT", 0.025, true);  // operation, duration_secs, success
 
-    // Record connection wait time
-    metrics.record_connection_wait(0.003);  // seconds
-}
+// Record connection wait time
+metrics.record_connection_wait(0.003);  // seconds
 ```
 
 ## Performance Impact
