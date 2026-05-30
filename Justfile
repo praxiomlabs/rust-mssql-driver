@@ -1689,7 +1689,7 @@ release-status:
     # Last CI runs on main
     # -----------------------------------------------------------------
     printf '{{bold}}Latest workflow runs on main:{{reset}}\n'
-    for WORKFLOW in "CI" "Security Audit" "Benchmarks" "Token Health Check"; do
+    for WORKFLOW in "CI" "Security Audit" "Benchmarks"; do
         STATUS=$(gh run list --repo "$REPO" --branch main --workflow="$WORKFLOW" --limit 1 --json conclusion,headSha --jq '.[0] // {}' 2>/dev/null)
         if [ -z "$STATUS" ] || [ "$STATUS" = "{}" ]; then
             printf '  %-22s {{yellow}}no runs found{{reset}}\n' "$WORKFLOW:"

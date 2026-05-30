@@ -1109,18 +1109,13 @@ workflow against crates.io. If it expires, is revoked, or is rotated
 without the GitHub secret being updated, the next release attempt will
 fail at tier 0.
 
-### Weekly health check
-
-`.github/workflows/token-health.yml` runs every Monday at 09:15 UTC and
-also supports manual `workflow_dispatch`. It calls
-`https://crates.io/api/v1/me` with the token — a non-destructive
-authenticated GET that returns 200 if and only if the token can perform
-authenticated operations against crates.io.
-
-On failure, the workflow opens (or updates) a tracking issue labelled
-`security` with rotation instructions. The same issue title is reused
-on subsequent failures so the alert is visible without spamming new
-issues every week.
+There is no automated health check. The `token-health.yml` workflow that
+previously probed `https://crates.io/api/v1/me` weekly was removed: crates.io
+restricted that endpoint to website sessions, so it now returns HTTP 403 for
+API-token requests regardless of token validity, which made the check fail
+every week with a false alarm. crates.io no longer exposes a non-destructive
+endpoint that validates a token, so verify the token at release time instead
+(the release workflow will fail fast at tier 0 if it is bad).
 
 ### Manual rotation
 
@@ -1135,9 +1130,8 @@ issues every week.
 5. Copy the token value (shown only once).
 6. Visit https://github.com/praxiomlabs/rust-mssql-driver/settings/secrets/actions
 7. Update the existing `CARGO_REGISTRY_TOKEN` secret.
-8. Manually trigger the Token Health Check workflow
-   (Actions → Token Health Check → Run workflow) to confirm the new
-   token works.
+8. The token is exercised on the next release; there is no separate health
+   check to run (see above).
 9. If a release was in flight when the token failed, rerun the failed
    publish job: `gh run rerun <run-id> --failed`. This was the exact
    recovery path used during the v0.7.0 release.

@@ -217,8 +217,6 @@ cargo-deny run fails with `license-not-allowed`:
 - **Weekly**: Dependabot opens minor/patch bump PRs (Monday 09:00 UTC).
 - **Weekly**: Security Audit workflow runs (Monday 09:00 UTC), cross-checks
   `cargo audit` + `cargo deny` against RustSec database.
-- **Weekly**: Token Health Check runs (Monday 09:15 UTC) to verify the
-  crates.io token is still valid.
 - **Per release**: Run `cargo update` once before the release cycle so
   transitive bumps land on `dev` with time for CI to catch regressions.
   Don't run `cargo update` inside the release prep commit itself — do it

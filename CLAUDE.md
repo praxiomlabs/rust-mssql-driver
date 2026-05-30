@@ -238,7 +238,7 @@ This is an actively maintained project with documented processes for contributio
 
 These just recipes and xtask commands were added post-v0.7.0 specifically to make releases reliable:
 
-- `just release-status` — dashboard: dev↔main divergence, last tag, CI/Security/Benchmarks/Token Health status, open PRs (bot vs contributor), issue count, local working copy state
+- `just release-status` — dashboard: dev↔main divergence, last tag, CI/Security/Benchmarks status, open PRs (bot vs contributor), issue count, local working copy state
 - `just release-preflight` — sequential gate check: working copy clean, version refs, audit, deny, wip-check, metadata, URLs, tier-0 publish dry-run
 - `just release-check` — comprehensive release validation (includes `release-preflight` gates plus full CI + feature-flag check + panic audit + doc consistency + typos + machete)
 - `just doc-consistency` — runs `scripts/check-doc-consistency.sh` to verify MSRV references agree across all files, CHANGELOG matches workspace version, deny.toml and audit.toml ignore lists are in sync, and the STABILITY.md ↔ CONTRIBUTING.md MSRV policy contradiction can never be reintroduced
@@ -263,7 +263,6 @@ Never manually run `cargo publish` — use the automated workflow. Never cancel 
 - `.github/workflows/ci.yml` — runs on main, dev, PRs to main. Cross-platform matrix (Linux / macOS / Windows). Has `workflow_dispatch` for manual reruns.
 - `.github/workflows/benchmarks.yml` — runs on main, dev, PRs to main. Performance regression detection.
 - `.github/workflows/security-audit.yml` — weekly schedule + triggers on Cargo.toml/Cargo.lock/deny.toml/audit.toml changes on main or dev.
-- `.github/workflows/token-health.yml` — weekly schedule + manual dispatch. Verifies `CARGO_REGISTRY_TOKEN` secret is still valid. Opens an issue on failure.
 - `.github/workflows/release.yml` — triggered by `v*.*.*` tag push. Publishes all 8 crates to crates.io in tier order with exponential retry.
 
 All workflows use `concurrency: cancel-in-progress` for non-main branches to save CI cycles, while keeping main runs to completion for the full audit trail.
