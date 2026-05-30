@@ -269,13 +269,13 @@ All workflows use `concurrency: cancel-in-progress` for non-main branches to sav
 
 ## OpenTelemetry Dependencies
 
-All otel crates must be version-aligned at 0.31:
+The three core otel crates are version-aligned at 0.31. `tracing-opentelemetry` tracks 0.32, which depends on otel 0.31 (see the note in `Cargo.toml`):
 
 ```toml
 opentelemetry = "0.31"
 opentelemetry_sdk = "0.31"
 opentelemetry-otlp = "0.31"
-tracing-opentelemetry = "0.31"
+tracing-opentelemetry = "0.32"
 ```
 
 ## Testing Strategy
