@@ -15,11 +15,22 @@
 //! ## Scope
 //!
 //! The guides below contain complete, runnable usage examples and are
-//! compile-tested. Pure-reference docs that consist of short illustrative
-//! fragments (e.g. `CONNECTION_STRINGS.md` connection-string formats,
-//! `DEPENDENCY_POLICY.md`, `BENCHMARKS.md`, `COMPARISON.md`,
-//! `FEATURES.md`, `SQL_SERVER_COMPATIBILITY.md`, `FILESTREAM.md` Windows APIs)
-//! keep their Rust syntax highlighting but are intentionally not included here.
+//! compile-tested. Two further categories are deliberately *not* compile-tested
+//! here, so their examples are verified by hand and can still drift:
+//!
+//! - Reference docs that are only short illustrative fragments, with no
+//!   self-contained example to compile: `CONNECTION_STRINGS.md`,
+//!   `DEPENDENCY_POLICY.md`, `BENCHMARKS.md`, `COMPARISON.md`, `FEATURES.md`,
+//!   `SQL_SERVER_COMPATIBILITY.md`, and `FILESTREAM.md` (Windows APIs).
+//! - Docs whose examples cannot build as-is in this harness: `ARCHITECTURE.md`
+//!   (design-illustrative fragments such as bare `impl` blocks),
+//!   `MIGRATION_FROM_TIBERIUS.md` (interleaves tiberius code that does not
+//!   compile against this workspace), and `TROUBLESHOOTING.md`.
+//!
+//! Crate READMEs: only `mssql-client` and `mssql-driver-pool` include their
+//! README as a doctest (via `#![doc = include_str!("../README.md")]`). The
+//! `mssql-tls`, `mssql-types`, `mssql-derive`, `mssql-auth`, `mssql-codec`, and
+//! `tds-protocol` READMEs are not yet guarded.
 
 #![doc = include_str!("../../../README.md")]
 
