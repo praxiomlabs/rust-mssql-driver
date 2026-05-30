@@ -72,19 +72,17 @@ Not directly configurable via connection string. Use programmatic configuration.
 use mssql_client::{Config, RetryPolicy};
 use std::time::Duration;
 
-fn main() {
-    // Custom retry policy
-    let retry = RetryPolicy::new()
-        .max_retries(5)
-        .initial_backoff(Duration::from_millis(200))
-        .max_backoff(Duration::from_secs(60))
-        .backoff_multiplier(2.5)
-        .jitter(true);
+// Custom retry policy
+let retry = RetryPolicy::new()
+    .max_retries(5)
+    .initial_backoff(Duration::from_millis(200))
+    .max_backoff(Duration::from_secs(60))
+    .backoff_multiplier(2.5)
+    .jitter(true);
 
-    let _config = Config::new()
-        .host("server")
-        .retry(retry);
-}
+let _config = Config::new()
+    .host("server")
+    .retry(retry);
 ```
 
 ### Disable Retries
@@ -92,11 +90,9 @@ fn main() {
 ```rust,no_run
 use mssql_client::{Config, RetryPolicy};
 
-fn main() {
-    let _config = Config::new()
-        .host("server")
-        .retry(RetryPolicy::no_retry());
-}
+let _config = Config::new()
+    .host("server")
+    .retry(RetryPolicy::no_retry());
 ```
 
 ### Per-Operation Retry
@@ -104,11 +100,9 @@ fn main() {
 ```rust,no_run
 use mssql_client::Config;
 
-fn main() {
-    let _config = Config::new()
-        .host("server")
-        .max_retries(5);  // Shorthand for default policy with different max
-}
+let _config = Config::new()
+    .host("server")
+    .max_retries(5);  // Shorthand for default policy with different max
 ```
 
 ## Azure SQL Recommendations
@@ -119,14 +113,12 @@ Azure SQL has specific transient error patterns. Recommended settings:
 use mssql_client::RetryPolicy;
 use std::time::Duration;
 
-fn main() {
-    let _azure_retry = RetryPolicy::new()
-        .max_retries(5)                           // More retries for cloud
-        .initial_backoff(Duration::from_millis(100))
-        .max_backoff(Duration::from_secs(60))     // Allow longer waits
-        .backoff_multiplier(2.0)
-        .jitter(true);                            // Essential for cloud
-}
+let _azure_retry = RetryPolicy::new()
+    .max_retries(5)                           // More retries for cloud
+    .initial_backoff(Duration::from_millis(100))
+    .max_backoff(Duration::from_secs(60))     // Allow longer waits
+    .backoff_multiplier(2.0)
+    .jitter(true);                            // Essential for cloud
 ```
 
 ### Azure-Specific Error Codes
@@ -149,14 +141,12 @@ For on-premises SQL Server with stable network:
 use mssql_client::RetryPolicy;
 use std::time::Duration;
 
-fn main() {
-    let _onprem_retry = RetryPolicy::new()
-        .max_retries(3)                           // Fewer retries
-        .initial_backoff(Duration::from_millis(50))
-        .max_backoff(Duration::from_secs(10))
-        .backoff_multiplier(2.0)
-        .jitter(false);                           // Less critical on-prem
-}
+let _onprem_retry = RetryPolicy::new()
+    .max_retries(3)                           // Fewer retries
+    .initial_backoff(Duration::from_millis(50))
+    .max_backoff(Duration::from_secs(10))
+    .backoff_multiplier(2.0)
+    .jitter(false);                           // Less critical on-prem
 ```
 
 ## Retry Flow
