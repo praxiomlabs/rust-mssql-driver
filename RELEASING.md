@@ -334,7 +334,7 @@ All workspace crates inherit `workspace.package.version` — no individual crate
 | `RELEASING.md` | Header `**Version:** X.Y.Z` |
 | `ARCHITECTURE.md` | Header `**Status:** … (vX.Y.Z Released)`; example `Cargo.toml` version snippets |
 | `README.md` | Feature Status header `(vX.Y.x)` |
-| `SECURITY.md` | § Supported Versions table; § Audit History |
+| `STABILITY.md` | § Security Support (the supported-versions rule; no per-release edit needed) |
 | `docs/BENCHMARKS.md` | `--save-baseline vX.Y.Z` / `--baseline vX.Y.Z` |
 
 **Historical** (do NOT update — that would rewrite history): CHANGELOG prior

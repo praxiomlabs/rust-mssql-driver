@@ -19,7 +19,7 @@ Thank you for your interest in contributing! This document provides guidelines a
 
 ## Code of Conduct
 
-This project follows the [Rust Code of Conduct](https://www.rust-lang.org/policies/code-of-conduct), reproduced in full in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Please be respectful and constructive in all interactions.
+This project follows the [Rust Code of Conduct](https://www.rust-lang.org/policies/code-of-conduct), adopted in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Please be respectful and constructive in all interactions.
 
 Report code-of-conduct violations privately via the [GitHub Security Advisory](https://github.com/praxiomlabs/rust-mssql-driver/security/advisories/new) channel or by contacting the maintainers listed in [MAINTAINERS.md](MAINTAINERS.md).
 

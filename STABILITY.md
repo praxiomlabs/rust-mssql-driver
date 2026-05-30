@@ -26,6 +26,12 @@ After 1.0.0 is released:
 - Deprecated APIs will remain functional for at least one minor release
 - Security fixes may be backported to supported versions
 
+### Security Support
+
+The latest released minor version receives security fixes. Pre-1.0, older minor
+versions are end-of-life and do not receive backports — upgrade to the latest
+minor to stay covered.
+
 ## Stable API Surface
 
 The following APIs are considered stable and covered by semver guarantees:

@@ -32,30 +32,16 @@ for any code-of-conduct violations, or email the maintainers listed in
 - Likewise any spamming, trolling, flaming, baiting or other attention-stealing
   behavior is not welcome.
 
-## Moderation
+## Enforcement
 
-These are the policies for upholding our community's standards of conduct.
+Violations may be reported privately to the maintainer via the
+[Security Advisory](https://github.com/praxiomlabs/rust-mssql-driver/security/advisories/new)
+channel. The maintainer will review the
+report and respond as warranted — typically a private warning, and for repeated
+or serious violations, removal from project spaces (blocking, comment/PR removal,
+or a GitHub interaction ban). Reports are handled confidentially.
 
-1. Remarks that violate the standards of conduct, including hateful, hurtful,
-   oppressive, or exclusionary remarks, are not allowed. (Cursing is allowed,
-   but never targeting another user, and never in a hateful manner.)
-2. Remarks that moderators find inappropriate, whether listed in the code of
-   conduct or not, are also not allowed.
-3. Moderators will first respond to such remarks with a warning.
-4. If the warning is unheeded, the user will be "kicked," i.e., kicked out of
-   the communication channel to cool off.
-5. If the user comes back and continues to make trouble, they will be banned,
-   i.e., indefinitely excluded.
-6. Moderators may choose at their discretion to un-ban the user if it was a
-   first offense and they offer the offended party a genuine apology.
-7. If a moderator bans someone and you think it was unjustified, please take
-   it up with that moderator, or with a different moderator, **in private**.
-   Complaints about bans in-channel are not allowed.
-8. Moderators are held to a higher standard than other community members. If
-   a moderator creates an inappropriate situation, they should expect less
-   leeway than others.
-
-In the rust-mssql-driver community we strive to go the extra step to look out
+We strive to go the extra step to look out
 for each other. Don't just aim to be technically unimpeachable — try to be
 your best self. In particular, avoid flirting with offensive or sensitive
 issues, particularly if they're off-topic; this all too often leads to hurt
@@ -69,9 +55,9 @@ we are all here first and foremost because we want to build good software.
 You will find that people will be eager to assume good intent and forgive as
 long as you earn their trust.
 
-The enforcement policies listed above apply to all official rust-mssql-driver
-venues, including GitHub repositories under [praxiomlabs](https://github.com/praxiomlabs)
-and any associated discussion forums.
+This Code of Conduct applies in all official rust-mssql-driver venues, including
+GitHub repositories under [praxiomlabs](https://github.com/praxiomlabs) and any
+associated discussion forums.
 
 *Adapted from the [Rust Code of Conduct](https://www.rust-lang.org/policies/code-of-conduct),
 which is itself adapted from the [Node.js Policy on Trolling](https://web.archive.org/web/20160911064355/http://blog.izs.me/post/30036893703/policy-on-trolling)

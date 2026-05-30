@@ -34,10 +34,8 @@ Maintainers are responsible for:
    policy during the 0.7.0 release), resolve it promptly rather than leaving
    contradictory guidance in place.
 
-5. **Continuity** — When a maintainer knows they'll be away for an extended
-   period, note it here or in a pinned issue so contributors know what to
-   expect. When a maintainer is no longer active, move them to the
-   **Emeritus Maintainers** section below.
+5. **Continuity** — When a maintainer will be away for an extended period, note
+   it in a pinned issue so contributors know what to expect.
 
 ## Contact
 
@@ -52,41 +50,14 @@ Maintainers are responsible for:
 - **Code of conduct violations:** Contact the maintainers privately via the
   same Security Advisory channel. See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
-## Becoming a Maintainer
-
-We welcome additional maintainers, especially contributors who have
-demonstrated:
-
-- **Sustained, high-quality contributions** — multiple merged PRs over at
-  least a few months covering meaningful work (not just trivial fixes).
-- **Deep knowledge in a specific area** — e.g., TDS protocol internals, TLS,
-  the connection pool, or authentication strategies. A maintainer doesn't
-  need to know everything; CODEOWNERS lets us scope ownership to specific
-  crates.
-- **Good reviewing judgment** — substantive, kind, actionable feedback on
-  other people's PRs.
-- **Alignment with project values** — the quality-over-speed and
-  correctness-first philosophies described in
-  [CONTRIBUTING.md](CONTRIBUTING.md).
-
-If you think you'd be a good fit, open a Discussion (or email the current
-maintainers via the Security Advisory channel) describing your interest and
-the area you'd like to take ownership of. We'll work with you on a
-trial period, then formalize the role with an update to this file and to
-`.github/CODEOWNERS`.
-
 ## Decision Making
 
-Today, decisions are made by the primary maintainer with input from the
-community via issues and PRs. As the project grows, we'll move to a more
-formal governance model — likely a simple "lazy consensus" approach where
-significant decisions are proposed via issues and go through if nobody
-objects within a reasonable window (e.g., one week).
-
-Architectural decisions should be captured as ADRs in
-[ARCHITECTURE.md](ARCHITECTURE.md) following the process described in
+Decisions are made by the primary maintainer with input from the community via
+issues and PRs. Architectural decisions are captured as ADRs in
+[ARCHITECTURE.md](ARCHITECTURE.md) following the process in
 [CONTRIBUTING.md § Architecture Decision Records](CONTRIBUTING.md#architecture-decision-records-adrs).
 
-## Emeritus Maintainers
-
-*None yet.*
+Interested in helping maintain the project? Open a
+[Discussion](https://github.com/praxiomlabs/rust-mssql-driver/discussions) —
+sustained, high-quality contributions in an area (TDS protocol, TLS, the pool,
+auth) are the path in.
