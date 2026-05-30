@@ -257,14 +257,18 @@ impl KeyStoreProvider for AzureKeyVaultProvider {
         let client = self.create_client(&vault_url)?;
 
         // Build sign parameters - use RS256 (RSA-SHA256) by default
-        use azure_security_keyvault_keys::models::{SignParameters, SignatureAlgorithm};
+        use azure_security_keyvault_keys::models::{
+            KeyClientSignOptions, SignParameters, SignatureAlgorithm,
+        };
 
         let parameters = SignParameters {
             algorithm: Some(SignatureAlgorithm::Rs256),
             value: Some(data.to_vec()),
         };
 
-        // key_version is required by the Azure SDK 0.13+ API
+        // key_version is required for this operation. As of azure_security_keyvault_keys
+        // 1.0, sign() takes the key version via options.key_version rather than as a
+        // positional argument (verify()/unwrap_key() still take it positionally).
         let version = key_version.ok_or_else(|| {
             EncryptionError::CmkError("CMK path must include key version for sign operation".into())
         })?;
@@ -273,9 +277,14 @@ impl KeyStoreProvider for AzureKeyVaultProvider {
             .try_into()
             .map_err(|e| EncryptionError::CmkError(format!("Failed to create request: {e}")))?;
 
+        let sign_options = KeyClientSignOptions {
+            key_version: Some(version),
+            ..Default::default()
+        };
+
         // Call Key Vault sign operation
         let result = client
-            .sign(&key_name, &version, request_content, None)
+            .sign(&key_name, request_content, Some(sign_options))
             .await
             .map_err(|e| EncryptionError::CmkError(format!("Key Vault sign failed: {e}")))?
             .into_model()
