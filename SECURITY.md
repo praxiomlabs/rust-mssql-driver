@@ -21,9 +21,8 @@ We take security vulnerabilities seriously. If you discover a security issue, pl
 
 **DO NOT** open a public GitHub issue for security vulnerabilities.
 
-Instead, please report security issues by emailing:
-
-**security@rust-mssql-driver.dev** (or open a private security advisory on GitHub)
+Instead, please report security issues privately via
+[GitHub Security Advisories](https://github.com/praxiomlabs/rust-mssql-driver/security/advisories/new).
 
 ### What to Include
 
