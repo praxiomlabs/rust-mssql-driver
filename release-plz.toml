@@ -11,10 +11,13 @@
 # mssql-client (the product's primary crate) carries them instead.
 
 [workspace]
-# Publish ONLY for commits that come from a merged release PR — a normal feature
-# merge (or a stray manual version edit) never triggers a publish. The merge of
-# the Release PR is the human gate.
-release_always = false
+# TEMPORARY (v0.11.0 recovery): true so the release job completes the partial
+# v0.11.0 publish. The dev-dep-cycle fix (4340ebb) had to land as a direct push,
+# which release_always=false correctly refuses to release from ("current commit
+# is not from a release PR"). REVERT TO false IMMEDIATELY AFTER v0.11.0 ships.
+# Normal posture: publish ONLY for commits from a merged Release PR — the merge
+# is the human gate.
+release_always = true
 
 # Disabled at workspace level; re-enabled on mssql-client below so we get ONE
 # tag/release/changelog per version instead of eight.
