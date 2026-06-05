@@ -241,6 +241,28 @@ jobs:
 
           echo "Feature-specific tests passed!"
 
+  # Verifies every publishable crate can be packaged with its published-manifest
+  # dependency requirements resolvable — the exact check that would have caught
+  # the v0.11.0 mid-publish failure (a versioned dev-dependency cycle) before
+  # the merge button existed. Runs cargo's own publish-time validation without
+  # uploading anything.
+  publish-dry-run:
+    name: Publish Dry-Run (packaging)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/setup-linux-deps
+      - name: Dry-run package all publishable crates
+        run: |
+          set -euo pipefail
+          for crate in tds-protocol mssql-types mssql-tls mssql-codec mssql-auth mssql-derive mssql-client mssql-driver-pool; do
+            echo "::group::$crate"
+            cargo publish -p "$crate" --dry-run --no-verify
+            echo "::endgroup::"
+          done
+
   hygiene:
     name: Hygiene (typos, unused deps)
     runs-on: ubuntu-latest

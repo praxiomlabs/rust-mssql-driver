@@ -32,7 +32,10 @@ mssql-client = { version = "0.11.0", path = "crates/mssql-client" }
 # release: a versioned dev-dep made packaging mssql-client require
 # mssql-derive@0.11.0 to already exist on crates.io.
 mssql-derive = { path = "crates/mssql-derive" }
-mssql-testing = { version = "0.10.0", path = "crates/mssql-testing" }
+# Path-only for the same reason as mssql-derive: never published
+# (publish = false), so a version field can only drift (it was stuck at 0.10.0
+# while the crate itself moved with the workspace).
+mssql-testing = { path = "crates/mssql-testing" }
 
 # Async runtime
 tokio = { version = "1.48", features = ["net", "io-util", "sync", "time", "macros", "rt", "rt-multi-thread"] }

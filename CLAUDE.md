@@ -298,7 +298,7 @@ Primary references (in the repository):
 
 - `ARCHITECTURE.md` — Complete architecture specification (includes ADRs and MSRV policy §6.6)
 - `STABILITY.md` — API stability guarantees and the authoritative MSRV Increase Policy
-- `RELEASING.md` — Release process, Cardinal Rules, Lessons Learned (including v0.5.1 and v0.7.0 incidents), Token Health
+- `RELEASING.md` — how the release-plz pipeline works, rules that survive automation, recovery procedures (incl. the v0.11.0 partial-publish recovery), post-release verification
 - `SECURITY.md` — Security policy and threat model
 - `CONTRIBUTING.md` — Contribution guide, commit format, review process
 - `MAINTAINERS.md` — Maintainer list and contact channels

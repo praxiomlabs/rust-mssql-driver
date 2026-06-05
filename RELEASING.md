@@ -6,7 +6,7 @@ Releases are automated by [release-plz](https://release-plz.dev) in its
 constrained Release-PR form. The history of the manual process this replaced —
 including the tier-ordered publish workflow and the incident write-ups that
 motivated the automation — is preserved in git history (`git log -- RELEASING.md`
-and `git show 9e75f21^:.github/workflows/release.yml`).
+and `git show 91074b6^:.github/workflows/release.yml`).
 
 ## How a release happens
 
@@ -16,10 +16,15 @@ and `git show 9e75f21^:.github/workflows/release.yml`).
 2. release-plz keeps a **Release PR** open/updated with the version bump,
    `CHANGELOG.md` entry, and `Cargo.lock` change. Nothing publishes while it sits.
 3. Review the Release PR: the proposed version, the changelog, and the required
-   CI checks (which run on it like any PR).
-4. **Merging the Release PR is the release.** release-plz then publishes all
-   8 crates to crates.io in dependency order, creates the `vX.Y.Z` tag, and
-   creates the GitHub Release.
+   CI checks (which run on it like any PR). Also check
+   `git log <last-tag>..main -- Cargo.toml` for workspace-level dependency
+   bumps — release-plz attributes commits to packages by file path, so a bump
+   that only touches the root manifest is invisible to the generated changelog
+   (this bit v0.11.0: the lru 0.16→0.17 requirement change was added by hand).
+4. **Merging the Release PR is the release.** release-plz publishes the
+   8 crates to crates.io in dependency order, and — only after every crate is
+   up — creates the `vX.Y.Z` tag and the GitHub Release. (Publish first, tag
+   last: a failed publish leaves no tag pointing at a half-released state.)
 
 There is no manual `cargo publish`, no manual tag, no manual CHANGELOG edit.
 
@@ -37,6 +42,14 @@ There is no manual `cargo publish`, no manual tag, no manual CHANGELOG edit.
 
 - **Publish job failed partway:** re-run the job (idempotent, resumes where it
   stopped). Verify afterward that all 8 crates show the new version on crates.io.
+- **The recovery fix has to land as a direct push:** `release_always = false`
+  refuses to publish from it ("current commit is not from a release PR").
+  Temporarily set `release_always = true` in release-plz.toml, push, let the
+  release job complete the partial publish, then revert in the next commit.
+  This exact sequence recovered v0.11.0 (a dev-dependency cycle the old
+  tier-ordered workflow had masked broke packaging for mssql-client; fixed
+  permanently with a path-only mssql-derive workspace entry, guarded forward
+  by the `Publish Dry-Run (packaging)` CI check).
 - **A broken version shipped:** yank it and release a fix —
   `cargo yank --version X.Y.Z <crate>` for each affected crate, then land the
   fix and merge the next Release PR. Document the yank in the CHANGELOG entry.
