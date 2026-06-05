@@ -188,8 +188,8 @@ Async read/write of SQL Server FILESTREAM data via `OpenSqlFilestream` from the 
 ### Required Tools
 
 - Rust 1.88+ (2024 Edition) — pinned via `rust-toolchain.toml`
-- `just` — task runner used for all development workflows (`just ci-all`, `just release-status`, etc.)
-- `gh` CLI — required for `just release-status` and `just tag` (workflow status checks)
+- `just` — task runner used for all development workflows (`just ci-all`, `just doc-consistency`, etc.)
+- `gh` CLI — useful for inspecting workflow runs and PRs
 - `cargo-deny` — dependency auditing
 - `cargo-hack` — feature flag matrix validation
 - `cargo-nextest` — fast test runner (CI uses this)
@@ -229,41 +229,29 @@ This is an actively maintained project with documented processes for contributio
 
 ### Release and policy documents
 
-- [`RELEASING.md`](RELEASING.md) — the Cardinal Rules, the tier-based publish order, the Lessons Learned section (including the v0.5.1 and v0.7.0 incidents), the Token Health section, and the comprehensive version/MSRV reference checklist (§ Version Consistency)
+- [`RELEASING.md`](RELEASING.md) — how the release-plz pipeline works, the rules that survive automation (irreversibility, never cancel mid-publish), recovery procedures, and post-release verification
 - [`STABILITY.md`](STABILITY.md) — API stability guarantees, MSRV Increase Policy (**authoritative: MSRV bumps are NOT breaking changes**), supported versions
 - [`SECURITY.md`](SECURITY.md) — security policy, threat model, supported versions for security fixes
 - [`docs/DEPENDENCY_POLICY.md`](docs/DEPENDENCY_POLICY.md) — when and how to take dep bumps, handle advisories, bump MSRV
 
-### Release observability tooling
+### How releases work (release-plz)
 
-These just recipes and xtask commands were added post-v0.7.0 specifically to make releases reliable:
+Releases are fully automated by [release-plz](https://release-plz.dev) (`release-plz.toml` + `.github/workflows/release-plz.yml`):
 
-- `just release-status` — dashboard: dev↔main divergence, last tag, CI/Security/Benchmarks status, open PRs (bot vs contributor), issue count, local working copy state
-- `just release-preflight` — sequential gate check: working copy clean, version refs, audit, deny, wip-check, metadata, URLs, tier-0 publish dry-run
-- `just release-check` — comprehensive release validation (includes `release-preflight` gates plus full CI + feature-flag check + panic audit + doc consistency + typos + machete)
-- `just doc-consistency` — runs `scripts/check-doc-consistency.sh` to verify MSRV references agree across all files, CHANGELOG matches workspace version, deny.toml and audit.toml ignore lists are in sync, and the STABILITY.md ↔ CONTRIBUTING.md MSRV policy contradiction can never be reintroduced
-- `just ci-status-all` — verify CI + Security Audit + Benchmarks all passed on main HEAD (required before tagging per Cardinal Rule #2)
-- `just tag` — create an annotated release tag (reverifies workflows green)
-- `cargo xtask release-notes [--since <tag>]` — generate a CHANGELOG draft from conventional commits since the last tag, grouped by type with breaking-change detection
+1. Conventional commits merge to the trunk; release-plz keeps a **Release PR** open with the version bump and CHANGELOG entry (versions derived from commit types + `cargo-semver-checks`; pre-1.0, breaking → minor).
+2. **Merging the Release PR is the release** — release-plz publishes all 8 crates in dependency order, creates the `vX.Y.Z` tag, and creates the GitHub Release. Nothing publishes before that merge (`release_always = false`).
+3. The publish job is idempotent — if it fails partway, re-run it; it skips already-published crates.
 
-When preparing a release, the canonical path is:
+Rules for agents: **never run `cargo publish`, never create version tags, never hand-edit the workspace version** — those all belong to release-plz. Never cancel the publish job mid-run. Merging a Release PR requires explicit human approval. See RELEASING.md for recovery procedures.
 
-```bash
-just release-status            # what's the state of the world?
-just release-check             # do all the gates pass?
-just ci-status-all             # are all workflows green on main HEAD?
-just tag                       # create the tag (revalidates workflows)
-git push origin vX.Y.Z         # trigger release.yml (publishes to crates.io)
-```
-
-Never manually run `cargo publish` — use the automated workflow. Never cancel the release workflow mid-publish. See RELEASING.md for the full Cardinal Rules.
+`just doc-consistency` (also a CI gate) verifies MSRV references agree across files, CHANGELOG matches the workspace version, and deny.toml/audit.toml ignore lists stay in sync.
 
 ### CI/CD workflows
 
-- `.github/workflows/ci.yml` — runs on main, dev, PRs to main. Cross-platform matrix (Linux / macOS / Windows). Has `workflow_dispatch` for manual reruns.
+- `.github/workflows/ci.yml` — runs on main, dev, PRs to main. Cross-platform matrix (Linux / macOS / Windows) plus hygiene (typos, unused deps), ADR-011 (no mod.rs), doc-consistency, and AI-branding gates. Has `workflow_dispatch` for manual reruns.
 - `.github/workflows/benchmarks.yml` — runs on main, dev, PRs to main. Performance regression detection.
-- `.github/workflows/security-audit.yml` — weekly schedule + triggers on Cargo.toml/Cargo.lock/deny.toml/audit.toml changes on main or dev.
-- `.github/workflows/release.yml` — triggered by `v*.*.*` tag push. Publishes all 8 crates to crates.io in tier order with exponential retry.
+- `.github/workflows/security-audit.yml` — weekly schedule + dep-file changes on main/dev pushes and PRs to main.
+- `.github/workflows/release-plz.yml` — runs on push to main. Maintains the Release PR and performs the publish when one merges (see above).
 
 All workflows use `concurrency: cancel-in-progress` for non-main branches to save CI cycles, while keeping main runs to completion for the full audit trail.
 
@@ -334,11 +322,11 @@ When making changes here, remember:
 
 2. **Prefer fixing over ignoring** security advisories. Bumping MSRV for a security fix is explicitly permitted. See the v0.7.0 precedent documented in `docs/DEPENDENCY_POLICY.md`.
 
-3. **Use the release recipes.** Don't manually run `cargo publish`, don't manually construct CHANGELOG entries from scratch, don't manually check each file for version drift. `just release-notes`, `just release-status`, `just release-preflight`, and `scripts/check-doc-consistency.sh` exist to prevent exactly the kinds of mistakes that caused past incidents.
+3. **Releases belong to release-plz.** Never run `cargo publish`, never create version tags, never hand-edit the workspace version or hand-write CHANGELOG release entries — the Release PR does all of that, and merging it (a human decision) is the release. `scripts/check-doc-consistency.sh` (a CI gate) catches version/MSRV drift.
 
-4. **Respect the Cardinal Rules** documented in RELEASING.md. They exist because of specific past incidents. Don't work around them — if you find them inconvenient, propose a process change via an issue.
+4. **Respect the release rules** documented in RELEASING.md (irreversibility, never cancel a publish mid-run, recovery is re-run). They exist because of specific past incidents. Don't work around them — if you find them inconvenient, propose a process change via an issue.
 
-5. **`dev` branch has CI.** Since post-v0.7.0, both `ci.yml` and `benchmarks.yml` trigger on pushes to `dev`. Cross-platform issues will surface there, not just at release PR time. Push to dev confidently — CI will tell you if something broke.
+5. **Trunk-based development.** Work happens on short-lived feature branches merged into `main` via PRs (no squash-merging — history stays linked). CI runs on every push and PR; cross-platform issues surface immediately, not at release time.
 
 6. **Update CLAUDE.md when you add new infrastructure.** This document is the entry point for future AI assistants working on the repo. Adding a new tool, workflow, or policy without updating CLAUDE.md leaves future sessions flying blind. The Process and Governance section above should reference all the discoverable infrastructure.
 

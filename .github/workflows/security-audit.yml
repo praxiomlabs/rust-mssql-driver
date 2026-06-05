@@ -18,6 +18,15 @@ on:
       - '**/Cargo.lock'
       - 'deny.toml'
       - '.cargo/audit.toml'
+  # And on PRs that touch dependencies, so the audit gates dependency changes
+  # (including the release-plz Release PR) before merge rather than after.
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'deny.toml'
+      - '.cargo/audit.toml'
 
 jobs:
   audit:

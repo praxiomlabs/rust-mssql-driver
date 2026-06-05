@@ -11,8 +11,8 @@
 #   ./scripts/check-doc-consistency.sh              # check, exit non-zero on mismatch
 #   ./scripts/check-doc-consistency.sh --verbose    # show all checks, not just failures
 #
-# Integrated into `just release-preflight` (conditional on the script being
-# present and executable) and can be wired into a git pre-commit hook.
+# Runs as a CI gate (the doc-consistency job in ci.yml) and locally via
+# `just doc-consistency`.
 
 set -euo pipefail
 

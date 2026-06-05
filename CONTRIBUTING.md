@@ -163,14 +163,13 @@ The project includes custom build commands via `cargo xtask`:
 |---------|---------|
 | `cargo xtask ci` | Run format, lint, test, and deny checks |
 | `cargo xtask ci-local` | Full CI pipeline locally (mirrors GitHub Actions) |
-| `cargo xtask release <version>` | Bump version across all crates + update CHANGELOG |
-| `cargo xtask release-notes` | Generate a CHANGELOG draft from conventional commits since last tag |
+| `cargo xtask release <version>` | Bump version across all crates + update CHANGELOG (emergency manual path; releases are normally automated) |
 | `cargo xtask check-features` | Validate all feature flag combinations compile (uses cargo-hack) |
 | `cargo xtask fuzz` | Run fuzz tests on protocol parser |
 | `cargo xtask coverage` | Generate code coverage report |
 | `cargo xtask semver` | Check for semver-breaking API changes |
 
-Maintainers preparing a release should follow [RELEASING.md](RELEASING.md), which documents the release-validation recipes (`just release-status`, `release-preflight`, `release-check`, `doc-consistency`, `tag`) and the Cardinal Rules that govern them.
+Releases are automated by release-plz — see [RELEASING.md](RELEASING.md). Your commit messages drive version bumps and the CHANGELOG, which is why the [conventional commit format](#commit-messages) matters.
 
 ## Making Changes
 

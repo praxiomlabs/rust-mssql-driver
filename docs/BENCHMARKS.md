@@ -24,11 +24,11 @@ cargo bench --package mssql-client
 cargo bench --package mssql-types
 cargo bench --package tds-protocol
 
-# Save baseline for comparison
-cargo bench --workspace -- --save-baseline v0.8.0
+# Save baseline for comparison (name it after the current version)
+cargo bench --workspace -- --save-baseline before-change
 
 # Compare against baseline
-cargo bench --workspace -- --baseline v0.8.0
+cargo bench --workspace -- --baseline before-change
 
 # Generate HTML reports
 cargo bench

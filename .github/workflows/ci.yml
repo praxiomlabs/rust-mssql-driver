@@ -241,6 +241,20 @@ jobs:
 
           echo "Feature-specific tests passed!"
 
+  hygiene:
+    name: Hygiene (typos, unused deps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install typos and cargo-machete
+        uses: taiki-e/install-action@v2
+        with:
+          tool: typos-cli,cargo-machete
+      - name: Spell check
+        run: typos
+      - name: Unused dependency check
+        run: cargo machete
+
   adr-011-mod-rs:
     name: ADR-011 (no mod.rs)
     runs-on: ubuntu-latest
