@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- *(deps)* bump lru 0.16 -> 0.17 (changes mssql-client's published requirement)
 - *(ci)* repair release-plz action ref, formatting, and typos findings
 
 ### Other
