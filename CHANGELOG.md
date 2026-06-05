@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.10.0...v0.11.0) - 2026-06-05
+
+### Added
+
+- *(deps)* [**breaking**] migrate Azure SDK to 1.0 (GA)
+
+### Fixed
+
+- *(ci)* repair release-plz action ref, formatting, and typos findings
+
+### Other
+
+- *(client)* adopt file-alongside modules per ADR-011
+- soften unbacked superlatives
+- reduce AI-generated surface markers (emoji, framing)
+- *(docs)* compile-test crate-README examples in CI
+- disclose AI-assisted development and add contribution policy
+- *(mssql-auth)* make CEK cache cleanup test deterministic
+- fix non-compiling connection-pool examples across the docs
+- *(pool)* fix Pool builder doctest using nonexistent method
+
 ## [0.10.0] - 2026-04-17
 
 > **v0.9.0 was yanked from crates.io.** v0.9.0 contained two critical bugs
