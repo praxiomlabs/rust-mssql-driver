@@ -248,9 +248,9 @@ Rules for agents: **never run `cargo publish`, never create version tags, never 
 
 ### CI/CD workflows
 
-- `.github/workflows/ci.yml` — runs on main, dev, PRs to main. Cross-platform matrix (Linux / macOS / Windows) plus hygiene (typos, unused deps), ADR-011 (no mod.rs), doc-consistency, and AI-branding gates. Has `workflow_dispatch` for manual reruns.
-- `.github/workflows/benchmarks.yml` — runs on main, dev, PRs to main. Performance regression detection.
-- `.github/workflows/security-audit.yml` — weekly schedule + dep-file changes on main/dev pushes and PRs to main.
+- `.github/workflows/ci.yml` — runs on pushes to main and PRs to main. Cross-platform matrix (Linux / macOS / Windows) plus hygiene (typos, unused deps), ADR-011 (no mod.rs), doc-consistency, and AI-branding gates. Has `workflow_dispatch` for manual reruns.
+- `.github/workflows/benchmarks.yml` — runs on pushes/PRs to main. Performance regression detection.
+- `.github/workflows/security-audit.yml` — weekly schedule + dep-file changes on pushes/PRs to main.
 - `.github/workflows/release-plz.yml` — runs on push to main. Maintains the Release PR and performs the publish when one merges (see above).
 
 All workflows use `concurrency: cancel-in-progress` for non-main branches to save CI cycles, while keeping main runs to completion for the full audit trail.

@@ -9,10 +9,9 @@ on:
     - cron: '0 9 * * 1'
   # Allow manual trigger
   workflow_dispatch:
-  # Also run on changes to dependencies (on main AND dev, so we catch
-  # supply-chain changes before they reach a release PR)
+  # Also run on dependency changes that land on the trunk
   push:
-    branches: [main, dev]
+    branches: [main]
     paths:
       - '**/Cargo.toml'
       - '**/Cargo.lock'

@@ -5,14 +5,14 @@ name: Benchmarks
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
 
-# Cancel in-progress runs for non-main branches when a new commit arrives.
-# Benchmarks take ~13 minutes; cancelling stale runs saves significant CI time
-# without losing signal (baselines are only stored from main anyway).
+# Cancel in-progress runs for non-main refs (PR branches) when a new commit
+# arrives. Benchmarks take ~13 minutes; cancelling stale runs saves significant
+# CI time without losing signal (baselines are only stored from main anyway).
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
