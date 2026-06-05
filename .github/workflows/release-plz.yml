@@ -60,7 +60,7 @@ jobs:
       - name: Install Kerberos headers
         run: sudo apt-get update && sudo apt-get install -y libkrb5-dev
       - name: Run release-plz
-        uses: release-plz/[email protected]
+        uses: release-plz/action@v0.5.129
         with:
           command: release
         env:
@@ -91,7 +91,7 @@ jobs:
       - name: Install Kerberos headers
         run: sudo apt-get update && sudo apt-get install -y libkrb5-dev
       - name: Run release-plz
-        uses: release-plz/[email protected]
+        uses: release-plz/action@v0.5.129
         with:
           command: release-pr
         env:

@@ -744,7 +744,7 @@ impl Client<Ready> {
     /// # Example
     ///
     /// ```rust,ignore
-    /// // Execute a batch with multiple SELECTs
+    /// // Execute a batch with multiple SELECT statements
     /// let mut results = client.query_multiple(
     ///     "SELECT 1 AS a; SELECT 2 AS b, 3 AS c;",
     ///     &[]

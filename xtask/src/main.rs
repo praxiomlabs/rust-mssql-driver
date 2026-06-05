@@ -1099,4 +1099,3 @@ fn validate_version_consistency(cargo_toml: &str, expected: &str) -> Result<()> 
 
     Ok(())
 }
-

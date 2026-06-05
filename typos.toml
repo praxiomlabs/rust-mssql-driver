@@ -15,8 +15,9 @@ ND = "ND"
 # AKS = Azure Kubernetes Service
 AKS = "AKS"
 
-# SELEKT is intentionally misspelled in tests to trigger SQL syntax errors
+# SELEKT/SELEC are intentionally misspelled in tests to trigger SQL syntax errors
 SELEKT = "SELEKT"
+SELEC = "SELEC"
 
 # ths as suffix for fractional time representation (300ths of a second)
 ths = "ths"
