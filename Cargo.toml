@@ -26,7 +26,12 @@ mssql-types = { version = "0.11.0", path = "crates/mssql-types" }
 mssql-auth = { version = "0.11.0", path = "crates/mssql-auth" }
 mssql-driver-pool = { version = "0.11.0", path = "crates/mssql-pool" }
 mssql-client = { version = "0.11.0", path = "crates/mssql-client" }
-mssql-derive = { version = "0.11.0", path = "crates/mssql-derive" }
+# Path-only (no version): mssql-derive is consumed solely as a dev-dependency
+# (mssql-client's tests). Cargo strips versionless path dev-deps from published
+# manifests, which breaks the publish-order cycle that blocked the v0.11.0
+# release: a versioned dev-dep made packaging mssql-client require
+# mssql-derive@0.11.0 to already exist on crates.io.
+mssql-derive = { path = "crates/mssql-derive" }
 mssql-testing = { version = "0.10.0", path = "crates/mssql-testing" }
 
 # Async runtime
