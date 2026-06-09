@@ -35,8 +35,13 @@ impl Client<Disconnected> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # use mssql_client::Client;
+    /// # async fn ex(config: mssql_client::Config) -> Result<(), mssql_client::Error> {
     /// let client = Client::connect(config).await?;
+    /// # let _ = client;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn connect(config: Config) -> Result<Client<Ready>> {
         let retry = config.retry.clone();

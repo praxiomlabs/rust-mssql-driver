@@ -13,7 +13,7 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```text
 //! use mssql_client::{BulkInsertBuilder, BulkColumn, BulkOptions};
 //!
 //! let builder = BulkInsertBuilder::new("dbo.Users")
@@ -1331,7 +1331,9 @@ impl BulkInsert {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// # use mssql_client::{BulkInsertBuilder, BulkColumn, SqlValue};
+/// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
 /// let builder = BulkInsertBuilder::new("dbo.Users")
 ///     .with_typed_columns(vec![
 ///         BulkColumn::new("id", "INT", 0)?,
@@ -1339,9 +1341,12 @@ impl BulkInsert {
 ///     ]);
 ///
 /// let mut writer = client.bulk_insert(&builder).await?;
-/// writer.send_row(&[&1i32, &"Alice"])?;
-/// writer.send_row(&[&2i32, &"Bob"])?;
+/// writer.send_row_values(&[SqlValue::Int(1), SqlValue::String("Alice".into())])?;
+/// writer.send_row_values(&[SqlValue::Int(2), SqlValue::String("Bob".into())])?;
 /// let result = writer.finish().await?;
+/// # let _ = result;
+/// # Ok(())
+/// # }
 /// ```
 pub struct BulkWriter<'a, S: crate::state::ConnectionState> {
     client: &'a mut crate::client::Client<S>,

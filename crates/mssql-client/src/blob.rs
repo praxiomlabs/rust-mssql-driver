@@ -12,7 +12,7 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```text
 //! use mssql_client::blob::BlobReader;
 //! use tokio::io::AsyncReadExt;
 //!
@@ -77,7 +77,7 @@ use tokio::io::{AsyncRead, ReadBuf};
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// use mssql_client::blob::BlobReader;
 /// use tokio::io::AsyncReadExt;
 ///

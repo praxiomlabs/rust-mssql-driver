@@ -18,10 +18,11 @@
 //!
 //! Then use the `#[derive(Tvp)]` macro:
 //!
-//! ```rust,ignore
-//! use mssql_derive::Tvp;
+//! ```rust,no_run
+//! # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
+//! use mssql_client::TvpValue;
 //!
-//! #[derive(Tvp)]
+//! #[derive(mssql_derive::Tvp)]
 //! #[mssql(type_name = "dbo.UserIdList")]
 //! struct UserIdList {
 //!     user_id: i32,
@@ -39,6 +40,8 @@
 //!     "EXEC GetUserDetails @UserIds = @user_ids",
 //!     &[&TvpValue::new(&user_ids)?],
 //! ).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Supported Attributes
@@ -105,7 +108,7 @@ impl TvpRow {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
 /// use mssql_client::{Tvp, TvpColumn, TvpRow};
 /// use mssql_types::{SqlValue, TypeError, ToSql};
 ///

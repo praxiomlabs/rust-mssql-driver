@@ -8,7 +8,7 @@
 //! The recommended way to implement `FromRow` is via the derive macro from
 //! `mssql-derive`:
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use mssql_derive::FromRow;
 //!
 //! #[derive(FromRow)]
@@ -74,10 +74,11 @@ pub trait RowIteratorExt: Iterator<Item = Result<Row, Error>> + Sized {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
     /// use mssql_client::{FromRow, RowIteratorExt};
     ///
-    /// #[derive(FromRow)]
+    /// #[derive(mssql_derive::FromRow)]
     /// struct User { id: i32, name: String }
     ///
     /// let users: Vec<User> = client
@@ -85,6 +86,9 @@ pub trait RowIteratorExt: Iterator<Item = Result<Row, Error>> + Sized {
     ///     .await?
     ///     .map_rows::<User>()
     ///     .collect::<Result<Vec<_>, _>>()?;
+    /// # let _ = users;
+    /// # Ok(())
+    /// # }
     /// ```
     fn map_rows<T: FromRow>(self) -> MapRows<Self, T>;
 }

@@ -23,7 +23,7 @@ static IDENTIFIER_RE: Lazy<Regex> =
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// validate_identifier("my_table")?;     // OK
 /// validate_identifier("sp_test")?;      // OK
 /// validate_identifier("123abc")?;       // Error: starts with digit
@@ -53,7 +53,7 @@ pub(crate) fn validate_identifier(name: &str) -> Result<(), Error> {
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// validate_qualified_identifier("dbo.Users")?;            // OK (2 parts)
 /// validate_qualified_identifier("my_proc")?;              // OK (1 part)
 /// validate_qualified_identifier("catalog.dbo.Users")?;    // OK (3 parts)

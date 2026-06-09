@@ -231,7 +231,8 @@ impl<S: ConnectionState> Client<S> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
     /// let result = client.procedure("dbo.CalculateSum")?
     ///     .input("@a", &10i32)
     ///     .input("@b", &20i32)
@@ -239,6 +240,9 @@ impl<S: ConnectionState> Client<S> {
     ///     .execute().await?;
     ///
     /// let sum = result.get_output("@result").unwrap();
+    /// # let _ = sum;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn procedure(
         &mut self,
@@ -256,13 +260,16 @@ impl<S: ConnectionState> Client<S> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
     /// let result = client.call_procedure("dbo.GetUser", &[&1i32]).await?;
     /// assert_eq!(result.return_value, 0);
     ///
     /// if let Some(rs) = result.first_result_set() {
     ///     println!("columns: {:?}", rs.columns());
     /// }
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn call_procedure(
         &mut self,
@@ -297,8 +304,9 @@ impl<S: ConnectionState> Client<S> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// use mssql_client::{BulkInsertBuilder, BulkColumn};
+    /// ```rust,no_run
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
+    /// use mssql_client::{BulkInsertBuilder, BulkColumn, SqlValue};
     ///
     /// let builder = BulkInsertBuilder::new("dbo.Users")
     ///     .with_typed_columns(vec![
@@ -307,10 +315,12 @@ impl<S: ConnectionState> Client<S> {
     ///     ]);
     ///
     /// let mut writer = client.bulk_insert(&builder).await?;
-    /// writer.send_row(&[&1i32, &"Alice"])?;
-    /// writer.send_row(&[&2i32, &"Bob"])?;
+    /// writer.send_row_values(&[SqlValue::Int(1), SqlValue::String("Alice".into())])?;
+    /// writer.send_row_values(&[SqlValue::Int(2), SqlValue::String("Bob".into())])?;
     /// let result = writer.finish().await?;
     /// println!("Inserted {} rows", result.rows_affected);
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn bulk_insert(
         &mut self,
@@ -496,11 +506,12 @@ impl<S: ConnectionState> Client<S> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
     /// use mssql_client::{NamedParam, ToParams};
     ///
     /// // With derive macro:
-    /// #[derive(ToParams)]
+    /// #[derive(mssql_derive::ToParams)]
     /// struct UserQuery { name: String }
     ///
     /// let q = UserQuery { name: "Alice".into() };
@@ -515,6 +526,9 @@ impl<S: ConnectionState> Client<S> {
     ///     "SELECT * FROM users WHERE name = @name",
     ///     &params,
     /// ).await?;
+    /// # let _ = rows;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn query_named<'a>(
         &'a mut self,
@@ -564,7 +578,8 @@ impl<S: ConnectionState> Client<S> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
     /// use mssql_client::NamedParam;
     ///
     /// let params = vec![
@@ -575,6 +590,9 @@ impl<S: ConnectionState> Client<S> {
     ///     "INSERT INTO users (name, email) VALUES (@name, @email)",
     ///     &params,
     /// ).await?;
+    /// # let _ = rows_affected;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn execute_named(
         &mut self,
@@ -641,12 +659,13 @@ impl Client<Ready> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// use futures::StreamExt;
-    ///
-    /// // Streaming (memory-efficient)
-    /// let mut stream = client.query("SELECT * FROM users WHERE id = @p1", &[&1]).await?;
-    /// while let Some(row) = stream.next().await {
+    /// ```rust,no_run
+    /// # use mssql_client::Row;
+    /// # fn process(_: &Row) {}
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
+    /// // Streaming (synchronous iteration over the result set)
+    /// let stream = client.query("SELECT * FROM users WHERE id = @p1", &[&1]).await?;
+    /// for row in stream {
     ///     let row = row?;
     ///     process(&row);
     /// }
@@ -657,6 +676,9 @@ impl Client<Ready> {
     ///     .await?
     ///     .collect_all()
     ///     .await?;
+    /// # let _ = rows;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn query<'a>(
         &'a mut self,
@@ -731,7 +753,8 @@ impl Client<Ready> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
     /// use std::time::Duration;
     ///
     /// // Execute with a 5-second timeout
@@ -742,6 +765,9 @@ impl Client<Ready> {
     ///         Duration::from_secs(5),
     ///     )
     ///     .await?;
+    /// # let _ = rows;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn query_with_timeout<'a>(
         &'a mut self,
@@ -761,7 +787,8 @@ impl Client<Ready> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
     /// // Execute a batch with multiple SELECT statements
     /// let mut results = client.query_multiple(
     ///     "SELECT 1 AS a; SELECT 2 AS b, 3 AS c;",
@@ -779,6 +806,8 @@ impl Client<Ready> {
     ///         println!("Result 2: {:?}", row);
     ///     }
     /// }
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn query_multiple<'a>(
         &'a mut self,
@@ -870,7 +899,8 @@ impl Client<Ready> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
     /// use std::time::Duration;
     ///
     /// // Execute with a 10-second timeout
@@ -881,6 +911,9 @@ impl Client<Ready> {
     ///         Duration::from_secs(10),
     ///     )
     ///     .await?;
+    /// # let _ = rows_affected;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn execute_with_timeout(
         &mut self,
@@ -951,12 +984,15 @@ impl Client<Ready> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # async fn ex(client: mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
     /// use mssql_client::IsolationLevel;
     ///
     /// let tx = client.begin_transaction_with_isolation(IsolationLevel::Serializable).await?;
     /// // All operations in this transaction use SERIALIZABLE isolation
     /// tx.commit().await?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn begin_transaction_with_isolation(
         mut self,
@@ -1063,12 +1099,15 @@ impl Client<Ready> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
     /// client.execute("BEGIN TRANSACTION", &[]).await?;
     /// assert!(client.is_in_transaction());
     ///
     /// client.execute("COMMIT", &[]).await?;
     /// assert!(!client.is_in_transaction());
+    /// # Ok(())
+    /// # }
     /// ```
     #[must_use]
     pub fn is_in_transaction(&self) -> bool {
@@ -1107,7 +1146,8 @@ impl Client<Ready> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
     /// use std::time::Duration;
     ///
     /// let cancel_handle = client.cancel_handle();
@@ -1120,6 +1160,9 @@ impl Client<Ready> {
     ///
     /// // This query will be cancelled if it runs longer than 10 seconds
     /// let result = client.query("SELECT * FROM very_large_table", &[]).await;
+    /// # let _ = (handle, result);
+    /// # Ok(())
+    /// # }
     /// ```
     #[must_use]
     pub fn cancel_handle(&self) -> crate::cancel::CancelHandle {
@@ -1166,12 +1209,16 @@ impl Client<Ready> {
 /// Always ensure `commit()` or `rollback()` is called. Use helper patterns
 /// for error paths:
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// # async fn do_work(_: &mssql_client::Client<mssql_client::InTransaction>) -> Result<(), mssql_client::Error> { Ok(()) }
+/// # async fn ex(client: mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
 /// let tx = client.begin_transaction().await?;
 /// match do_work(&tx).await {
 ///     Ok(_) => { tx.commit().await?; }
 ///     Err(e) => { tx.rollback().await?; return Err(e); }
 /// }
+/// # Ok(())
+/// # }
 /// ```
 impl Client<InTransaction> {
     /// Execute a query within the transaction and return a streaming result set.
@@ -1339,7 +1386,7 @@ impl Client<InTransaction> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use mssql_client::FileStreamAccess;
     /// use tokio::io::AsyncReadExt;
     ///
@@ -1490,14 +1537,17 @@ impl Client<InTransaction> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// let tx = client.begin_transaction().await?;
-    /// tx.execute("INSERT INTO orders ...").await?;
+    /// ```rust,no_run
+    /// # async fn ex(client: mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
+    /// let mut tx = client.begin_transaction().await?;
+    /// tx.execute("INSERT INTO orders ...", &[]).await?;
     /// let sp = tx.save_point("before_items").await?;
-    /// tx.execute("INSERT INTO items ...").await?;
+    /// tx.execute("INSERT INTO items ...", &[]).await?;
     /// // Oops, rollback just the items
     /// tx.rollback_to(&sp).await?;
     /// tx.commit().await?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn save_point(&mut self, name: &str) -> Result<SavePoint> {
         crate::validation::validate_identifier(name)?;
@@ -1520,11 +1570,14 @@ impl Client<InTransaction> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # async fn ex(mut tx: mssql_client::Client<mssql_client::InTransaction>) -> Result<(), mssql_client::Error> {
     /// let sp = tx.save_point("checkpoint").await?;
     /// // ... do some work ...
     /// tx.rollback_to(&sp).await?;  // Undo changes since checkpoint
     /// // Transaction is still active, savepoint is still valid
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn rollback_to(&mut self, savepoint: &SavePoint) -> Result<()> {
         tracing::debug!(name = savepoint.name(), "rolling back to savepoint");

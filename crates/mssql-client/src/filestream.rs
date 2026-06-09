@@ -15,7 +15,7 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```text
 //! use mssql_client::{Client, Config, FileStream, FileStreamAccess};
 //!
 //! // Connect and begin a transaction (FILESTREAM requires a transaction)
@@ -171,7 +171,7 @@ pub mod open_options {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// use tokio::io::AsyncReadExt;
 /// use mssql_client::FileStreamAccess;
 ///
