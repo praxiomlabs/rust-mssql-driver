@@ -329,32 +329,21 @@ See the [`examples/`](crates/mssql-client/examples/) directory:
 
 ### Feature & Usage Guides
 
-- [docs/TYPE_STATE.md](docs/TYPE_STATE.md) - Type-state connection pattern
 - [docs/CONNECTION_STRINGS.md](docs/CONNECTION_STRINGS.md) - ADO.NET connection string reference
 - [docs/STORED_PROCEDURES.md](docs/STORED_PROCEDURES.md) - Stored procedure (RPC) calls
-- [docs/DERIVE_MACROS.md](docs/DERIVE_MACROS.md) - `FromRow` / `ToParams` derive macros
 - [docs/DDL.md](docs/DDL.md) - Executing DDL (CREATE/ALTER/DROP)
 - [docs/LOB.md](docs/LOB.md) - Large object (MAX / XML) handling
 - [docs/CANCEL_SAFETY.md](docs/CANCEL_SAFETY.md) - Query cancellation and cancel safety
 - [docs/ALWAYS_ENCRYPTED.md](docs/ALWAYS_ENCRYPTED.md) - Always Encrypted (transparent decryption)
 - [docs/FILESTREAM.md](docs/FILESTREAM.md) - FILESTREAM BLOB access (Windows)
 - [docs/OPENTELEMETRY.md](docs/OPENTELEMETRY.md) - OpenTelemetry instrumentation
-- [docs/FEATURES.md](docs/FEATURES.md) - Feature flag reference
-- [docs/MEMORY.md](docs/MEMORY.md) - Memory and allocation design (`Arc<Bytes>`)
 
 ### Operational Docs
 
-- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) - Production deployment guide
-- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - Common issues and solutions
-- [docs/CONNECTION_RECOVERY.md](docs/CONNECTION_RECOVERY.md) - Connection recovery and resilience
 - [docs/ERRORS.md](docs/ERRORS.md) - Error codes and handling
-- [docs/RETRY_STRATEGY.md](docs/RETRY_STRATEGY.md) - Retry policies and backoff
-- [docs/TIMEOUTS.md](docs/TIMEOUTS.md) - Timeout configuration
 - [docs/POOL_METRICS.md](docs/POOL_METRICS.md) - Pool metrics and monitoring
 - [docs/MIGRATION_FROM_TIBERIUS.md](docs/MIGRATION_FROM_TIBERIUS.md) - Migration guide
 - [docs/TLS.md](docs/TLS.md) - TLS configuration
-- [docs/OPERATIONS.md](docs/OPERATIONS.md) - Operations and graceful shutdown
-- [docs/BENCHMARKS.md](docs/BENCHMARKS.md) - Performance benchmarks and targets
 
 ### Crate-Specific Documentation
 
