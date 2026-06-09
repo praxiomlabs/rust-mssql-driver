@@ -1,4 +1,37 @@
 //! Client error types.
+//!
+//! All fallible operations return [`Error`](enum@Error). Beyond matching specific variants,
+//! the key question for resilience is whether an error is worth retrying.
+//!
+//! ## Transient vs terminal
+//!
+//! [`Error::is_transient`] reports whether an error is likely to succeed on
+//! retry (timeouts, connection drops, transient server conditions);
+//! [`Error::is_terminal`] reports the opposite (syntax errors, constraint
+//! violations, authentication failures). Retry only transient errors — retrying
+//! a terminal one just repeats the failure.
+//!
+//! ```rust,no_run
+//! # use mssql_client::Error;
+//! fn should_retry(err: &Error) -> bool {
+//!     err.is_transient()
+//! }
+//! ```
+//!
+//! Transient SQL Server conditions include deadlock victim (1205), Azure
+//! throttling (10928/10929) and service errors (40197/40501/40613), and
+//! failover (4060). Terminal server errors include syntax (102), invalid
+//! object/column (208/207), and constraint/unique violations (547/2627/2601).
+//! For server errors, [`Error::class`] exposes the TDS severity (classes 11-16
+//! are user errors; 17+ indicate resource or system problems).
+//!
+//! ## Retrying
+//!
+//! Retry transient errors with capped exponential backoff plus jitter and a
+//! small attempt limit (3-5). The pool and the configured `RetryPolicy` handle
+//! common connection-level cases automatically; apply application-level retries
+//! around whole logical operations, and only when the work is idempotent or
+//! transaction-wrapped.
 
 use std::sync::Arc;
 

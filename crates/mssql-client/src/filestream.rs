@@ -68,6 +68,31 @@
 //! concurrency. The [`open_options::ASYNC`] flag is provided to enable overlapped I/O at
 //! the Win32 level for advanced users who implement their own IOCP wrapper around the
 //! handle obtained from [`FileStream::into_tokio_file`].
+//!
+//! ## SQL Server setup
+//!
+//! FILESTREAM must be enabled at the instance and database level:
+//!
+//! 1. Enable FILESTREAM in SQL Server Configuration Manager (both T-SQL access
+//!    and file I/O access), then restart the service.
+//! 2. Set the access level and reconfigure:
+//!    ```sql
+//!    EXEC sp_configure 'filestream access level', 2;
+//!    RECONFIGURE;
+//!    ```
+//! 3. Create a database with a FILESTREAM filegroup, and a table with a
+//!    `VARBINARY(MAX) FILESTREAM` column alongside a `UNIQUEIDENTIFIER ROWGUIDCOL`
+//!    column (required by FILESTREAM).
+//!
+//! ## Troubleshooting
+//!
+//! - **OLE DB driver not found** — install the Microsoft OLE DB Driver for SQL
+//!   Server (`msoledbsql19.dll`); the loader falls back to `msoledbsql.dll` and
+//!   `sqlncli11.dll`.
+//! - **Access denied** — FILESTREAM requires Windows authentication, and the
+//!   account needs NTFS access to the data container.
+//! - **Path not found** — `PathName()` and the open call must run inside the
+//!   same active transaction.
 
 use std::ffi::c_void;
 use std::io;

@@ -91,7 +91,7 @@ The `Config::from_connection_string()` parser conforms to the Microsoft ADO.NET 
 - **Pool keywords** (`Max Pool Size`, etc.): Recognized with info-level log directing to `PoolConfig`.
 - **Known-but-unsupported keywords** (30+): Recognized at info level instead of silently ignored.
 
-See [`docs/CONNECTION_STRINGS.md`](docs/CONNECTION_STRINGS.md) for the full keyword reference.
+See the [`mssql-client` `config` module docs](https://docs.rs/mssql-client/latest/mssql_client/config/) for the full keyword reference.
 
 ## Workspace Structure
 
@@ -181,7 +181,7 @@ Named instances (e.g., `Server=localhost\SQLEXPRESS`) are automatically resolved
 
 ### FILESTREAM BLOB Access (Windows only, `filestream` feature)
 
-Async read/write of SQL Server FILESTREAM data via `OpenSqlFilestream` from the OLE DB Driver DLL. The implementation uses runtime dynamic loading (`LoadLibraryW` + `GetProcAddress`) with a fallback chain: `msoledbsql19.dll` → `msoledbsql.dll` → `sqlncli11.dll`. The function pointer is cached via `OnceLock`. The Win32 `HANDLE` is wrapped in `tokio::fs::File` for `AsyncRead + AsyncWrite`. See [`docs/FILESTREAM.md`](docs/FILESTREAM.md) for setup and usage.
+Async read/write of SQL Server FILESTREAM data via `OpenSqlFilestream` from the OLE DB Driver DLL. The implementation uses runtime dynamic loading (`LoadLibraryW` + `GetProcAddress`) with a fallback chain: `msoledbsql19.dll` → `msoledbsql.dll` → `sqlncli11.dll`. The function pointer is cached via `OnceLock`. The Win32 `HANDLE` is wrapped in `tokio::fs::File` for `AsyncRead + AsyncWrite`. See the [`mssql-client` `filestream` module docs](https://docs.rs/mssql-client/latest/mssql_client/filestream/) for setup and usage.
 
 ## Development Tooling
 
@@ -305,9 +305,9 @@ Primary references (in the repository):
 - `CODE_OF_CONDUCT.md` — Rust Code of Conduct
 - `CONTRIBUTING.md` (Dependency Policy section) — dependency management policy
 - `MIGRATION.md` — Migration guide from Tiberius
-- `docs/CONNECTION_STRINGS.md` — ADO.NET connection string keyword reference (full spec conformance)
-- `docs/ALWAYS_ENCRYPTED.md` — Always Encrypted user guide (key providers, transparent decryption)
-- `docs/STORED_PROCEDURES.md` — Stored procedure API guide
+- `mssql-client` `config` module rustdoc (docs.rs) — ADO.NET connection string keyword reference (full spec conformance)
+- `mssql-client` `encryption` module rustdoc (docs.rs) — Always Encrypted (key providers, transparent decryption)
+- `mssql-client` `procedure` module rustdoc (docs.rs) — stored procedure API
 
 External references:
 

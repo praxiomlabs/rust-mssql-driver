@@ -36,7 +36,7 @@ An async Microsoft SQL Server driver for Rust.
 | Table-Valued Parameters | Yes | Via `Tvp` type |
 | OpenTelemetry Metrics | Yes | Query + pool lifecycle via `otel` feature |
 | Always Encrypted (read) | Yes | Transparent decryption with Azure Key Vault and Windows CertStore providers |
-| Always Encrypted (write) | Partial | `NULL` writes only; ciphertext write path pending — see [docs/ALWAYS_ENCRYPTED.md](docs/ALWAYS_ENCRYPTED.md#limitations) |
+| Always Encrypted (write) | Partial | `NULL` writes only; ciphertext write path pending |
 | Query Cancellation | Yes | ATTENTION signal + in-flight pool discard |
 | Collation-Aware Decoding | Yes | 14+ character encodings |
 | Collation-Aware VARCHAR Params | Yes | Via `SendStringParametersAsUnicode=false` |
@@ -114,7 +114,7 @@ Server=hostname,port;Database=dbname;User Id=user;Password=pass;Encrypt=strict;
 | `ConnectRetryCount` | | Transient connect failures retried with exponential backoff |
 | `Column Encryption Setting` | | `Enabled`/`Disabled` — transparent decryption of encrypted columns |
 
-See [docs/CONNECTION_STRINGS.md](docs/CONNECTION_STRINGS.md) for the full ADO.NET-compatible keyword reference.
+See the [`mssql-client` config docs](https://docs.rs/mssql-client/latest/mssql_client/config/) for the full ADO.NET-compatible keyword reference.
 
 ## Connection Pooling
 
@@ -328,7 +328,7 @@ Compared with the other Rust options for SQL Server connectivity, based on sourc
 |---|---|---|---|---|
 | TDS 8.0 (strict TLS) | Yes | No (#412) | N/A | No |
 | Always Encrypted (read) | Yes | No (#54) | Via ODBC | No |
-| Always Encrypted (write) | Partial — NULL only ([docs/ALWAYS_ENCRYPTED.md](docs/ALWAYS_ENCRYPTED.md#limitations)) | No | Via ODBC | No |
+| Always Encrypted (write) | Partial — NULL only | No | Via ODBC | No |
 | Built-in connection pool | Yes | No (#146) | No | No |
 | Prepared statement cache | Yes (LRU) | No (#30) | Via ODBC | Yes |
 | Table-valued parameters | Yes | No | Via ODBC | No (#46) |
@@ -374,20 +374,10 @@ See the [`examples/`](crates/mssql-client/examples/) directory:
 
 ### Feature & Usage Guides
 
-- [docs/CONNECTION_STRINGS.md](docs/CONNECTION_STRINGS.md) - ADO.NET connection string reference
-- [docs/STORED_PROCEDURES.md](docs/STORED_PROCEDURES.md) - Stored procedure (RPC) calls
-- [docs/DDL.md](docs/DDL.md) - Executing DDL (CREATE/ALTER/DROP)
-- [docs/LOB.md](docs/LOB.md) - Large object (MAX / XML) handling
-- [docs/CANCEL_SAFETY.md](docs/CANCEL_SAFETY.md) - Query cancellation and cancel safety
-- [docs/ALWAYS_ENCRYPTED.md](docs/ALWAYS_ENCRYPTED.md) - Always Encrypted (transparent decryption)
-- [docs/FILESTREAM.md](docs/FILESTREAM.md) - FILESTREAM BLOB access (Windows)
-- [docs/OPENTELEMETRY.md](docs/OPENTELEMETRY.md) - OpenTelemetry instrumentation
-
-### Operational Docs
-
-- [docs/ERRORS.md](docs/ERRORS.md) - Error codes and handling
-- [docs/POOL_METRICS.md](docs/POOL_METRICS.md) - Pool metrics and monitoring
-- [docs/TLS.md](docs/TLS.md) - TLS configuration
+Feature and usage guides — connection strings, stored procedures, DDL, LOBs,
+cancellation, Always Encrypted, FILESTREAM, OpenTelemetry, error handling, pool
+metrics, and TLS — live in the crate rustdoc on
+[docs.rs](https://docs.rs/mssql-client); see the relevant module on each crate's page.
 
 ### Crate-Specific Documentation
 

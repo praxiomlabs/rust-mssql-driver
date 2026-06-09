@@ -2,6 +2,51 @@
 //!
 //! Supporting types (`RedirectConfig`, `TimeoutConfig`, `RetryPolicy`) live in
 //! the `types` submodule and are re-exported here for convenience.
+//!
+//! ## Connection strings
+//!
+//! [`Config::from_connection_string`] parses the ADO.NET
+//! `SqlConnection.ConnectionString` format: case-insensitive `Key=Value` pairs
+//! separated by `;`, with surrounding whitespace trimmed. Unknown keywords are
+//! ignored (logged at debug); recognized-but-unsupported keywords are logged at
+//! info rather than silently dropped.
+//!
+//! ```rust,no_run
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use mssql_client::Config;
+//!
+//! let config = Config::from_connection_string(
+//!     "Server=tcp:myserver.database.windows.net,1433;Database=mydb;\
+//!      User Id=user;Password=secret;Encrypt=strict",
+//! )?;
+//! # let _ = config;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! **Quoting.** A value with `;` or `=` may be wrapped in single or double
+//! quotes; double the quote char to escape it: `Password="my;pass"`,
+//! `Password='it''s complex'`.
+//!
+//! **Server forms** (`Server` / `Data Source` / `Addr` / `Address` /
+//! `Network Address` / `Host`): `host`, `host,1433` (comma port),
+//! `host\INSTANCE` (named instance, resolved via SQL Browser), and the Azure
+//! `tcp:host` prefix (stripped automatically). `.` and `(local)` normalize to
+//! `127.0.0.1`; `np:` and `lpc:` (named pipes / shared memory) are rejected.
+//!
+//! **Common keywords.** `Database`/`Initial Catalog`; `User Id`/`UID` +
+//! `Password`/`PWD`; `Encrypt` (`strict` / `true`(`mandatory`) / `no_tls`, plus
+//! booleans); `TrustServerCertificate`; `Connect Timeout` / `Command Timeout`;
+//! `Application Name`; `ApplicationIntent=ReadOnly`; `MultiSubnetFailover`;
+//! `ConnectRetryCount` / `ConnectRetryInterval`. Booleans accept
+//! `true`/`false`/`yes`/`no`/`1`/`0`; an invalid boolean is an error, not a
+//! silent default.
+//!
+//! **Common mistakes.** Use a comma (not a colon) for the port outside the
+//! `tcp:` prefix (`host,1433`); quote passwords containing `;`; use
+//! `user@server` for Azure SQL logins; and prefer `Encrypt=strict` or `true`
+//! (never `TrustServerCertificate=true`) in production. Never log a full
+//! connection string — it contains the password.
 
 mod types;
 pub use types::*;

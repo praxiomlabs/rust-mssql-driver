@@ -24,9 +24,9 @@ are documented where they live:
 
 - **TLS / transport security** — encryption modes (`Encrypt=strict`/`true`/`no_tls`),
   certificate validation, TLS versions, cipher suites, TDS 8.0 strict mode:
-  see [docs/TLS.md](docs/TLS.md).
+  see the [`mssql-tls` crate docs](https://docs.rs/mssql-tls).
 - **Always Encrypted** — client-side column encryption, key providers, the
-  cryptographic design: see [docs/ALWAYS_ENCRYPTED.md](docs/ALWAYS_ENCRYPTED.md)
+  cryptographic design: see the [`mssql-client` `encryption` module docs](https://docs.rs/mssql-client/latest/mssql_client/encryption/)
   and [ARCHITECTURE.md § ADR-013](ARCHITECTURE.md).
 
 In brief: the driver assumes a hostile network (mitigated by TLS with certificate
@@ -72,7 +72,7 @@ unwrapping, CEK caching) with `InMemoryKeyStore`, `AzureKeyVaultProvider`,
 
 **Do NOT use T-SQL `ENCRYPTBYKEY` as a substitute** — its keys exist on the server,
 so it does not protect against a malicious DBA or server compromise the way Always
-Encrypted does. See [docs/ALWAYS_ENCRYPTED.md](docs/ALWAYS_ENCRYPTED.md).
+Encrypted does. See the [`mssql-client` `encryption` module docs](https://docs.rs/mssql-client/latest/mssql_client/encryption/).
 
 ## Dependency Security
 

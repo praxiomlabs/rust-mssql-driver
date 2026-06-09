@@ -1,4 +1,22 @@
 //! SQL Server client implementation.
+//!
+//! ## DDL and statement routing
+//!
+//! [`Client::execute`] routes automatically by parameter count: with no
+//! parameters it sends a SQL batch (which permits DDL such as `CREATE` / `ALTER`
+//! / `DROP`); with parameters it uses `sp_executesql`, whose procedure context
+//! SQL Server forbids DDL in. Run DDL with an empty parameter slice:
+//!
+//! ```rust,no_run
+//! # async fn create_table(config: mssql_client::Config) -> Result<(), mssql_client::Error> {
+//! # let mut client = mssql_client::Client::connect(config).await?;
+//! client.execute("CREATE TABLE dbo.t (id INT)", &[]).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! Use [`Client::simple_query`] for fire-and-forget batches (including
+//! multi-statement, `;`-separated DDL) when you don't need the affected-row count.
 
 // Allow unwrap/expect for chrono date construction with known-valid constant dates
 // and for regex patterns that are compile-time constants

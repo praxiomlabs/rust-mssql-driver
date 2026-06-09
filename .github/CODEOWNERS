@@ -59,7 +59,6 @@
 # Dependency and supply-chain policy.
 /deny.toml                   @jkindrix
 /.cargo/audit.toml           @jkindrix
-/docs/DEPENDENCY_POLICY.md   @jkindrix
 
 # Project-level config. Version bumps, workspace membership, etc.
 /Cargo.toml                  @jkindrix

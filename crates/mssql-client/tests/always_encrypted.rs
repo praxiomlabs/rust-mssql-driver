@@ -467,7 +467,7 @@ mod key_store_tests {
 //
 // Populating encrypted columns with ciphertext requires the driver to send
 // encrypted RPC parameters (parameter encryption). That path is NOT yet
-// implemented — see `docs/ALWAYS_ENCRYPTED.md § Limitations`. A naïve
+// implemented — see the `encryption` module rustdoc (Limitations). A naïve
 // `INSERT ... VALUES (CONVERT(varbinary(max), 0x...))` is rejected by
 // SQL Server with "Operand type clash: varbinary is incompatible with
 // varbinary(N) encrypted with (...)" because the server strictly separates
