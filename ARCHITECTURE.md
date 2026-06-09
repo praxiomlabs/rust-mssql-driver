@@ -300,16 +300,12 @@ pub enum Token {
 
 #### `xtask`
 
-**Responsibility:** Build automation replacing `Makefile`/`bash` scripts.
+**Responsibility:** Rust-native build helpers that the `Justfile` (the
+canonical task runner) should not own.
 
 **Commands:**
 ```bash
-cargo xtask dist       # Build release artifacts
-cargo xtask test       # Run nextest with filtering
-cargo xtask fuzz       # Run fuzz tests
-cargo xtask bench      # Run benchmarks
-cargo xtask codegen    # Generate protocol constants from spec
-cargo xtask ci         # Full CI pipeline
+cargo xtask check-features   # Validate all feature flag combinations compile (CI gate)
 ```
 
 ---
