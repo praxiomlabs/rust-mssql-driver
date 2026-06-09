@@ -28,19 +28,75 @@
 //! quotes; double the quote char to escape it: `Password="my;pass"`,
 //! `Password='it''s complex'`.
 //!
-//! **Server forms** (`Server` / `Data Source` / `Addr` / `Address` /
-//! `Network Address` / `Host`): `host`, `host,1433` (comma port),
-//! `host\INSTANCE` (named instance, resolved via SQL Browser), and the Azure
-//! `tcp:host` prefix (stripped automatically). `.` and `(local)` normalize to
-//! `127.0.0.1`; `np:` and `lpc:` (named pipes / shared memory) are rejected.
+//! ## Keyword reference
 //!
-//! **Common keywords.** `Database`/`Initial Catalog`; `User Id`/`UID` +
-//! `Password`/`PWD`; `Encrypt` (`strict` / `true`(`mandatory`) / `no_tls`, plus
-//! booleans); `TrustServerCertificate`; `Connect Timeout` / `Command Timeout`;
-//! `Application Name`; `ApplicationIntent=ReadOnly`; `MultiSubnetFailover`;
-//! `ConnectRetryCount` / `ConnectRetryInterval`. Booleans accept
-//! `true`/`false`/`yes`/`no`/`1`/`0`; an invalid boolean is an error, not a
-//! silent default.
+//! ### Server
+//!
+//! | Keyword | Aliases | Default | Description |
+//! |---------|---------|---------|-------------|
+//! | `Server` | `Data Source`, `Addr`, `Address`, `Network Address`, `Host` | `localhost` | Hostname or IP. Forms: `host`, `host,1433` (comma port), `host\INSTANCE` (named instance, resolved via SQL Browser), `tcp:host` (Azure prefix, stripped). `.` and `(local)` normalize to `127.0.0.1`; `np:` / `lpc:` (named pipes / shared memory) are rejected. |
+//! | `Port` | — | `1433` | TCP port. |
+//!
+//! ### Authentication and database
+//!
+//! | Keyword | Aliases | Default | Description |
+//! |---------|---------|---------|-------------|
+//! | `User Id` | `UID`, `User` | (empty) | SQL Server login username. |
+//! | `Password` | `PWD` | (empty) | SQL Server login password. |
+//! | `Database` | `Initial Catalog` | none | Target database. |
+//!
+//! ### Security
+//!
+//! | Keyword | Aliases | Default | Description |
+//! |---------|---------|---------|-------------|
+//! | `Encrypt` | — | `false` | `strict` (TDS 8.0, SQL Server 2022+), `mandatory`/`true`, `optional`, `no_tls`, or a boolean. |
+//! | `TrustServerCertificate` | `Trust Server Certificate` | `false` | Skip certificate validation (development only). |
+//!
+//! ### Timeouts
+//!
+//! | Keyword | Aliases | Default | Description |
+//! |---------|---------|---------|-------------|
+//! | `Connect Timeout` | `Connection Timeout`, `Timeout` | `15` | TCP connect timeout (seconds; `0` = none). |
+//! | `Command Timeout` | — | `30` | Query execution timeout (seconds; `0` = none). |
+//!
+//! ### Application identification
+//!
+//! | Keyword | Aliases | Default | Description |
+//! |---------|---------|---------|-------------|
+//! | `Application Name` | `App` | `mssql-client` | Appears in `sys.dm_exec_sessions`. |
+//! | `ApplicationIntent` | `Application Intent` | `ReadWrite` | `ReadOnly` routes to an AlwaysOn AG readable secondary. |
+//! | `Workstation ID` | `WSID` | machine hostname | Sent in LOGIN7 HostName; appears in `sys.dm_exec_sessions.host_name`. |
+//! | `Current Language` | `Language` | server default | Session language for server messages. |
+//!
+//! ### Connection resiliency
+//!
+//! | Keyword | Aliases | Default | Description |
+//! |---------|---------|---------|-------------|
+//! | `ConnectRetryCount` | `Connect Retry Count` | `3` | Reconnect attempts on idle-connection failure (wires to `RetryPolicy`). |
+//! | `ConnectRetryInterval` | `Connect Retry Interval` | `0` | Seconds between reconnect attempts. |
+//! | `MultiSubnetFailover` | `Multi Subnet Failover` | `false` | Race parallel TCP connects to all resolved IPs (AlwaysOn AG listeners). |
+//!
+//! ### Advanced
+//!
+//! | Keyword | Aliases | Default | Description |
+//! |---------|---------|---------|-------------|
+//! | `MultipleActiveResultSets` | `MARS` | `false` | MARS (not fully supported). |
+//! | `Packet Size` | — | `4096` | TDS packet size in bytes. |
+//! | `SendStringParametersAsUnicode` | `Send String Parameters As Unicode` | `true` | When `false`, sends `String`/`&str` params as VARCHAR (Windows-1252) instead of NVARCHAR (UTF-16) so SQL Server can index-seek VARCHAR columns. |
+//!
+//! Booleans accept `true`/`false`/`yes`/`no`/`1`/`0` (case-insensitive); an
+//! invalid boolean is an error, not a silent default.
+//!
+//! ### Recognized but not supported
+//!
+//! Logged at info level rather than silently dropped:
+//!
+//! | Keyword(s) | Guidance |
+//! |------------|----------|
+//! | `Max Pool Size`, `Min Pool Size`, `Pooling`, `Connection Lifetime`, `Load Balance Timeout` | Use the pool crate's `PoolConfig` instead. |
+//! | `Failover Partner` | Database mirroring failover not implemented. |
+//! | `Persist Security Info` | Passwords are never returned in connection strings. |
+//! | `Network Library`, `Enlist`, `Replication`, `Transaction Binding`, `Type System Version`, `User Instance`, `AttachDbFilename`, `Context Connection`, `Asynchronous Processing` | .NET-specific, not applicable. |
 //!
 //! **Common mistakes.** Use a comma (not a colon) for the port outside the
 //! `tcp:` prefix (`host,1433`); quote passwords containing `;`; use
