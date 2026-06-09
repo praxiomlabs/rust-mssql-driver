@@ -12,9 +12,8 @@ SQL Server FILESTREAM stores `VARBINARY(MAX)` data directly on the NTFS filesyst
 
 ## Quick Start
 
-```toml
-[dependencies]
-mssql-client = { version = "0.11", features = ["sspi-auth", "filestream"] }
+```bash
+cargo add mssql-client --features sspi-auth,filestream
 ```
 
 ```rust

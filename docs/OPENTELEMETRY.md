@@ -6,9 +6,8 @@ rust-mssql-driver provides optional OpenTelemetry instrumentation for distribute
 
 Add the `otel` feature to your dependency:
 
-```toml
-[dependencies]
-mssql-client = { version = "0.11", features = ["otel"] }
+```bash
+cargo add mssql-client --features otel
 ```
 
 ## Automatic Instrumentation

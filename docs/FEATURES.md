@@ -54,8 +54,8 @@ client.query(
 
 **Disable if:** You don't use date/time types or prefer manual parsing.
 
-```toml
-mssql-client = { version = "0.11", default-features = false, features = ["uuid", "decimal", "json"] }
+```bash
+cargo add mssql-client --no-default-features --features uuid,decimal,json
 ```
 
 ### uuid
@@ -139,8 +139,8 @@ client.execute(
 
 Enables OpenTelemetry instrumentation for distributed tracing:
 
-```toml
-mssql-client = { version = "0.11", features = ["otel"] }
+```bash
+cargo add mssql-client --features otel
 ```
 
 When enabled, the driver automatically creates spans for:
@@ -159,8 +159,8 @@ See [OPENTELEMETRY.md](OPENTELEMETRY.md) for detailed setup instructions.
 
 Enables secure credential wiping using the `zeroize` crate:
 
-```toml
-mssql-client = { version = "0.11", features = ["zeroize"] }
+```bash
+cargo add mssql-client --features zeroize
 ```
 
 When enabled:
@@ -176,8 +176,8 @@ When enabled:
 
 Enables async read/write access to SQL Server FILESTREAM BLOBs (Windows only):
 
-```toml
-mssql-client = { version = "0.11", features = ["sspi-auth", "filestream"] }
+```bash
+cargo add mssql-client --features sspi-auth,filestream
 ```
 
 When enabled:
@@ -215,8 +215,8 @@ The authentication crate (`mssql-auth`) provides these features:
 
 Enables Azure authentication methods:
 
-```toml
-mssql-auth = { version = "0.11", features = ["azure-identity"] }
+```bash
+cargo add mssql-auth --features azure-identity
 ```
 
 Provides:
@@ -229,8 +229,8 @@ Provides:
 
 Enables Kerberos/GSSAPI authentication on Linux and macOS:
 
-```toml
-mssql-auth = { version = "0.11", features = ["integrated-auth"] }
+```bash
+cargo add mssql-auth --features integrated-auth
 ```
 
 **Prerequisites:**
@@ -243,8 +243,8 @@ mssql-auth = { version = "0.11", features = ["integrated-auth"] }
 
 Enables Windows SSPI authentication via the cross-platform sspi-rs crate:
 
-```toml
-mssql-auth = { version = "0.11", features = ["sspi-auth"] }
+```bash
+cargo add mssql-auth --features sspi-auth
 ```
 
 Works on Windows natively and on other platforms when appropriate credentials are available.
@@ -255,8 +255,8 @@ Works on Windows natively and on other platforms when appropriate credentials ar
 
 Enables client certificate authentication for Azure AD Service Principal:
 
-```toml
-mssql-auth = { version = "0.11", features = ["cert-auth"] }
+```bash
+cargo add mssql-auth --features cert-auth
 ```
 
 Requires X.509 certificate and private key for authentication.
@@ -267,8 +267,8 @@ Requires X.509 certificate and private key for authentication.
 
 Enables Always Encrypted transparent column decryption:
 
-```toml
-mssql-auth = { version = "0.11", features = ["always-encrypted"] }
+```bash
+cargo add mssql-auth --features always-encrypted
 ```
 
 When `Column Encryption Setting=Enabled` is in the connection string, encrypted
@@ -308,54 +308,48 @@ Provides full standard library support including I/O and error handling.
 
 Enables compilation without the standard library, using only the `alloc` crate. Useful for embedded or constrained environments.
 
-```toml
-[dependencies]
-tds-protocol = { version = "0.11", default-features = false, features = ["alloc"] }
+```bash
+cargo add tds-protocol --no-default-features --features alloc
 ```
 
 ## Common Configurations
 
 ### Minimal (Smallest Binary)
 
-```toml
-[dependencies]
-mssql-client = { version = "0.11", default-features = false }
+```bash
+cargo add mssql-client --no-default-features
 ```
 
 Only basic types supported. No date/time, UUID, decimal, or JSON.
 
 ### Web Application (Typical)
 
-```toml
-[dependencies]
-mssql-client = { version = "0.11" }
+```bash
+cargo add mssql-client
 ```
 
 All default features enabled for broad type support.
 
 ### Production with Observability
 
-```toml
-[dependencies]
-mssql-client = { version = "0.11", features = ["otel"] }
+```bash
+cargo add mssql-client --features otel
 ```
 
 Default features plus OpenTelemetry tracing.
 
 ### High-Security Environment
 
-```toml
-[dependencies]
-mssql-client = { version = "0.11", features = ["zeroize", "otel"] }
+```bash
+cargo add mssql-client --features zeroize,otel
 ```
 
 All defaults plus secure credential handling and audit tracing.
 
 ### Numeric-Only Application
 
-```toml
-[dependencies]
-mssql-client = { version = "0.11", default-features = false, features = ["decimal"] }
+```bash
+cargo add mssql-client --no-default-features --features decimal
 ```
 
 Only decimal support, no date/time or JSON.
