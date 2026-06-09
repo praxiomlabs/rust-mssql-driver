@@ -15,16 +15,17 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
-//! use mssql_client::{Client, Config};
-//! use mssql_client::instrumentation::Instrumented;
+//! Build the driver with the `otel` feature (`cargo add mssql-client --features
+//! otel`). Spans and metrics are then emitted automatically for connections,
+//! queries, executes, transactions, and pool operations; with the feature off
+//! the instrumentation compiles to no-ops at zero cost.
 //!
-//! // Wrap client for automatic instrumentation
-//! let client = Client::connect(config).await?.instrumented();
-//!
-//! // All operations now emit spans
-//! client.query("SELECT * FROM users").await?;
-//! ```
+//! This crate emits OpenTelemetry telemetry but does not configure an exporter —
+//! install a tracer/meter provider in your application using the
+//! `opentelemetry`, `opentelemetry_sdk`, and an exporter crate (e.g.
+//! `opentelemetry-otlp` to an OTLP collector such as Jaeger), then drive the
+//! `tracing` <-> OpenTelemetry bridge with `tracing-opentelemetry`. See those
+//! crates' docs for provider setup.
 //!
 //! ## Semantic Conventions
 //!
@@ -35,6 +36,20 @@
 //! - `db.operation`: Query operation type (SELECT, INSERT, etc.)
 //! - `server.address`: Server hostname
 //! - `server.port`: Server port
+//!
+//! `db.statement` is sanitized by default ([`SanitizationConfig`]) so literal
+//! parameter values are replaced with placeholders before being recorded; opt
+//! out with [`SanitizationConfig::no_sanitization`] only when capturing raw SQL
+//! is acceptable.
+//!
+//! ## Troubleshooting
+//!
+//! - **No spans appear** — confirm the `otel` feature is enabled and a tracer
+//!   provider is installed before the first operation.
+//! - **`db.rows_affected` missing** — it is only recorded on mutating
+//!   statements, not on `SELECT`.
+//! - **High attribute cardinality** — keep sanitization on and avoid adding
+//!   per-row custom attributes.
 
 #[cfg(feature = "otel")]
 use opentelemetry::{

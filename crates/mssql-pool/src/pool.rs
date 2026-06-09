@@ -2,6 +2,30 @@
 //!
 //! This module provides a purpose-built connection pool for SQL Server
 //! with SQL Server-specific lifecycle management including `sp_reset_connection`.
+//!
+//! ## Monitoring
+//!
+//! [`Pool::status`] returns a point-in-time [`PoolStatus`] (available / in-use /
+//! total / max connections plus wait-queue depth); [`Pool::metrics`] returns
+//! cumulative [`PoolMetrics`] (checkout and health-check success rates, average
+//! acquisition time, lifetime counters). Sample them on an interval to feed
+//! logs, a metrics exporter, or alerts.
+//!
+//! ```rust,no_run
+//! # use mssql_driver_pool::Pool;
+//! # fn inspect(pool: &Pool) {
+//! let status = pool.status();
+//! if status.utilization() > 0.9 {
+//!     // pool is nearly saturated
+//! }
+//! let _ = pool.metrics().checkout_success_rate();
+//! # }
+//! ```
+//!
+//! There is no built-in Prometheus/OTLP exporter — read these values and map
+//! them to your metrics library. Useful alert signals: sustained utilization
+//! (≥90%), any checkout failures, a health-check success rate below ~99%, or
+//! `available == 0` while requests are waiting ([`PoolStatus::has_waiters`]).
 
 use std::collections::VecDeque;
 use std::sync::Arc;

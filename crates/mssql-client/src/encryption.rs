@@ -20,23 +20,39 @@
 //! ## Usage
 //!
 //! ```rust,ignore
-//! use mssql_client::{Config, EncryptionConfig};
+//! use mssql_client::{Client, Config, EncryptionConfig};
 //! use mssql_auth::InMemoryKeyStore;
 //!
-//! // Create encryption configuration
-//! let mut key_store = InMemoryKeyStore::new();
-//! key_store.add_key("MyKey", &pem)?;
+//! // Register a key-store provider, then attach it to the connection config.
+//! let key_store = InMemoryKeyStore::new();
+//! let encryption_config = EncryptionConfig::new().with_provider(key_store);
 //!
-//! let encryption_config = EncryptionConfig::new()
-//!     .with_provider(key_store)
-//!     .build();
-//!
-//! // Connect with encryption enabled
 //! let config = Config::from_connection_string(conn_str)?
-//!     .with_encryption(encryption_config);
+//!     .with_column_encryption(encryption_config);
 //!
 //! let client = Client::connect(config).await?;
 //! ```
+//!
+//! Equivalently, set `Column Encryption Setting=Enabled` in the connection
+//! string. Production-ready providers ship in `mssql-auth`: `InMemoryKeyStore`
+//! (dev/test), `AzureKeyVaultProvider` (`azure-identity` feature), and
+//! `WindowsCertStoreProvider` (`sspi-auth`, Windows). Implement
+//! [`mssql_auth::KeyStoreProvider`] for custom key storage. Do **not** substitute
+//! T-SQL `ENCRYPTBYKEY` — the server can see that plaintext, defeating the point.
+//!
+//! ## How decryption works
+//!
+//! 1. Always Encrypted support is negotiated in LOGIN7 (`FEATURE_EXT`).
+//! 2. `ColMetaData` carries [`CryptoMetadata`] and the [`CekTable`]; column
+//!    encryption keys are resolved asynchronously up front (calling the key-store
+//!    providers).
+//! 3. Each encrypted cell is decrypted during row parsing via
+//!    AEAD_AES_256_CBC_HMAC_SHA256, with the HMAC verified before decryption.
+//!
+//! Reads are transparent across `query`, `call_procedure`, the procedure
+//! builder, and multi-result queries. **Limitation:** the parameter (write) path
+//! only supports `NULL`; encrypting outbound parameter values is not yet
+//! implemented.
 //!
 //! ## Security Model
 //!

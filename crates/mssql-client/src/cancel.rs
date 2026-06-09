@@ -38,6 +38,32 @@
 //! - Calling `cancel()` is idempotent; multiple calls have no additional effect
 //! - After cancellation, the current query will return an error
 //! - The connection remains usable for subsequent queries
+//!
+//! ## Cancel safety
+//!
+//! [`CancelHandle::cancel`] is the safe way to stop an in-flight query: it sends
+//! an Attention packet and drains the server's response, leaving the connection
+//! clean. Prefer it over dropping the query future.
+//!
+//! Dropping a query future mid-flight — for example the losing branch of
+//! `tokio::select!`, or a `tokio::time::timeout` that fires — is **not**
+//! cancel-safe: it can leave unconsumed TDS data in the connection buffer, and
+//! stable Rust has no async `Drop` to clean it up. The pool is the safety net: a
+//! connection dropped while a query is in flight is detected and discarded
+//! rather than handed back dirty (the pool's `test_on_checkin` /
+//! `test_on_checkout` options), but you pay for a replacement connection.
+//!
+//! For a timeout, race the query against a timer and cancel explicitly rather
+//! than letting the future drop:
+//!
+//! ```rust,ignore
+//! let canceller = client.cancel_handle();
+//! tokio::spawn(async move {
+//!     tokio::time::sleep(Duration::from_secs(30)).await;
+//!     let _ = canceller.cancel().await;
+//! });
+//! let result = client.query("SELECT * FROM big_table", &[]).await;
+//! ```
 
 use std::sync::Arc;
 

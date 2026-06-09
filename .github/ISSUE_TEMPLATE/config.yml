@@ -20,5 +20,5 @@ contact_links:
     about: API documentation on docs.rs. Consult this first — many questions are answered there.
 
   - name: 🚢 Migration from Tiberius
-    url: https://github.com/praxiomlabs/rust-mssql-driver/blob/main/docs/MIGRATION_FROM_TIBERIUS.md
+    url: https://github.com/praxiomlabs/rust-mssql-driver/blob/main/MIGRATION.md
     about: Migrating from the Tiberius driver? The migration guide covers API differences, feature parity, and common pitfalls.

@@ -124,7 +124,7 @@ ciphertext as a `VARBINARY` parameter bound to the base column type.
 Reads are unaffected — queries with `Column Encryption Setting=Enabled`
 decrypt transparently.
 
-See [docs/ALWAYS_ENCRYPTED.md](docs/ALWAYS_ENCRYPTED.md#limitations) for
+See the [`mssql-client` `encryption` module docs](https://docs.rs/mssql-client/latest/mssql_client/encryption/) for
 the full rationale.
 
 ---

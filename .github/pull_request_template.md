@@ -53,7 +53,7 @@ helps reviewers focus.
 - [ ] Updated rustdoc comments on new/changed public items
 - [ ] Updated CHANGELOG.md `[Unreleased]` section (under Added/Fixed/Changed/Deprecated/Removed/Security)
 - [ ] Updated README.md if the change affects installation, features, or quick-start examples
-- [ ] Updated relevant files in `docs/` if the change affects user-facing behavior
+- [ ] Updated the relevant module rustdoc (user-facing feature/usage guides live in each crate's rustdoc) if the change affects user-facing behavior
 - [ ] Updated ARCHITECTURE.md if the change introduces an architectural decision (add or update an ADR)
 
 ## Breaking changes

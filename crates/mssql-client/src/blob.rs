@@ -46,6 +46,21 @@
 //!
 //! For LOBs under 100MB, this buffering approach is acceptable. For larger objects,
 //! consider application-level chunking via SQL `SUBSTRING` queries.
+//!
+//! ## Memory and best practices
+//!
+//! Because the LOB is buffered in full, a multi-gigabyte column means a
+//! multi-gigabyte allocation. Keep readers short-lived, drop them as soon as the
+//! data is consumed, and avoid collecting many large LOBs at once. When you only
+//! need part of a very large value, pre-check its size or page through it with a
+//! SQL `SUBSTRING` query rather than materializing the whole column.
+//!
+//! ## Inspecting progress
+//!
+//! Beyond `AsyncRead`, [`BlobReader`] exposes [`BlobReader::len`] (total size, if
+//! known), [`BlobReader::bytes_read`], [`BlobReader::remaining`],
+//! [`BlobReader::is_exhausted`], [`BlobReader::rewind`] (re-read from the start),
+//! and [`BlobReader::into_bytes`] (take the underlying buffer).
 
 use std::io;
 use std::pin::Pin;

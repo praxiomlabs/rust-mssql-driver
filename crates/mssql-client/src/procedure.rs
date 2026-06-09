@@ -18,6 +18,30 @@
 //!
 //! let sum = result.get_output("@result").unwrap();
 //! ```
+//!
+//! ## How it works
+//!
+//! Both entry points issue a TDS RPC request (not a SQL batch): parameters are
+//! sent as typed RPC parameters, never interpolated into SQL. The response
+//! stream carries any result sets, `OUTPUT` parameter values, and the
+//! procedure's `RETURN` value, surfaced on [`ProcedureResult`] as `result_sets`,
+//! `output_params`, and `return_value`. The procedure name is validated as a SQL
+//! identifier (per dotted part) before use.
+//!
+//! [`Client::call_procedure`] takes positional input parameters (named `@p1`,
+//! `@p2`, ...); [`Client::procedure`] returns a [`ProcedureBuilder`] for named
+//! input and `OUTPUT` parameters. Both work in the `Ready` and `InTransaction`
+//! states, so procedures compose with [`Client::begin_transaction`].
+//!
+//! ## Output parameters
+//!
+//! Declare each `OUTPUT` parameter with the matching typed setter —
+//! [`ProcedureBuilder::output_int`], `output_bigint`, `output_bit`,
+//! `output_float`, `output_nvarchar` (length; `0` = MAX), `output_decimal`
+//! (precision, scale) — or `output_raw` for an explicit `TypeInfo`. After
+//! [`ProcedureBuilder::execute`], read values with
+//! [`ProcedureResult::get_output`] and the return code with
+//! [`ProcedureResult::get_return_value`].
 
 use tds_protocol::rpc::{RpcParam, RpcRequest, TypeInfo as RpcTypeInfo};
 
