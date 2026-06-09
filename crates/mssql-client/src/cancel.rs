@@ -56,13 +56,18 @@
 //! For a timeout, race the query against a timer and cancel explicitly rather
 //! than letting the future drop:
 //!
-//! ```rust,ignore
+//! ```rust,no_run
+//! # use std::time::Duration;
+//! # async fn timeout_via_cancel(config: mssql_client::Config) -> Result<(), mssql_client::Error> {
+//! # let mut client = mssql_client::Client::connect(config).await?;
 //! let canceller = client.cancel_handle();
 //! tokio::spawn(async move {
 //!     tokio::time::sleep(Duration::from_secs(30)).await;
 //!     let _ = canceller.cancel().await;
 //! });
-//! let result = client.query("SELECT * FROM big_table", &[]).await;
+//! let _result = client.query("SELECT * FROM big_table", &[]).await;
+//! # Ok(())
+//! # }
 //! ```
 
 use std::sync::Arc;

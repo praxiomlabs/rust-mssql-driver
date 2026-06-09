@@ -19,7 +19,11 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```rust,no_run
+//! # async fn with_always_encrypted() -> Result<(), Box<dyn std::error::Error>> {
+//! # #[cfg(feature = "always-encrypted")]
+//! # {
+//! # let conn_str = "Server=localhost;Database=db;Encrypt=strict;Column Encryption Setting=Enabled";
 //! use mssql_client::{Client, Config, EncryptionConfig};
 //! use mssql_auth::InMemoryKeyStore;
 //!
@@ -30,7 +34,10 @@
 //! let config = Config::from_connection_string(conn_str)?
 //!     .with_column_encryption(encryption_config);
 //!
-//! let client = Client::connect(config).await?;
+//! let _client = Client::connect(config).await?;
+//! # }
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! Equivalently, set `Column Encryption Setting=Enabled` in the connection
