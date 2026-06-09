@@ -74,7 +74,8 @@ impl IsolationLevel {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// # async fn ex(client: mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
 /// let mut tx = client.begin_transaction().await?;
 ///
 /// tx.execute("INSERT INTO orders (customer_id) VALUES (@p1)", &[&42]).await?;
@@ -87,6 +88,8 @@ impl IsolationLevel {
 ///
 /// // Continue with different items...
 /// tx.commit().await?;
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug, Clone)]
 #[must_use = "a savepoint should be used to rollback or it has no effect"]

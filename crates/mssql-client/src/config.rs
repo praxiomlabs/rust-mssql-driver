@@ -800,7 +800,10 @@ impl Config {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # fn ex() -> Result<(), mssql_client::Error> {
+    /// use mssql_client::Config;
+    ///
     /// // Connection string (Tiberius-compatible)
     /// let config = Config::from_connection_string(
     ///     "Server=legacy-server;User Id=sa;Password=secret;Encrypt=no_tls"
@@ -810,6 +813,9 @@ impl Config {
     /// let config = Config::new()
     ///     .host("legacy-server")
     ///     .no_tls(true);
+    /// # let _ = config;
+    /// # Ok(())
+    /// # }
     /// ```
     #[must_use]
     pub fn no_tls(mut self, enabled: bool) -> Self {
@@ -827,14 +833,19 @@ impl Config {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # #[cfg(feature = "always-encrypted")]
+    /// # fn ex() {
     /// use mssql_client::{Config, EncryptionConfig};
     /// use mssql_auth::InMemoryKeyStore;
     ///
+    /// let key_store = InMemoryKeyStore::new();
     /// let config = Config::new()
     ///     .with_column_encryption(
     ///         EncryptionConfig::new().with_provider(key_store)
     ///     );
+    /// # let _ = config;
+    /// # }
     /// ```
     #[cfg(feature = "always-encrypted")]
     #[must_use]

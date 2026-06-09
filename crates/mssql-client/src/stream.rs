@@ -62,15 +62,17 @@ pub(crate) enum PendingRow {
 ///
 /// # Example
 ///
-/// ```rust,ignore
-/// use futures::StreamExt;
-///
-/// let mut stream = client.query("SELECT * FROM large_table", &[]).await?;
-///
-/// while let Some(row) = stream.next().await {
+/// ```rust,no_run
+/// # use mssql_client::Row;
+/// # fn process_row(_: &Row) {}
+/// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
+/// let stream = client.query("SELECT * FROM large_table", &[]).await?;
+/// for row in stream {
 ///     let row = row?;
 ///     process_row(&row);
 /// }
+/// # Ok(())
+/// # }
 /// ```
 #[must_use = "streams must be consumed; dropping a stream discards remaining rows"]
 pub struct QueryStream<'a> {
@@ -337,7 +339,8 @@ impl ExecuteResult {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
 /// let result = client.call_procedure("dbo.GetUser", &[&1i32]).await?;
 ///
 /// // Check the return value (RETURN statement in the proc)
@@ -350,6 +353,8 @@ impl ExecuteResult {
 ///         println!("{:?}", row);
 ///     }
 /// }
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -396,7 +401,9 @@ impl ProcedureResult {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # use mssql_client::SqlValue;
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
     /// let result = client.procedure("dbo.CalculateSum")?
     ///     .input("@a", &10i32)
     ///     .input("@b", &20i32)
@@ -405,6 +412,8 @@ impl ProcedureResult {
     ///
     /// let output = result.get_output("@result").expect("output param exists");
     /// assert_eq!(output.value, SqlValue::Int(30));
+    /// # Ok(())
+    /// # }
     /// ```
     #[must_use]
     pub fn get_output(&self, name: &str) -> Option<&OutputParam> {
@@ -597,7 +606,8 @@ impl ResultSet {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
 /// // Execute a batch with multiple SELECT statements
 /// let mut results = client.query_multiple("SELECT 1 AS a; SELECT 2 AS b, 3 AS c;", &[]).await?;
 ///
@@ -612,6 +622,8 @@ impl ResultSet {
 ///         println!("Result 2: {:?}", row);
 ///     }
 /// }
+/// # Ok(())
+/// # }
 /// ```
 #[must_use = "streams must be consumed; dropping a stream discards remaining results"]
 pub struct MultiResultStream<'a> {

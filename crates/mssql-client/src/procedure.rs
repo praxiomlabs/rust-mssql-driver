@@ -5,7 +5,8 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```rust,no_run
+//! # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
 //! // Simple positional call (input parameters only)
 //! let result = client.call_procedure("dbo.GetUser", &[&1i32]).await?;
 //!
@@ -17,6 +18,9 @@
 //!     .execute().await?;
 //!
 //! let sum = result.get_output("@result").unwrap();
+//! # let _ = sum;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## How it works
@@ -57,7 +61,9 @@ use crate::stream::ProcedureResult;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// # use mssql_client::SqlValue;
+/// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
 /// let result = client.procedure("dbo.CalculateSum")?
 ///     .input("@a", &10i32)
 ///     .input("@b", &20i32)
@@ -67,6 +73,8 @@ use crate::stream::ProcedureResult;
 /// // Access the output parameter
 /// let output = result.get_output("@result").expect("output param present");
 /// assert_eq!(output.value, SqlValue::Int(30));
+/// # Ok(())
+/// # }
 /// ```
 pub struct ProcedureBuilder<'a, S: ConnectionState> {
     client: &'a mut Client<S>,
@@ -93,11 +101,14 @@ impl<'a, S: ConnectionState> ProcedureBuilder<'a, S> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
     /// client.procedure("dbo.UpdateUser")?
     ///     .input("@id", &42i32)
     ///     .input("@name", &"Alice")
     ///     .execute().await?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn input(&mut self, name: &str, value: &(dyn crate::ToSql + Sync)) -> &mut Self {
         // Use the shared conversion logic from params.rs.
@@ -124,10 +135,13 @@ impl<'a, S: ConnectionState> ProcedureBuilder<'a, S> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
     /// client.procedure("dbo.GetCount")?
     ///     .output_int("@count")
     ///     .execute().await?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn output_int(&mut self, name: &str) -> &mut Self {
         self.params
@@ -183,12 +197,15 @@ impl<'a, S: ConnectionState> ProcedureBuilder<'a, S> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
     /// use tds_protocol::rpc::TypeInfo;
     ///
     /// client.procedure("dbo.GetGuid")?
     ///     .output_raw("@id", TypeInfo::uniqueidentifier())
     ///     .execute().await?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn output_raw(&mut self, name: &str, type_info: RpcTypeInfo) -> &mut Self {
         self.params

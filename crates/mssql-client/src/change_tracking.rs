@@ -12,7 +12,7 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
+//! ```text
 //! use mssql_client::change_tracking::{ChangeOperation, ChangeTrackingQuery};
 //!
 //! // Get current version for baseline

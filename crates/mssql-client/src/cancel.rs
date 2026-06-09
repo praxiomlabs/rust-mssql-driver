@@ -13,8 +13,8 @@
 //!
 //! ## Example
 //!
-//! ```rust,ignore
-//! use mssql_client::Client;
+//! ```rust,no_run
+//! # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
 //! use std::time::Duration;
 //!
 //! // Get a cancel handle before starting the query
@@ -30,6 +30,9 @@
 //!
 //! // This query will be cancelled if it runs longer than 5 seconds
 //! let result = client.query("SELECT * FROM very_large_table", &[]).await;
+//! # let _ = result;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Important Notes
@@ -154,11 +157,14 @@ impl CancelHandle {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
     /// let cancel_handle = client.cancel_handle();
     ///
     /// // From another task:
     /// cancel_handle.cancel().await?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn cancel(&self) -> Result<()> {
         let inner = self.inner.lock().await;

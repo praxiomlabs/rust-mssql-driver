@@ -470,7 +470,7 @@ impl Row {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use tokio::io::AsyncWriteExt;
     ///
     /// // Stream a large VARBINARY(MAX) column to a file
@@ -508,7 +508,7 @@ impl Row {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// let mut reader = row.get_stream_by_name("document_content")?;
     /// // Process the blob stream...
     /// ```

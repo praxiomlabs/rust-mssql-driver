@@ -15,7 +15,7 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```text
 //! use mssql_client::browser::resolve_instance;
 //! use std::time::Duration;
 //!
@@ -66,7 +66,7 @@ const MAX_RESPONSE_SIZE: usize = 1024 + 3; // 3 bytes for header (type + length)
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```text
 /// let port = resolve_instance("localhost", "SQLEXPRESS", Duration::from_secs(2)).await?;
 /// ```
 pub(crate) async fn resolve_instance(

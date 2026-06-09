@@ -8,10 +8,11 @@
 //! The recommended way to implement `ToParams` is via the derive macro from
 //! `mssql-derive`:
 //!
-//! ```rust,ignore
-//! use mssql_derive::ToParams;
+//! ```rust,no_run
+//! # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
+//! use mssql_client::ToParams;
 //!
-//! #[derive(ToParams)]
+//! #[derive(mssql_derive::ToParams)]
 //! struct NewUser {
 //!     name: String,
 //!     #[mssql(rename = "email_address")]
@@ -28,6 +29,8 @@
 //!     "INSERT INTO users (name, email_address) VALUES (@name, @email_address)",
 //!     &user.to_params()?,
 //! ).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Supported Attributes
