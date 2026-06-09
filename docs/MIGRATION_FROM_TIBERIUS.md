@@ -459,9 +459,8 @@ tiberius = { version = "0.12", features = ["chrono", "rust_decimal"] }
 
 ### rust-mssql-driver
 
-```toml
-[dependencies]
-mssql-client = { version = "0.11", features = ["chrono", "decimal", "uuid"] }
+```bash
+cargo add mssql-client --features chrono,decimal,uuid
 ```
 
 Available features:

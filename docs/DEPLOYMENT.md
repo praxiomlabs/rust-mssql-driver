@@ -261,10 +261,8 @@ async fn query_with_fallback(
 
 ### OpenTelemetry Integration
 
-```toml
-# Cargo.toml
-[dependencies]
-mssql-client = { version = "0.11", features = ["otel"] }
+```bash
+cargo add mssql-client --features otel
 ```
 
 ```text

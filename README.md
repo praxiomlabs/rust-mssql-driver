@@ -244,10 +244,9 @@ for result in rows {
 
 Enable optional features:
 
-```toml
-[dependencies]
-mssql-client = { version = "0.11", features = ["otel"] }
-mssql-auth = { version = "0.11", features = ["sspi-auth"] }
+```bash
+cargo add mssql-client --features otel
+cargo add mssql-auth --features sspi-auth
 ```
 
 ## SQL Server Compatibility
