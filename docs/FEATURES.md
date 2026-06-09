@@ -19,6 +19,7 @@ The main client crate (`mssql-client`) provides these features:
 | `otel` | No | OpenTelemetry instrumentation for tracing |
 | `zeroize` | No | Secure credential wiping from memory |
 | `encoding` | Yes | Collation-aware VARCHAR decoding via encoding_rs |
+| `tls` | Yes | TLS transport encryption via rustls (mssql-tls) |
 | `filestream` | No | FILESTREAM BLOB access (Windows only) |
 
 ### chrono
@@ -54,7 +55,7 @@ client.query(
 **Disable if:** You don't use date/time types or prefer manual parsing.
 
 ```toml
-mssql-client = { version = "0.10", default-features = false, features = ["uuid", "decimal", "json"] }
+mssql-client = { version = "0.11", default-features = false, features = ["uuid", "decimal", "json"] }
 ```
 
 ### uuid
@@ -104,7 +105,7 @@ client.execute(
 
 ### json
 
-**Default: Enabled**
+**Default: Disabled**
 
 Provides support for JSON data via serde_json:
 
@@ -139,7 +140,7 @@ client.execute(
 Enables OpenTelemetry instrumentation for distributed tracing:
 
 ```toml
-mssql-client = { version = "0.10", features = ["otel"] }
+mssql-client = { version = "0.11", features = ["otel"] }
 ```
 
 When enabled, the driver automatically creates spans for:
@@ -159,7 +160,7 @@ See [OPENTELEMETRY.md](OPENTELEMETRY.md) for detailed setup instructions.
 Enables secure credential wiping using the `zeroize` crate:
 
 ```toml
-mssql-client = { version = "0.10", features = ["zeroize"] }
+mssql-client = { version = "0.11", features = ["zeroize"] }
 ```
 
 When enabled:
@@ -176,7 +177,7 @@ When enabled:
 Enables async read/write access to SQL Server FILESTREAM BLOBs (Windows only):
 
 ```toml
-mssql-client = { version = "0.10", features = ["sspi-auth", "filestream"] }
+mssql-client = { version = "0.11", features = ["sspi-auth", "filestream"] }
 ```
 
 When enabled:
@@ -215,7 +216,7 @@ The authentication crate (`mssql-auth`) provides these features:
 Enables Azure authentication methods:
 
 ```toml
-mssql-auth = { version = "0.10", features = ["azure-identity"] }
+mssql-auth = { version = "0.11", features = ["azure-identity"] }
 ```
 
 Provides:
@@ -229,7 +230,7 @@ Provides:
 Enables Kerberos/GSSAPI authentication on Linux and macOS:
 
 ```toml
-mssql-auth = { version = "0.10", features = ["integrated-auth"] }
+mssql-auth = { version = "0.11", features = ["integrated-auth"] }
 ```
 
 **Prerequisites:**
@@ -243,7 +244,7 @@ mssql-auth = { version = "0.10", features = ["integrated-auth"] }
 Enables Windows SSPI authentication via the cross-platform sspi-rs crate:
 
 ```toml
-mssql-auth = { version = "0.10", features = ["sspi-auth"] }
+mssql-auth = { version = "0.11", features = ["sspi-auth"] }
 ```
 
 Works on Windows natively and on other platforms when appropriate credentials are available.
@@ -255,7 +256,7 @@ Works on Windows natively and on other platforms when appropriate credentials ar
 Enables client certificate authentication for Azure AD Service Principal:
 
 ```toml
-mssql-auth = { version = "0.10", features = ["cert-auth"] }
+mssql-auth = { version = "0.11", features = ["cert-auth"] }
 ```
 
 Requires X.509 certificate and private key for authentication.
@@ -267,7 +268,7 @@ Requires X.509 certificate and private key for authentication.
 Enables Always Encrypted transparent column decryption:
 
 ```toml
-mssql-auth = { version = "0.10", features = ["always-encrypted"] }
+mssql-auth = { version = "0.11", features = ["always-encrypted"] }
 ```
 
 When `Column Encryption Setting=Enabled` is in the connection string, encrypted
@@ -309,7 +310,7 @@ Enables compilation without the standard library, using only the `alloc` crate. 
 
 ```toml
 [dependencies]
-tds-protocol = { version = "0.10", default-features = false, features = ["alloc"] }
+tds-protocol = { version = "0.11", default-features = false, features = ["alloc"] }
 ```
 
 ## Common Configurations
@@ -318,7 +319,7 @@ tds-protocol = { version = "0.10", default-features = false, features = ["alloc"
 
 ```toml
 [dependencies]
-mssql-client = { version = "0.10", default-features = false }
+mssql-client = { version = "0.11", default-features = false }
 ```
 
 Only basic types supported. No date/time, UUID, decimal, or JSON.
@@ -327,7 +328,7 @@ Only basic types supported. No date/time, UUID, decimal, or JSON.
 
 ```toml
 [dependencies]
-mssql-client = { version = "0.10" }
+mssql-client = { version = "0.11" }
 ```
 
 All default features enabled for broad type support.
@@ -336,7 +337,7 @@ All default features enabled for broad type support.
 
 ```toml
 [dependencies]
-mssql-client = { version = "0.10", features = ["otel"] }
+mssql-client = { version = "0.11", features = ["otel"] }
 ```
 
 Default features plus OpenTelemetry tracing.
@@ -345,7 +346,7 @@ Default features plus OpenTelemetry tracing.
 
 ```toml
 [dependencies]
-mssql-client = { version = "0.10", features = ["zeroize", "otel"] }
+mssql-client = { version = "0.11", features = ["zeroize", "otel"] }
 ```
 
 All defaults plus secure credential handling and audit tracing.
@@ -354,7 +355,7 @@ All defaults plus secure credential handling and audit tracing.
 
 ```toml
 [dependencies]
-mssql-client = { version = "0.10", default-features = false, features = ["decimal"] }
+mssql-client = { version = "0.11", default-features = false, features = ["decimal"] }
 ```
 
 Only decimal support, no date/time or JSON.

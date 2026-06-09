@@ -8,7 +8,7 @@ Add the `otel` feature to your dependency:
 
 ```toml
 [dependencies]
-mssql-client = { version = "0.10", features = ["otel"] }
+mssql-client = { version = "0.11", features = ["otel"] }
 ```
 
 ## Automatic Instrumentation

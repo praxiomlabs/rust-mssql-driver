@@ -211,7 +211,7 @@ We take backwards compatibility seriously and will work to resolve issues prompt
 | `chrono` | Yes | Stable |
 | `uuid` | Yes | Stable |
 | `decimal` | Yes | Stable |
-| `json` | Yes | Stable |
+| `json` | No | Stable |
 | `otel` | No | Stable |
 | `zeroize` | No | Stable |
 | `azure-identity` | No | Stable (platform-dependent) |
@@ -220,7 +220,8 @@ We take backwards compatibility seriously and will work to resolve issues prompt
 | `cert-auth` | No | Stable |
 | `always-encrypted` | No | Stable |
 | `filestream` | No | Stable (Windows only) |
-| `encoding` | No | Stable |
+| `encoding` | Yes | Stable |
+| `tls` | Yes | Stable |
 
 ## SQL Server Compatibility
 

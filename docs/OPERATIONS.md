@@ -204,7 +204,7 @@ Enable the `otel` feature for distributed tracing:
 
 ```toml
 [dependencies]
-mssql-client = { version = "0.10", features = ["otel"] }
+mssql-client = { version = "0.11", features = ["otel"] }
 ```
 
 ```text

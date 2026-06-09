@@ -204,25 +204,7 @@ for crate_toml in crates/*/Cargo.toml; do
 done
 
 # =============================================================================
-# Check 5: Supported versions tables align
-# =============================================================================
-section "Supported versions tables"
-
-# SECURITY.md and STABILITY.md both have "Supported Versions" sections.
-# They should list the same set of supported versions. This is a soft check
-# — we just warn if they're clearly out of sync.
-
-if [ -f "SECURITY.md" ] && [ -f "STABILITY.md" ]; then
-    security_supported=$(awk '/## Supported Versions/,/^##[^#]/' SECURITY.md | grep -oE '^\| [0-9]+\.[0-9]+\.' | sort -u || true)
-    stability_supported=$(awk '/## Platform Support/,/^##[^#]/' STABILITY.md | grep -oE '^\| [0-9]+\.[0-9]+\.' | sort -u || true)
-
-    if [ -n "$security_supported" ]; then
-        pass "SECURITY.md has a Supported Versions table"
-    fi
-fi
-
-# =============================================================================
-# Check 6: Deny / audit ignore lists are in sync
+# Check 5: Deny / audit ignore lists are in sync
 # =============================================================================
 section "deny.toml and .cargo/audit.toml advisory lists"
 
@@ -238,13 +220,44 @@ if [ -f "deny.toml" ] && [ -f ".cargo/audit.toml" ]; then
         pass "deny.toml and .cargo/audit.toml advisory ignore lists are in sync"
     else
         if [ -n "$only_in_deny" ]; then
-            fail "Advisories ignored in deny.toml but not in .cargo/audit.toml: $(echo $only_in_deny | tr '\n' ' ')"
+            fail "Advisories ignored in deny.toml but not in .cargo/audit.toml: $(echo "$only_in_deny" | tr '\n' ' ')"
         fi
         if [ -n "$only_in_audit" ]; then
-            fail "Advisories ignored in .cargo/audit.toml but not in deny.toml: $(echo $only_in_audit | tr '\n' ' ')"
+            fail "Advisories ignored in .cargo/audit.toml but not in deny.toml: $(echo "$only_in_audit" | tr '\n' ' ')"
         fi
     fi
 fi
+
+# =============================================================================
+# Check 6: First-party dependency snippets in docs match workspace version
+# =============================================================================
+section "Doc dependency snippets match workspace version"
+
+# Install snippets like `mssql-client = "0.11"` drift on every release unless
+# checked (v0.11.0 shipped with 24 stale 0.10 snippets). Only lines that
+# declare a first-party crate dependency are checked; prose and historical
+# references are not matched. Versions match on major.minor so docs may show
+# "0.11" while the workspace is at 0.11.x.
+
+EXPECTED_MINOR=${WORKSPACE_VERSION%.*}
+SNIPPET_CRATES='tds-protocol|mssql-client|mssql-auth|mssql-tls|mssql-codec|mssql-types|mssql-derive|mssql-driver-pool'
+
+while IFS= read -r match; do
+    file=${match%%:*}
+    rest=${match#*:}
+    line_no=${rest%%:*}
+    line=${rest#*:}
+    found=$(echo "$line" | grep -oE '"[0-9]+\.[0-9]+(\.[0-9]+)?"' | head -1 | tr -d '"' || true)
+    if [ -z "$found" ]; then
+        continue  # versionless snippet (e.g. path-only) — nothing to drift
+    fi
+    found_minor=$(echo "$found" | cut -d. -f1-2)
+    if [ "$found_minor" = "$EXPECTED_MINOR" ]; then
+        pass "$file:$line_no snippet version \"$found\" matches workspace $WORKSPACE_VERSION"
+    else
+        fail "$file:$line_no first-party dep snippet has version \"$found\" but workspace is $WORKSPACE_VERSION (expected \"$EXPECTED_MINOR\")"
+    fi
+done < <(grep -rnE "^[[:space:]]*($SNIPPET_CRATES) = " README.md docs/*.md crates/*/README.md 2>/dev/null || true)
 
 # =============================================================================
 # Summary
