@@ -12,8 +12,8 @@
 # The human gate is merging the Release PR. Until then, nothing reaches crates.io.
 #
 # Tokens:
-#   - A GitHub App (praxiomlabs-release-plz; App ID + private key in the
-#     RELEASE_PLZ_APP_* secrets) mints a short-lived token each run instead of
+#   - A GitHub App (praxiomlabs-release-plz; Client ID + private key in the
+#     RELEASE_PLZ_CLIENT_ID / RELEASE_PLZ_APP_PRIVATE_KEY secrets) mints a short-lived token each run instead of
 #     using the default GITHUB_TOKEN, because PRs opened with the default token
 #     do NOT trigger CI workflows — the Release PR would sit with zero checks
 #     and could never satisfy required status checks. An App (vs a PAT) has no
@@ -46,9 +46,9 @@ jobs:
     steps:
       - name: Generate GitHub App token
         id: app-token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.RELEASE_PLZ_APP_ID }}
+          client-id: ${{ secrets.RELEASE_PLZ_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_PLZ_APP_PRIVATE_KEY }}
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -76,9 +76,9 @@ jobs:
     steps:
       - name: Generate GitHub App token
         id: app-token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.RELEASE_PLZ_APP_ID }}
+          client-id: ${{ secrets.RELEASE_PLZ_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_PLZ_APP_PRIVATE_KEY }}
       - name: Checkout repository
         uses: actions/checkout@v6
