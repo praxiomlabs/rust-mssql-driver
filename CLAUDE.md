@@ -244,7 +244,7 @@ Releases are fully automated by [release-plz](https://release-plz.dev) (`release
 
 Rules for agents: **never run `cargo publish`, never create version tags, never hand-edit the workspace version** — those all belong to release-plz. Never cancel the publish job mid-run. Merging a Release PR requires explicit human approval. See RELEASING.md for recovery procedures.
 
-`just doc-consistency` (also a CI gate) verifies MSRV references agree across files, CHANGELOG matches the workspace version, and deny.toml/audit.toml ignore lists stay in sync.
+`just doc-consistency` (also a CI gate) verifies MSRV references agree across files, CHANGELOG matches the workspace version, deny.toml/audit.toml ignore lists stay in sync, and first-party dependency snippets in README/docs match the workspace version.
 
 ### CI/CD workflows
 

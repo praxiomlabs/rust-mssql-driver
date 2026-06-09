@@ -155,19 +155,22 @@ export MSSQL_USER=sa
 export MSSQL_PASSWORD=YourStrong@Passw0rd
 ```
 
-### Build Automation (`cargo xtask`)
+### Build Automation
 
-The project includes custom build commands via `cargo xtask`:
+`just` is the canonical task runner — run `just --list` for the full recipe
+catalog. The common workflows:
 
 | Command | Purpose |
 |---------|---------|
-| `cargo xtask ci` | Run format, lint, test, and deny checks |
-| `cargo xtask ci-local` | Full CI pipeline locally (mirrors GitHub Actions) |
-| `cargo xtask release <version>` | Bump version across all crates + update CHANGELOG (emergency manual path; releases are normally automated) |
-| `cargo xtask check-features` | Validate all feature flag combinations compile (uses cargo-hack) |
-| `cargo xtask fuzz` | Run fuzz tests on protocol parser |
-| `cargo xtask coverage` | Generate code coverage report |
-| `cargo xtask semver` | Check for semver-breaking API changes |
+| `just ci` | Format check, clippy, tests, doc check, examples |
+| `just ci-all` | Same with all features (matches GitHub Actions) |
+| `just test` / `just test-all` | Run the test suite |
+| `just fuzz-all` | Run all fuzz targets briefly (smoke test) |
+| `just coverage` | Generate code coverage report |
+| `just semver` | Check for semver-breaking API changes |
+
+The `xtask` crate carries only `cargo xtask check-features` (validates all
+feature flag combinations compile via cargo-hack; used by CI).
 
 Releases are automated by release-plz — see [RELEASING.md](RELEASING.md). Your commit messages drive version bumps and the CHANGELOG, which is why the [conventional commit format](#commit-messages) matters.
 

@@ -218,6 +218,9 @@ setup-tools:
     cargo install cargo-machete@0.7.0 --locked
     cargo install cargo-semver-checks@0.42.0 --locked
 
+    # Feature flag matrix validation (used by `cargo xtask check-features` and CI)
+    cargo install cargo-hack --locked
+
     # Development workflow
     cargo install cargo-watch --locked
 
@@ -1099,12 +1102,12 @@ example-pool:
 # ============================================================================
 
 [group('bench')]
-[doc("Run benchmarks")]
-bench:
+[doc("Run benchmarks (optionally filtered to a name pattern)")]
+bench filter="":
     #!/usr/bin/env bash
     set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Running Benchmarks ══════{{reset}}\n\n'
-    {{cargo}} bench --workspace
+    {{cargo}} bench --workspace -- {{filter}}
     printf '{{green}}[OK]{{reset}}   Benchmarks complete\n'
 
 [group('bench')]

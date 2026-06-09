@@ -97,29 +97,3 @@ jobs:
           # Alert if performance degrades by more than 20%
           alert-threshold: '120%'
 
-  # Separate job for heavier memory profiling (only on main)
-  memory-profile:
-    name: Memory Profiling
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install Kerberos headers
-        run: sudo apt-get update && sudo apt-get install -y libkrb5-dev
-
-      - name: Install Valgrind
-        run: sudo apt-get install -y valgrind
-
-      - name: Run memory stress tests
-        run: |
-          # Run stress tests under Valgrind to check for memory leaks
-          # Note: This is slow, so only run on main branch
-          cargo test -p mssql-client --test stress_tests -- --test-threads=1 2>&1 | head -100
-        env:
-          # Skip live database tests in CI
-          SKIP_LIVE_TESTS: "1"

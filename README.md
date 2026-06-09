@@ -52,7 +52,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-mssql-client = "0.10"
+mssql-client = "0.11"
 tokio = { version = "1.48", features = ["full"] }
 ```
 
@@ -246,8 +246,8 @@ Enable optional features:
 
 ```toml
 [dependencies]
-mssql-client = { version = "0.10", features = ["otel"] }
-mssql-auth = { version = "0.10", features = ["sspi-auth"] }
+mssql-client = { version = "0.11", features = ["otel"] }
+mssql-auth = { version = "0.11", features = ["sspi-auth"] }
 ```
 
 ## SQL Server Compatibility
