@@ -264,7 +264,39 @@ cargo add mssql-auth --features sspi-auth
 | Azure SQL Database | Yes | 7.4/8.0 | |
 | Azure SQL Managed Instance | Yes | 7.4/8.0 | |
 
-**Legacy Support (SQL Server 2008-2016):** Use `Encrypt=no_tls` for servers that don't support TLS 1.2. See [LIMITATIONS.md](LIMITATIONS.md) and [docs/SQL_SERVER_COMPATIBILITY.md](docs/SQL_SERVER_COMPATIBILITY.md) for details.
+**Legacy Support (SQL Server 2008-2016):** Use `Encrypt=no_tls` for servers that don't support TLS 1.2. See [LIMITATIONS.md](LIMITATIONS.md) for the full list of known limitations.
+
+### Connection configuration by version
+
+```text
+// 2008-2016 (legacy): often no TLS 1.2 — disable TLS
+Server=host,1433;Database=mydb;User Id=sa;Password=pwd;Encrypt=no_tls
+
+// 2017+: standard TLS
+Server=host,1433;Database=mydb;User Id=sa;Password=pwd;Encrypt=true;TrustServerCertificate=true
+
+// 2022+: TDS 8.0 strict mode
+Config::new("host", "mydb", "sa", "pwd").tds_version(TdsVersion::V8_0).strict_mode(true)
+```
+
+### Feature availability by version
+
+| Feature | 2008 | 2012 | 2014 | 2016 | 2017 | 2019 | 2022 |
+|---------|------|------|------|------|------|------|------|
+| Queries, parameters, transactions | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| DATE/TIME, DATETIME2, DATETIMEOFFSET | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| Table-valued parameters | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| STRING_AGG | No | No | No | No | Yes | Yes | Yes |
+| APPROX_COUNT_DISTINCT | No | No | No | No | No | Yes | Yes |
+| TLS/SSL encryption | No\* | No\* | No\* | No\* | Yes | Yes | Yes |
+| TDS 8.0 strict mode | No | No | No | No | No | No | Yes |
+
+\* These versions typically negotiate TLS 1.0/1.1, which rustls does not support. Use `Encrypt=no_tls` on a trusted network.
+
+### Known issues
+
+- **`ProductMajorVersion` NULL on SQL Server 2014 RTM** — the driver falls back to parsing `SERVERPROPERTY('ProductVersion')`.
+- **TLS handshake fails on legacy servers** — 2008-2016 servers using TLS 1.0/1.1 fail with "TLS handshake eof" under `Encrypt=true`. Use `Encrypt=no_tls` (data travels unencrypted; only on trusted networks).
 
 ## API Stability
 
@@ -288,19 +320,32 @@ API surface (see [STABILITY.md](STABILITY.md)) and closing the gaps in
 [LIMITATIONS.md](LIMITATIONS.md) — once the API is proven in real deployments,
 the 1.0 backward-compatibility guarantee follows.
 
-## Comparison with Tiberius
+## Comparison with Other Drivers
 
-| Feature | rust-mssql-driver | tiberius |
-|---------|-------------------|----------|
-| TDS 7.3 (SQL 2008) | Configurable | Supported |
-| TDS 8.0 (strict mode) | Yes | Not supported |
-| Connection pooling | Built-in | External (bb8/deadpool) |
-| Runtime | Tokio-native | Runtime agnostic |
-| Prepared statement cache | Automatic LRU | Per-execution |
-| Azure SQL redirects | Automatic | Manual handling |
-| Type-state connections | Yes | No |
-| Stored procedures (RPC) | Dedicated API (OUTPUT params, RETURN value) | Via `EXEC` in SQL only; no dedicated API |
-| Named instance resolution | Automatic (SQL Browser) | Yes (`SqlBrowser` trait) |
+Compared with the other Rust options for SQL Server connectivity, based on source-code analysis and public GitHub issues (issue numbers in parentheses).
+
+| Feature | mssql-driver | Tiberius | odbc-api | sqlx-oldapi |
+|---|---|---|---|---|
+| TDS 8.0 (strict TLS) | Yes | No (#412) | N/A | No |
+| Always Encrypted (read) | Yes | No (#54) | Via ODBC | No |
+| Always Encrypted (write) | Partial — NULL only ([docs/ALWAYS_ENCRYPTED.md](docs/ALWAYS_ENCRYPTED.md#limitations)) | No | Via ODBC | No |
+| Built-in connection pool | Yes | No (#146) | No | No |
+| Prepared statement cache | Yes (LRU) | No (#30) | Via ODBC | Yes |
+| Table-valued parameters | Yes | No | Via ODBC | No (#46) |
+| Bulk insert (BCP) | Yes | Partial (#322, #358) | Yes | No |
+| Query cancellation | Yes (attention) | No (#79, #300) | Via ODBC | No |
+| Azure AD / Managed Identity | Yes | No (#175) | Via ODBC | No |
+| Cross-platform NTLM | Yes | Windows only (#97) | Via ODBC | No (#13) |
+| Kerberos / SPNEGO | Yes | Unix only | Via ODBC | No |
+| ADO.NET connection strings | Yes | Yes | N/A | No (#411, #605) |
+| `deny(unsafe_code)` | Yes, audited FFI exceptions | No (4 unsafe) | No (372 unsafe) | No |
+| Runtime agnostic | No (Tokio only) | Yes | N/A (sync) | Yes |
+| Compile-time query checking | No | No | No | Yes (limited) |
+| MARS | No | No | Via ODBC | No |
+
+**Authentication:** mssql-driver supports SQL auth, cross-platform Windows/NTLM, Kerberos/SPNEGO (`integrated-auth`), Azure AD token, Managed Identity and Service Principal (`azure-identity`), client certificate (`cert-auth`), and Windows SSPI (`sspi-auth`). Tiberius is Windows-only for NTLM and lacks Managed Identity; sqlx-oldapi has no Windows authentication at all (called a "blocker" by enterprise users, #13).
+
+**Pure-Rust deployment:** mssql-driver has no C/FFI dependencies (outside optional Windows SSPI), which avoids the problems odbc-api users report: can't compile for musl/Alpine (#526), static linking blocked by LGPL unixODBC (#781), driver-manager conflicts (#503), connections that aren't `Send`/`Sync` (#354), and FFI panics on drop (#574). It is `Send + Sync` and Tokio-native by design.
 
 ## Examples
 
@@ -325,7 +370,7 @@ See the [`examples/`](crates/mssql-client/examples/) directory:
 - [STABILITY.md](STABILITY.md) - API stability guarantees and versioning policy
 - [SECURITY.md](SECURITY.md) - Security policy, threat model, and best practices
 - [LIMITATIONS.md](LIMITATIONS.md) - Known limitations and explicit non-goals
-- [docs/COMPARISON.md](docs/COMPARISON.md) - Feature comparison vs Tiberius, odbc-api, and sqlx-oldapi
+- [MIGRATION.md](MIGRATION.md) - Migrating from Tiberius
 
 ### Feature & Usage Guides
 
@@ -342,7 +387,6 @@ See the [`examples/`](crates/mssql-client/examples/) directory:
 
 - [docs/ERRORS.md](docs/ERRORS.md) - Error codes and handling
 - [docs/POOL_METRICS.md](docs/POOL_METRICS.md) - Pool metrics and monitoring
-- [docs/MIGRATION_FROM_TIBERIUS.md](docs/MIGRATION_FROM_TIBERIUS.md) - Migration guide
 - [docs/TLS.md](docs/TLS.md) - TLS configuration
 
 ### Crate-Specific Documentation

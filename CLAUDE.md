@@ -211,7 +211,7 @@ tokio = "1.48"           # >=1.48.0, <2.0.0
 tokio = "=1.48.0"        # Exact pin - blocks security updates
 ```
 
-See [`docs/DEPENDENCY_POLICY.md`](docs/DEPENDENCY_POLICY.md) for the full dependency management policy: when to add a new dep, when to take a bump, when to bump MSRV for a security fix, and how advisory ignores are managed.
+See the [Dependency Policy section of CONTRIBUTING.md](CONTRIBUTING.md#dependency-policy) for the full dependency management policy: when to add a new dep, when to take a bump, when to bump MSRV for a security fix, and how advisory ignores are managed.
 
 ## Process and Governance
 
@@ -232,7 +232,7 @@ This is an actively maintained project with documented processes for contributio
 - [`RELEASING.md`](RELEASING.md) — how the release-plz pipeline works, the rules that survive automation (irreversibility, never cancel mid-publish), recovery procedures, and post-release verification
 - [`STABILITY.md`](STABILITY.md) — API stability guarantees, MSRV Increase Policy (**authoritative: MSRV bumps are NOT breaking changes**), supported versions
 - [`SECURITY.md`](SECURITY.md) — security policy, threat model, supported versions for security fixes
-- [`docs/DEPENDENCY_POLICY.md`](docs/DEPENDENCY_POLICY.md) — when and how to take dep bumps, handle advisories, bump MSRV
+- [`CONTRIBUTING.md` § Dependency Policy](CONTRIBUTING.md#dependency-policy) — when and how to take dep bumps, handle advisories, bump MSRV
 
 ### How releases work (release-plz)
 
@@ -303,8 +303,8 @@ Primary references (in the repository):
 - `CONTRIBUTING.md` — Contribution guide, commit format, review process
 - `MAINTAINERS.md` — Maintainer list and contact channels
 - `CODE_OF_CONDUCT.md` — Rust Code of Conduct
-- `docs/DEPENDENCY_POLICY.md` — Dependency management policy
-- `docs/MIGRATION_FROM_TIBERIUS.md` — Migration guide from Tiberius
+- `CONTRIBUTING.md` (Dependency Policy section) — dependency management policy
+- `MIGRATION.md` — Migration guide from Tiberius
 - `docs/CONNECTION_STRINGS.md` — ADO.NET connection string keyword reference (full spec conformance)
 - `docs/ALWAYS_ENCRYPTED.md` — Always Encrypted user guide (key providers, transparent decryption)
 - `docs/STORED_PROCEDURES.md` — Stored procedure API guide
@@ -320,7 +320,7 @@ When making changes here, remember:
 
 1. **MSRV bumps are NOT breaking changes.** This is stated authoritatively in STABILITY.md § MSRV Increase Policy. If CONTRIBUTING.md ever contradicts this, STABILITY.md wins — and fix CONTRIBUTING.md as part of your change. The doc consistency linter (`scripts/check-doc-consistency.sh`) catches this contradiction automatically.
 
-2. **Prefer fixing over ignoring** security advisories. Bumping MSRV for a security fix is explicitly permitted. See the v0.7.0 precedent documented in `docs/DEPENDENCY_POLICY.md`.
+2. **Prefer fixing over ignoring** security advisories. Bumping MSRV for a security fix is explicitly permitted. See the v0.7.0 precedent documented in the Dependency Policy section of `CONTRIBUTING.md`.
 
 3. **Releases belong to release-plz.** Never run `cargo publish`, never create version tags, never hand-edit the workspace version or hand-write CHANGELOG release entries — the Release PR does all of that, and merging it (a human decision) is the release. `scripts/check-doc-consistency.sh` (a CI gate) catches version/MSRV drift.
 
