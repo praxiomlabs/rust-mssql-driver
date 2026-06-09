@@ -118,7 +118,7 @@ impl IntegratedAuth {
 
     /// Create a GSSAPI Name from the stored SPN.
     fn create_service_name(&self) -> Result<Name, AuthError> {
-        Name::new(self.spn.as_bytes(), Some(&GSS_NT_HOSTBASED_SERVICE))
+        Name::new(self.spn.as_bytes(), Some(GSS_NT_HOSTBASED_SERVICE))
             .map_err(|e| AuthError::Sspi(format!("Failed to create service name: {e}")))
     }
 
@@ -135,17 +135,16 @@ impl IntegratedAuth {
         let service_name = self.create_service_name()?;
 
         // Acquire default credentials from the Kerberos ticket cache
-        let mut mechs =
-            OidSet::new().map_err(|e| AuthError::Sspi(format!("Failed to create OID set: {e}")))?;
+        let mut mechs = OidSet::new();
 
         // Add SPNEGO mechanism for negotiation
         mechs
-            .add(&GSS_MECH_SPNEGO)
+            .add(GSS_MECH_SPNEGO)
             .map_err(|e| AuthError::Sspi(format!("Failed to add SPNEGO mechanism: {e}")))?;
 
         // Also add Kerberos as fallback
         mechs
-            .add(&GSS_MECH_KRB5)
+            .add(GSS_MECH_KRB5)
             .map_err(|e| AuthError::Sspi(format!("Failed to add Kerberos mechanism: {e}")))?;
 
         let cred = Cred::acquire(None, None, CredUsage::Initiate, Some(&mechs))
@@ -156,7 +155,7 @@ impl IntegratedAuth {
             Some(cred),
             service_name,
             CtxFlags::GSS_C_MUTUAL_FLAG | CtxFlags::GSS_C_REPLAY_FLAG,
-            Some(&GSS_MECH_SPNEGO),
+            Some(GSS_MECH_SPNEGO),
         );
 
         // Get initial token
