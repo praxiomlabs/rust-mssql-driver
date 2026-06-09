@@ -32,7 +32,7 @@ ignore = [
     { id = "RUSTSEC-2023-0071", reason = "RSA used locally for CEK unwrapping; no network-observable timing. No fix available; tracking RustCrypto/RSA#390" },
 
     # rand 0.8.5 unsoundness with custom logger calling rand::rng() during ThreadRng reseeding
-    # Case C per DEPENDENCY_POLICY.md: no stable fix available.
+    # Case C per CONTRIBUTING.md (Dependency Policy): no stable fix available.
     # Risk assessment:
     # - Requires `log` feature enabled on rand AND a custom logger that calls rand::rng()
     # - Our rand 0.8.5 does NOT enable the `log` feature

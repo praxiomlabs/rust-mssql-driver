@@ -24,7 +24,7 @@
 //!   `SQL_SERVER_COMPATIBILITY.md`, and `FILESTREAM.md` (Windows APIs).
 //! - Docs whose examples cannot build as-is in this harness: `ARCHITECTURE.md`
 //!   (design-illustrative fragments such as bare `impl` blocks) and
-//!   `MIGRATION_FROM_TIBERIUS.md` (interleaves tiberius code that does not
+//!   `MIGRATION.md` (interleaves tiberius code that does not
 //!   compile against this workspace).
 //!
 //! Crate READMEs: only `mssql-client` and `mssql-driver-pool` include their

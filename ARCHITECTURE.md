@@ -2002,7 +2002,7 @@ Features on `mssql-auth` only (not exposed via `mssql-client`):
 
 ### 8.4 Migration Guide from Tiberius
 
-See [docs/MIGRATION_FROM_TIBERIUS.md](docs/MIGRATION_FROM_TIBERIUS.md) for the
+See [MIGRATION.md](MIGRATION.md) for the
 full migration guide — connection setup, query execution, transactions,
 connection pooling, Azure SQL routing, error handling, type mappings, and a
 quick-reference cheat sheet.
