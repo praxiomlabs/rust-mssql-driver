@@ -186,9 +186,15 @@ jobs:
             exit 1
           fi
           echo "Fuzzing ${#targets[@]} targets: ${targets[*]}"
+          # Pin the gnu target: recent cargo-fuzz defaults to
+          # x86_64-unknown-linux-musl, which isn't installed on the runner
+          # (and would pull in musl static-linking issues for mssql-client's
+          # C deps). gnu is always present and is what these targets are
+          # validated against.
           for target in "${targets[@]}"; do
             echo "::group::fuzz $target"
-            cargo +nightly fuzz run "$target" -- -max_total_time=15 -rss_limit_mb=4096
+            cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$target" \
+              -- -max_total_time=15 -rss_limit_mb=4096
             echo "::endgroup::"
           done
 
