@@ -15,7 +15,11 @@ categories = ["database", "asynchronous"]
 features = ["otel", "json", "always-encrypted", "zeroize", "encoding", "tls", "chrono", "uuid", "decimal", "filestream"]
 
 [features]
-default = ["chrono", "uuid", "decimal", "encoding", "tls"]
+default = ["chrono", "uuid", "decimal", "encoding", "tls", "derive"]
+# Derive macros (`#[derive(FromRow, ToParams, Tvp)]`), re-exported from
+# `mssql-derive` so users need only the `mssql-client` dependency. On by
+# default; disable with `default-features = false` if you don't use them.
+derive = ["dep:mssql-derive"]
 # Type support features — forwarded to mssql-types
 chrono = ["mssql-types/chrono", "dep:chrono"]
 uuid = ["mssql-types/uuid", "dep:uuid"]
@@ -57,6 +61,7 @@ mssql-tls = { workspace = true, optional = true }
 mssql-codec = { workspace = true }
 mssql-types = { workspace = true }
 mssql-auth = { workspace = true }
+mssql-derive = { workspace = true, optional = true }
 bytes = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
@@ -82,7 +87,6 @@ tracing-opentelemetry = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
-mssql-derive = { workspace = true }
 trybuild = { workspace = true }
 # Note: mssql-driver-pool removed to break circular dev-dependency.
 # Pool-dependent tests are in mssql-testing crate.
@@ -134,10 +138,10 @@ name = "client"
 harness = false
 
 [package.metadata.cargo-machete]
-# tokio-test and mssql-derive are dev-dependencies for tests
+# tokio-test is a dev-dependency for tests
 # opentelemetry_sdk and tracing-opentelemetry are behind the otel feature flag
-# mssql-tls is behind the tls feature flag
-ignored = ["tokio-test", "mssql-derive", "opentelemetry_sdk", "tracing-opentelemetry", "mssql-tls"]
+# mssql-tls is behind the tls feature flag; mssql-derive behind the derive feature flag
+ignored = ["tokio-test", "opentelemetry_sdk", "tracing-opentelemetry", "mssql-tls", "mssql-derive"]
 
 [lints]
 workspace = true

@@ -1,5 +1,13 @@
 //! Prepared statement caching with LRU eviction.
 //!
+//! **Status: implemented but not yet wired into the query path.** Queries
+//! currently go through `sp_executesql` (the server still reuses plans), so
+//! this cache is constructed but never consulted; its types are crate-private
+//! until it is wired. The implementation is kept ready for that integration —
+//! hence the `dead_code` allowance below. See LIMITATIONS.md § Prepared
+//! Statement Cache.
+#![allow(dead_code)]
+//!
 //! This module provides automatic caching of prepared statements to improve performance
 //! for repeated query execution. The cache uses an LRU (Least Recently Used) eviction
 //! policy to manage memory and server-side resources.

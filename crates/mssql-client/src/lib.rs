@@ -38,7 +38,10 @@ pub mod procedure;
 pub mod query;
 pub mod row;
 pub mod state;
-pub mod statement_cache;
+// Not yet wired into the query path (queries use sp_executesql); kept
+// crate-private until the cache is actually used, so the public API does not
+// expose types for an unshipped feature. Re-export when it lands.
+pub(crate) mod statement_cache;
 pub mod stream;
 pub mod to_params;
 pub mod transaction;
@@ -53,6 +56,52 @@ pub use cancel::CancelHandle;
 pub use client::Client;
 pub use config::{ApplicationIntent, Config, RedirectConfig, RetryPolicy, TimeoutConfig};
 pub use error::{Error, SharedIoError};
+// Sub-error types carried by `Error` variants and the `FromSql`/`ToSql` trait
+// return type. Re-exported so downstream crates can name them (e.g. match on
+// `Error::Type(e)`, or write `fn from_sql(..) -> Result<Self, TypeError>`)
+// without depending on the internal crates directly. `EncryptionError` is
+// intentionally NOT here: `Error` stringifies it (see `error.rs`) so key
+// material cannot leak, and it appears in no other public signature.
+pub use mssql_auth::AuthError;
+pub use mssql_codec::CodecError;
+#[cfg(feature = "tls")]
+pub use mssql_tls::TlsError;
+pub use mssql_types::TypeError;
+pub use tds_protocol::ProtocolError;
+
+// TLS configuration: re-export so the `Config::tls` field is usable (custom
+// root certificates, client auth) without a direct `mssql-tls` dependency.
+// `CertificateDer` is needed to add a root certificate.
+#[cfg(feature = "tls")]
+pub use mssql_tls::{CertificateDer, TlsConfig};
+
+// `KeyStoreProvider` extension trait: users implement it for custom Always
+// Encrypted key stores (per the encryption-module docs) without a direct
+// `mssql-auth` dependency.
+#[cfg(feature = "always-encrypted")]
+pub use mssql_auth::KeyStoreProvider;
+
+// `Collation` appears on `Column::collation` and the `with_collation` builders
+// (Column, BulkColumn); re-export so those are usable without a direct
+// `tds-protocol` dependency.
+pub use tds_protocol::token::Collation;
+
+// Derive macros, re-exported under the `derive` feature so users need only a
+// single `mssql-client` dependency (the macros' generated code resolves all
+// its paths through `mssql_client`, including `__private` below). The macro
+// names intentionally match the trait names — they live in the macro
+// namespace, so `#[derive(FromRow)]` and `impl FromRow` coexist (as with
+// serde's `Serialize`).
+#[cfg(feature = "derive")]
+pub use mssql_derive::{FromRow, ToParams, Tvp};
+
+/// Items the derive macros' generated code references. Not public API: hidden
+/// from docs and exempt from stability guarantees. Centralizing them here
+/// keeps the proc-macro crate decoupled from internal restructuring.
+#[doc(hidden)]
+pub mod __private {
+    pub use mssql_types::{ToSql, TypeError};
+}
 
 // Re-export TDS version for configuration
 pub use from_row::{FromRow, MapRows, RowIteratorExt};
@@ -73,7 +122,6 @@ pub use row::{Column, Row};
 pub use state::{
     Connected, ConnectionState, Disconnected, InTransaction, ProtocolState, Ready, Streaming,
 };
-pub use statement_cache::{PreparedStatement, StatementCache, StatementCacheConfig};
 
 /// Internal entry points for the fuzzing harness in `fuzz/`.
 ///
@@ -239,9 +287,10 @@ mod auto_trait_tests {
         assert_sync::<Column>();
     }
 
-    // --- Statement cache ---
+    // --- Statement cache (crate-private until wired) ---
     #[test]
     fn statement_cache_is_send_sync() {
+        use crate::statement_cache::StatementCache;
         assert_send::<StatementCache>();
         assert_sync::<StatementCache>();
     }
