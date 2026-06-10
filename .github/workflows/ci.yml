@@ -302,6 +302,11 @@ jobs:
       # downstream crates failed to resolve the just-bumped, not-yet-published
       # first-party versions (the cause of the v0.11.1 Release PR CI failure).
       - name: Workspace publish dry-run
+        # rust-toolchain.toml pins 1.88, but `cargo publish --workspace` is stable
+        # only on cargo >= 1.90. Override to the installed stable for this step
+        # (this is packaging validation, not an MSRV check — the msrv job covers 1.88).
+        env:
+          RUSTUP_TOOLCHAIN: stable
         run: cargo publish --workspace --dry-run --no-verify --exclude mssql-testing
 
   hygiene:
