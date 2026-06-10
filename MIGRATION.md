@@ -10,7 +10,7 @@ This guide helps you migrate from [tiberius](https://github.com/prisma/tiberius)
 | Type-state | No | Yes (compile-time safety) |
 | Connection pooling | External (bb8/deadpool) | Built-in |
 | TDS 8.0 strict | Not supported | Yes |
-| Prepared statements | Manual | Auto-cached LRU |
+| Prepared statements | Manual | `sp_executesql` (client-side cache planned) |
 | Azure redirects | Manual handling | Automatic |
 | Result streaming | Iterator | Stream with collect |
 | Transaction safety | Runtime checks | Compile-time checks |
@@ -378,10 +378,11 @@ for user_id in user_ids {
 ### rust-mssql-driver
 
 ```rust
-// Automatic LRU caching
+// Same model as Tiberius today: each parameterized execution goes through
+// sp_executesql. SQL Server's server-side plan cache reuses the plan across
+// calls; client-side handle caching (sp_prepare/sp_execute) is planned but
+// not yet wired (see LIMITATIONS.md).
 for user_id in user_ids {
-    // First call: sp_prepare + sp_execute
-    // Subsequent calls: sp_execute only (cache hit)
     let mut stream = client.query(
         "SELECT * FROM users WHERE id = @p1",
         &[&user_id]

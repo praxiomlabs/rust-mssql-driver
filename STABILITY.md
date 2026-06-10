@@ -46,7 +46,7 @@ The following APIs are considered stable and covered by semver guarantees:
 | `Client::close()` | Stable |
 | `Client::begin_transaction()` | Stable |
 | `Config::from_connection_string()` | Stable |
-| `Config::builder()` | Stable |
+| `Config::new()` + `with_*` builders | Stable |
 | `Row::get()` | Stable |
 | `Row::try_get()` | Stable |
 | `Transaction::commit()` | Stable |
@@ -120,9 +120,8 @@ APIs behind these feature flags depend on platform-specific libraries and may ha
 
 ### Unstable Functions
 
-| API | Reason |
-|-----|--------|
-| `Client::with_raw_connection()` | Low-level access, may change |
+None currently. APIs considered unstable will be listed here with the
+reason; expect additions as low-level access points are exposed.
 
 ## Deprecation Policy
 
@@ -141,12 +140,14 @@ When an API is deprecated:
 
 ### Example Deprecation
 
+A hypothetical illustration of the format:
+
 ```rust
 #[deprecated(
     since = "0.2.0",
-    note = "Use `Config::builder()` instead. Will be removed in 0.4.0."
+    note = "Use `connect_with_config()` instead. Will be removed in 0.4.0."
 )]
-pub fn Config::new() -> Config { ... }
+pub async fn connect_legacy(/* ... */) { /* ... */ }
 ```
 
 ## Minimum Supported Rust Version (MSRV)
@@ -231,7 +232,9 @@ We take backwards compatibility seriously and will work to resolve issues prompt
 | 2019 | Full (TDS 7.4) |
 | 2017 | Full (TDS 7.4) |
 | 2016 | Full (TDS 7.4) |
-| 2014 and earlier | Not supported |
+| 2012 / 2014 | Supported (TDS 7.4) |
+| 2008 / 2008 R2 | Legacy (TDS 7.3; usually needs `Encrypt=no_tls`, see LIMITATIONS.md) |
+| 2005 and earlier | Not supported |
 | Azure SQL Database | Full |
 | Azure SQL Managed Instance | Full |
 

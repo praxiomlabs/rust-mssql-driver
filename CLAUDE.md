@@ -42,7 +42,7 @@ Refer to `ARCHITECTURE.md` (v1.2.0) for complete details. Critical decisions:
 Always Encrypted is fully implemented via the `always-encrypted` feature with production-ready key providers:
 1. **`InMemoryKeyStore`** - For development/testing
 2. **`AzureKeyVaultProvider`** - For Azure Key Vault (`azure-identity` feature)
-3. **`WindowsCertStoreProvider`** - For Windows Certificate Store (`sspi-auth` feature, Windows only)
+3. **`WindowsCertStoreProvider`** - For Windows Certificate Store (`windows-certstore` feature, Windows only)
 4. Implement the `KeyStoreProvider` trait for custom key storage
 5. **Do NOT use ENCRYPTBYKEY** - it does not provide the same security guarantees
 
@@ -131,6 +131,11 @@ impl Client<Ready> {
 ```
 
 ### Prepared Statement Lifecycle
+
+**Status: designed, not wired.** The LRU cache exists in
+`mssql-client/src/statement_cache.rs` but no query path consults it — every
+parameterized query uses `sp_executesql` (server-side plan cache still gives
+plan reuse). The intended design when wiring lands:
 
 1. Hash SQL → check LRU cache
 2. Cache miss → `sp_prepare` → store handle
@@ -282,8 +287,8 @@ Key differences for migrators:
 | `Client::connect()` | `Client::connect()` (type-state) |
 | External pooling (bb8) | Built-in `Pool` |
 | Runtime agnostic | Tokio-only |
-| `QueryResult` iterator | Streaming `RowStream` |
-| Manual prepared | Auto-cached prepared statements |
+| `QueryResult` iterator | `RowStream` (lazy decode; response buffered) |
+| Manual prepared | `sp_executesql` (client cache planned) |
 | Manual Azure redirect | Automatic redirect handling |
 
 ## Commit Standards

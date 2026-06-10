@@ -23,10 +23,11 @@ Maintainers are responsible for:
    [Security Advisory](https://github.com/praxiomlabs/rust-mssql-driver/security/advisories/new)
    channel rather than discussing them publicly.
 
-3. **Releases** — Following [RELEASING.md](RELEASING.md) to cut new versions
-   when the dev branch has accumulated meaningful changes. Maintainers must
-   ensure all Cardinal Rules in RELEASING.md are satisfied before pushing a
-   release tag.
+3. **Releases** — Releases are automated by release-plz: merging the
+   Release PR it maintains *is* the release (publish, tag, GitHub Release).
+   Maintainers must ensure all Cardinal Rules in
+   [RELEASING.md](RELEASING.md) are satisfied before merging a Release PR,
+   and never publish or tag by hand.
 
 4. **Stewardship** — Keeping the project's documented policies (STABILITY.md,
    SECURITY.md, CODE_OF_CONDUCT.md, this file) honest and up to date. When a
