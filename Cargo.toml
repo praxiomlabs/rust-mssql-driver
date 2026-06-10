@@ -26,12 +26,14 @@ mssql-types = { version = "0.11.0", path = "crates/mssql-types" }
 mssql-auth = { version = "0.11.0", path = "crates/mssql-auth" }
 mssql-driver-pool = { version = "0.11.0", path = "crates/mssql-pool" }
 mssql-client = { version = "0.11.0", path = "crates/mssql-client" }
-# Path-only (no version): mssql-derive is consumed solely as a dev-dependency
-# (mssql-client's tests). Cargo strips versionless path dev-deps from published
-# manifests, which breaks the publish-order cycle that blocked the v0.11.0
-# release: a versioned dev-dep made packaging mssql-client require
-# mssql-derive@0.11.0 to already exist on crates.io.
-mssql-derive = { path = "crates/mssql-derive" }
+# Versioned: mssql-derive is now an optional NORMAL dependency of mssql-client
+# (the `derive` feature re-exports its macros), so it must carry a version to
+# be packaged into mssql-client's published manifest, and release-plz publishes
+# it before mssql-client (a simple linear order — mssql-derive only depends on
+# proc-macro2/quote/syn, so there is no cycle). The v0.11.0 incident this list
+# guards against was a versioned *dev*-dependency; the publish-invariants check
+# only flags dev/build-deps, which this is not.
+mssql-derive = { version = "0.11.0", path = "crates/mssql-derive" }
 # Path-only for the same reason as mssql-derive: never published
 # (publish = false), so a version field can only drift (it was stuck at 0.10.0
 # while the crate itself moved with the workspace).

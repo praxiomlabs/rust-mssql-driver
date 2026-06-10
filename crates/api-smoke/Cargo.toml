@@ -13,6 +13,7 @@ name = "api-smoke"
 version.workspace = true
 edition = "2024"
 publish = false
+license.workspace = true
 
 [dependencies]
 mssql-client = { workspace = true, features = ["derive", "always-encrypted"] }
