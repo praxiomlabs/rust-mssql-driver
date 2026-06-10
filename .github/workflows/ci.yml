@@ -21,6 +21,12 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  # Trim debuginfo in CI builds: ~10% faster compile and ~39% smaller target dir,
+  # which shrinks rust-cache entries and compounds the save-if cache fix. line-tables
+  # keeps file/line backtraces. Set via env (not Cargo.toml) so local debugging keeps
+  # full debuginfo.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
 jobs:
   test:
