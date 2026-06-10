@@ -9,6 +9,11 @@ repository.workspace = true
 keywords = ["sql-server", "types", "conversion"]
 categories = ["database"]
 
+[package.metadata.docs.rs]
+# Without this, docs.rs builds default features only, hiding non-default public
+# API (json, encoding). All features build on docs.rs (Linux), so document all.
+all-features = true
+
 [features]
 default = ["chrono", "uuid", "decimal"]
 chrono = ["dep:chrono"]

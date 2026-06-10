@@ -9,6 +9,11 @@ repository.workspace = true
 keywords = ["sql-server", "mssql", "database", "async", "tokio"]
 categories = ["database", "asynchronous"]
 
+[package.metadata.docs.rs]
+# docs.rs builds on Linux x86_64. Excluded: sspi-auth (Windows-only) and
+# integrated-auth (libgssapi system library not guaranteed on docs.rs).
+features = ["otel", "json", "always-encrypted", "zeroize", "encoding", "tls", "chrono", "uuid", "decimal", "filestream"]
+
 [features]
 default = ["chrono", "uuid", "decimal", "encoding", "tls"]
 # Type support features — forwarded to mssql-types

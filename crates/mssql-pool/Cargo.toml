@@ -9,6 +9,11 @@ repository.workspace = true
 keywords = ["sql-server", "pool", "connection", "async"]
 categories = ["database", "asynchronous"]
 
+[package.metadata.docs.rs]
+# docs.rs builds on Linux x86_64. Excluded: sspi-auth (Windows-only) and
+# integrated-auth (libgssapi system library not guaranteed on docs.rs).
+features = ["otel", "filestream"]
+
 [features]
 default = []
 # Integrated authentication (Kerberos/SPNEGO) - Linux/macOS
