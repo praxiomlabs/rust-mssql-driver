@@ -61,7 +61,103 @@ async fn test_pool_create_and_close() {
     assert_eq!(status.max, 5);
     assert_eq!(status.in_use, 0);
 
+    // Warm the pool so there are idle connections to drain.
+    {
+        let _c1 = pool.get().await.expect("checkout 1");
+        let _c2 = pool.get().await.expect("checkout 2");
+    } // returned to idle here
+    assert!(pool.status().available > 0, "pool should have idle conns");
+
     pool.close().await;
+    assert!(pool.is_closed());
+
+    // close() must actually drain the idle connections, not just flip a flag.
+    assert_eq!(
+        pool.status().available,
+        0,
+        "close() must drain idle connections"
+    );
+
+    // And new checkouts must be refused.
+    assert!(
+        matches!(pool.get().await, Err(PoolError::PoolClosed)),
+        "checkout after close must fail with PoolClosed"
+    );
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_pool_close_discards_in_use_connection_on_return() {
+    let client_config = get_test_config().expect("SQL Server config required");
+
+    let pool = Pool::builder()
+        .client_config(client_config)
+        .max_connections(5)
+        .build()
+        .await
+        .expect("Failed to create pool");
+
+    // Hold a connection across close(), then return it.
+    let conn = pool.get().await.expect("checkout");
+    pool.close().await;
+    assert_eq!(pool.status().in_use, 1, "still in use during close");
+
+    drop(conn); // returned after close — must be discarded, not re-pooled
+
+    let status = pool.status();
+    assert_eq!(status.in_use, 0, "in_use decremented on return");
+    assert_eq!(
+        status.available, 0,
+        "connection returned after close must be discarded, not idle"
+    );
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_pool_close_under_concurrent_churn_does_not_deadlock() {
+    // Robustness smoke test, NOT a race-leak detector. The return-vs-close
+    // leak window is a few microseconds inside `Drop`, too narrow to hit
+    // reliably from a test — verified empirically: an `available == 0`
+    // assertion here passes even against the pre-fix (racy) code, so it would
+    // be false confidence. This asserts only liveness: `close()` racing many
+    // concurrent checkouts/returns must not deadlock or panic. The leak
+    // property is guaranteed instead by lock ordering — `close()` sets the
+    // closed flag and drains the idle queue under the same lock that `Drop`
+    // re-checks before re-pooling — and the non-racy path is covered by the
+    // two tests above.
+    let client_config = get_test_config().expect("SQL Server config required");
+
+    let pool = Arc::new(
+        Pool::builder()
+            .client_config(client_config)
+            .max_connections(4)
+            .build()
+            .await
+            .expect("Failed to create pool"),
+    );
+
+    let mut handles = Vec::new();
+    for _ in 0..8 {
+        let pool = pool.clone();
+        handles.push(tokio::spawn(async move {
+            for _ in 0..50 {
+                match pool.get().await {
+                    Ok(conn) => {
+                        tokio::task::yield_now().await;
+                        drop(conn);
+                    }
+                    Err(_) => break, // PoolClosed once close() lands
+                }
+            }
+        }));
+    }
+
+    tokio::task::yield_now().await;
+    pool.close().await;
+
+    for handle in handles {
+        handle.await.expect("task panicked or deadlocked");
+    }
     assert!(pool.is_closed());
 }
 

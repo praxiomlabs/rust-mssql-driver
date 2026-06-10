@@ -812,10 +812,38 @@ impl Pool {
         }
     }
 
-    /// Close the pool, dropping all connections.
+    /// Close the pool.
+    ///
+    /// Marks the pool closed (further [`Pool::get`] calls return
+    /// [`PoolError::PoolClosed`]), drains and closes all idle connections
+    /// immediately, and signals the idle reaper to stop (the reaper polls the
+    /// closed flag and exits on its next tick, so it may linger briefly).
+    /// Connections currently checked out are closed when their handles are
+    /// dropped rather than returned to the pool, so the pool holds no
+    /// connections once all outstanding handles are gone. Idempotent.
     pub async fn close(&self) {
-        self.inner.closed.store(true, Ordering::Release);
-        tracing::info!("connection pool closed");
+        // Set the closed flag *and* drain the idle queue while holding the
+        // idle lock, so this is atomic with respect to `Drop for
+        // PooledConnection`, which re-checks the flag under the same lock
+        // before re-pooling. Without this serialization a connection returning
+        // concurrently with `close()` could load `closed == false`, then get
+        // pushed into the idle queue after the drain — leaking past close.
+        let drained = {
+            let mut idle = self.inner.idle_connections.lock();
+            self.inner.closed.store(true, Ordering::Release);
+            std::mem::take(&mut *idle)
+        };
+        let closed = drained.len() as u64;
+        drop(drained); // closes the TCP sockets
+
+        if closed > 0 {
+            self.inner.metrics.lock().connections_closed += closed;
+            for _ in 0..closed {
+                self.inner.otel_metrics.record_connection_closed();
+            }
+        }
+        self.inner.record_pool_status();
+        tracing::info!(closed_idle = closed, "connection pool closed");
     }
 
     /// Check if the pool is closed.
@@ -1183,6 +1211,20 @@ impl Drop for PooledConnection {
         self.pool.in_use_count.fetch_sub(1, Ordering::Relaxed);
 
         if let Some(mut client) = self.client.take() {
+            // Fast path: if the pool is already closed, discard rather than
+            // returning to the idle queue. This is an opportunistic check —
+            // the authoritative one happens under the idle lock at the
+            // push-back site below, which closes the race against `close()`.
+            if self.pool.closed.load(Ordering::Acquire) {
+                tracing::trace!(
+                    connection_id = self.metadata.id,
+                    "pool closed - discarding returned connection"
+                );
+                self.pool.otel_metrics.record_connection_closed();
+                self.pool.record_pool_status();
+                return;
+            }
+
             // Check if a request was in-flight (sent but response not fully read).
             // This happens when a query future is dropped mid-execution (e.g.,
             // via tokio::select! or a timeout). The TCP buffer has unread response
@@ -1250,7 +1292,26 @@ impl Drop for PooledConnection {
                 needs_health_check,
             };
 
-            self.pool.idle_connections.lock().push_back(entry);
+            // Re-check the closed flag while holding the idle lock and push
+            // atomically. `close()` sets the flag under this same lock before
+            // draining, so either it runs first (we see closed and discard) or
+            // we push first (its drain then removes this entry). Either way the
+            // connection cannot linger in the idle queue past `close()`.
+            {
+                let mut idle = self.pool.idle_connections.lock();
+                if self.pool.closed.load(Ordering::Acquire) {
+                    drop(idle);
+                    drop(entry); // closes the socket
+                    tracing::trace!(
+                        connection_id = self.metadata.id,
+                        "pool closed during return - discarding connection"
+                    );
+                    self.pool.otel_metrics.record_connection_closed();
+                    self.pool.record_pool_status();
+                    return;
+                }
+                idle.push_back(entry);
+            }
             self.pool.record_pool_status();
         } else {
             tracing::trace!(
