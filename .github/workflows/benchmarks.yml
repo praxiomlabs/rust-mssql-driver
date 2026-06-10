@@ -44,6 +44,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libkrb5-dev
 
       - name: Run benchmarks
+        env:
+          # The criterion run phase dominates this job (~600s of ~780s: 56 benches
+          # at criterion's default ~3s warm-up + ~5s measurement each). On PRs we
+          # only need a regression *signal* against the main baseline, so use
+          # reduced sampling (~2.5s/bench). Pushes to main keep full-fidelity
+          # timing because that run stores the baseline the comparison uses.
+          CRITERION_ARGS: ${{ github.event_name == 'pull_request' && '--warm-up-time 1 --measurement-time 1 --sample-size 10' || '' }}
         run: |
           # Run only criterion benchmark targets with bencher output format
           # Using explicit --bench flags avoids running lib tests which don't understand criterion flags
@@ -52,7 +59,7 @@ jobs:
             -p tds-protocol --bench protocol \
             -p mssql-types --bench types \
             -p mssql-client --bench client \
-            -- --output-format bencher 2>&1 | tee benchmark-output.txt
+            -- --output-format bencher $CRITERION_ARGS 2>&1 | tee benchmark-output.txt
 
       # Clean up any changes to Cargo.lock before switching branches
       # The benchmark action needs a clean working directory to switch to gh-pages
