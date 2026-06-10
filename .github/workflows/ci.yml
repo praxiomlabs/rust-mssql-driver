@@ -44,6 +44,8 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@nextest
       - uses: ./.github/actions/setup-linux-deps
       - name: Run tests
@@ -60,6 +62,11 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Only write caches from main. PRs restore main's cache but never save
+          # their own ~4 GB of per-PR entries, which were pushing total usage over
+          # the 10 GB Actions limit and LRU-evicting main's caches (cache thrashing).
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/setup-linux-deps
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -85,6 +92,11 @@ jobs:
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Only write caches from main. PRs restore main's cache but never save
+          # their own ~4 GB of per-PR entries, which were pushing total usage over
+          # the 10 GB Actions limit and LRU-evicting main's caches (cache thrashing).
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/setup-linux-deps
       - name: Check MSRV
         run: cargo check --all-features
@@ -96,6 +108,11 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Only write caches from main. PRs restore main's cache but never save
+          # their own ~4 GB of per-PR entries, which were pushing total usage over
+          # the 10 GB Actions limit and LRU-evicting main's caches (cache thrashing).
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/setup-linux-deps
       - name: Build documentation
         run: cargo doc --all-features --no-deps
@@ -109,6 +126,11 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Only write caches from main. PRs restore main's cache but never save
+          # their own ~4 GB of per-PR entries, which were pushing total usage over
+          # the 10 GB Actions limit and LRU-evicting main's caches (cache thrashing).
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/setup-linux-deps
       - name: Build examples
         run: cargo build --examples --all-features
@@ -166,6 +188,8 @@ jobs:
         with:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: ./.github/actions/setup-linux-deps
       - name: Generate coverage report
@@ -198,6 +222,8 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@nextest
       - uses: ./.github/actions/setup-linux-deps
       - name: Wait for SQL Server
@@ -226,6 +252,11 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Only write caches from main. PRs restore main's cache but never save
+          # their own ~4 GB of per-PR entries, which were pushing total usage over
+          # the 10 GB Actions limit and LRU-evicting main's caches (cache thrashing).
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/setup-linux-deps
       - name: Install cargo-hack
         run: cargo install cargo-hack --locked
@@ -253,6 +284,11 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Only write caches from main. PRs restore main's cache but never save
+          # their own ~4 GB of per-PR entries, which were pushing total usage over
+          # the 10 GB Actions limit and LRU-evicting main's caches (cache thrashing).
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/setup-linux-deps
       - name: Dry-run package all publishable crates
         run: |
