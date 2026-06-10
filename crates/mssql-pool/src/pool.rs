@@ -812,10 +812,34 @@ impl Pool {
         }
     }
 
-    /// Close the pool, dropping all connections.
+    /// Close the pool.
+    ///
+    /// Marks the pool closed (further [`Pool::get`] calls return
+    /// [`PoolError::PoolClosed`]), drains and closes all idle connections
+    /// immediately, and stops the idle reaper. Connections currently checked
+    /// out are closed when their handles are dropped rather than returned to
+    /// the pool, so the pool holds no connections once all outstanding
+    /// handles are gone. Idempotent.
     pub async fn close(&self) {
         self.inner.closed.store(true, Ordering::Release);
-        tracing::info!("connection pool closed");
+
+        // Drain idle connections and drop them, closing their sockets. New
+        // checkouts already fail with `PoolError::PoolClosed` (see `get`), and
+        // connections currently in use are closed when returned rather than
+        // re-pooled (see `Drop for PooledConnection`), so after this the pool
+        // holds nothing once outstanding handles are dropped.
+        let drained = std::mem::take(&mut *self.inner.idle_connections.lock());
+        let closed = drained.len() as u64;
+        drop(drained); // closes the TCP sockets
+
+        if closed > 0 {
+            self.inner.metrics.lock().connections_closed += closed;
+            for _ in 0..closed {
+                self.inner.otel_metrics.record_connection_closed();
+            }
+        }
+        self.inner.record_pool_status();
+        tracing::info!(closed_idle = closed, "connection pool closed");
     }
 
     /// Check if the pool is closed.
@@ -1183,6 +1207,19 @@ impl Drop for PooledConnection {
         self.pool.in_use_count.fetch_sub(1, Ordering::Relaxed);
 
         if let Some(mut client) = self.client.take() {
+            // If the pool has been closed, discard the connection instead of
+            // returning it to the idle queue — otherwise `close()` could not
+            // actually empty the pool while connections were in use.
+            if self.pool.closed.load(Ordering::Acquire) {
+                tracing::trace!(
+                    connection_id = self.metadata.id,
+                    "pool closed - discarding returned connection"
+                );
+                self.pool.otel_metrics.record_connection_closed();
+                self.pool.record_pool_status();
+                return;
+            }
+
             // Check if a request was in-flight (sent but response not fully read).
             // This happens when a query future is dropped mid-execution (e.g.,
             // via tokio::select! or a timeout). The TCP buffer has unread response

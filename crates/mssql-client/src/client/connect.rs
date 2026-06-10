@@ -313,11 +313,9 @@ impl Client<Disconnected> {
     async fn connect_tds_8(config: &Config, tcp_stream: TcpStream) -> Result<Client<Ready>> {
         tracing::debug!("using TDS 8.0 strict mode (TLS first)");
 
-        // Build TLS configuration with TDS 8.0 ALPN protocol
-        let tls_config = TlsConfig::new()
-            .strict_mode(true)
-            .trust_server_certificate(config.trust_server_certificate)
-            .with_alpn_protocols(vec![b"tds/8.0".to_vec()]);
+        // Build TLS configuration from the user's `config.tls` plus the
+        // TDS 8.0 strict-mode requirements (see `connection_tls_config`).
+        let tls_config = connection_tls_config(config, true);
 
         let tls_connector = TlsConnector::new(tls_config)?;
 
@@ -536,10 +534,11 @@ impl Client<Disconnected> {
         let use_tls = negotiated_encryption != EncryptionLevel::NotSupported;
 
         if use_tls {
-            // Upgrade to TLS with PreLogin wrapping (TDS 7.x style)
-            // In TDS 7.x, the TLS handshake is wrapped inside TDS PreLogin packets
-            let tls_config =
-                TlsConfig::new().trust_server_certificate(config.trust_server_certificate);
+            // Upgrade to TLS with PreLogin wrapping (TDS 7.x style).
+            // In TDS 7.x, the TLS handshake is wrapped inside TDS PreLogin
+            // packets. Honor the user's `config.tls` (custom root certs,
+            // client auth) without the TDS 8.0 strict ALPN.
+            let tls_config = connection_tls_config(config, false);
 
             let tls_connector = TlsConnector::new(tls_config)?;
 
@@ -1279,5 +1278,91 @@ impl Client<Disconnected> {
                 }
             }
         }
+    }
+}
+
+/// Build the TLS configuration for an outbound connection.
+///
+/// Starts from the user's [`Config::tls`] so custom root certificates, client
+/// auth, and protocol-version bounds are honored, then layers the
+/// connection-specific requirements. `trust_server_certificate` is taken from
+/// the authoritative top-level [`Config`] field: both the builder and the
+/// connection-string parser set it, but the parser does not mirror it into
+/// `config.tls`, so reading it here is what keeps `TrustServerCertificate=...`
+/// connection strings working.
+///
+/// `strict` selects TDS 8.0 strict mode (TLS-first) and adds the `tds/8.0`
+/// ALPN protocol; TDS 7.x leaves both off (its TLS is wrapped in PreLogin).
+#[cfg(feature = "tls")]
+fn connection_tls_config(config: &Config, strict: bool) -> TlsConfig {
+    let tls = config
+        .tls
+        .clone()
+        .trust_server_certificate(config.trust_server_certificate);
+    if strict {
+        tls.strict_mode(true)
+            .with_alpn_protocols(vec![b"tds/8.0".to_vec()])
+    } else {
+        tls
+    }
+}
+
+#[cfg(all(test, feature = "tls"))]
+mod tls_config_tests {
+    use super::*;
+    use mssql_tls::CertificateDer;
+
+    fn config_with_root(cert: Vec<u8>) -> Config {
+        let mut config = Config::new();
+        config.tls = config
+            .tls
+            .clone()
+            .add_root_certificate(CertificateDer::from(cert));
+        config
+    }
+
+    #[test]
+    fn custom_root_certificate_reaches_connector_config() {
+        // The bug: connect built a fresh TlsConfig and dropped config.tls,
+        // so a custom CA was unreachable. Assert it survives into the
+        // connection's TLS config, in both strict and non-strict paths.
+        let config = config_with_root(vec![0xCA; 32]);
+
+        for strict in [true, false] {
+            let tls = connection_tls_config(&config, strict);
+            assert_eq!(
+                tls.root_certificates.len(),
+                1,
+                "custom root must reach the connector (strict={strict})"
+            );
+            assert_eq!(tls.root_certificates[0].as_ref(), &[0xCA; 32][..]);
+        }
+    }
+
+    #[test]
+    fn trust_server_certificate_taken_from_top_level_field() {
+        // Mirrors the connection-string path, which sets the top-level field
+        // without updating config.tls.
+        let mut config = Config::new();
+        config.trust_server_certificate = true;
+        // config.tls still has the default (false) trust flag.
+        assert!(!config.tls.trust_server_certificate);
+
+        let tls = connection_tls_config(&config, false);
+        assert!(
+            tls.trust_server_certificate,
+            "top-level trust flag must win"
+        );
+    }
+
+    #[test]
+    fn strict_mode_adds_tds8_alpn() {
+        let config = Config::new();
+        let strict = connection_tls_config(&config, true);
+        assert!(strict.strict_mode);
+        assert!(strict.alpn_protocols.iter().any(|p| p == b"tds/8.0"));
+
+        let non_strict = connection_tls_config(&config, false);
+        assert!(!non_strict.strict_mode);
     }
 }

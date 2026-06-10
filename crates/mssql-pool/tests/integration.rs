@@ -61,8 +61,55 @@ async fn test_pool_create_and_close() {
     assert_eq!(status.max, 5);
     assert_eq!(status.in_use, 0);
 
+    // Warm the pool so there are idle connections to drain.
+    {
+        let _c1 = pool.get().await.expect("checkout 1");
+        let _c2 = pool.get().await.expect("checkout 2");
+    } // returned to idle here
+    assert!(pool.status().available > 0, "pool should have idle conns");
+
     pool.close().await;
     assert!(pool.is_closed());
+
+    // close() must actually drain the idle connections, not just flip a flag.
+    assert_eq!(
+        pool.status().available,
+        0,
+        "close() must drain idle connections"
+    );
+
+    // And new checkouts must be refused.
+    assert!(
+        matches!(pool.get().await, Err(PoolError::PoolClosed)),
+        "checkout after close must fail with PoolClosed"
+    );
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_pool_close_discards_in_use_connection_on_return() {
+    let client_config = get_test_config().expect("SQL Server config required");
+
+    let pool = Pool::builder()
+        .client_config(client_config)
+        .max_connections(5)
+        .build()
+        .await
+        .expect("Failed to create pool");
+
+    // Hold a connection across close(), then return it.
+    let conn = pool.get().await.expect("checkout");
+    pool.close().await;
+    assert_eq!(pool.status().in_use, 1, "still in use during close");
+
+    drop(conn); // returned after close — must be discarded, not re-pooled
+
+    let status = pool.status();
+    assert_eq!(status.in_use, 0, "in_use decremented on return");
+    assert_eq!(
+        status.available, 0,
+        "connection returned after close must be discarded, not idle"
+    );
 }
 
 #[tokio::test]
