@@ -114,6 +114,55 @@ async fn test_pool_close_discards_in_use_connection_on_return() {
 
 #[tokio::test]
 #[ignore = "Requires SQL Server"]
+async fn test_pool_close_under_concurrent_churn_does_not_deadlock() {
+    // Robustness smoke test, NOT a race-leak detector. The return-vs-close
+    // leak window is a few microseconds inside `Drop`, too narrow to hit
+    // reliably from a test — verified empirically: an `available == 0`
+    // assertion here passes even against the pre-fix (racy) code, so it would
+    // be false confidence. This asserts only liveness: `close()` racing many
+    // concurrent checkouts/returns must not deadlock or panic. The leak
+    // property is guaranteed instead by lock ordering — `close()` sets the
+    // closed flag and drains the idle queue under the same lock that `Drop`
+    // re-checks before re-pooling — and the non-racy path is covered by the
+    // two tests above.
+    let client_config = get_test_config().expect("SQL Server config required");
+
+    let pool = Arc::new(
+        Pool::builder()
+            .client_config(client_config)
+            .max_connections(4)
+            .build()
+            .await
+            .expect("Failed to create pool"),
+    );
+
+    let mut handles = Vec::new();
+    for _ in 0..8 {
+        let pool = pool.clone();
+        handles.push(tokio::spawn(async move {
+            for _ in 0..50 {
+                match pool.get().await {
+                    Ok(conn) => {
+                        tokio::task::yield_now().await;
+                        drop(conn);
+                    }
+                    Err(_) => break, // PoolClosed once close() lands
+                }
+            }
+        }));
+    }
+
+    tokio::task::yield_now().await;
+    pool.close().await;
+
+    for handle in handles {
+        handle.await.expect("task panicked or deadlocked");
+    }
+    assert!(pool.is_closed());
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
 async fn test_pool_with_otel_name() {
     // Exercises the OTel metric hooks end-to-end: create, warmup, checkout,
     // checkin, close. When built without the `otel` feature this calls the

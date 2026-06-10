@@ -1293,6 +1293,14 @@ impl Client<Disconnected> {
 ///
 /// `strict` selects TDS 8.0 strict mode (TLS-first) and adds the `tds/8.0`
 /// ALPN protocol; TDS 7.x leaves both off (its TLS is wrapped in PreLogin).
+///
+/// Note the asymmetry: root certificates and client auth come from
+/// `config.tls`, but `trust_server_certificate` is taken from the top-level
+/// field and overrides whatever `config.tls` holds. So setting *only*
+/// `config.tls = TlsConfig::new().trust_server_certificate(true)` while
+/// leaving the top-level field at its `false` default does not trust the
+/// server — set it via the connection string (`TrustServerCertificate=true`)
+/// or `Config::trust_server_certificate(true)`, which is the supported path.
 #[cfg(feature = "tls")]
 fn connection_tls_config(config: &Config, strict: bool) -> TlsConfig {
     let tls = config
