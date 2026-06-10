@@ -38,6 +38,8 @@ Desktop.ini
 .env.local
 .env.*.local
 *.pem
+# Exception: committed test-only CMK fixture (never a real key)
+!crates/mssql-auth/tests/fixtures/test_cmk_rsa2048.pem
 *.key
 *.crt
 *.p12

@@ -303,7 +303,7 @@ mod aead_tests {
 mod key_unwrap_tests {
     use mssql_auth::RsaKeyUnwrapper;
     use rsa::{Oaep, RsaPrivateKey, pkcs8::EncodePrivateKey};
-    use sha2::Sha256;
+    use sha1::Sha1;
 
     fn generate_test_key() -> RsaPrivateKey {
         let mut rng = rand::thread_rng();
@@ -319,7 +319,7 @@ mod key_unwrap_tests {
         // Encrypt a test CEK
         let test_cek = [0x42u8; 32];
         let public_key = key.to_public_key();
-        let padding = Oaep::new::<Sha256>();
+        let padding = Oaep::new::<Sha1>();
         let mut rng = rand::thread_rng();
         let ciphertext = public_key.encrypt(&mut rng, padding, &test_cek).unwrap();
 
@@ -346,7 +346,8 @@ mod key_unwrap_tests {
 mod key_store_tests {
     use mssql_auth::{CekCache, CekCacheKey, InMemoryKeyStore, KeyStoreProvider};
     use rsa::{Oaep, RsaPrivateKey, pkcs8::EncodePrivateKey};
-    use sha2::Sha256;
+    use sha1::Sha1;
+    use sha2::{Digest, Sha256};
     use std::time::Duration;
 
     fn generate_test_key_pem() -> String {
@@ -389,24 +390,18 @@ mod key_store_tests {
         let mut store = InMemoryKeyStore::new();
         store.add_key("TestKey", &pem).unwrap();
 
-        // Create encrypted CEK in SQL Server format
+        // Create encrypted CEK in the canonical signed envelope format
         let test_cek = [0x55u8; 32];
         let public_key = key.to_public_key();
-        let padding = Oaep::new::<Sha256>();
+        let padding = Oaep::new::<Sha1>();
         let ciphertext = public_key.encrypt(&mut rng, padding, &test_cek).unwrap();
 
-        // Create SQL Server format envelope
-        let key_path = "TestKey";
-        let key_path_utf16: Vec<u8> = key_path
-            .encode_utf16()
-            .flat_map(|c| c.to_le_bytes())
-            .collect();
-
-        let mut envelope = vec![0x01]; // version
-        envelope.extend_from_slice(&(key_path_utf16.len() as u16).to_le_bytes());
-        envelope.extend_from_slice(&key_path_utf16);
-        envelope.extend_from_slice(&(ciphertext.len() as u16).to_le_bytes());
-        envelope.extend_from_slice(&ciphertext);
+        let mut envelope = mssql_auth::cek_envelope::build_signed_portion("TestKey", &ciphertext);
+        let digest: [u8; 32] = Sha256::digest(&envelope).into();
+        let signature = key
+            .sign(rsa::Pkcs1v15Sign::new::<Sha256>(), &digest)
+            .unwrap();
+        envelope.extend_from_slice(&signature);
 
         // Decrypt
         let decrypted = store
@@ -477,9 +472,10 @@ mod key_store_tests {
 // slice of the pipeline end-to-end against a real server:
 //
 //   1. Generate an RSA-2048 keypair in the test.
-//   2. Wrap a random 32-byte CEK with RSA-OAEP-SHA256 and build the
-//      SQL Server envelope consumed by `RsaKeyUnwrapper::parse_encrypted_cek`:
-//      `0x01 || u16le(path_len) || utf16le(path) || u16le(cipher_len) || cipher`.
+//   2. Wrap a random 32-byte CEK with RSA-OAEP-SHA1 (what `RSA_OAEP` means in
+//      AE metadata) and build the canonical signed envelope
+//      (`mssql_auth::cek_envelope`): `0x01 || u16le(path_len)
+//      || u16le(cipher_len) || utf16le(path) || cipher || signature`.
 //   3. `CREATE COLUMN MASTER KEY`, `CREATE COLUMN ENCRYPTION KEY`, and a
 //      table with at least one encrypted column.
 //   4. Populate rows through the only server-allowed path without parameter
@@ -504,6 +500,7 @@ mod live_server {
     use mssql_client::{Client, Config, EncryptionConfig};
     use rand::RngCore;
     use rsa::{Oaep, RsaPrivateKey, pkcs8::EncodePrivateKey};
+    use sha1::Sha1;
     use sha2::Sha256;
 
     /// Key path we register both in SQL Server's CMK metadata and in our
@@ -555,22 +552,20 @@ mod live_server {
         s
     }
 
-    /// Build a SQL Server CEK envelope in the format `RsaKeyUnwrapper::parse_encrypted_cek`
-    /// expects: `0x01 || u16_le(path_len) || utf16le(path) || u16_le(cipher_len) || cipher`.
+    /// Build a canonical signed CEK envelope (see `mssql_auth::cek_envelope`),
+    /// exactly as standard provisioning tools (SSMS, .NET, JDBC) do.
     ///
-    /// `encrypted_cek` is the raw RSA-OAEP output.
-    fn build_cek_envelope(key_path: &str, encrypted_cek: &[u8]) -> Vec<u8> {
-        let path_utf16: Vec<u8> = key_path
-            .encode_utf16()
-            .flat_map(|c| c.to_le_bytes())
-            .collect();
-        let mut out = Vec::with_capacity(1 + 2 + path_utf16.len() + 2 + encrypted_cek.len());
-        out.push(0x01);
-        out.extend_from_slice(&(path_utf16.len() as u16).to_le_bytes());
-        out.extend_from_slice(&path_utf16);
-        out.extend_from_slice(&(encrypted_cek.len() as u16).to_le_bytes());
-        out.extend_from_slice(encrypted_cek);
-        out
+    /// `encrypted_cek` is the raw RSA-OAEP output; `cmk` signs the envelope.
+    fn build_cek_envelope(cmk: &RsaPrivateKey, key_path: &str, encrypted_cek: &[u8]) -> Vec<u8> {
+        use sha2::Digest;
+
+        let mut envelope = mssql_auth::cek_envelope::build_signed_portion(key_path, encrypted_cek);
+        let digest: [u8; 32] = Sha256::digest(&envelope).into();
+        let signature = cmk
+            .sign(rsa::Pkcs1v15Sign::new::<Sha256>(), &digest)
+            .expect("CMK signs envelope");
+        envelope.extend_from_slice(&signature);
+        envelope
     }
 
     /// Build an admin Config (no column encryption — used for DDL setup/teardown).
@@ -626,14 +621,15 @@ mod live_server {
         let cek_name = format!("AE_TestCEK_{suffix}");
         let table_name = format!("AE_TestTbl_{suffix}");
 
-        // Wrap the CEK with RSA-OAEP-SHA256 using the public half.
+        // Wrap the CEK with RSA-OAEP-SHA1 (what RSA_OAEP means in AE
+        // metadata) using the public half.
         let pub_key = rsa_private.to_public_key();
         let mut rng = rand::thread_rng();
-        let padding = Oaep::new::<Sha256>();
+        let padding = Oaep::new::<Sha1>();
         let rsa_ciphertext = pub_key
             .encrypt(&mut rng, padding, cek_bytes)
             .expect("rsa encrypt");
-        let envelope = build_cek_envelope(KEY_PATH, &rsa_ciphertext);
+        let envelope = build_cek_envelope(rsa_private, KEY_PATH, &rsa_ciphertext);
         let envelope_hex = hex_literal(&envelope);
 
         // CREATE COLUMN MASTER KEY

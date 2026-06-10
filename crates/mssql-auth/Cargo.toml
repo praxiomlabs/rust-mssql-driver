@@ -34,7 +34,7 @@ cert-auth = ["dep:azure_identity", "dep:azure_core", "dep:time", "dep:base64", "
 zeroize = ["dep:zeroize"]
 # Always Encrypted client-side encryption support
 # Provides AEAD_AES_256_CBC_HMAC_SHA256 encryption and RSA-OAEP key unwrapping
-always-encrypted = ["dep:aes", "dep:cbc", "dep:hmac", "dep:sha2", "dep:rsa", "dep:rand", "dep:parking_lot"]
+always-encrypted = ["dep:aes", "dep:cbc", "dep:hmac", "dep:sha1", "dep:sha2", "dep:rsa", "dep:rand", "dep:parking_lot"]
 # Azure Key Vault CMK provider for Always Encrypted
 # Requires always-encrypted feature and Azure authentication
 azure-keyvault = ["always-encrypted", "dep:azure_security_keyvault_keys", "dep:azure_identity", "dep:azure_core", "dep:url"]
@@ -73,6 +73,7 @@ zeroize = { version = "1.8", features = ["derive"], optional = true }
 aes = { version = "0.8", optional = true }
 cbc = { version = "0.1", features = ["std"], optional = true }
 hmac = { version = "0.12", optional = true }
+sha1 = { version = "0.10", optional = true }
 sha2 = { version = "0.10", optional = true }
 rsa = { version = "0.9", features = ["sha2"], optional = true }
 rand = { version = "0.8", optional = true }
