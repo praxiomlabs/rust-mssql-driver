@@ -243,8 +243,16 @@ jobs:
             sleep 2
           done
       - name: Run integration tests
-        # Run with all features to test full functionality
-        run: cargo nextest run --all-features
+        # Live tests are #[ignore]d, so the plain `nextest run` this job used
+        # to invoke ran zero of them while the SQL Server container idled.
+        # Run ONLY the ignored set here (non-ignored tests are covered by the
+        # Test matrix). Tests that need infrastructure CI lacks (Azure SQL,
+        # Azure identity, client certificates) are excluded explicitly; they
+        # still fail loudly when run locally without configuration.
+        run: >-
+          cargo nextest run --all-features --run-ignored ignored-only
+          --no-fail-fast
+          -E 'not (binary(azure_sql) or test(azure_identity_auth) or test(cert_auth))'
         env:
           MSSQL_HOST: localhost
           MSSQL_PORT: 1433
