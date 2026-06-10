@@ -1898,14 +1898,27 @@ impl EnvChange {
                 // These use binary format per MS-TDS spec:
                 // - Transaction tokens: transaction descriptor (8 bytes)
                 // - SqlCollation: collation info (5 bytes: LCID + sort flags)
-                let new_len = src.get_u8() as usize;
+                // The declared ENVCHANGE `length` can be shorter than this
+                // branch needs (e.g. covers only the type byte), so the
+                // length-prefix reads must be bounds-checked individually:
+                // `get_u8` on an empty buffer panics. Match the branch's
+                // existing graceful style — a missing prefix means empty.
+                let new_len = if src.has_remaining() {
+                    src.get_u8() as usize
+                } else {
+                    0
+                };
                 let new_value = if new_len > 0 && src.remaining() >= new_len {
                     EnvChangeValue::Binary(src.copy_to_bytes(new_len))
                 } else {
                     EnvChangeValue::Binary(Bytes::new())
                 };
 
-                let old_len = src.get_u8() as usize;
+                let old_len = if src.has_remaining() {
+                    src.get_u8() as usize
+                } else {
+                    0
+                };
                 let old_value = if old_len > 0 && src.remaining() >= old_len {
                     EnvChangeValue::Binary(src.copy_to_bytes(old_len))
                 } else {
@@ -2563,6 +2576,18 @@ mod tests {
         assert_eq!(EnvChangeType::from_u8(1), Some(EnvChangeType::Database));
         assert_eq!(EnvChangeType::from_u8(20), Some(EnvChangeType::Routing));
         assert_eq!(EnvChangeType::from_u8(100), None);
+    }
+
+    #[test]
+    fn hostile_env_change_binary_truncated_is_not_panic() {
+        // length=1 covers only the type byte (0x08 = BeginTransaction, a
+        // binary-format type); the new_len/old_len prefix reads then hit an
+        // empty buffer. Must decode gracefully, never panic (found by the
+        // parse_env_change and parse_token fuzz targets).
+        let data = [0x01, 0x00, 0x08];
+        let mut buf: &[u8] = &data;
+        let env = EnvChange::decode(&mut buf).unwrap();
+        assert_eq!(env.env_type, EnvChangeType::BeginTransaction);
     }
 
     #[test]
