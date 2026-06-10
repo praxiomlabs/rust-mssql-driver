@@ -31,7 +31,7 @@ An async Microsoft SQL Server driver for Rust.
 | TDS 7.3 (Legacy) | Yes | SQL Server 2008/2008 R2 |
 | TDS 8.0 Strict Mode | Yes | SQL Server 2022+ |
 | Azure Managed Identity | Yes | Via `azure-identity` |
-| Kerberos/GSSAPI | Yes | Unix via `libgssapi` |
+| Kerberos/GSSAPI | Untested | Unix via `libgssapi`; not yet validated against a live KDC |
 | Windows SSPI | Yes | Via `sspi-auth` feature |
 | Table-Valued Parameters | Yes | Via `Tvp` type |
 | OpenTelemetry Metrics | Yes | Query + pool lifecycle via `otel` feature |
@@ -330,20 +330,20 @@ Compared with the other Rust options for SQL Server connectivity, based on sourc
 | Always Encrypted (read) | Yes | No (#54) | Via ODBC | No |
 | Always Encrypted (write) | Partial — NULL only | No | Via ODBC | No |
 | Built-in connection pool | Yes | No (#146) | No | No |
-| Prepared statement cache | Yes (LRU) | No (#30) | Via ODBC | Yes |
+| Prepared statement cache | Planned | No (#30) | Via ODBC | Yes |
 | Table-valued parameters | Yes | No | Via ODBC | No (#46) |
 | Bulk insert (BCP) | Yes | Partial (#322, #358) | Yes | No |
 | Query cancellation | Yes (attention) | No (#79, #300) | Via ODBC | No |
 | Azure AD / Managed Identity | Yes | No (#175) | Via ODBC | No |
 | Cross-platform NTLM | Yes | Windows only (#97) | Via ODBC | No (#13) |
-| Kerberos / SPNEGO | Yes | Unix only | Via ODBC | No |
+| Kerberos / SPNEGO | Yes (untested live) | Unix only | Via ODBC | No |
 | ADO.NET connection strings | Yes | Yes | N/A | No (#411, #605) |
 | `deny(unsafe_code)` | Yes, audited FFI exceptions | No (4 unsafe) | No (372 unsafe) | No |
 | Runtime agnostic | No (Tokio only) | Yes | N/A (sync) | Yes |
 | Compile-time query checking | No | No | No | Yes (limited) |
 | MARS | No | No | Via ODBC | No |
 
-**Authentication:** mssql-driver supports SQL auth, cross-platform Windows/NTLM, Kerberos/SPNEGO (`integrated-auth`), Azure AD token, Managed Identity and Service Principal (`azure-identity`), client certificate (`cert-auth`), and Windows SSPI (`sspi-auth`). Tiberius is Windows-only for NTLM and lacks Managed Identity; sqlx-oldapi has no Windows authentication at all (called a "blocker" by enterprise users, #13).
+**Authentication:** mssql-driver supports SQL auth, cross-platform Windows/NTLM, Kerberos/SPNEGO (`integrated-auth`, not yet validated against a live KDC — see LIMITATIONS.md), Azure AD token, Managed Identity and Service Principal (`azure-identity`), client certificate (`cert-auth`), and Windows SSPI (`sspi-auth`). Tiberius is Windows-only for NTLM and lacks Managed Identity; sqlx-oldapi has no Windows authentication at all (called a "blocker" by enterprise users, #13).
 
 **Pure-Rust deployment:** mssql-driver has no C/FFI dependencies (outside optional Windows SSPI), which avoids the problems odbc-api users report: can't compile for musl/Alpine (#526), static linking blocked by LGPL unixODBC (#781), driver-manager conflicts (#503), connections that aren't `Send`/`Sync` (#354), and FFI panics on drop (#574). It is `Send + Sync` and Tokio-native by design.
 

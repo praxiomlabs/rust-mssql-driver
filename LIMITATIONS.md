@@ -17,6 +17,8 @@ For supported features, see [README.md](README.md).
 | Data Types | GEOMETRY, GEOGRAPHY | Use `STAsText()` or `STAsGeoJSON()` |
 | Data Types | HIERARCHYID | Use `.ToString()` |
 | Data Types | CLR UDTs | Cast to VARBINARY |
+| Performance | Prepared statement cache (not wired) | `sp_executesql` server plan cache |
+| Auth | Kerberos untested against live KDC | SQL auth, NTLM, or Azure AD |
 | Platforms | SQL Server 2005 and earlier | Upgrade to SQL Server 2008+ |
 | Platforms | 32-bit systems | Use 64-bit |
 | Runtime | Non-Tokio runtimes | Use Tokio |
@@ -95,11 +97,30 @@ tokio::spawn(async move {
 
 ### Prepared Statement Cache
 
-**Status:** LRU only (no TTL)
+**Status:** Not wired — all parameterized queries use `sp_executesql`
 
-Cached statements are evicted by LRU policy, not time-based expiration.
+An LRU statement cache exists in the codebase but is not consulted by any
+query path: the driver never issues `sp_prepare`/`sp_execute`. Every
+parameterized query goes through `sp_executesql`, which still benefits from
+SQL Server's server-side plan cache, so repeated queries reuse plans —
+there is just no client-side handle caching yet.
 
-**Workaround:** Configure appropriate cache size or periodically recycle connections via `idle_timeout`.
+**Workaround:** None needed for plan reuse (`sp_executesql` provides it).
+Client-side handle caching is planned.
+
+---
+
+### Kerberos / Integrated Authentication (Untested Live)
+
+**Status:** Implemented but never validated against a live KDC
+
+The `integrated-auth` feature (Kerberos/GSSAPI via libgssapi) compiles and
+has unit tests, but no end-to-end authentication against a real KDC or
+domain-joined SQL Server has been performed. Treat it as experimental until
+live validation lands.
+
+**Workaround:** SQL authentication, cross-platform NTLM, or Azure AD are
+the validated paths.
 
 ---
 

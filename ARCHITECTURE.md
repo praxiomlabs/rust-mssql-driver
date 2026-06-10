@@ -537,12 +537,18 @@ if results.next_result().await? {
 
 **Decision:** Results are streamed by default with optional buffering.
 
+> **Implementation status (2026-06):** what ships today is *lazy decode over
+> a buffered response*: the full TDS payload is reassembled in memory, then
+> rows are decoded one at a time as pulled (peak memory ≈ raw payload size,
+> not payload + `Vec<Row>`). True incremental network streaming is not
+> implemented. See the `mssql-client` `stream` module docs.
+
 **Streaming (Default):**
 ```rust
 let rows = client.query("SELECT * FROM large_table", &[]).await?;
 for row in rows {
     let _row = row?;
-    // Process row - memory usage stays constant
+    // Rows decode lazily; peak memory ~ raw response payload
 }
 ```
 
@@ -1330,6 +1336,12 @@ impl Default for TimeoutConfig {
 
 ### 4.5 Prepared Statement Lifecycle
 
+> **Implementation status (2026-06):** this section documents the intended
+> design. The `StatementCache` type exists but is not consulted by any query
+> path — all parameterized queries currently go through `sp_executesql`
+> (SQL Server's server-side plan cache still provides plan reuse). See
+> LIMITATIONS.md § Prepared Statement Cache.
+
 SQL Server supports server-side prepared statements via RPC calls. The driver manages statement handles transparently to optimize repeated query execution.
 
 #### Protocol Flow
@@ -1414,7 +1426,8 @@ When a connection is returned to the pool:
 #### Usage Example
 
 ```rust
-// Automatic statement caching (the only mode — there is no explicit prepare API)
+// Intended behavior once the cache is wired (today every iteration goes
+// through sp_executesql; there is no explicit prepare API either way):
 for user_id in user_ids {
     // First iteration: sp_prepare + sp_execute
     // Subsequent iterations: sp_execute only (cache hit)
