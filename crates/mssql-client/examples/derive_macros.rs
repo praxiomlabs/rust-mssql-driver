@@ -13,9 +13,12 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use mssql_client::{Client, Column, Config, Error, FromRow, Row, ToParams, Tvp, TvpValue};
-use mssql_derive::{FromRow, ToParams, Tvp};
-use mssql_types::SqlValue;
+// Everything comes from `mssql_client` alone — the derive macros are
+// re-exported under the `derive` feature, so no direct dependency on
+// `mssql-derive` or `mssql-types` is needed.
+use mssql_client::{
+    Client, Column, Config, Error, FromRow, Row, SqlValue, ToParams, Tvp, TvpValue,
+};
 
 /// A user struct that can be populated from query results.
 ///

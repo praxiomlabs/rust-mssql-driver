@@ -59,7 +59,7 @@ pub(crate) fn impl_to_params(input: &DeriveInput) -> syn::Result<TokenStream2> {
         impl #impl_generics mssql_client::ToParams for #name #ty_generics #where_clause {
             fn to_params(&self) -> ::std::result::Result<
                 ::std::vec::Vec<mssql_client::NamedParam>,
-                mssql_types::TypeError
+                mssql_client::__private::TypeError
             > {
                 Ok(::std::vec![
                     #(#param_creations),*

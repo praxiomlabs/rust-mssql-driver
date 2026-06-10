@@ -141,6 +141,22 @@ jobs:
       - name: Build examples
         run: cargo build --examples --all-features
 
+  api-self-containment:
+    name: API Self-Containment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: ./.github/actions/setup-linux-deps
+      - name: Build the api-smoke guard
+        # api-smoke depends ONLY on mssql-client (not the internal crates), so
+        # this fails to compile if any public entry point — including derive
+        # macro output — needs a direct dependency on an internal crate.
+        run: cargo build -p api-smoke
+
   miri:
     name: Miri (unsafe code detection)
     runs-on: ubuntu-latest

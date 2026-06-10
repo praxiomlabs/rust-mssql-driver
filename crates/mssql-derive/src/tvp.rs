@@ -65,7 +65,7 @@ pub(crate) fn impl_tvp(input: &DeriveInput) -> syn::Result<TokenStream2> {
         });
 
         value_extractions.push(quote! {
-            mssql_types::ToSql::to_sql(&self.#field_name)?
+            mssql_client::__private::ToSql::to_sql(&self.#field_name)?
         });
 
         ordinal += 1;
@@ -83,7 +83,7 @@ pub(crate) fn impl_tvp(input: &DeriveInput) -> syn::Result<TokenStream2> {
                 ]
             }
 
-            fn to_row(&self) -> ::std::result::Result<mssql_client::TvpRow, mssql_types::TypeError> {
+            fn to_row(&self) -> ::std::result::Result<mssql_client::TvpRow, mssql_client::__private::TypeError> {
                 Ok(mssql_client::TvpRow::new(::std::vec![
                     #(#value_extractions),*
                 ]))

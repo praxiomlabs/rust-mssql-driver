@@ -1,0 +1,23 @@
+# Public-API self-containment guard.
+#
+# Depends ONLY on `mssql-client` — deliberately NOT on the internal crates
+# (mssql-types, tds-protocol, mssql-auth, mssql-tls, mssql-codec, mssql-derive).
+# If any public entry point (including the derive macros' generated code)
+# requires one of those crates to be a direct dependency, THIS CRATE FAILS TO
+# COMPILE. That is the point: it reproduces an external consumer and turns
+# self-containment from an assertion into a CI-enforced fact.
+#
+# Not published; build-only.
+[package]
+name = "api-smoke"
+version.workspace = true
+edition = "2024"
+publish = false
+license.workspace = true
+
+[dependencies]
+mssql-client = { workspace = true, features = ["derive", "always-encrypted"] }
+
+
+[lints]
+workspace = true
