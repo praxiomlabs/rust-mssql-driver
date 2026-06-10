@@ -74,6 +74,16 @@ pub use state::{
     Connected, ConnectionState, Disconnected, InTransaction, ProtocolState, Ready, Streaming,
 };
 pub use statement_cache::{PreparedStatement, StatementCache, StatementCacheConfig};
+
+/// Internal entry points for the fuzzing harness in `fuzz/`.
+///
+/// Enabled only by the `fuzzing` feature; not public API and exempt from
+/// all stability guarantees.
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub mod __fuzzing {
+    pub use crate::column_parser::parse_column_value;
+}
 pub use stream::{
     ExecuteResult, MultiResultStream, OutputParam, ProcedureResult, QueryStream, ResultSet,
 };

@@ -24,7 +24,7 @@ path = "../crates/tds-protocol"
 
 [dependencies.mssql-client]
 path = "../crates/mssql-client"
-features = ["default"]
+features = ["default", "fuzzing"]
 
 [dependencies.mssql-types]
 path = "../crates/mssql-types"
@@ -103,6 +103,13 @@ bench = false
 [[bin]]
 name = "type_roundtrip"
 path = "fuzz_targets/type_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_column_value"
+path = "fuzz_targets/parse_column_value.rs"
 test = false
 doc = false
 bench = false
