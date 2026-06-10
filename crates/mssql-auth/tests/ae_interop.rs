@@ -9,8 +9,11 @@
 //! with data encrypted by .NET/SSMS/JDBC. Self-roundtrip tests cannot catch
 //! a derivation that is internally consistent but non-conformant.
 //!
-//! Caveat: the fixture is spec-derived, not captured from a live .NET
-//! client; a blob harvested from SSMS would make this conclusive.
+//! The fixture is cross-validated against Microsoft's shipped binary:
+//! Microsoft.Data.SqlClient 5.2.2 (`SqlAeadAes256CbcHmac256Algorithm`,
+//! invoked via reflection) produces this exact blob for the same
+//! CEK/plaintext and decrypts it back. End-to-end validation against a
+//! live server (the wire-metadata path) is tracked in issue #87.
 
 #![cfg(feature = "always-encrypted")]
 #![allow(clippy::expect_used)]
