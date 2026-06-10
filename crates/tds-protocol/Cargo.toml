@@ -9,6 +9,11 @@ repository.workspace = true
 keywords = ["tds", "sql-server", "protocol", "no_std"]
 categories = ["parser-implementations", "no-std"]
 
+[package.metadata.docs.rs]
+# Without this, docs.rs builds default features only, hiding non-default public
+# API. All features build on docs.rs (Linux), so document them all.
+all-features = true
+
 [features]
 default = ["std", "encoding"]
 std = []

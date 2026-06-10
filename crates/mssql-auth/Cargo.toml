@@ -9,6 +9,12 @@ repository.workspace = true
 keywords = ["sql-server", "authentication", "azure", "security"]
 categories = ["authentication", "database"]
 
+[package.metadata.docs.rs]
+# docs.rs builds on Linux x86_64, so document the features that build there.
+# Excluded: sspi-auth + windows-certstore (Windows-only deps) and integrated-auth
+# (libgssapi system library not guaranteed on docs.rs).
+features = ["azure-identity", "cert-auth", "zeroize", "always-encrypted", "azure-keyvault"]
+
 [features]
 default = []
 # Azure Managed Identity and Service Principal authentication
