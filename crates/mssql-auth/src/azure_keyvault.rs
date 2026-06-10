@@ -202,13 +202,25 @@ impl KeyStoreProvider for AzureKeyVaultProvider {
         // Map algorithm name to Azure Key Vault algorithm
         let kv_algorithm = map_algorithm(algorithm)?;
 
-        // Parse the SQL Server encrypted CEK format to extract the raw ciphertext
-        let ciphertext = parse_sql_server_encrypted_cek(encrypted_cek)?;
+        // Parse the canonical encrypted-CEK envelope
+        let envelope = crate::cek_envelope::parse(encrypted_cek)?;
+
+        // Verify the envelope signature against the CMK (mandatory, matching
+        // the reference implementation) before asking the vault to unwrap.
+        let digest = envelope.signed_digest();
+        let valid = self
+            .verify_signature(cmk_path, &digest, envelope.signature)
+            .await?;
+        if !valid {
+            return Err(EncryptionError::CekDecryptionFailed(
+                "CEK envelope signature verification failed".into(),
+            ));
+        }
 
         // Build unwrap parameters
         let parameters = KeyOperationParameters {
             algorithm: Some(kv_algorithm),
-            value: Some(ciphertext.to_vec()),
+            value: Some(envelope.ciphertext.to_vec()),
             ..Default::default()
         };
 
@@ -363,57 +375,6 @@ fn map_algorithm(algorithm: &str) -> Result<EncryptionAlgorithm, EncryptionError
     }
 }
 
-/// Parse the SQL Server encrypted CEK format to extract the raw ciphertext.
-///
-/// SQL Server CEK format:
-/// - Version (1 byte): 0x01
-/// - Key path length (2 bytes, LE)
-/// - Key path (UTF-16LE)
-/// - Ciphertext length (2 bytes, LE)
-/// - Ciphertext (RSA encrypted CEK)
-fn parse_sql_server_encrypted_cek(data: &[u8]) -> Result<&[u8], EncryptionError> {
-    if data.len() < 5 {
-        return Err(EncryptionError::CekDecryptionFailed(
-            "Encrypted CEK too short".into(),
-        ));
-    }
-
-    // Check version byte
-    if data[0] != 0x01 {
-        return Err(EncryptionError::CekDecryptionFailed(format!(
-            "Invalid CEK version: expected 0x01, got {:#04x}",
-            data[0]
-        )));
-    }
-
-    // Read key path length (2 bytes, little-endian)
-    let key_path_len = u16::from_le_bytes([data[1], data[2]]) as usize;
-
-    // Calculate offset after key path
-    let ciphertext_len_offset = 3 + key_path_len;
-    if data.len() < ciphertext_len_offset + 2 {
-        return Err(EncryptionError::CekDecryptionFailed(
-            "Encrypted CEK truncated: missing ciphertext length".into(),
-        ));
-    }
-
-    // Read ciphertext length (2 bytes, little-endian)
-    let ciphertext_len =
-        u16::from_le_bytes([data[ciphertext_len_offset], data[ciphertext_len_offset + 1]]) as usize;
-
-    // Calculate ciphertext offset
-    let ciphertext_offset = ciphertext_len_offset + 2;
-    if data.len() < ciphertext_offset + ciphertext_len {
-        return Err(EncryptionError::CekDecryptionFailed(format!(
-            "Encrypted CEK truncated: expected {} bytes of ciphertext, got {}",
-            ciphertext_len,
-            data.len() - ciphertext_offset
-        )));
-    }
-
-    Ok(&data[ciphertext_offset..ciphertext_offset + ciphertext_len])
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -482,36 +443,5 @@ mod tests {
             EncryptionAlgorithm::RsaOaep
         ));
         assert!(map_algorithm("UNKNOWN").is_err());
-    }
-
-    #[test]
-    fn test_parse_sql_server_encrypted_cek() {
-        // Create a valid encrypted CEK structure
-        let key_path = "test";
-        let key_path_utf16: Vec<u8> = key_path
-            .encode_utf16()
-            .flat_map(|c| c.to_le_bytes())
-            .collect();
-        let ciphertext = vec![0xAB, 0xCD, 0xEF];
-
-        let mut data = Vec::new();
-        data.push(0x01); // Version
-        data.extend_from_slice(&(key_path_utf16.len() as u16).to_le_bytes()); // Key path length
-        data.extend_from_slice(&key_path_utf16); // Key path
-        data.extend_from_slice(&(ciphertext.len() as u16).to_le_bytes()); // Ciphertext length
-        data.extend_from_slice(&ciphertext); // Ciphertext
-
-        let parsed =
-            parse_sql_server_encrypted_cek(&data).expect("valid encrypted CEK should parse");
-        assert_eq!(parsed, &ciphertext[..]);
-    }
-
-    #[test]
-    fn test_parse_sql_server_encrypted_cek_invalid() {
-        // Too short
-        assert!(parse_sql_server_encrypted_cek(&[0x01, 0x00]).is_err());
-
-        // Wrong version
-        assert!(parse_sql_server_encrypted_cek(&[0x02, 0x00, 0x00, 0x00, 0x00]).is_err());
     }
 }

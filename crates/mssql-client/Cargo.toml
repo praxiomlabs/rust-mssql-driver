@@ -91,6 +91,7 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 # Always Encrypted test dependencies
 rsa = { version = "0.9", features = ["sha2"] }
+sha1 = "0.10"
 sha2 = "0.10"
 rand = "0.8"
 

@@ -252,8 +252,21 @@ impl KeyStoreProvider for WindowsCertStoreProvider {
         // Get the private key handle
         let key_handle = Self::get_private_key(store_location, &store_name, &thumbprint)?;
 
-        // Parse the SQL Server encrypted CEK format
-        let ciphertext = parse_sql_server_encrypted_cek(encrypted_cek)?;
+        // Parse the canonical encrypted-CEK envelope
+        let envelope = crate::cek_envelope::parse(encrypted_cek)?;
+
+        // Verify the envelope signature against the CMK (mandatory, matching
+        // the reference implementation) before decrypting.
+        let digest = envelope.signed_digest();
+        let valid = self
+            .verify_signature(cmk_path, &digest, envelope.signature)
+            .await?;
+        if !valid {
+            return Err(EncryptionError::CekDecryptionFailed(
+                "CEK envelope signature verification failed".into(),
+            ));
+        }
+        let ciphertext = envelope.ciphertext;
 
         // Determine padding based on algorithm
         let (padding_info, flags) = get_padding_info(algorithm)?;
@@ -495,13 +508,23 @@ impl PaddingInfo {
 }
 
 /// Get padding info based on algorithm name.
+///
+/// `RSA_OAEP` in Always Encrypted CMK metadata means OAEP-SHA1 (the reference
+/// implementation uses `RSAEncryptionPadding.OaepSHA1`); `RSA_OAEP_256` is the
+/// distinct SHA-256 variant.
 fn get_padding_info(algorithm: &str) -> Result<(PaddingInfo, NCRYPT_FLAGS), EncryptionError> {
-    // SHA-256 hash algorithm string (null-terminated UTF-16)
+    // Hash algorithm strings (null-terminated UTF-16)
+    static SHA1_ALG: &str = "SHA1\0";
     static SHA256_ALG: &str = "SHA256\0";
 
     match algorithm.to_uppercase().as_str() {
         "RSA_OAEP" | "RSA-OAEP" | "RSA_OAEP_256" | "RSA-OAEP-256" => {
-            let hash_alg: Vec<u16> = SHA256_ALG.encode_utf16().collect();
+            let oaep_alg = if algorithm.to_uppercase().contains("256") {
+                SHA256_ALG
+            } else {
+                SHA1_ALG
+            };
+            let hash_alg: Vec<u16> = oaep_alg.encode_utf16().collect();
             // SAFETY: Box::leak is used intentionally to produce a 'static PCWSTR pointer.
             // BCRYPT_OAEP_PADDING_INFO requires a valid PCWSTR for its lifetime, but the
             // PaddingInfo is returned to the caller and may outlive any local borrow.
@@ -540,57 +563,6 @@ fn get_padding_info(algorithm: &str) -> Result<(PaddingInfo, NCRYPT_FLAGS), Encr
             "Unsupported key encryption algorithm: {algorithm}. Expected RSA_OAEP, RSA_OAEP_256, or RSA1_5"
         ))),
     }
-}
-
-/// Parse the SQL Server encrypted CEK format to extract the raw ciphertext.
-///
-/// SQL Server CEK format:
-/// - Version (1 byte): 0x01
-/// - Key path length (2 bytes, LE)
-/// - Key path (UTF-16LE)
-/// - Ciphertext length (2 bytes, LE)
-/// - Ciphertext (RSA encrypted CEK)
-fn parse_sql_server_encrypted_cek(data: &[u8]) -> Result<&[u8], EncryptionError> {
-    if data.len() < 5 {
-        return Err(EncryptionError::CekDecryptionFailed(
-            "Encrypted CEK too short".into(),
-        ));
-    }
-
-    // Check version byte
-    if data[0] != 0x01 {
-        return Err(EncryptionError::CekDecryptionFailed(format!(
-            "Invalid CEK version: expected 0x01, got {:#04x}",
-            data[0]
-        )));
-    }
-
-    // Read key path length (2 bytes, little-endian)
-    let key_path_len = u16::from_le_bytes([data[1], data[2]]) as usize;
-
-    // Calculate offset after key path
-    let ciphertext_len_offset = 3 + key_path_len;
-    if data.len() < ciphertext_len_offset + 2 {
-        return Err(EncryptionError::CekDecryptionFailed(
-            "Encrypted CEK truncated: missing ciphertext length".into(),
-        ));
-    }
-
-    // Read ciphertext length (2 bytes, little-endian)
-    let ciphertext_len =
-        u16::from_le_bytes([data[ciphertext_len_offset], data[ciphertext_len_offset + 1]]) as usize;
-
-    // Calculate ciphertext offset
-    let ciphertext_offset = ciphertext_len_offset + 2;
-    if data.len() < ciphertext_offset + ciphertext_len {
-        return Err(EncryptionError::CekDecryptionFailed(format!(
-            "Encrypted CEK truncated: expected {} bytes of ciphertext, got {}",
-            ciphertext_len,
-            data.len() - ciphertext_offset
-        )));
-    }
-
-    Ok(&data[ciphertext_offset..ciphertext_offset + ciphertext_len])
 }
 
 /// Convert a hex string to bytes.
@@ -676,36 +648,6 @@ mod tests {
         assert_eq!(bytes_to_hex(&[0xAA, 0xBB, 0xCC, 0xDD]), "AABBCCDD");
         assert_eq!(bytes_to_hex(&[0x01, 0x02, 0x0F]), "01020F");
         assert_eq!(bytes_to_hex(&[]), "");
-    }
-
-    #[test]
-    fn test_parse_sql_server_encrypted_cek() {
-        // Create a valid encrypted CEK structure
-        let key_path = "test";
-        let key_path_utf16: Vec<u8> = key_path
-            .encode_utf16()
-            .flat_map(|c| c.to_le_bytes())
-            .collect();
-        let ciphertext = vec![0xAB, 0xCD, 0xEF];
-
-        let mut data = Vec::new();
-        data.push(0x01); // Version
-        data.extend_from_slice(&(key_path_utf16.len() as u16).to_le_bytes());
-        data.extend_from_slice(&key_path_utf16);
-        data.extend_from_slice(&(ciphertext.len() as u16).to_le_bytes());
-        data.extend_from_slice(&ciphertext);
-
-        let parsed = parse_sql_server_encrypted_cek(&data).unwrap();
-        assert_eq!(parsed, &ciphertext[..]);
-    }
-
-    #[test]
-    fn test_parse_sql_server_encrypted_cek_invalid() {
-        // Too short
-        assert!(parse_sql_server_encrypted_cek(&[0x01, 0x00]).is_err());
-
-        // Wrong version
-        assert!(parse_sql_server_encrypted_cek(&[0x02, 0x00, 0x00, 0x00, 0x00]).is_err());
     }
 
     #[test]

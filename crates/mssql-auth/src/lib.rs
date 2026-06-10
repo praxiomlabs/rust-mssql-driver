@@ -93,6 +93,8 @@ pub mod sspi_auth;
 #[cfg(feature = "always-encrypted")]
 pub mod aead;
 #[cfg(feature = "always-encrypted")]
+pub mod cek_envelope;
+#[cfg(feature = "always-encrypted")]
 pub mod key_store;
 #[cfg(feature = "always-encrypted")]
 pub mod key_unwrap;
