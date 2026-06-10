@@ -166,13 +166,27 @@ jobs:
         with:
           workspaces: fuzz
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@cargo-fuzz
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
       - name: Fuzz each target briefly
         # Short per-target budget: this is a smoke test that the parsers
         # don't crash on shallow hostile inputs and that the targets keep
         # building. Long fuzzing runs stay local/manual.
+        #
+        # set -euo pipefail + an explicit empty-list check are load-bearing:
+        # the previous `for target in $(cargo fuzz list)` form swallowed a
+        # failed install/list (empty substitution -> loop never runs -> exit
+        # 0), making the job pass while fuzzing nothing.
         run: |
-          for target in $(cargo +nightly fuzz list); do
+          set -euo pipefail
+          mapfile -t targets < <(cargo +nightly fuzz list)
+          if [ "${#targets[@]}" -eq 0 ]; then
+            echo "::error::cargo fuzz list returned no targets"
+            exit 1
+          fi
+          echo "Fuzzing ${#targets[@]} targets: ${targets[*]}"
+          for target in "${targets[@]}"; do
             echo "::group::fuzz $target"
             cargo +nightly fuzz run "$target" -- -max_total_time=15 -rss_limit_mb=4096
             echo "::endgroup::"

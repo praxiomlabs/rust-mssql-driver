@@ -241,10 +241,14 @@ fn parse_money_value(buf: &mut &[u8], bytes: usize) -> Result<SqlValue> {
     #[cfg(feature = "decimal")]
     {
         use rust_decimal::Decimal;
-        Ok(SqlValue::Decimal(Decimal::from_i128_with_scale(
-            cents as i128,
-            4,
-        )))
+        // `cents` is an i64 (fixed 4- or 8-byte MONEY) at scale 4, always
+        // inside rust_decimal's 96-bit range — but use the checked
+        // constructor anyway so no panicking `from_i128_with_scale` call
+        // remains in the decoder (invariant: grep returns nothing).
+        match Decimal::try_from_i128_with_scale(cents as i128, 4) {
+            Ok(decimal) => Ok(SqlValue::Decimal(decimal)),
+            Err(_) => Ok(SqlValue::Double((cents as f64) / 10000.0)),
+        }
     }
 
     #[cfg(not(feature = "decimal"))]
@@ -1271,18 +1275,29 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
             #[cfg(feature = "decimal")]
             {
                 use rust_decimal::Decimal;
-                if scale > 28 {
-                    // Fall back to f64
-                    let divisor = 10f64.powi(scale as i32);
-                    let value = (mantissa as f64) / divisor;
-                    let value = if sign == 0 { -value } else { value };
-                    Ok(SqlValue::Double(value))
-                } else {
-                    let mut decimal = Decimal::from_i128_with_scale(mantissa as i128, scale as u32);
-                    if sign == 0 {
-                        decimal.set_sign_negative(true);
+                // Same overflow class as the top-level DECIMAL branch:
+                // rust_decimal holds 96-bit mantissas with scale <= 28, but a
+                // 16-byte wire mantissa (legitimate 38-digit NUMERIC or
+                // hostile) can exceed that regardless of scale. The old
+                // `scale > 28` guard did not cover an oversized mantissa, so
+                // `from_i128_with_scale` could panic. Fall back to f64 on any
+                // out-of-range value.
+                let decimal = i128::try_from(mantissa)
+                    .ok()
+                    .and_then(|m| Decimal::try_from_i128_with_scale(m, scale as u32).ok());
+                match decimal {
+                    Some(mut decimal) => {
+                        if sign == 0 {
+                            decimal.set_sign_negative(true);
+                        }
+                        Ok(SqlValue::Decimal(decimal))
                     }
-                    Ok(SqlValue::Decimal(decimal))
+                    None => {
+                        let divisor = 10f64.powi(scale as i32);
+                        let value = (mantissa as f64) / divisor;
+                        let value = if sign == 0 { -value } else { value };
+                        Ok(SqlValue::Double(value))
+                    }
                 }
             }
             #[cfg(not(feature = "decimal"))]
@@ -1886,6 +1901,29 @@ mod tests {
         data.extend_from_slice(&0u32.to_le_bytes());
         let mut buf: &[u8] = &data;
         assert!(parse_sql_variant(&mut buf).is_err());
+    }
+
+    #[cfg(feature = "decimal")]
+    #[test]
+    fn hostile_variant_decimal_over_96bit_is_not_panic() {
+        // SQL_VARIANT DECIMALN (0x6A) with a 16-byte mantissa above 2^96.
+        // rust_decimal cannot hold it; must fall back to f64, never panic
+        // (a legitimate 38-digit NUMERIC inside a variant reaches this too).
+        // total_len=21: base_type + prop_count + precision + scale + sign(1)
+        // + mantissa(16) = 2 + 2 + 17.
+        let mantissa = 1u128 << 100;
+        let mut data = Vec::new();
+        data.extend_from_slice(&21u32.to_le_bytes());
+        data.push(0x6A); // DECIMALN
+        data.push(0x02); // prop_count: precision, scale
+        data.push(38); // precision
+        data.push(10); // scale
+        data.push(0x01); // sign (positive)
+        data.extend_from_slice(&mantissa.to_le_bytes());
+        let mut buf: &[u8] = &data;
+        // Must not panic; an oversized mantissa decodes to a Double fallback.
+        let value = parse_sql_variant(&mut buf).expect("must not error");
+        assert!(matches!(value, SqlValue::Double(_)));
     }
 
     #[cfg(feature = "chrono")]
