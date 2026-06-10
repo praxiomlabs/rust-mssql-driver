@@ -290,14 +290,24 @@ jobs:
           # the 10 GB Actions limit and LRU-evicting main's caches (cache thrashing).
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/setup-linux-deps
-      - name: Dry-run package all publishable crates
-        run: |
-          set -euo pipefail
-          for crate in tds-protocol mssql-types mssql-tls mssql-codec mssql-auth mssql-derive mssql-client mssql-driver-pool; do
-            echo "::group::$crate"
-            cargo publish -p "$crate" --dry-run --no-verify
-            echo "::endgroup::"
-          done
+      # Registry-independent invariant guarding the v0.11.0 incident directly:
+      # no published crate may carry a versioned first-party dev/build-dependency.
+      # Holds identically on release PRs, where the per-crate dry-run below cannot.
+      - name: Check publish invariants
+        run: bash scripts/check-publish-invariants.sh
+      # Workspace-aware dry-run: resolves sibling crates from the local workspace
+      # instead of crates.io, so it validates packaging + ordered dependency
+      # resolution even on release PRs whose versions are bumped ahead of the
+      # index. The old per-crate `cargo publish -p ... --dry-run` loop could not:
+      # downstream crates failed to resolve the just-bumped, not-yet-published
+      # first-party versions (the cause of the v0.11.1 Release PR CI failure).
+      - name: Workspace publish dry-run
+        # rust-toolchain.toml pins 1.88, but `cargo publish --workspace` is stable
+        # only on cargo >= 1.90. Override to the installed stable for this step
+        # (this is packaging validation, not an MSRV check — the msrv job covers 1.88).
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: cargo publish --workspace --dry-run --no-verify --exclude mssql-testing
 
   hygiene:
     name: Hygiene (typos, unused deps)
