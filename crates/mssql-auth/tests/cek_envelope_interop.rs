@@ -16,9 +16,9 @@
 //! round-trip cannot catch a layout that is internally consistent but
 //! non-conformant (the v0.9.0 lesson, twice over).
 //!
-//! Regenerate with `.tmp/cek-jdbc-check/CekHarness.java` (see PR for the
-//! recipe); the fixture is stable because parse + RSA-OAEP decrypt of a
-//! captured envelope is deterministic.
+//! Regenerate with `fixtures/CekHarness.java` (full recipe in its header);
+//! the fixture is stable because parse + RSA-OAEP decrypt of a captured
+//! envelope is deterministic.
 
 #![cfg(feature = "always-encrypted")]
 #![allow(clippy::expect_used)]
@@ -80,9 +80,10 @@ const MS_JDBC_ENVELOPE: [u8; 541] = [
 /// PKCS1-SHA256 signature) and round-trip it through our own provider.
 ///
 /// Run with `--nocapture` to emit the envelope hex; feeding it to
-/// `.tmp/cek-jdbc-check/CekHarness.java` proves Microsoft's binary decrypts
-/// it and accepts our signature (done for the PR; OAEP is randomized so the
-/// bytes differ per run, which is why this isn't a fixed fixture).
+/// `fixtures/CekHarness.java` (recipe in its header) proves Microsoft's
+/// binary decrypts it and accepts our signature (done for the PR; OAEP is
+/// randomized so the bytes differ per run, which is why this isn't a fixed
+/// fixture).
 #[tokio::test]
 async fn builds_envelope_other_clients_accept() {
     use rsa::{Oaep, Pkcs1v15Sign, RsaPrivateKey, pkcs8::DecodePrivateKey};
