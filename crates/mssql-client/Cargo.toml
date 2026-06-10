@@ -28,6 +28,8 @@ otel = [
 ]
 # Secure credential handling with automatic memory zeroization
 zeroize = ["mssql-auth/zeroize"]
+# Internal hooks for the fuzzing harness (fuzz/). Not public API.
+fuzzing = []
 # Always Encrypted client-side encryption support
 # Activates crypto deps in mssql-auth: aes, cbc, hmac, sha2, rsa, rand, parking_lot
 always-encrypted = ["mssql-auth/always-encrypted"]

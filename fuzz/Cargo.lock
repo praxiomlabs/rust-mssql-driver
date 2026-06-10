@@ -336,6 +336,12 @@ name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
+
+[[package]]
+name = "hashbrown"
+version = "0.17.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
  "allocator-api2",
  "equivalent",
@@ -402,11 +408,11 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "lru"
-version = "0.16.2"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96051b46fc183dc9cd4a223960ef37b9af631b55191852a8274bfef064cda20f"
+checksum = "8a860605968fce16869fd239cf4237a82f3ac470723415db603b0e8b6c8d4fb9"
 dependencies = [
- "hashbrown 0.16.1",
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -428,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-auth"
-version = "0.9.0"
+version = "0.11.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -438,7 +444,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-client"
-version = "0.9.0"
+version = "0.11.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -460,7 +466,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-codec"
-version = "0.9.0"
+version = "0.11.0"
 dependencies = [
  "bytes",
  "futures-core",
@@ -490,7 +496,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-tls"
-version = "0.9.0"
+version = "0.11.0"
 dependencies = [
  "rustls",
  "thiserror",
@@ -502,7 +508,7 @@ dependencies = [
 
 [[package]]
 name = "mssql-types"
-version = "0.9.0"
+version = "0.11.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -895,7 +901,7 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
 name = "tds-protocol"
-version = "0.9.0"
+version = "0.11.0"
 dependencies = [
  "bitflags",
  "bytes",

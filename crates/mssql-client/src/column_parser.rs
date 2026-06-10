@@ -17,7 +17,11 @@
 //! All functions are pure (no `self` parameter) and operate on byte buffers
 //! with TDS column metadata.
 
-// Allow unwrap/expect for chrono date construction with known-valid constant dates
+// Allow unwrap/expect ONLY for chrono construction from compile-time
+// constants (epochs, midnight, UTC offset 0). Values that arrive from the
+// wire must use checked construction and surface protocol errors — a
+// malicious or buggy server must never be able to panic the client (see
+// `smalldatetime_from_wire` / `datetime_from_wire`).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::needless_range_loop)]
 
 use bytes::Buf;
@@ -26,6 +30,45 @@ use tds_protocol::token::{ColMetaData, Collation, ColumnData, NbcRow, RawRow};
 use tds_protocol::types::TypeId;
 
 use crate::error::{Error, Result};
+
+/// Build a `NaiveDateTime` from SMALLDATETIME wire values (days since
+/// 1900-01-01, minutes since midnight). Both come from the wire: out-of-range
+/// values are protocol errors, never panics.
+#[cfg(feature = "chrono")]
+fn smalldatetime_from_wire(days: i64, minutes: u32) -> Result<chrono::NaiveDateTime> {
+    let base = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("epoch 1900-01-01 is valid");
+    let date = base
+        .checked_add_signed(chrono::Duration::days(days))
+        .ok_or_else(|| Error::Protocol(format!("SMALLDATETIME days out of range: {days}")))?;
+    let secs = u64::from(minutes) * 60;
+    let time = u32::try_from(secs)
+        .ok()
+        .and_then(|s| chrono::NaiveTime::from_num_seconds_from_midnight_opt(s, 0))
+        .ok_or_else(|| Error::Protocol(format!("SMALLDATETIME minutes out of range: {minutes}")))?;
+    Ok(date.and_time(time))
+}
+
+/// Build a `NaiveDateTime` from DATETIME wire values (days since 1900-01-01,
+/// 1/300ths of a second since midnight). Both come from the wire:
+/// out-of-range values are protocol errors, never panics.
+#[cfg(feature = "chrono")]
+fn datetime_from_wire(days: i64, time_300ths: u64) -> Result<chrono::NaiveDateTime> {
+    let base = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("epoch 1900-01-01 is valid");
+    let date = base
+        .checked_add_signed(chrono::Duration::days(days))
+        .ok_or_else(|| Error::Protocol(format!("DATETIME days out of range: {days}")))?;
+    let total_ms = (time_300ths * 1000) / 300;
+    let nanos = ((total_ms % 1000) * 1_000_000) as u32;
+    let time = u32::try_from(total_ms / 1000)
+        .ok()
+        .and_then(|secs| chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nanos))
+        .ok_or_else(|| {
+            Error::Protocol(format!(
+                "DATETIME time component out of range: {time_300ths}"
+            ))
+        })?;
+    Ok(date.and_time(time))
+}
 
 /// Convert a RawRow to a client Row.
 ///
@@ -211,7 +254,9 @@ fn parse_money_value(buf: &mut &[u8], bytes: usize) -> Result<SqlValue> {
 }
 
 /// Parse a single column value from a buffer based on column metadata.
-pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue> {
+// `pub` for the `__fuzzing` re-export; the module itself is `pub(crate)`,
+// so this stays crate-private unless the `fuzzing` feature is enabled.
+pub fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue> {
     let value = match col.type_id {
         // Fixed-length null type
         TypeId::Null => SqlValue::Null,
@@ -299,6 +344,9 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
                 return Err(Error::Protocol("unexpected EOF reading IntN length".into()));
             }
             let len = buf.get_u8();
+            if buf.remaining() < len as usize {
+                return Err(Error::Protocol("unexpected EOF reading IntN data".into()));
+            }
             match len {
                 0 => SqlValue::Null,
                 1 => SqlValue::TinyInt(buf.get_u8()),
@@ -317,6 +365,9 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
                 ));
             }
             let len = buf.get_u8();
+            if buf.remaining() < len as usize {
+                return Err(Error::Protocol("unexpected EOF reading FloatN data".into()));
+            }
             match len {
                 0 => SqlValue::Null,
                 4 => SqlValue::Float(buf.get_f32_le()),
@@ -331,6 +382,9 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
                 return Err(Error::Protocol("unexpected EOF reading BitN length".into()));
             }
             let len = buf.get_u8();
+            if buf.remaining() < len as usize {
+                return Err(Error::Protocol("unexpected EOF reading BitN data".into()));
+            }
             match len {
                 0 => SqlValue::Null,
                 1 => SqlValue::Bool(buf.get_u8() != 0),
@@ -377,20 +431,26 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
                 #[cfg(feature = "decimal")]
                 {
                     use rust_decimal::Decimal;
-                    // rust_decimal supports max scale of 28
-                    // For scales > 28, fall back to f64 to avoid overflow/hang
-                    if scale > 28 {
-                        // Fall back to f64 for high-scale decimals
-                        let divisor = 10f64.powi(scale as i32);
-                        let value = (mantissa as f64) / divisor;
-                        let value = if sign == 0 { -value } else { value };
-                        SqlValue::Double(value)
-                    } else {
-                        let mut decimal = Decimal::from_i128_with_scale(mantissa as i128, scale);
-                        if sign == 0 {
-                            decimal.set_sign_negative(true);
+                    // rust_decimal holds 96-bit mantissas with scale <= 28;
+                    // SQL Server NUMERIC goes to 38 digits, so wire values
+                    // (legitimate or hostile) can exceed both limits. Fall
+                    // back to f64 rather than panic.
+                    let decimal = i128::try_from(mantissa)
+                        .ok()
+                        .and_then(|m| Decimal::try_from_i128_with_scale(m, scale).ok());
+                    match decimal {
+                        Some(mut decimal) => {
+                            if sign == 0 {
+                                decimal.set_sign_negative(true);
+                            }
+                            SqlValue::Decimal(decimal)
                         }
-                        SqlValue::Decimal(decimal)
+                        None => {
+                            let divisor = 10f64.powi(scale as i32);
+                            let value = (mantissa as f64) / divisor;
+                            let value = if sign == 0 { -value } else { value };
+                            SqlValue::Double(value)
+                        }
                     }
                 }
 
@@ -425,15 +485,7 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
                         let minutes = buf.get_u16_le() as u32;
                         #[cfg(feature = "chrono")]
                         {
-                            let base = chrono::NaiveDate::from_ymd_opt(1900, 1, 1)
-                                .expect("epoch 1900-01-01 is valid");
-                            let date = base + chrono::Duration::days(days);
-                            let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(
-                                minutes * 60,
-                                0,
-                            )
-                            .expect("SMALLDATETIME minutes should be 0-1439");
-                            SqlValue::DateTime(date.and_time(time))
+                            SqlValue::DateTime(smalldatetime_from_wire(days, minutes)?)
                         }
                         #[cfg(not(feature = "chrono"))]
                         {
@@ -446,17 +498,7 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
                         let time_300ths = buf.get_u32_le() as u64;
                         #[cfg(feature = "chrono")]
                         {
-                            let base = chrono::NaiveDate::from_ymd_opt(1900, 1, 1)
-                                .expect("epoch 1900-01-01 is valid");
-                            let date = base + chrono::Duration::days(days);
-                            // Convert 300ths of second to nanoseconds
-                            let total_ms = (time_300ths * 1000) / 300;
-                            let secs = (total_ms / 1000) as u32;
-                            let nanos = ((total_ms % 1000) * 1_000_000) as u32;
-                            let time =
-                                chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nanos)
-                                    .expect("DATETIME time component should be valid");
-                            SqlValue::DateTime(date.and_time(time))
+                            SqlValue::DateTime(datetime_from_wire(days, time_300ths)?)
                         }
                         #[cfg(not(feature = "chrono"))]
                         {
@@ -479,15 +521,7 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
             let time_300ths = buf.get_u32_le() as u64;
             #[cfg(feature = "chrono")]
             {
-                let base =
-                    chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("epoch 1900-01-01 is valid");
-                let date = base + chrono::Duration::days(days);
-                let total_ms = (time_300ths * 1000) / 300;
-                let secs = (total_ms / 1000) as u32;
-                let nanos = ((total_ms % 1000) * 1_000_000) as u32;
-                let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nanos)
-                    .expect("DATETIME time component should be valid");
-                SqlValue::DateTime(date.and_time(time))
+                SqlValue::DateTime(datetime_from_wire(days, time_300ths)?)
             }
             #[cfg(not(feature = "chrono"))]
             {
@@ -506,12 +540,7 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
             let minutes = buf.get_u16_le() as u32;
             #[cfg(feature = "chrono")]
             {
-                let base =
-                    chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("epoch 1900-01-01 is valid");
-                let date = base + chrono::Duration::days(days);
-                let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(minutes * 60, 0)
-                    .expect("SMALLDATETIME minutes should be 0-1439");
-                SqlValue::DateTime(date.and_time(time))
+                SqlValue::DateTime(smalldatetime_from_wire(days, minutes)?)
             }
             #[cfg(not(feature = "chrono"))]
             {
@@ -594,6 +623,13 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
             } else {
                 let scale = col.type_info.scale.unwrap_or(7);
                 let time_len = time_bytes_for_scale(scale);
+                // Reads below are driven by scale metadata, not by `len`:
+                // a short declared length must be an error, not a panic.
+                if len < time_len + 3 {
+                    return Err(Error::Protocol(format!(
+                        "DATETIME2 length {len} too short for scale {scale}"
+                    )));
+                }
 
                 // Read time
                 let mut time_bytes = [0u8; 8];
@@ -639,6 +675,13 @@ pub(crate) fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<Sq
             } else {
                 let scale = col.type_info.scale.unwrap_or(7);
                 let time_len = time_bytes_for_scale(scale);
+                // Reads below are driven by scale metadata, not by `len`:
+                // a short declared length must be an error, not a panic.
+                if len < time_len + 5 {
+                    return Err(Error::Protocol(format!(
+                        "DATETIMEOFFSET length {len} too short for scale {scale}"
+                    )));
+                }
 
                 // Read time
                 let mut time_bytes = [0u8; 8];
@@ -1180,32 +1223,16 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
 
             #[cfg(feature = "chrono")]
             {
-                use chrono::NaiveDate;
                 if dt_len == 4 && data_len >= 4 {
                     // SMALLDATETIME
                     let days = buf.get_u16_le() as i64;
                     let mins = buf.get_u16_le() as u32;
-                    let base = NaiveDate::from_ymd_opt(1900, 1, 1)
-                        .expect("epoch 1900-01-01 is valid")
-                        .and_hms_opt(0, 0, 0)
-                        .expect("midnight is valid");
-                    let dt = base
-                        + chrono::Duration::days(days)
-                        + chrono::Duration::minutes(mins as i64);
-                    Ok(SqlValue::DateTime(dt))
+                    Ok(SqlValue::DateTime(smalldatetime_from_wire(days, mins)?))
                 } else if data_len >= 8 {
                     // DATETIME
                     let days = buf.get_i32_le() as i64;
-                    let ticks = buf.get_u32_le() as i64;
-                    let base = NaiveDate::from_ymd_opt(1900, 1, 1)
-                        .expect("epoch 1900-01-01 is valid")
-                        .and_hms_opt(0, 0, 0)
-                        .expect("midnight is valid");
-                    let millis = (ticks * 10) / 3;
-                    let dt = base
-                        + chrono::Duration::days(days)
-                        + chrono::Duration::milliseconds(millis);
-                    Ok(SqlValue::DateTime(dt))
+                    let ticks = buf.get_u32_le() as u64;
+                    Ok(SqlValue::DateTime(datetime_from_wire(days, ticks)?))
                 } else {
                     Ok(SqlValue::Null)
                 }
@@ -1500,16 +1527,19 @@ fn intervals_to_time(intervals: u64, scale: u8) -> chrono::NaiveTime {
     // scale 5: 10us
     // scale 6: 1us
     // scale 7: 100ns
+    // Saturating: `intervals` comes from the wire, and a hostile value must
+    // not overflow-panic in debug builds (saturation lands in the
+    // out-of-range fallback below).
     let nanos = match scale {
-        0 => intervals * 1_000_000_000,
-        1 => intervals * 100_000_000,
-        2 => intervals * 10_000_000,
-        3 => intervals * 1_000_000,
-        4 => intervals * 100_000,
-        5 => intervals * 10_000,
-        6 => intervals * 1_000,
-        7 => intervals * 100,
-        _ => intervals * 100,
+        0 => intervals.saturating_mul(1_000_000_000),
+        1 => intervals.saturating_mul(100_000_000),
+        2 => intervals.saturating_mul(10_000_000),
+        3 => intervals.saturating_mul(1_000_000),
+        4 => intervals.saturating_mul(100_000),
+        5 => intervals.saturating_mul(10_000),
+        6 => intervals.saturating_mul(1_000),
+        7 => intervals.saturating_mul(100),
+        _ => intervals.saturating_mul(100),
     };
 
     let secs = (nanos / 1_000_000_000) as u32;
@@ -1729,6 +1759,142 @@ mod tests {
         data.extend_from_slice(&int_value.to_le_bytes());
 
         data
+    }
+
+    // ========================================================================
+    // Hostile wire data: out-of-range date/time values from a malicious or
+    // buggy server must produce protocol errors, never panics.
+    // ========================================================================
+
+    #[cfg(feature = "chrono")]
+    fn datetime_col(type_id: TypeId, col_type: u8, max_length: Option<u32>) -> ColumnData {
+        ColumnData {
+            name: "c".to_string(),
+            type_id,
+            col_type,
+            flags: 0x01,
+            user_type: 0,
+            type_info: TypeInfo {
+                max_length,
+                precision: None,
+                scale: None,
+                collation: None,
+            },
+            crypto_metadata: None,
+        }
+    }
+
+    #[cfg(feature = "chrono")]
+    #[test]
+    fn hostile_smalldatetime_minutes_is_error_not_panic() {
+        // DateTimeN, len=4: days=0, minutes=0xFFFF (>= 1440 is invalid)
+        let data = [4u8, 0x00, 0x00, 0xFF, 0xFF];
+        let col = datetime_col(TypeId::DateTimeN, 0x6F, Some(4));
+        let mut buf: &[u8] = &data;
+        assert!(parse_column_value(&mut buf, &col).is_err());
+
+        // Fixed SMALLDATETIME (DateTime4): same payload, no length prefix
+        let data = [0x00, 0x00, 0xFF, 0xFF];
+        let col = datetime_col(TypeId::DateTime4, 0x3A, None);
+        let mut buf: &[u8] = &data;
+        assert!(parse_column_value(&mut buf, &col).is_err());
+    }
+
+    #[cfg(feature = "chrono")]
+    #[test]
+    fn hostile_datetime_days_overflow_is_error_not_panic() {
+        // DateTimeN, len=8: days=i32::MAX overflows chrono's date range
+        let mut data = vec![8u8];
+        data.extend_from_slice(&i32::MAX.to_le_bytes());
+        data.extend_from_slice(&0u32.to_le_bytes());
+        let col = datetime_col(TypeId::DateTimeN, 0x6F, Some(8));
+        let mut buf: &[u8] = &data;
+        assert!(parse_column_value(&mut buf, &col).is_err());
+
+        // Fixed DATETIME: days=i32::MIN
+        let mut data = Vec::new();
+        data.extend_from_slice(&i32::MIN.to_le_bytes());
+        data.extend_from_slice(&0u32.to_le_bytes());
+        let col = datetime_col(TypeId::DateTime, 0x3D, None);
+        let mut buf: &[u8] = &data;
+        assert!(parse_column_value(&mut buf, &col).is_err());
+    }
+
+    #[cfg(feature = "chrono")]
+    #[test]
+    fn hostile_datetime_time_300ths_is_error_not_panic() {
+        // DateTimeN, len=8: valid days, time_300ths=u32::MAX (> 24h of 300ths)
+        let mut data = vec![8u8];
+        data.extend_from_slice(&0i32.to_le_bytes());
+        data.extend_from_slice(&u32::MAX.to_le_bytes());
+        let col = datetime_col(TypeId::DateTimeN, 0x6F, Some(8));
+        let mut buf: &[u8] = &data;
+        assert!(parse_column_value(&mut buf, &col).is_err());
+    }
+
+    #[cfg(feature = "chrono")]
+    #[test]
+    fn hostile_truncated_n_types_are_error_not_panic() {
+        // Declared length with no payload bytes behind it (found by the
+        // parse_column_value fuzz target on FloatN).
+        for (type_id, col_type, len) in [
+            (TypeId::IntN, 0x26u8, 8u8),
+            (TypeId::FloatN, 0x6D, 4),
+            (TypeId::BitN, 0x68, 1),
+        ] {
+            let data = [len];
+            let col = datetime_col(type_id, col_type, Some(len as u32));
+            let mut buf: &[u8] = &data;
+            assert!(
+                parse_column_value(&mut buf, &col).is_err(),
+                "{type_id:?} must error on truncated payload"
+            );
+        }
+    }
+
+    #[cfg(feature = "chrono")]
+    #[test]
+    fn hostile_short_datetime2_len_is_error_not_panic() {
+        // DATETIME2 declared len=1 (1 byte present) but scale 7 implies
+        // time_len=5 + 3 date bytes; reads are scale-driven, so a short
+        // declared length must error.
+        let data = [1u8, 0xAA];
+        let mut col = datetime_col(TypeId::DateTime2, 0x2A, None);
+        col.type_info.scale = Some(7);
+        let mut buf: &[u8] = &data;
+        assert!(parse_column_value(&mut buf, &col).is_err());
+
+        // Same for DATETIMEOFFSET (time_len + 5)
+        let data = [1u8, 0xAA];
+        let mut col = datetime_col(TypeId::DateTimeOffset, 0x2B, None);
+        col.type_info.scale = Some(7);
+        let mut buf: &[u8] = &data;
+        assert!(parse_column_value(&mut buf, &col).is_err());
+    }
+
+    #[cfg(feature = "chrono")]
+    #[test]
+    fn hostile_variant_datetime_days_overflow_is_error_not_panic() {
+        // SQL_VARIANT: total_len=11, base_type=0x6F (DATETIMEN), prop_count=1,
+        // dt_len=8, then days=i32::MAX + ticks=0
+        let mut data = Vec::new();
+        data.extend_from_slice(&11u32.to_le_bytes());
+        data.push(0x6F);
+        data.push(0x01);
+        data.push(0x08);
+        data.extend_from_slice(&i32::MAX.to_le_bytes());
+        data.extend_from_slice(&0u32.to_le_bytes());
+        let mut buf: &[u8] = &data;
+        assert!(parse_sql_variant(&mut buf).is_err());
+    }
+
+    #[cfg(feature = "chrono")]
+    #[test]
+    fn hostile_time_intervals_do_not_panic() {
+        // intervals_to_time multiplies wire-supplied u64 by up to 1e9; must
+        // not overflow-panic in debug builds. Falls back to midnight today.
+        let t = intervals_to_time(u64::MAX, 0);
+        let _ = t; // any non-panicking result is acceptable
     }
 
     #[test]

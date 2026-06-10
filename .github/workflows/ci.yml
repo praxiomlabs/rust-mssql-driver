@@ -156,6 +156,28 @@ jobs:
         # is in mssql-auth/windows_certstore.rs (Windows FFI, not Miri-testable).
         run: cargo +nightly miri test -p tds-protocol
 
+  fuzz-smoke:
+    name: Fuzz Smoke (wire parsers)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@cargo-fuzz
+      - name: Fuzz each target briefly
+        # Short per-target budget: this is a smoke test that the parsers
+        # don't crash on shallow hostile inputs and that the targets keep
+        # building. Long fuzzing runs stay local/manual.
+        run: |
+          for target in $(cargo +nightly fuzz list); do
+            echo "::group::fuzz $target"
+            cargo +nightly fuzz run "$target" -- -max_total_time=15 -rss_limit_mb=4096
+            echo "::endgroup::"
+          done
+
   semver:
     name: Semver Check
     runs-on: ubuntu-latest

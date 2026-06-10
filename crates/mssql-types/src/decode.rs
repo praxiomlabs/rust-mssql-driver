@@ -560,12 +560,26 @@ fn decode_decimal(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, Typ
     let mantissa = u128::from_le_bytes(mantissa_bytes);
     let scale = type_info.scale.unwrap_or(0) as u32;
 
-    let mut decimal = Decimal::from_i128_with_scale(mantissa as i128, scale);
-    if sign == 0 {
-        decimal.set_sign_negative(true);
+    // rust_decimal holds 96-bit mantissas with scale <= 28; SQL Server
+    // NUMERIC goes to 38 digits, so wire values (legitimate or hostile) can
+    // exceed both limits. Fall back to f64 rather than panic.
+    let decimal = i128::try_from(mantissa)
+        .ok()
+        .and_then(|m| Decimal::try_from_i128_with_scale(m, scale).ok());
+    match decimal {
+        Some(mut decimal) => {
+            if sign == 0 {
+                decimal.set_sign_negative(true);
+            }
+            Ok(SqlValue::Decimal(decimal))
+        }
+        None => {
+            let divisor = 10f64.powi(scale as i32);
+            let value = (mantissa as f64) / divisor;
+            let value = if sign == 0 { -value } else { value };
+            Ok(SqlValue::Double(value))
+        }
     }
-
-    Ok(SqlValue::Decimal(decimal))
 }
 
 #[cfg(not(feature = "decimal"))]
@@ -678,6 +692,13 @@ fn decode_time(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, TypeEr
             available: buf.remaining(),
         });
     }
+    // Reads below are driven by scale metadata, not by `len`: a short
+    // declared length must be an error, not a panic.
+    if len < time_len {
+        return Err(TypeError::InvalidDateTime(format!(
+            "TIME length {len} too short for scale {scale}"
+        )));
+    }
 
     // Read time bytes (variable length based on scale)
     let mut time_bytes = [0u8; 8];
@@ -738,6 +759,13 @@ fn decode_datetime2(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, T
             needed: len,
             available: buf.remaining(),
         });
+    }
+    // Reads below are driven by scale metadata, not by `len`: a short
+    // declared length must be an error, not a panic.
+    if len < time_len + 3 {
+        return Err(TypeError::InvalidDateTime(format!(
+            "DATETIME2 length {len} too short for scale {scale}"
+        )));
     }
 
     // Decode time
@@ -805,6 +833,13 @@ fn decode_datetimeoffset(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlVal
             needed: len,
             available: buf.remaining(),
         });
+    }
+    // Reads below are driven by scale metadata, not by `len`: a short
+    // declared length must be an error, not a panic.
+    if len < time_len + 5 {
+        return Err(TypeError::InvalidDateTime(format!(
+            "DATETIMEOFFSET length {len} too short for scale {scale}"
+        )));
     }
 
     // Decode time
@@ -874,7 +909,10 @@ fn decode_datetime(buf: &mut Bytes) -> Result<SqlValue, TypeError> {
     let time_300ths = buf.get_u32_le();
 
     let base = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("valid date");
-    let date = base + chrono::Duration::days(days as i64);
+    // days comes from the wire: out-of-range is an error, never a panic.
+    let date = base
+        .checked_add_signed(chrono::Duration::days(days as i64))
+        .ok_or_else(|| TypeError::InvalidDateTime(format!("DATETIME days out of range: {days}")))?;
 
     // Convert 300ths of second to time
     let total_ms = (time_300ths as u64 * 1000) / 300;
@@ -1004,16 +1042,19 @@ fn intervals_to_time(intervals: u64, scale: u8) -> chrono::NaiveTime {
     // scale 6: 1us
     // scale 7: 100ns
 
+    // Saturating: `intervals` comes from the wire, and a hostile value must
+    // not overflow-panic in debug builds (saturation lands in the
+    // out-of-range fallback below).
     let nanos = match scale {
-        0 => intervals * 1_000_000_000,
-        1 => intervals * 100_000_000,
-        2 => intervals * 10_000_000,
-        3 => intervals * 1_000_000,
-        4 => intervals * 100_000,
-        5 => intervals * 10_000,
-        6 => intervals * 1_000,
-        7 => intervals * 100,
-        _ => intervals * 100,
+        0 => intervals.saturating_mul(1_000_000_000),
+        1 => intervals.saturating_mul(100_000_000),
+        2 => intervals.saturating_mul(10_000_000),
+        3 => intervals.saturating_mul(1_000_000),
+        4 => intervals.saturating_mul(100_000),
+        5 => intervals.saturating_mul(10_000),
+        6 => intervals.saturating_mul(1_000),
+        7 => intervals.saturating_mul(100),
+        _ => intervals.saturating_mul(100),
     };
 
     let secs = (nanos / 1_000_000_000) as u32;
@@ -1034,6 +1075,18 @@ mod tests {
         let type_info = TypeInfo::int(0x38);
         let result = decode_value(&mut buf, &type_info).unwrap();
         assert_eq!(result, SqlValue::Int(42));
+    }
+
+    #[cfg(feature = "chrono")]
+    #[test]
+    fn hostile_datetime_days_overflow_is_error_not_panic() {
+        // days=i32::MAX from the wire overflows chrono's date range; must be
+        // a TypeError, never a panic.
+        let mut data = Vec::new();
+        data.extend_from_slice(&i32::MAX.to_le_bytes());
+        data.extend_from_slice(&0u32.to_le_bytes());
+        let mut buf = Bytes::from(data);
+        assert!(decode_datetime(&mut buf).is_err());
     }
 
     #[test]
