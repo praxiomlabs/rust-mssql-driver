@@ -685,10 +685,13 @@ impl Client<Ready> {
         self.needs_reset
     }
 
-    /// Execute a query and return a streaming result set.
+    /// Execute a query and return a result set with lazy per-row decoding.
     ///
-    /// Per ADR-007, results are streamed by default for memory efficiency.
-    /// Use `.collect_all()` on the stream if you need all rows in memory.
+    /// Per ADR-007 the full response is buffered in memory and each row is
+    /// *decoded* on demand as you iterate — this is not incremental network
+    /// streaming, so peak memory tracks the response size. Use
+    /// `.collect_all()` if you want all rows materialized into a `Vec` up
+    /// front.
     ///
     /// # Example
     ///

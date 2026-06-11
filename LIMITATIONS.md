@@ -13,6 +13,7 @@ For supported features, see [README.md](README.md).
 | Protocol | MARS | Use connection pooling |
 | Protocol | Named Pipes / Shared Memory | Use TCP/IP |
 | Protocol | True LOB Streaming | Chunked reads via SQL |
+| Protocol | Incremental result streaming (whole response is buffered) | Page with OFFSET/FETCH |
 | Protocol | Server-Side Cursors | Use OFFSET/FETCH pagination |
 | Data Types | NUMERIC/DECIMAL beyond 28-29 significant digits | CAST to narrower NUMERIC, FLOAT, or VARCHAR |
 | Collations | OEM code pages CP437 / CP850 (legacy SQL collations) | Use a CP125x or UTF-8 collation, or CAST to NVARCHAR |
@@ -63,11 +64,32 @@ let (result1, result2) = tokio::join!(
 
 ---
 
+### Result Set Buffering (No Incremental Streaming)
+
+**Status:** The full server response is buffered in memory; rows decode lazily
+
+`query()` reads the entire server response into one buffer before returning.
+The returned result set then *decodes* each row lazily as you iterate, so
+peak memory tracks the raw response size (not the response plus a fully
+typed `Vec<Row>`) — but it does **not** bound memory to a single row the way
+true incremental network streaming would. A multi-GB result set means
+multi-GB resident memory. There is currently no maximum-response-size guard.
+
+**Workaround:** Page the query with `OFFSET`/`FETCH` so each fetch is
+bounded:
+
+```sql
+SELECT ... FROM t ORDER BY id OFFSET @skip ROWS FETCH NEXT @take ROWS ONLY
+```
+
+---
+
 ### Large Object (LOB) Streaming
 
 **Status:** Buffered only (no true streaming)
 
-Large objects (VARCHAR(MAX), NVARCHAR(MAX), VARBINARY(MAX)) are fully buffered in memory.
+Large objects (VARCHAR(MAX), NVARCHAR(MAX), VARBINARY(MAX)) are fully buffered in memory
+(this is a specific case of the whole-response buffering described above).
 
 **Workaround:** For objects over 100MB, chunk via SQL:
 
@@ -307,7 +329,9 @@ Windows-only protocols with limited use in modern deployments.
 
 ### Server-Side Cursors
 
-Result set streaming is efficient; cursors add complexity without significant benefit.
+Not implemented. Bound large reads by paging in SQL rather than holding a
+server-side cursor; see "Result Set Buffering" above for why paging (not the
+result set type) is what limits client memory.
 
 **Alternative:** Use `OFFSET`/`FETCH` for pagination.
 
