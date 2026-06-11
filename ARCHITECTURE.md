@@ -746,10 +746,10 @@ webpki-roots = "1.0"
 thiserror = "2.0"
 
 # Observability (optional `otel` feature)
-opentelemetry = { version = "0.31", optional = true }
-opentelemetry_sdk = { version = "0.31", optional = true }
-opentelemetry-otlp = { version = "0.31", optional = true }
-tracing-opentelemetry = { version = "0.32", optional = true }
+opentelemetry = { version = "0.32", optional = true }
+opentelemetry_sdk = { version = "0.32", optional = true }
+opentelemetry-otlp = { version = "0.32", optional = true }
+tracing-opentelemetry = { version = "0.33", optional = true }
 
 # Testing
 criterion = { version = "0.8", features = ["async_tokio"] }
@@ -780,7 +780,7 @@ Dependencies use **minimum version constraints** (caret requirements) rather tha
 # PREFERRED: Allows compatible updates (default Cargo behavior)
 tokio = "1.48"           # Equivalent to "^1.48", allows 1.48.x and 1.49.x etc.
 rustls = "0.23"          # Allows 0.23.x updates
-opentelemetry = "0.31"   # Allows 0.31.x updates
+opentelemetry = "0.32"   # Allows 0.32.x updates
 
 # AVOID: Creates immediate tech debt, blocks security patches
 tokio = "=1.48.0"        # Exact pin - requires manual update for every patch
@@ -829,37 +829,38 @@ src/
 
 **API:**
 ```rust
-let bulk = client
-    .bulk_insert("dbo.Users")
-    .with_columns(&["id", "name", "email"])
+let builder = BulkInsertBuilder::new("dbo.Users")
+    .with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0)?,
+        BulkColumn::new("name", "NVARCHAR(100)", 1)?,
+        BulkColumn::new("email", "NVARCHAR(200)", 2)?,
+    ])
     .with_options(BulkOptions {
-        batch_size: 1000,
+        batch_size: 1000, // sent as a ROWS_PER_BATCH hint
         check_constraints: true,
         fire_triggers: false,
         keep_nulls: true,
         table_lock: true,
-    })
-    .build()
-    .await?;
+        order_hint: None,
+    });
 
-// Stream rows
+let mut writer = client.bulk_insert(&builder).await?;
 for user in users {
-    bulk.send_row(&[&user.id, &user.name, &user.email]).await?;
+    writer.send_row_values(&[
+        SqlValue::Int(user.id),
+        SqlValue::String(user.name),
+        SqlValue::String(user.email),
+    ])?;
 }
 
-let result = bulk.finish().await?;
+let result = writer.finish().await?;
 println!("Inserted {} rows", result.rows_affected);
 ```
 
-**Streaming from CSV:**
-```rust
-let file = File::open("users.csv").await?;
-let reader = csv_async::AsyncReader::from_reader(file);
-
-let bulk = client.bulk_insert("dbo.Users").build().await?;
-bulk.send_stream(reader).await?;
-let result = bulk.finish().await?;
-```
+**Current limits:** rows are buffered in memory and sent as a single batch on
+`finish()` — `BulkOptions::batch_size` is only a `ROWS_PER_BATCH` server hint.
+Incremental client-side flushing and a streaming input API are planned
+alongside the response-streaming work.
 
 ---
 

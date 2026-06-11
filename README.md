@@ -44,7 +44,7 @@ An async Microsoft SQL Server driver for Rust.
 | Named Instance Resolution | Yes | SQL Browser service (UDP 1434) |
 | MultiSubnetFailover (AG) | Yes | Parallel TCP connect for listener failover |
 | Connection Retry | Yes | `ConnectRetryCount` / `ConnectRetryInterval` |
-| FILESTREAM BLOB Access | Yes | Windows only, via `filestream` feature |
+| FILESTREAM BLOB Access | Untested | Windows only via `filestream` feature; not yet validated against a FILESTREAM-enabled instance |
 
 ## Installation
 
