@@ -766,9 +766,11 @@ pub(crate) fn decode_type_info(
             let schema_present = src.get_u8();
 
             if schema_present != 0 {
-                // Read schema info (3 us_varchar strings)
-                let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // db name
-                let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // owning schema
+                // XML_INFO per MS-TDS §2.2.5.5.3: DBNAME and OWNING_SCHEMA are
+                // B_VARCHAR (1-byte length); only XML_SCHEMA_COLLECTION is
+                // US_VARCHAR (2-byte length).
+                let _ = read_b_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // db name
+                let _ = read_b_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // owning schema
                 let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // xml schema collection
             }
 
@@ -783,10 +785,12 @@ pub(crate) fn decode_type_info(
             }
             let max_length = src.get_u16_le() as u32;
 
-            // UDT metadata: db name, schema name, type name, assembly qualified name
-            let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // db name
-            let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // schema name
-            let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // type name
+            // UDT_INFO per MS-TDS: DB_NAME, SCHEMA_NAME, and TYPE_NAME are
+            // B_VARCHAR (1-byte length); only ASSEMBLY_QUALIFIED_NAME is
+            // US_VARCHAR (2-byte length).
+            let _ = read_b_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // db name
+            let _ = read_b_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // schema name
+            let _ = read_b_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // type name
             let _ = read_us_varchar(src).ok_or(ProtocolError::UnexpectedEof)?; // assembly qualified name
 
             Ok(TypeInfo {
@@ -2628,6 +2632,73 @@ mod tests {
             buf,
             &[0xFD],
             "decode must consume exactly the declared ENVCHANGE frame"
+        );
+    }
+
+    fn put_b_varchar(buf: &mut BytesMut, s: &str) {
+        let utf16: Vec<u16> = s.encode_utf16().collect();
+        buf.put_u8(utf16.len() as u8);
+        for c in utf16 {
+            buf.put_u16_le(c);
+        }
+    }
+
+    fn put_us_varchar(buf: &mut BytesMut, s: &str) {
+        let utf16: Vec<u16> = s.encode_utf16().collect();
+        buf.put_u16_le(utf16.len() as u16);
+        for c in utf16 {
+            buf.put_u16_le(c);
+        }
+    }
+
+    /// UDT_INFO regression (issue #154): per MS-TDS, DB_NAME, SCHEMA_NAME,
+    /// and TYPE_NAME are B_VARCHAR (1-byte length); only
+    /// ASSEMBLY_QUALIFIED_NAME is US_VARCHAR. Reading all four as US_VARCHAR
+    /// misaligned the stream, so every query selecting a UDT column
+    /// (geography, geometry, hierarchyid, CLR UDTs) failed with
+    /// UnexpectedEof.
+    #[test]
+    fn test_udt_info_metadata_uses_b_varchar_names() {
+        let mut data = BytesMut::new();
+        data.put_u16_le(0xFFFF); // MAX_BYTE_SIZE
+        put_b_varchar(&mut data, "master");
+        put_b_varchar(&mut data, "dbo");
+        put_b_varchar(&mut data, "hierarchyid");
+        put_us_varchar(
+            &mut data,
+            "Microsoft.SqlServer.Types.SqlHierarchyId, Microsoft.SqlServer.Types",
+        );
+        // A trailing token type byte that must remain for the next read.
+        data.put_u8(0xFD);
+
+        let mut buf: &[u8] = &data;
+        let info = decode_type_info(&mut buf, TypeId::Udt, TypeId::Udt as u8).unwrap();
+        assert_eq!(info.max_length, Some(0xFFFF));
+        assert_eq!(
+            buf,
+            &[0xFD],
+            "decode must consume exactly the UDT_INFO frame"
+        );
+    }
+
+    /// XML_INFO regression (issue #154): per MS-TDS §2.2.5.5.3, DBNAME and
+    /// OWNING_SCHEMA are B_VARCHAR; only XML_SCHEMA_COLLECTION is US_VARCHAR.
+    /// Schema-bound xml columns (SCHEMA_PRESENT=1) previously misparsed.
+    #[test]
+    fn test_xml_info_schema_bound_uses_b_varchar_names() {
+        let mut data = BytesMut::new();
+        data.put_u8(1); // SCHEMA_PRESENT
+        put_b_varchar(&mut data, "master");
+        put_b_varchar(&mut data, "dbo");
+        put_us_varchar(&mut data, "MyXmlSchemaCollection");
+        data.put_u8(0xFD);
+
+        let mut buf: &[u8] = &data;
+        decode_type_info(&mut buf, TypeId::Xml, TypeId::Xml as u8).unwrap();
+        assert_eq!(
+            buf,
+            &[0xFD],
+            "decode must consume exactly the XML_INFO frame"
         );
     }
 
