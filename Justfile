@@ -1344,7 +1344,11 @@ typos:
         printf '{{yellow}}[WARN]{{reset}} typos not installed (cargo install typos-cli)\n'
         exit 0
     fi
-    typos crates/ docs/ README.md CHANGELOG.md RELEASING.md ARCHITECTURE.md
+    # Scan the whole tree (respecting typos.toml), matching the bare `typos`
+    # invocation in the CI Hygiene job. The previous hand-picked path list
+    # included a `docs/` directory that no longer exists, so the recipe
+    # failed (exit 64) and also diverged from what CI actually checks.
+    typos
     printf '{{green}}[OK]{{reset}}   Typos check passed\n'
 
 [group('lint')]
