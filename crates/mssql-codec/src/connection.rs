@@ -210,7 +210,15 @@ where
         reset_connection: bool,
     ) -> Result<(), CodecError> {
         let max_payload = max_packet_size - PACKET_HEADER_SIZE;
-        let chunks: Vec<_> = payload.chunks(max_payload).collect();
+        // An empty payload must still produce one header-only EOM packet:
+        // `[]chunks()` yields zero chunks, which would send nothing at all and
+        // leave the caller waiting for a response that never comes (issue
+        // #165). A zero-length-payload message is valid TDS framing.
+        let chunks: Vec<&[u8]> = if payload.is_empty() {
+            vec![&[]]
+        } else {
+            payload.chunks(max_payload).collect()
+        };
         let total_chunks = chunks.len();
 
         let mut writer = self.writer.lock().await;
@@ -431,6 +439,88 @@ where
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    /// Issue #165: sending a message with an empty payload must still emit
+    /// exactly one header-only EOM packet. Previously `chunks()` on an empty
+    /// payload yielded zero chunks, so nothing was sent and the caller would
+    /// hang waiting for a response.
+    #[tokio::test]
+    async fn test_send_empty_payload_emits_one_eom_packet() {
+        use tokio::io::AsyncReadExt;
+
+        let (client_io, mut server_io) = tokio::io::duplex(4096);
+        let mut conn = Connection::new(client_io);
+
+        conn.send_message(PacketType::SqlBatch, Bytes::new(), 4096)
+            .await
+            .expect("empty message should send");
+
+        // Exactly one header-only packet (8 bytes) must arrive.
+        let mut header = [0u8; PACKET_HEADER_SIZE];
+        server_io
+            .read_exact(&mut header)
+            .await
+            .expect("one header-only packet must be sent");
+        assert_eq!(header[0], PacketType::SqlBatch as u8);
+        assert!(
+            PacketStatus::from_bits_truncate(header[1]).contains(PacketStatus::END_OF_MESSAGE),
+            "the single packet must be flagged END_OF_MESSAGE"
+        );
+        let length = u16::from_be_bytes([header[2], header[3]]);
+        assert_eq!(
+            length as usize, PACKET_HEADER_SIZE,
+            "length must be header-only (no payload)"
+        );
+
+        // And nothing more.
+        drop(conn);
+        let mut rest = Vec::new();
+        server_io.read_to_end(&mut rest).await.expect("read rest");
+        assert!(rest.is_empty(), "no second packet may follow");
+    }
+
+    /// Issue #165: across a multi-packet send, RESET_CONNECTION must be set on
+    /// the first packet only (per MS-TDS), and END_OF_MESSAGE on the last only.
+    #[tokio::test]
+    async fn test_reset_flag_on_first_packet_only_across_multi_packet_send() {
+        use tokio::io::AsyncReadExt;
+
+        let (client_io, mut server_io) = tokio::io::duplex(4096);
+        let mut conn = Connection::new(client_io);
+
+        // max_packet_size 16 → max_payload 8; a 12-byte payload spans 2 packets.
+        let payload = Bytes::from(vec![0xABu8; 12]);
+        conn.send_message_with_reset(PacketType::SqlBatch, payload, 16, true)
+            .await
+            .expect("multi-packet send should succeed");
+        drop(conn);
+
+        let mut all = Vec::new();
+        server_io.read_to_end(&mut all).await.expect("read packets");
+
+        // Packet 1: header(8) + payload(8) = 16 bytes.
+        let s0 = PacketStatus::from_bits_truncate(all[1]);
+        assert!(
+            s0.contains(PacketStatus::RESET_CONNECTION),
+            "first packet must carry RESET_CONNECTION"
+        );
+        assert!(
+            !s0.contains(PacketStatus::END_OF_MESSAGE),
+            "first packet of two must not be END_OF_MESSAGE"
+        );
+
+        // Packet 2 starts at offset 16: header(8) + payload(4).
+        let s1 = PacketStatus::from_bits_truncate(all[16 + 1]);
+        assert!(
+            !s1.contains(PacketStatus::RESET_CONNECTION),
+            "RESET_CONNECTION must not repeat on later packets"
+        );
+        assert!(
+            s1.contains(PacketStatus::END_OF_MESSAGE),
+            "last packet must be END_OF_MESSAGE"
+        );
+        assert_eq!(all.len(), 16 + 8 + 4, "exactly two packets must be sent");
+    }
 
     #[test]
     fn test_attention_packet_header() {
