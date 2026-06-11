@@ -270,14 +270,25 @@ impl<S: ConnectionState> Client<S> {
         // Encode metadata
         encoder.encode_metadata_with_collation(&mut buf, collation);
 
-        // Encode each row
+        // Encode each row. encode_row takes an infallible closure, so capture
+        // the first cell error and abort the whole conversion — the partially
+        // written buffer is discarded with it.
+        let mut cell_error: Option<Error> = None;
         for row in &tvp_data.rows {
             encoder.encode_row(&mut buf, |row_buf| {
                 for (col_idx, value) in row.iter().enumerate() {
                     let wire_type = &wire_columns[col_idx].wire_type;
-                    Self::encode_tvp_value(value, wire_type, collation, row_buf);
+                    if let Err(e) = Self::encode_tvp_value(value, wire_type, collation, row_buf) {
+                        if cell_error.is_none() {
+                            cell_error = Some(e);
+                        }
+                        break;
+                    }
                 }
             });
+            if let Some(e) = cell_error.take() {
+                return Err(e);
+            }
         }
 
         // Encode end marker
@@ -352,12 +363,21 @@ impl<S: ConnectionState> Client<S> {
     }
 
     /// Encode a single TVP column value.
+    /// Encode one TVP cell.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for values the wire type cannot represent
+    /// (out-of-range MONEY/SMALLMONEY/SMALLDATETIME) and for unsupported
+    /// variants (nested TVPs) — the cell must NOT be silently written as
+    /// NULL: the server cannot tell a substituted NULL from an intentional
+    /// one, so the row would insert wrong data (issue #157).
     fn encode_tvp_value(
         value: &mssql_types::SqlValue,
         wire_type: &TvpWireType,
         collation: Option<&tds_protocol::token::Collation>,
         buf: &mut BytesMut,
-    ) {
+    ) -> Result<()> {
         use mssql_types::SqlValue;
 
         match value {
@@ -413,27 +433,11 @@ impl<S: ConnectionState> Client<S> {
                 // authoritative dispatch key.
                 match wire_type {
                     TvpWireType::Money => {
-                        let scaled = match mssql_types::encode::decimal_to_money_cents_i64(*d) {
-                            Ok(v) => v,
-                            Err(_) => {
-                                // Out-of-range values write NULL so the row
-                                // structure stays intact; the caller can
-                                // pre-validate to reject.
-                                encode_tvp_null(wire_type, buf);
-                                return;
-                            }
-                        };
+                        let scaled = mssql_types::encode::decimal_to_money_cents_i64(*d)?;
                         encode_tvp_money(scaled, buf);
                     }
                     TvpWireType::SmallMoney => {
-                        let scaled = match mssql_types::encode::decimal_to_smallmoney_cents_i32(*d)
-                        {
-                            Ok(v) => v,
-                            Err(_) => {
-                                encode_tvp_null(wire_type, buf);
-                                return;
-                            }
-                        };
+                        let scaled = mssql_types::encode::decimal_to_smallmoney_cents_i32(*d)?;
                         encode_tvp_smallmoney(scaled, buf);
                     }
                     _ => {
@@ -480,14 +484,9 @@ impl<S: ConnectionState> Client<S> {
                         encode_tvp_datetime(days, ticks, buf);
                     }
                     TvpWireType::SmallDateTime => {
-                        match mssql_types::encode::datetime_to_smalldatetime_days_minutes(*dt) {
-                            Ok((days, minutes)) => {
-                                encode_tvp_smalldatetime(days, minutes, buf);
-                            }
-                            Err(_) => {
-                                encode_tvp_null(wire_type, buf);
-                            }
-                        }
+                        let (days, minutes) =
+                            mssql_types::encode::datetime_to_smalldatetime_days_minutes(*dt)?;
+                        encode_tvp_smalldatetime(days, minutes, buf);
                     }
                     _ => {
                         use chrono::Timelike;
@@ -545,13 +544,75 @@ impl<S: ConnectionState> Client<S> {
                 encode_tvp_nvarchar(s, 0xFFFF, buf);
             }
             SqlValue::Tvp(_) => {
-                // Nested TVPs are not supported
-                encode_tvp_null(wire_type, buf);
+                return Err(mssql_types::TypeError::UnsupportedConversion {
+                    from: "TVP".to_string(),
+                    to: "TVP cell (nested TVPs are not supported)",
+                }
+                .into());
             }
-            // Handle future SqlValue variants as NULL
-            _ => {
-                encode_tvp_null(wire_type, buf);
+            // Future SqlValue variants must error, not silently become NULL.
+            other => {
+                return Err(mssql_types::TypeError::UnsupportedConversion {
+                    from: other.type_name().to_string(),
+                    to: "TVP cell",
+                }
+                .into());
             }
         }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::state::Ready;
+    use mssql_types::SqlValue;
+    use tds_protocol::tvp::TvpWireType;
+
+    /// Issue #157 regression: TVP cells whose value the wire type cannot
+    /// represent must error — previously they were silently written as NULL,
+    /// inserting wrong data the server cannot distinguish from intentional
+    /// NULLs.
+    #[cfg(feature = "decimal")]
+    #[test]
+    fn tvp_out_of_range_money_cell_errors_instead_of_null() {
+        let mut buf = BytesMut::new();
+        let err = Client::<Ready>::encode_tvp_value(
+            &SqlValue::Money(rust_decimal::Decimal::MAX),
+            &TvpWireType::Money,
+            None,
+            &mut buf,
+        )
+        .expect_err("out-of-range MONEY must error");
+        assert!(
+            !err.to_string().is_empty(),
+            "error must be descriptive: {err}"
+        );
+
+        let mut buf = BytesMut::new();
+        Client::<Ready>::encode_tvp_value(
+            &SqlValue::SmallMoney(rust_decimal::Decimal::MAX),
+            &TvpWireType::SmallMoney,
+            None,
+            &mut buf,
+        )
+        .expect_err("out-of-range SMALLMONEY must error");
+    }
+
+    /// Issue #157 regression: unsupported variants (nested TVPs) must error,
+    /// not silently encode NULL.
+    #[test]
+    fn tvp_nested_tvp_cell_errors_instead_of_null() {
+        let nested = mssql_types::TvpData::new("dbo", "Inner");
+        let mut buf = BytesMut::new();
+        Client::<Ready>::encode_tvp_value(
+            &SqlValue::Tvp(Box::new(nested)),
+            &TvpWireType::Int { size: 4 },
+            None,
+            &mut buf,
+        )
+        .expect_err("nested TVP cell must error");
     }
 }

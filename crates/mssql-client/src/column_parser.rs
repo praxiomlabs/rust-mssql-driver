@@ -436,9 +436,11 @@ pub fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue>
                 {
                     use rust_decimal::Decimal;
                     // rust_decimal holds 96-bit mantissas with scale <= 28;
-                    // SQL Server NUMERIC goes to 38 digits, so wire values
-                    // (legitimate or hostile) can exceed both limits. Fall
-                    // back to f64 rather than panic.
+                    // SQL Server NUMERIC goes to 38 digits, so legitimate
+                    // wire values can exceed it. That must be an error, not
+                    // a silent fall back to f64 (~15-16 significant digits):
+                    // a lossy value read, written back, or compared
+                    // downstream corrupts data (issue #157).
                     let decimal = i128::try_from(mantissa)
                         .ok()
                         .and_then(|m| Decimal::try_from_i128_with_scale(m, scale).ok());
@@ -450,10 +452,12 @@ pub fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue>
                             SqlValue::Decimal(decimal)
                         }
                         None => {
-                            let divisor = 10f64.powi(scale as i32);
-                            let value = (mantissa as f64) / divisor;
-                            let value = if sign == 0 { -value } else { value };
-                            SqlValue::Double(value)
+                            return Err(mssql_types::TypeError::InvalidDecimal(format!(
+                                "NUMERIC value (mantissa {mantissa}, scale {scale}) exceeds \
+                                 rust_decimal's 96-bit/scale-28 range; CAST the column to a \
+                                 narrower NUMERIC, FLOAT, or VARCHAR in the query"
+                            ))
+                            .into());
                         }
                     }
                 }
@@ -1291,12 +1295,12 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
                         }
                         Ok(SqlValue::Decimal(decimal))
                     }
-                    None => {
-                        let divisor = 10f64.powi(scale as i32);
-                        let value = (mantissa as f64) / divisor;
-                        let value = if sign == 0 { -value } else { value };
-                        Ok(SqlValue::Double(value))
-                    }
+                    None => Err(mssql_types::TypeError::InvalidDecimal(format!(
+                        "NUMERIC value in sql_variant (mantissa {mantissa}, scale {scale}) \
+                         exceeds rust_decimal's 96-bit/scale-28 range; CAST the column to a \
+                         narrower NUMERIC, FLOAT, or VARCHAR in the query"
+                    ))
+                    .into()),
                 }
             }
             #[cfg(not(feature = "decimal"))]
@@ -1903,10 +1907,12 @@ mod tests {
 
     #[cfg(feature = "decimal")]
     #[test]
-    fn hostile_variant_decimal_over_96bit_is_not_panic() {
+    fn hostile_variant_decimal_over_96bit_is_error_not_panic() {
         // SQL_VARIANT DECIMALN (0x6A) with a 16-byte mantissa above 2^96.
-        // rust_decimal cannot hold it; must fall back to f64, never panic
-        // (a legitimate 38-digit NUMERIC inside a variant reaches this too).
+        // rust_decimal cannot hold it; this must be a descriptive error,
+        // never a panic — and never a silent f64 fallback, which corrupted
+        // legitimate 38-digit NUMERIC values down to ~15-16 significant
+        // digits (issue #157).
         // total_len=21: base_type + prop_count + precision + scale + sign(1)
         // + mantissa(16) = 2 + 2 + 17.
         let mantissa = 1u128 << 100;
@@ -1919,9 +1925,11 @@ mod tests {
         data.push(0x01); // sign (positive)
         data.extend_from_slice(&mantissa.to_le_bytes());
         let mut buf: &[u8] = &data;
-        // Must not panic; an oversized mantissa decodes to a Double fallback.
-        let value = parse_sql_variant(&mut buf).expect("must not error");
-        assert!(matches!(value, SqlValue::Double(_)));
+        let err = parse_sql_variant(&mut buf).expect_err("oversized NUMERIC must error");
+        assert!(
+            err.to_string().contains("rust_decimal"),
+            "error should explain the range limitation: {err}"
+        );
     }
 
     #[cfg(feature = "chrono")]

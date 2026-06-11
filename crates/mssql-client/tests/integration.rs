@@ -2809,7 +2809,7 @@ async fn test_data_type_date() {
 
     for result in rows {
         let row = result.expect("Row should be valid");
-        let date: Option<NaiveDate> = row.try_get(0);
+        let date: Option<NaiveDate> = row.try_get(0).expect("date should decode");
         assert!(date.is_none(), "Should be NULL");
     }
 
@@ -2846,7 +2846,7 @@ async fn test_data_type_xml() {
 
     for result in rows {
         let row = result.expect("Row should be valid");
-        let xml: Option<String> = row.try_get(0);
+        let xml: Option<String> = row.try_get(0).expect("xml should decode");
         assert!(xml.is_none(), "Should be NULL");
     }
 
@@ -2962,28 +2962,46 @@ async fn test_data_type_decimal_high_scale() {
     let config = get_test_config().expect("SQL Server config required");
     let mut client = Client::connect(config).await.expect("Failed to connect");
 
-    // Test high-scale DECIMAL - was causing hang before fix
-    // rust_decimal supports max scale of 28, so scale 30+ falls back to f64
-    let rows = client
+    // High-scale DECIMAL — originally caused a hang; then silently degraded
+    // to f64. Since #157, values beyond rust_decimal's 96-bit/scale-28 range
+    // must surface a descriptive error rather than lose precision silently.
+    // The error may surface at query() or at row decode depending on where
+    // the response is parsed — accept either, but never a silent value.
+    let mut saw_range_error = false;
+    match client
         .query(
             "SELECT CAST(123456.123456789012345678901234567890 AS DECIMAL(38,30)) AS high_scale",
             &[],
         )
         .await
-        .expect("High-scale DECIMAL query failed - driver may have hung");
-
-    for result in rows {
-        let row = result.expect("Row should be valid");
-        // With scale > 28, we fall back to f64
-        let value: f64 = row.get(0).expect("Should get high-scale decimal as f64");
-        // Check approximate value (f64 won't have full precision)
-        assert!(
-            (value - 123456.123456789).abs() < 0.001,
-            "Value should be approximately correct: {value}"
-        );
+    {
+        Err(e) => {
+            assert!(
+                e.to_string().contains("rust_decimal"),
+                "error should explain the range limitation: {e}"
+            );
+            saw_range_error = true;
+        }
+        Ok(rows) => {
+            for result in rows {
+                let err = result.expect_err(
+                    "DECIMAL(38,30) beyond rust_decimal range must error, not decode silently",
+                );
+                assert!(
+                    err.to_string().contains("rust_decimal"),
+                    "error should explain the range limitation: {err}"
+                );
+                saw_range_error = true;
+            }
+        }
     }
+    assert!(
+        saw_range_error,
+        "the out-of-range DECIMAL must produce an error somewhere"
+    );
 
-    // Test normal scale DECIMAL still works with rust_decimal
+    // Normal scale DECIMAL still works — this also proves the connection
+    // remains usable after the decode error above.
     let rows = client
         .query(
             "SELECT CAST(123.456789 AS DECIMAL(18,6)) AS normal_scale",
@@ -3205,7 +3223,7 @@ async fn test_data_type_sql_variant() {
 
     for result in rows {
         let row = result.expect("Row should be valid");
-        let value: Option<i32> = row.try_get(0);
+        let value: Option<i32> = row.try_get(0).expect("value should decode");
         assert!(value.is_none(), "Should be NULL");
     }
 

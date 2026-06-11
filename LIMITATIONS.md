@@ -14,6 +14,7 @@ For supported features, see [README.md](README.md).
 | Protocol | Named Pipes / Shared Memory | Use TCP/IP |
 | Protocol | True LOB Streaming | Chunked reads via SQL |
 | Protocol | Server-Side Cursors | Use OFFSET/FETCH pagination |
+| Data Types | NUMERIC/DECIMAL beyond 28-29 significant digits | CAST to narrower NUMERIC, FLOAT, or VARCHAR |
 | Data Types | GEOMETRY, GEOGRAPHY | Use `STAsText()` or `STAsGeoJSON()` |
 | Data Types | HIERARCHYID | Use `.ToString()` |
 | Data Types | CLR UDTs | Cast to VARBINARY |
@@ -142,6 +143,25 @@ live validation lands.
 
 **Workaround:** SQL authentication and cross-platform NTLM are the
 validated paths.
+
+---
+
+### NUMERIC/DECIMAL Precision Beyond 28-29 Significant Digits
+
+**Status:** Reads error with a descriptive message
+
+SQL Server `NUMERIC`/`DECIMAL` supports up to 38 significant digits;
+[`rust_decimal`] (the `decimal` feature's backing type) holds a 96-bit
+mantissa with scale ≤ 28. Reading a value that exceeds that range returns a
+`TypeError` naming the limitation. It is deliberately **not** a silent
+fallback to `f64` (~15-16 significant digits), which would corrupt values
+read, written back, or compared downstream.
+
+[`rust_decimal`]: https://docs.rs/rust_decimal
+
+**Workaround:** `CAST` the column in the query — to a `NUMERIC` precision
+within range, to `FLOAT` if approximate semantics are acceptable, or to
+`VARCHAR` to receive the exact digits as text.
 
 ---
 
