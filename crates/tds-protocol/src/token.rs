@@ -1878,6 +1878,7 @@ impl EnvChange {
                 actual: src.remaining(),
             });
         }
+        let remaining_before = src.remaining();
 
         let env_type_byte = src.get_u8();
         let env_type = EnvChangeType::from_u8(env_type_byte)
@@ -1940,6 +1941,18 @@ impl EnvChange {
                 (new_value, old_value)
             }
         };
+
+        // The declared `length` frames the whole ENVCHANGE data. Value
+        // decoders may legitimately consume less than that — e.g. the
+        // Routing decoder reads only the NewValue, leaving the spec-mandated
+        // zero-length OldValue (two bytes) behind. Skip to the frame
+        // boundary so the leftover bytes are not misparsed as the next
+        // token. (Decoders that tolerantly read *past* an under-declared
+        // length are left as-is — see the transaction/collation branch.)
+        let consumed = remaining_before - src.remaining();
+        if consumed < length {
+            src.advance(length - consumed);
+        }
 
         Ok(Self {
             env_type,
@@ -2576,6 +2589,46 @@ mod tests {
         assert_eq!(EnvChangeType::from_u8(1), Some(EnvChangeType::Database));
         assert_eq!(EnvChangeType::from_u8(20), Some(EnvChangeType::Routing));
         assert_eq!(EnvChangeType::from_u8(100), None);
+    }
+
+    /// A spec-faithful Routing ENVCHANGE (MS-TDS 2.2.7.9) carries a
+    /// zero-length OldValue (two bytes) after the routing data. The decoder
+    /// reads only the NewValue, so it must skip to the declared frame
+    /// boundary — otherwise the leftover `00 00` is misparsed as the next
+    /// token type and the rest of the login response is garbage. Azure SQL
+    /// Gateway redirects send exactly this shape.
+    #[test]
+    fn test_env_change_routing_consumes_declared_length() {
+        let host = "redirect.example";
+        let host_utf16: Vec<u16> = host.encode_utf16().collect();
+
+        let mut data = BytesMut::new();
+        // RoutingDataValue: length + protocol + port + server_len + server
+        let routing_len = 1 + 2 + 2 + host_utf16.len() * 2;
+        // ENVCHANGE length: type byte + routing length prefix + routing data
+        // + zero-length OldValue
+        let env_len = 1 + 2 + routing_len + 2;
+        data.put_u16_le(env_len as u16);
+        data.put_u8(20); // Routing
+        data.put_u16_le(routing_len as u16);
+        data.put_u8(0); // protocol: TCP
+        data.put_u16_le(11000); // port
+        data.put_u16_le(host_utf16.len() as u16);
+        for c in &host_utf16 {
+            data.put_u16_le(*c);
+        }
+        data.put_u16_le(0); // OldValue: zero-length US_VARBYTE
+        // A trailing DONE token type byte that must remain for the next read.
+        data.put_u8(0xFD);
+
+        let mut buf: &[u8] = &data;
+        let env = EnvChange::decode(&mut buf).unwrap();
+        assert_eq!(env.routing_info(), Some((host, 11000)));
+        assert_eq!(
+            buf,
+            &[0xFD],
+            "decode must consume exactly the declared ENVCHANGE frame"
+        );
     }
 
     #[test]
