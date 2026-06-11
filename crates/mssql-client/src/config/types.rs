@@ -87,6 +87,13 @@ pub struct TimeoutConfig {
     /// Time to complete login sequence (default: 30s).
     pub login_timeout: Duration,
     /// Default timeout for command execution (default: 30s).
+    ///
+    /// Applied to every `query`/`execute` call: if the server does not return
+    /// a complete response within this duration, the driver sends an Attention
+    /// packet to cancel the command, drains the acknowledgement, and returns
+    /// [`Error::CommandTimeout`](crate::Error::CommandTimeout) with the
+    /// connection left usable. Set to `Duration::ZERO` for no limit (matching
+    /// ADO.NET's `CommandTimeout = 0`).
     pub command_timeout: Duration,
     /// Time before idle connection is closed (default: 300s).
     pub idle_timeout: Duration,
