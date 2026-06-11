@@ -255,6 +255,69 @@ pub fn encoding_for_lcid(lcid: u32) -> Option<&'static Encoding> {
     }
 }
 
+/// Returns the encoding for a SQL collation identified by its SortId.
+///
+/// A collation with a non-zero SortId is a "SQL collation" (one of a
+/// predefined set of sort orders); its code page is derived from the SortId,
+/// not the LCID (MS-TDS Collation rule). For example
+/// `SQL_Latin1_General_CP1250_CS_AS` has SortId 80 → windows-1250, while its
+/// LCID would otherwise resolve to windows-1252.
+///
+/// Returns `None` for SortIds whose code page `encoding_rs` cannot represent
+/// (the OEM code pages CP437 and CP850 are not in the WHATWG encoding set)
+/// and for unknown SortIds. Table derived from the Microsoft/mssql-jdbc
+/// SortId mapping.
+#[cfg(feature = "encoding")]
+pub fn encoding_for_sort_id(sort_id: u8) -> Option<&'static Encoding> {
+    match sort_id {
+        // 30..=35  => CP437 — not representable in encoding_rs
+        // 40..=49  => CP850 — not representable in encoding_rs
+        50..=54 | 71..=75 | 183..=186 | 210..=217 => Some(encoding_rs::WINDOWS_1252),
+        // 55..=62  => CP850 — not representable in encoding_rs
+        80..=98 => Some(encoding_rs::WINDOWS_1250),
+        104..=108 => Some(encoding_rs::WINDOWS_1251),
+        112..=114 | 120..=124 => Some(encoding_rs::WINDOWS_1253),
+        128..=130 => Some(encoding_rs::WINDOWS_1254),
+        136..=138 => Some(encoding_rs::WINDOWS_1255),
+        144..=146 => Some(encoding_rs::WINDOWS_1256),
+        152..=160 => Some(encoding_rs::WINDOWS_1257),
+        192 | 193 | 200 => Some(encoding_rs::SHIFT_JIS), // CP932
+        194 | 195 => Some(encoding_rs::EUC_KR),          // CP949
+        196 | 197 | 201 | 202 => Some(encoding_rs::BIG5), // CP950
+        198 | 199 | 203 => Some(encoding_rs::GB18030),   // CP936
+        204..=206 => Some(encoding_rs::WINDOWS_874),
+        _ => None,
+    }
+}
+
+/// Returns the Windows code page number for a SQL collation's SortId.
+///
+/// Unlike [`encoding_for_sort_id`], this reports the true code page even for
+/// the OEM pages `encoding_rs` cannot decode (437, 850), so callers can
+/// produce an accurate "unsupported code page" error. Returns `None` for
+/// unknown SortIds.
+#[cfg(feature = "encoding")]
+pub fn code_page_for_sort_id(sort_id: u8) -> Option<u16> {
+    match sort_id {
+        30..=35 => Some(437),
+        40..=49 | 55..=62 => Some(850),
+        50..=54 | 71..=75 | 183..=186 | 210..=217 => Some(1252),
+        80..=98 => Some(1250),
+        104..=108 => Some(1251),
+        112..=114 | 120..=124 => Some(1253),
+        128..=130 => Some(1254),
+        136..=138 => Some(1255),
+        144..=146 => Some(1256),
+        152..=160 => Some(1257),
+        192 | 193 | 200 => Some(932),
+        194 | 195 => Some(949),
+        196 | 197 | 201 | 202 => Some(950),
+        198 | 199 | 203 => Some(936),
+        204..=206 => Some(874),
+        _ => None,
+    }
+}
+
 /// Returns the Windows code page number for a given LCID.
 ///
 /// This is useful for error messages and debugging.
@@ -534,6 +597,98 @@ mod tests {
         let enc = encoding_for_lcid(0x0427);
         assert!(enc.is_some());
         assert_eq!(enc.unwrap().name(), "windows-1257");
+    }
+
+    /// Issue #158: a SQL collation's code page comes from its SortId, not the
+    /// LCID. Without consulting SortId these silently decoded as
+    /// windows-1252.
+    #[test]
+    fn test_sort_id_drives_encoding() {
+        // SQL_Latin1_General_CP1250_CS_AS — SortId 80, LCID 0x0409 (English,
+        // which would otherwise resolve to windows-1252).
+        assert_eq!(
+            encoding_for_sort_id(80).map(|e| e.name()),
+            Some("windows-1250")
+        );
+        assert_eq!(code_page_for_sort_id(80), Some(1250));
+
+        // Cyrillic, Greek, Turkish, Hebrew, Arabic, Baltic SQL collations.
+        assert_eq!(
+            encoding_for_sort_id(105).map(|e| e.name()),
+            Some("windows-1251")
+        );
+        assert_eq!(
+            encoding_for_sort_id(112).map(|e| e.name()),
+            Some("windows-1253")
+        );
+        assert_eq!(
+            encoding_for_sort_id(128).map(|e| e.name()),
+            Some("windows-1254")
+        );
+        assert_eq!(
+            encoding_for_sort_id(136).map(|e| e.name()),
+            Some("windows-1255")
+        );
+        assert_eq!(
+            encoding_for_sort_id(144).map(|e| e.name()),
+            Some("windows-1256")
+        );
+        assert_eq!(
+            encoding_for_sort_id(152).map(|e| e.name()),
+            Some("windows-1257")
+        );
+
+        // The common default SQL_Latin1_General_CP1_CI_AS (SortId 52) is 1252.
+        assert_eq!(
+            encoding_for_sort_id(52).map(|e| e.name()),
+            Some("windows-1252")
+        );
+
+        // CJK SQL collations.
+        assert_eq!(
+            encoding_for_sort_id(192).map(|e| e.name()),
+            Some("Shift_JIS")
+        );
+        assert_eq!(encoding_for_sort_id(198).map(|e| e.name()), Some("gb18030"));
+
+        // CP437/CP850 are not representable in encoding_rs: no encoding, but
+        // the true code page is still reported for error messages.
+        assert_eq!(encoding_for_sort_id(40), None);
+        assert_eq!(code_page_for_sort_id(40), Some(850));
+        assert_eq!(encoding_for_sort_id(30), None);
+        assert_eq!(code_page_for_sort_id(30), Some(437));
+
+        // Unknown SortId.
+        assert_eq!(encoding_for_sort_id(250), None);
+        assert_eq!(code_page_for_sort_id(250), None);
+    }
+
+    /// Issue #158: the `Collation` accessors must branch on SortId.
+    #[test]
+    fn test_collation_methods_consult_sort_id() {
+        use crate::token::Collation;
+
+        // SortId 80 (CP1250) with an English LCID — must NOT be 1252.
+        let sql_collation = Collation {
+            lcid: 0x0409,
+            sort_id: 80,
+        };
+        assert_eq!(
+            sql_collation.encoding().map(|e| e.name()),
+            Some("windows-1250")
+        );
+        assert_eq!(sql_collation.code_page(), Some(1250));
+        assert_eq!(sql_collation.encoding_name(), "windows-1250");
+
+        // SortId 0 (Windows collation) still uses the LCID path.
+        let win_collation = Collation {
+            lcid: 0x0419, // Russian
+            sort_id: 0,
+        };
+        assert_eq!(
+            win_collation.encoding().map(|e| e.name()),
+            Some("windows-1251")
+        );
     }
 
     #[test]
