@@ -59,6 +59,15 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Install Kerberos headers
         run: sudo apt-get update && sudo apt-get install -y libkrb5-dev
+      # rust-toolchain.toml pins the repo to the MSRV toolchain, which is too
+      # old for cargo-semver-checks (0.47 needs rustc >= 1.91; the sspi dep
+      # needs >= 1.89). release-plz silently treats a cargo-semver-checks
+      # error as "API compatible changes" (release-plz#2294), which produced
+      # a patch-bump Release PR (v0.11.1) for an API-breaking main. Force the
+      # stable toolchain for release-plz's cargo invocations; CI already
+      # builds and tests every commit on stable in the test matrix.
+      - name: Use stable toolchain despite the MSRV pin
+        run: echo "RUSTUP_TOOLCHAIN=stable" >> "$GITHUB_ENV"
       - name: Run release-plz
         uses: release-plz/action@v0.5.129
         with:
@@ -90,6 +99,15 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Install Kerberos headers
         run: sudo apt-get update && sudo apt-get install -y libkrb5-dev
+      # rust-toolchain.toml pins the repo to the MSRV toolchain, which is too
+      # old for cargo-semver-checks (0.47 needs rustc >= 1.91; the sspi dep
+      # needs >= 1.89). release-plz silently treats a cargo-semver-checks
+      # error as "API compatible changes" (release-plz#2294), which produced
+      # a patch-bump Release PR (v0.11.1) for an API-breaking main. Force the
+      # stable toolchain for release-plz's cargo invocations; CI already
+      # builds and tests every commit on stable in the test matrix.
+      - name: Use stable toolchain despite the MSRV pin
+        run: echo "RUSTUP_TOOLCHAIN=stable" >> "$GITHUB_ENV"
       - name: Run release-plz
         uses: release-plz/action@v0.5.129
         with:
