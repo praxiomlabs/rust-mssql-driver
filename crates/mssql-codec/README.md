@@ -20,7 +20,7 @@ TCP Stream -> TdsCodec (packet framing) -> MessageAssembler -> Client
 - **Message reassembly** - Combines multi-packet messages (EOM bit handling)
 - **IO splitting** - Separate read/write halves for cancellation safety (ADR-005)
 - **Tokio-util codec** - Integrates with tokio-util's codec framework
-- **Zero-copy where possible** - Minimizes buffer copies
+- **Reduced-copy buffering** - `Bytes`-based slicing minimizes buffer copies
 
 ## Cancellation Safety
 

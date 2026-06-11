@@ -4,47 +4,18 @@ An async Microsoft SQL Server driver for Rust.
 
 [![Crates.io](https://img.shields.io/crates/v/mssql-client.svg)](https://crates.io/crates/mssql-client)
 [![Documentation](https://docs.rs/mssql-client/badge.svg)](https://docs.rs/mssql-client)
+[![CI](https://github.com/praxiomlabs/rust-mssql-driver/actions/workflows/ci.yml/badge.svg)](https://github.com/praxiomlabs/rust-mssql-driver/actions/workflows/ci.yml)
 [![License](https://img.shields.io/crates/l/mssql-client.svg)](LICENSE-MIT)
 [![MSRV](https://img.shields.io/badge/MSRV-1.88-blue.svg)](https://blog.rust-lang.org/2025/06/26/Rust-1.88.0/)
 
-## Features
-
-- **TDS 7.3 – 8.0 Support** - SQL Server 2008+ legacy support through SQL Server 2022+ strict encryption
-- **Tokio-Native** - Designed for the Tokio async runtime with no compatibility layers
-- **Type-State Connections** - Compile-time enforcement of valid connection states
-- **Built-in Connection Pooling** - No external pooling crate required
-- **Reduced-Copy Architecture** - `Arc<Bytes>` pattern minimizes allocation overhead
-- **Pure Rust TLS** - Uses rustls, no OpenSSL dependency
-- **Modern Rust** - 2024 Edition, MSRV 1.88
-
-### Feature Status
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| SQL Authentication | Yes | Username/password |
-| Azure AD Token | Yes | Pre-acquired tokens |
-| Queries & Parameters | Yes | Full support |
-| Transactions | Yes | Commit, rollback, savepoints |
-| Connection Pooling | Yes | Built-in via `mssql-driver-pool` |
-| Bulk Insert | Yes | Batch loading via `Client::bulk_insert()` |
-| `#[derive(FromRow)]` / `#[derive(ToParams)]` | Yes | Row-to-struct and struct-to-params mapping |
-| TDS 7.3 (Legacy) | Yes | SQL Server 2008/2008 R2 |
-| TDS 8.0 Strict Mode | Yes | SQL Server 2022+ |
-| Azure Managed Identity | Yes | Via `azure-identity` |
-| Kerberos/GSSAPI | Untested | Unix via `libgssapi`; not yet validated against a live KDC |
-| Windows SSPI | Yes | Via `sspi-auth` feature |
-| Table-Valued Parameters | Yes | Via `Tvp` type |
-| OpenTelemetry Metrics | Yes | Query + pool lifecycle via `otel` feature |
-| Always Encrypted (read) | Yes | Transparent decryption with Azure Key Vault and Windows CertStore providers |
-| Always Encrypted (write) | Partial | `NULL` writes only; ciphertext write path pending |
-| Query Cancellation | Yes | ATTENTION signal + in-flight pool discard |
-| Collation-Aware Decoding | Yes | 14+ character encodings |
-| Collation-Aware VARCHAR Params | Yes | Via `SendStringParametersAsUnicode=false` |
-| Stored Procedures | Yes | RPC-based with OUTPUT params and RETURN value |
-| Named Instance Resolution | Yes | SQL Browser service (UDP 1434) |
-| MultiSubnetFailover (AG) | Yes | Parallel TCP connect for listener failover |
-| Connection Retry | Yes | `ConnectRetryCount` / `ConnectRetryInterval` |
-| FILESTREAM BLOB Access | Untested | Windows only via `filestream` feature; not yet validated against a FILESTREAM-enabled instance |
+- **TDS 7.3 – 8.0** — SQL Server 2008 through 2022+ strict encryption, plus Azure SQL
+- **Tokio-native** — async from the ground up, no compatibility layers
+- **Built-in connection pooling** — no external pooling crate required
+- **Type-state connections** — invalid operations are compile errors
+- **Pure-Rust TLS** — rustls; no OpenSSL, no system dependencies
+- **Beyond queries** — transactions and savepoints, stored procedures with OUTPUT
+  params, table-valued parameters, bulk insert, Always Encrypted (read),
+  OpenTelemetry
 
 ## Installation
 
@@ -56,7 +27,7 @@ mssql-client = "0.11"
 tokio = { version = "1.48", features = ["full"] }
 ```
 
-**Windows note:** The default TLS feature requires a C compiler (`ring`/`aws-lc-sys`). Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the "Desktop development with C++" workload, or any edition of Visual Studio with that workload. This is a one-time setup — see [CONTRIBUTING.md](CONTRIBUTING.md#4-platform-specific-windows-c-build-tools) for details.
+**Windows note:** The default TLS feature requires a C compiler (`ring`/`aws-lc-sys`). Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the "Desktop development with C++" workload — a one-time setup; see [CONTRIBUTING.md](CONTRIBUTING.md#4-platform-specific-windows-c-build-tools) for details.
 
 ## Quick Start
 
@@ -87,34 +58,18 @@ async fn main() -> Result<(), mssql_client::Error> {
 }
 ```
 
-## Connection String Format
+## Connection Strings
 
-The driver supports ADO.NET-compatible connection strings:
+ADO.NET-style connection strings are supported, including the quoting rules
+and the keywords you'd expect (`Server`, `Database`, `User Id`, `Password`,
+`Encrypt`, `TrustServerCertificate`, timeouts, `Application Name`, and more):
 
 ```text
 Server=hostname,port;Database=dbname;User Id=user;Password=pass;Encrypt=strict;
 ```
 
-### Supported Keywords
-
-| Keyword | Aliases | Description |
-|---------|---------|-------------|
-| `Server` | `Data Source`, `Address` | Host and optional port (e.g., `localhost,1433`) |
-| `Database` | `Initial Catalog` | Database name |
-| `User Id` | `UID`, `User` | SQL authentication username |
-| `Password` | `PWD` | SQL authentication password |
-| `Encrypt` | | `true`, `false`, `strict`, `no_tls` |
-| `TrustServerCertificate` | | Skip certificate validation (dev only) |
-| `TDSVersion` | `ProtocolVersion` | TDS protocol version: `7.3`, `7.3A`, `7.3B`, `7.4`, `8.0` |
-| `Application Name` | | Application identifier |
-| `Connect Timeout` | | Connection timeout in seconds |
-| `Command Timeout` | | Default command timeout |
-| `SendStringParametersAsUnicode` | | `true`/`false` — when `false`, `String` params send as VARCHAR under the server collation (for index seeks) |
-| `MultiSubnetFailover` | | `true` to race parallel TCP connects across all resolved addresses (Always On AG) |
-| `ConnectRetryCount` | | Transient connect failures retried with exponential backoff |
-| `Column Encryption Setting` | | `Enabled`/`Disabled` — transparent decryption of encrypted columns |
-
-See the [`mssql-client` config docs](https://docs.rs/mssql-client/latest/mssql_client/config/) for the full ADO.NET-compatible keyword reference.
+The full keyword reference lives in the
+[`mssql-client` config docs](https://docs.rs/mssql-client/latest/mssql_client/config/).
 
 ## Connection Pooling
 
@@ -155,41 +110,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_connection_string("Server=localhost;Database=mydb;User Id=sa;Password=Password123!")?;
     let client = Client::connect(config).await?;
 
-    // Begin transaction with a specific isolation level
     let mut tx = client.begin_transaction_with_isolation(IsolationLevel::Serializable).await?;
 
     tx.execute("UPDATE accounts SET balance = balance - 100 WHERE id = @p1", &[&1i32]).await?;
+
+    // Savepoints let you roll back part of a transaction
+    let sp = tx.save_point("transfer").await?;
     tx.execute("UPDATE accounts SET balance = balance + 100 WHERE id = @p1", &[&2i32]).await?;
+    tx.rollback_to(&sp).await?;
 
     // Commit (returns the client)
     tx.commit().await?;
 
-    Ok(())
-}
-```
-
-### Savepoints
-
-```rust,no_run
-use mssql_client::{Client, Config};
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config = Config::from_connection_string("Server=localhost;Database=mydb;User Id=sa;Password=Password123!")?;
-    let client = Client::connect(config).await?;
-    let mut tx = client.begin_transaction().await?;
-
-    tx.execute("INSERT INTO orders DEFAULT VALUES", &[]).await?;
-
-    // Create a savepoint
-    let sp = tx.save_point("before_items").await?;
-
-    tx.execute("INSERT INTO order_items DEFAULT VALUES", &[]).await?;
-
-    // Rollback to savepoint if needed
-    tx.rollback_to(&sp).await?;
-
-    tx.commit().await?;
     Ok(())
 }
 ```
@@ -251,101 +183,48 @@ cargo add mssql-auth --features sspi-auth
 
 ## SQL Server Compatibility
 
-| SQL Server Version | Supported | TDS Version | Notes |
-|-------------------|-----------|-------------|-------|
-| 2008 | Yes | 7.3A | Legacy support |
-| 2008 R2 | Yes | 7.3B | Legacy support |
-| 2012 | Yes | 7.4 | |
-| 2014 | Yes | 7.4 | |
-| 2016 | Yes | 7.4 | |
-| 2017 | Yes | 7.4 | Full TLS support |
-| 2019 | Yes | 7.4 | |
-| 2022+ | Yes | 8.0 | Strict TLS mode |
-| Azure SQL Database | Yes | 7.4/8.0 | |
-| Azure SQL Managed Instance | Yes | 7.4/8.0 | |
+| Version | Notes |
+|---------|-------|
+| SQL Server 2008 – 2016 | TDS 7.3/7.4. These servers often lack TLS 1.2 (rustls requires it); use `Encrypt=no_tls` on a trusted network |
+| SQL Server 2017 – 2019 | TDS 7.4, full TLS |
+| SQL Server 2022+ | TDS 7.4 or 8.0 strict mode |
+| Azure SQL Database / Managed Instance | Including automatic gateway redirects |
 
-**Legacy Support (SQL Server 2008-2016):** Use `Encrypt=no_tls` for servers that don't support TLS 1.2. See [LIMITATIONS.md](LIMITATIONS.md) for the full list of known limitations.
+Known quirks: SQL Server 2014 RTM reports `ProductMajorVersion` as NULL (the
+driver falls back to parsing `ProductVersion`), and legacy servers negotiating
+TLS 1.0/1.1 fail with "TLS handshake eof" under `Encrypt=true` — use
+`Encrypt=no_tls` there. See [LIMITATIONS.md](LIMITATIONS.md) for the rest.
 
-### Connection configuration by version
+## Status
 
-```text
-// 2008-2016 (legacy): often no TLS 1.2 — disable TLS
-Server=host,1433;Database=mydb;User Id=sa;Password=pwd;Encrypt=no_tls
+Pre-1.0 and actively maintained — by a single maintainer on a best-effort
+basis (see [MAINTAINERS.md](MAINTAINERS.md)), with the aim of a first response
+to issues and pull requests within about a week. The API may still change
+between 0.x minors; [STABILITY.md](STABILITY.md) describes what is already
+considered settled and the road to 1.0. An integration suite runs against a
+real SQL Server in CI on every change.
 
-// 2017+: standard TLS
-Server=host,1433;Database=mydb;User Id=sa;Password=pwd;Encrypt=true;TrustServerCertificate=true
+Known gaps, so you don't have to discover them yourself:
 
-// 2022+: TDS 8.0 strict mode
-Config::new("host", "mydb", "sa", "pwd").tds_version(TdsVersion::V8_0).strict_mode(true)
-```
+- Kerberos/GSSAPI and FILESTREAM are implemented but not yet validated against
+  live infrastructure.
+- Always Encrypted writes support `NULL` only; reads are fully transparent.
+- Rows decode lazily, but the response is buffered in memory — true streaming
+  from the socket is planned.
+- Parameterized queries run via `sp_executesql` (the server still reuses
+  plans); the client-side prepared-statement cache is planned.
+- No MARS (multiple active result sets on one connection).
 
-### Feature availability by version
+The full list, with workarounds where they exist, is in
+[LIMITATIONS.md](LIMITATIONS.md).
 
-| Feature | 2008 | 2012 | 2014 | 2016 | 2017 | 2019 | 2022 |
-|---------|------|------|------|------|------|------|------|
-| Queries, parameters, transactions | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
-| DATE/TIME, DATETIME2, DATETIMEOFFSET | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
-| Table-valued parameters | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
-| STRING_AGG | No | No | No | No | Yes | Yes | Yes |
-| APPROX_COUNT_DISTINCT | No | No | No | No | No | Yes | Yes |
-| TLS/SSL encryption | No\* | No\* | No\* | No\* | Yes | Yes | Yes |
-| TDS 8.0 strict mode | No | No | No | No | No | No | Yes |
+## Scope
 
-\* These versions typically negotiate TLS 1.0/1.1, which rustls does not support. Use `Encrypt=no_tls` on a trusted network.
-
-### Known issues
-
-- **`ProductMajorVersion` NULL on SQL Server 2014 RTM** — the driver falls back to parsing `SERVERPROPERTY('ProductVersion')`.
-- **TLS handshake fails on legacy servers** — 2008-2016 servers using TLS 1.0/1.1 fail with "TLS handshake eof" under `Encrypt=true`. Use `Encrypt=no_tls` (data travels unencrypted; only on trusted networks).
-
-## API Stability
-
-This project follows [Semantic Versioning](https://semver.org/).
-
-- **0.x.y**: API may change between minor versions
-- **1.0.0+**: Stable API with backward compatibility guarantees
-
-See [STABILITY.md](STABILITY.md) for details on what's considered stable.
-
-## Project Status
-
-**Actively maintained**, currently pre-1.0. The driver is feature-complete for
-the scenarios in the [Feature Status](#feature-status) table above, and an
-integration suite runs against a real SQL Server instance in CI on every change.
-
-Maintenance is **best-effort by a single maintainer** (see
-[MAINTAINERS.md](MAINTAINERS.md)); the aim is a first response to issues and pull
-requests within about a week. The road to **1.0** is about settling the public
-API surface (see [STABILITY.md](STABILITY.md)) and closing the gaps in
-[LIMITATIONS.md](LIMITATIONS.md) — once the API is proven in real deployments,
-the 1.0 backward-compatibility guarantee follows.
-
-## Comparison with Other Drivers
-
-Compared with the other Rust options for SQL Server connectivity, based on source-code analysis and public GitHub issues (issue numbers in parentheses).
-
-| Feature | mssql-driver | Tiberius | odbc-api | sqlx-oldapi |
-|---|---|---|---|---|
-| TDS 8.0 (strict TLS) | Yes | No (#412) | N/A | No |
-| Always Encrypted (read) | Yes | No (#54) | Via ODBC | No |
-| Always Encrypted (write) | Partial — NULL only | No | Via ODBC | No |
-| Built-in connection pool | Yes | No (#146) | No | No |
-| Prepared statement cache | Planned | No (#30) | Via ODBC | Yes |
-| Table-valued parameters | Yes | No | Via ODBC | No (#46) |
-| Bulk insert (BCP) | Yes | Partial (#322, #358) | Yes | No |
-| Query cancellation | Yes (attention) | No (#79, #300) | Via ODBC | No |
-| Azure AD / Managed Identity | Yes | No (#175) | Via ODBC | No |
-| Cross-platform NTLM | Yes | Windows only (#97) | Via ODBC | No (#13) |
-| Kerberos / SPNEGO | Yes (untested live) | Unix only | Via ODBC | No |
-| ADO.NET connection strings | Yes | Yes | N/A | No (#411, #605) |
-| `deny(unsafe_code)` | Yes, audited FFI exceptions | No (4 unsafe) | No (372 unsafe) | No |
-| Runtime agnostic | No (Tokio only) | Yes | N/A (sync) | Yes |
-| Compile-time query checking | No | No | No | Yes (limited) |
-| MARS | No | No | Via ODBC | No |
-
-**Authentication:** mssql-driver supports SQL auth, cross-platform Windows/NTLM, Kerberos/SPNEGO (`integrated-auth`, not yet validated against a live KDC — see LIMITATIONS.md), Azure AD token, Managed Identity and Service Principal (`azure-identity`), client certificate (`cert-auth`), and Windows SSPI (`sspi-auth`). Tiberius is Windows-only for NTLM and lacks Managed Identity; sqlx-oldapi has no Windows authentication at all (called a "blocker" by enterprise users, #13).
-
-**Pure-Rust deployment:** mssql-driver has no C/FFI dependencies (outside optional Windows SSPI), which avoids the problems odbc-api users report: can't compile for musl/Alpine (#526), static linking blocked by LGPL unixODBC (#781), driver-manager conflicts (#503), connections that aren't `Send`/`Sync` (#354), and FFI panics on drop (#574). It is `Send + Sync` and Tokio-native by design.
+This driver speaks TDS natively in pure Rust — no ODBC driver manager, no
+OpenSSL, no C toolchain (outside the optional Windows SSPI feature) — and is
+Tokio-only by design. It does not do compile-time query checking; if you want
+sqlx-style checked queries, this is not that. Coming from Tiberius?
+[MIGRATION.md](MIGRATION.md) maps the API differences.
 
 ## Examples
 
@@ -353,26 +232,19 @@ See the [`examples/`](crates/mssql-client/examples/) directory:
 
 - [`basic.rs`](crates/mssql-client/examples/basic.rs) - Connection and queries
 - [`transactions.rs`](crates/mssql-client/examples/transactions.rs) - Transaction handling
-- [`streaming.rs`](crates/mssql-client/examples/streaming.rs) - Streaming large results
+- [`streaming.rs`](crates/mssql-client/examples/streaming.rs) - Iterating large result sets (lazy row decoding)
 - [`bulk_insert.rs`](crates/mssql-client/examples/bulk_insert.rs) - Bulk data loading
 - [`derive_macros.rs`](crates/mssql-client/examples/derive_macros.rs) - Row mapping macros
 
 ## Documentation
 
-### API & Reference
-
 - [API Documentation](https://docs.rs/mssql-client) - Full API reference on docs.rs
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Design decisions, ADRs, and internals
 - [CHANGELOG.md](CHANGELOG.md) - Version history and release notes
-
-### Guides & Policies
-
 - [STABILITY.md](STABILITY.md) - API stability guarantees and versioning policy
 - [SECURITY.md](SECURITY.md) - Security policy, threat model, and best practices
 - [LIMITATIONS.md](LIMITATIONS.md) - Known limitations and explicit non-goals
 - [MIGRATION.md](MIGRATION.md) - Migrating from Tiberius
-
-### Feature & Usage Guides
 
 Feature and usage guides — connection strings, stored procedures, DDL, LOBs,
 cancellation, Always Encrypted, FILESTREAM, OpenTelemetry, error handling, pool

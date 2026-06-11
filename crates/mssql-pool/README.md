@@ -15,7 +15,6 @@ Unlike generic connection pools, this implementation understands SQL Server spec
 - **Configurable sizing** - Min/max pool sizes
 - **Timeout management** - Connection, idle, and checkout timeouts
 - **Automatic reconnection** - Handles transient failures
-- **Statement cache coordination** - Per-connection prepared statement management
 - **Pool metrics** - Observable pool statistics
 
 ## Usage

@@ -10,10 +10,10 @@ This is the primary public API surface for the rust-mssql-driver project. It pro
 
 - **Type-state pattern**: Compile-time enforcement of connection states
 - **Async/await**: Built on Tokio for efficient async I/O
-- **Prepared statements**: Automatic caching with LRU eviction
+- **Parameterized queries**: Server-side plan reuse via `sp_executesql` (a client-side statement cache is planned)
 - **Transactions**: Full transaction support with savepoints
 - **Azure support**: Automatic routing and failover handling
-- **Streaming results**: Memory-efficient processing of large result sets
+- **Lazy row decoding**: Rows decode on demand from the buffered response (true streaming from the socket is planned)
 - **Bulk insert**: Bulk data loading via BCP
 - **Table-valued parameters**: Pass collections to stored procedures
 
@@ -24,7 +24,6 @@ The client uses a compile-time type-state pattern that ensures invalid operation
 ```text
 Disconnected -> Ready (via connect())
 Ready -> InTransaction (via begin_transaction())
-Ready -> Streaming (via query that returns a stream)
 InTransaction -> Ready (via commit() or rollback())
 ```
 
@@ -85,7 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-## Streaming Large Results
+## Large Result Sets
 
 ```rust,no_run
 use mssql_client::{Client, Config};
@@ -97,12 +96,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let mut client = Client::connect(config).await?;
 
-    // QueryStream decodes rows lazily as they are consumed.
+    // The response is buffered, but rows decode lazily as they are consumed —
+    // only one decoded Row is alive at a time.
     let stream = client.query("SELECT * FROM large_table", &[]).await?;
 
     for result in stream {
         let row = result?;
-        let _ = row; // Process row without loading entire result into memory
+        let _ = row; // Process each row as it decodes
     }
     Ok(())
 }
@@ -162,7 +162,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `tvp` | Table-valued parameters |
 | `from_row` | Row-to-struct mapping trait |
 | `to_params` | Struct-to-parameters trait |
-| `statement_cache` | Prepared statement caching |
 | `instrumentation` | OpenTelemetry integration |
 
 ## Examples
@@ -173,7 +172,7 @@ See the `examples/` directory for complete examples:
 - `transactions.rs` - Transaction handling with savepoints
 - `bulk_insert.rs` - Bulk loading
 - `derive_macros.rs` - Using `#[derive(FromRow)]` and `#[derive(ToParams)]`
-- `streaming.rs` - Processing large result sets
+- `streaming.rs` - Iterating large result sets (lazy row decoding)
 
 ## Development
 
