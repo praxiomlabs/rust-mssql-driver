@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.11.0...v0.12.0) - 2026-06-11
+
+### Added
+
+- *(mssql-client)* record the documented query-level OTel metrics
+
+### Fixed
+
+- *(mssql-client)* escape closing brackets in Change Tracking identifiers
+- *(mssql-client)* make Change Tracking builder SQL actually executable
+- make explicit query cancellation leave the connection usable
+- encode TVP VARCHAR cells with the captured server collation
+- *(mssql-pool)* close race between connection return and close()
+- wire Config.tls through connect; make Pool::close() actually close
+- convert remaining panicking decimal calls; make fuzz CI job real
+- replace wire-data panics with protocol errors in row decoders
+- *(mssql-auth)* conform CEK envelope and OAEP padding to the AE spec
+- *(tds-protocol)* substitute '?' for unmappable VARCHAR chars, not HTML entities
+- *(tds-protocol)* consume the declared ENVCHANGE length after value decode
+- *(tds-protocol)* bounds-check ENVCHANGE length-prefix reads
+- *(mssql-codec)* anchor the attention-ack check to the message trailer
+
+### Other
+
+- align capability claims with implementation reality
+- *(mssql-client)* bulk-insert a 16 MiB VARBINARY(MAX) + 8 MB NVARCHAR(MAX)
+- *(api)* make the public surface self-contained (item 5)
+- add docs.rs metadata so non-default feature APIs are documented
+- Merge remote-tracking branch 'origin/main' into docs/compile-check-existing-examples
+- compile-check the mssql-client doc examples (no_run/text, not ignore)
+- compile-check the encryption, cancel, and DDL examples (no_run, not ignore)
+- fold the remaining guides into crate rustdoc and empty docs/
+- *(tds-protocol)* pin the LOGIN7 READONLY_INTENT bit
+- Merge pull request #137 from praxiomlabs/fix/cek-envelope-interop
+- *(mssql-auth)* commit the CEK fixture regeneration harness
+- bump libgssapi 0.9 -> 0.11 and adapt to its new API
+- convert feature-example snippets to versionless cargo add
+- fix version/feature-default drift and guard it in the linter
+
 ## [0.11.0](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.10.0...v0.11.0) - 2026-06-05
 
 ### Added
