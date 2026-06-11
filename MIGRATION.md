@@ -68,8 +68,10 @@ let value: i32 = row[0].get(0).unwrap();
 
 **rust-mssql-driver:**
 ```rust
-let mut stream = client.query("SELECT 1 AS value", &[]).await?;
-let row = stream.next().await.unwrap()?;
+let stream = client.query("SELECT 1 AS value", &[]).await?;
+// The result set is iterated synchronously (the response is already
+// buffered; rows decode lazily). Each item is a `Result<Row, Error>`.
+let row = stream.into_iter().next().expect("one row")?;
 let value: i32 = row.get(0)?;
 ```
 
@@ -88,12 +90,12 @@ let name: &str = row.get(1).unwrap();
 
 **rust-mssql-driver:**
 ```rust
-let mut stream = client.query(
+let stream = client.query(
     "SELECT * FROM users WHERE id = @p1",
     &[&1i32]
 ).await?;
 
-let row = stream.next().await.unwrap()?;
+let row = stream.into_iter().next().expect("one row")?;
 let name: String = row.get(1)?;
 ```
 
@@ -143,21 +145,27 @@ for row in rows {
 
 **rust-mssql-driver:**
 ```rust
-let mut stream = client.query("SELECT * FROM users", &[]).await?;
+let stream = client.query("SELECT * FROM users", &[]).await?;
 
-while let Some(row) = stream.next().await {
+// Synchronous iteration: the response is already buffered, and each row
+// decodes lazily as it is yielded. Each item is a `Result<Row, Error>`.
+for row in stream {
     let row = row?;
     let id: i32 = row.get(0)?;
     let name: String = row.get(1)?;
 }
+```
 
-// Or collect all rows
+To buffer all rows up front instead:
+```rust
+let stream = client.query("SELECT * FROM users", &[]).await?;
 let rows: Vec<Row> = stream.collect_all().await?;
 ```
 
 **Key changes:**
-- Async iteration with `stream.next().await`
-- Explicit error handling per row
+- Synchronous `for row in stream` iteration (the result set implements
+  `Iterator`, not async `Stream`-style `.next().await`)
+- Explicit error handling per row (`Result<Row, Error>`)
 - `collect_all()` for buffered results
 
 ### Column Access by Name
@@ -561,4 +569,4 @@ let client = tx.commit().await?;  // Capture the returned client
 | `execute("BEGIN TRANSACTION")` | `begin_transaction()` |
 | `execute("COMMIT")` | `commit()` → returns client |
 | Manual Azure redirect | Automatic |
-| No statement caching | Automatic LRU cache |
+| `sp_executesql` plan reuse | `sp_executesql` plan reuse (client-side handle cache not yet wired) |
