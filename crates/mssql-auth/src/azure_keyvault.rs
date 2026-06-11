@@ -68,6 +68,26 @@ use crate::encryption::{EncryptionError, KeyStoreProvider};
 /// SQL Server provider name for Azure Key Vault.
 const PROVIDER_NAME: &str = "AZURE_KEY_VAULT";
 
+/// Default trusted Key Vault / Managed HSM DNS suffixes across Azure clouds.
+///
+/// The CMK path in Always Encrypted metadata is supplied by the server. A
+/// malicious or compromised server could point it at an attacker-controlled
+/// host, causing this provider to send a Key-Vault-scoped bearer token there
+/// (token exfiltration / SSRF). Restricting the host to these
+/// Microsoft-operated suffixes closes that vector; custom or private
+/// deployments can override via
+/// [`AzureKeyVaultProvider::with_trusted_endpoints`].
+const DEFAULT_TRUSTED_KEY_VAULT_SUFFIXES: &[&str] = &[
+    ".vault.azure.net",              // Azure public cloud
+    ".vaultcore.azure.net",          // Azure public cloud (data-plane alias)
+    ".managedhsm.azure.net",         // Managed HSM, public cloud
+    ".vault.azure.cn",               // Azure China (21Vianet)
+    ".managedhsm.azure.cn",          // Managed HSM, Azure China
+    ".vault.usgovcloudapi.net",      // Azure US Government
+    ".managedhsm.usgovcloudapi.net", // Managed HSM, US Government
+    ".vault.microsoftazure.de",      // Azure Germany (legacy)
+];
+
 /// Azure Key Vault Column Master Key provider.
 ///
 /// This provider implements the [`KeyStoreProvider`] trait to support
@@ -79,6 +99,16 @@ const PROVIDER_NAME: &str = "AZURE_KEY_VAULT";
 pub struct AzureKeyVaultProvider {
     /// Azure credential for authentication.
     credential: Arc<DeveloperToolsCredential>,
+    /// Host suffixes a server-supplied CMK path is allowed to target.
+    /// Defaults to `DEFAULT_TRUSTED_KEY_VAULT_SUFFIXES`.
+    trusted_host_suffixes: Vec<String>,
+}
+
+fn default_trusted_suffixes() -> Vec<String> {
+    DEFAULT_TRUSTED_KEY_VAULT_SUFFIXES
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect()
 }
 
 impl AzureKeyVaultProvider {
@@ -106,7 +136,10 @@ impl AzureKeyVaultProvider {
         let credential = DeveloperToolsCredential::new(None).map_err(|e| {
             EncryptionError::ConfigurationError(format!("Failed to create Azure credential: {e}"))
         })?;
-        Ok(Self { credential })
+        Ok(Self {
+            credential,
+            trusted_host_suffixes: default_trusted_suffixes(),
+        })
     }
 
     /// Create a new Azure Key Vault provider with an existing credential.
@@ -123,24 +156,73 @@ impl AzureKeyVaultProvider {
     /// ```
     #[must_use]
     pub fn with_credential(credential: Arc<DeveloperToolsCredential>) -> Self {
-        Self { credential }
+        Self {
+            credential,
+            trusted_host_suffixes: default_trusted_suffixes(),
+        }
+    }
+
+    /// Override the set of host suffixes a server-supplied CMK path may target.
+    ///
+    /// By default only Microsoft-operated Key Vault / Managed HSM endpoints
+    /// (`.vault.azure.net`, `.managedhsm.azure.net`, and the China / US-Gov /
+    /// legacy-Germany variants) are accepted, so a malicious server cannot
+    /// redirect key operations to an attacker-controlled host.
+    /// Use this only for private or sovereign deployments with custom DNS, and
+    /// pass suffixes you fully control (e.g. `".vault.contoso.example"`).
+    /// Replacing the list with an over-broad suffix re-opens the SSRF /
+    /// token-exfiltration vector this guard closes.
+    #[must_use]
+    pub fn with_trusted_endpoints<I, S>(mut self, suffixes: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.trusted_host_suffixes = suffixes.into_iter().map(Into::into).collect();
+        self
     }
 
     /// Parse a CMK path into vault URL, key name, and optional version.
     ///
     /// Expected format: `https://<vault>.vault.azure.net/keys/<key-name>[/<version>]`
-    fn parse_cmk_path(cmk_path: &str) -> Result<(String, String, Option<String>), EncryptionError> {
+    ///
+    /// The scheme must be `https` and the host must match one of
+    /// `trusted_suffixes`; otherwise an error is returned, since the path
+    /// originates from the (untrusted) server.
+    fn parse_cmk_path(
+        cmk_path: &str,
+        trusted_suffixes: &[String],
+    ) -> Result<(String, String, Option<String>), EncryptionError> {
         let url = Url::parse(cmk_path).map_err(|e| {
             EncryptionError::CmkError(format!("Invalid CMK path '{cmk_path}': {e}"))
         })?;
 
+        if url.scheme() != "https" {
+            return Err(EncryptionError::CmkError(format!(
+                "CMK path must use https, got scheme '{}' in '{cmk_path}'",
+                url.scheme()
+            )));
+        }
+
+        let host = url
+            .host_str()
+            .ok_or_else(|| EncryptionError::CmkError("CMK path missing host".into()))?;
+        let host_lc = host.to_ascii_lowercase();
+        let trusted = trusted_suffixes
+            .iter()
+            .any(|suffix| host_lc.ends_with(&suffix.to_ascii_lowercase()));
+        if !trusted {
+            return Err(EncryptionError::CmkError(format!(
+                "CMK host '{host}' is not a trusted Key Vault endpoint. The CMK path is \
+                 supplied by the server; allowing an arbitrary host would let a malicious \
+                 server redirect key operations and exfiltrate access tokens. Trusted \
+                 suffixes: {trusted_suffixes:?}. For custom deployments use \
+                 AzureKeyVaultProvider::with_trusted_endpoints."
+            )));
+        }
+
         // Extract vault URL (scheme + host)
-        let vault_url = format!(
-            "{}://{}",
-            url.scheme(),
-            url.host_str()
-                .ok_or_else(|| EncryptionError::CmkError("CMK path missing host".into()))?
-        );
+        let vault_url = format!("{}://{host}", url.scheme());
 
         // Parse path segments: /keys/<name>[/<version>]
         let segments: Vec<&str> = url.path_segments().map(|s| s.collect()).unwrap_or_default();
@@ -194,7 +276,8 @@ impl KeyStoreProvider for AzureKeyVaultProvider {
         debug!("Decrypting CEK using Azure Key Vault");
 
         // Parse the CMK path
-        let (vault_url, key_name, key_version) = Self::parse_cmk_path(cmk_path)?;
+        let (vault_url, key_name, key_version) =
+            Self::parse_cmk_path(cmk_path, &self.trusted_host_suffixes)?;
 
         // Create client for this vault
         let client = self.create_client(&vault_url)?;
@@ -263,7 +346,8 @@ impl KeyStoreProvider for AzureKeyVaultProvider {
         debug!("Signing data using Azure Key Vault");
 
         // Parse the CMK path
-        let (vault_url, key_name, key_version) = Self::parse_cmk_path(cmk_path)?;
+        let (vault_url, key_name, key_version) =
+            Self::parse_cmk_path(cmk_path, &self.trusted_host_suffixes)?;
 
         // Create client for this vault
         let client = self.create_client(&vault_url)?;
@@ -321,7 +405,8 @@ impl KeyStoreProvider for AzureKeyVaultProvider {
         debug!("Verifying signature using Azure Key Vault");
 
         // Parse the CMK path
-        let (vault_url, key_name, key_version) = Self::parse_cmk_path(cmk_path)?;
+        let (vault_url, key_name, key_version) =
+            Self::parse_cmk_path(cmk_path, &self.trusted_host_suffixes)?;
 
         // Create client for this vault
         let client = self.create_client(&vault_url)?;
@@ -380,11 +465,16 @@ fn map_algorithm(algorithm: &str) -> Result<EncryptionAlgorithm, EncryptionError
 mod tests {
     use super::*;
 
+    fn trusted() -> Vec<String> {
+        default_trusted_suffixes()
+    }
+
     #[test]
     fn test_parse_cmk_path() {
         // Full path with version
         let (vault, name, version) = AzureKeyVaultProvider::parse_cmk_path(
             "https://myvault.vault.azure.net/keys/mykey/abc123",
+            &trusted(),
         )
         .expect("valid CMK path with version should parse");
         assert_eq!(vault, "https://myvault.vault.azure.net");
@@ -392,35 +482,118 @@ mod tests {
         assert_eq!(version, Some("abc123".to_string()));
 
         // Path without version
-        let (vault, name, version) =
-            AzureKeyVaultProvider::parse_cmk_path("https://myvault.vault.azure.net/keys/mykey")
-                .expect("valid CMK path without version should parse");
+        let (vault, name, version) = AzureKeyVaultProvider::parse_cmk_path(
+            "https://myvault.vault.azure.net/keys/mykey",
+            &trusted(),
+        )
+        .expect("valid CMK path without version should parse");
         assert_eq!(vault, "https://myvault.vault.azure.net");
         assert_eq!(name, "mykey");
         assert_eq!(version, None);
 
         // Path with trailing slash (no version)
-        let (vault, name, version) =
-            AzureKeyVaultProvider::parse_cmk_path("https://myvault.vault.azure.net/keys/mykey/")
-                .expect("valid CMK path with trailing slash should parse");
+        let (vault, name, version) = AzureKeyVaultProvider::parse_cmk_path(
+            "https://myvault.vault.azure.net/keys/mykey/",
+            &trusted(),
+        )
+        .expect("valid CMK path with trailing slash should parse");
         assert_eq!(vault, "https://myvault.vault.azure.net");
         assert_eq!(name, "mykey");
         assert_eq!(version, None);
+
+        // Managed HSM and a sovereign-cloud host are also trusted by default.
+        assert!(
+            AzureKeyVaultProvider::parse_cmk_path(
+                "https://myhsm.managedhsm.azure.net/keys/mykey",
+                &trusted(),
+            )
+            .is_ok()
+        );
+        assert!(
+            AzureKeyVaultProvider::parse_cmk_path(
+                "https://myvault.vault.usgovcloudapi.net/keys/mykey",
+                &trusted(),
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_parse_cmk_path_invalid() {
         // Not a URL
-        assert!(AzureKeyVaultProvider::parse_cmk_path("not-a-url").is_err());
+        assert!(AzureKeyVaultProvider::parse_cmk_path("not-a-url", &trusted()).is_err());
 
-        // Wrong path format
+        // Wrong path format (host is trusted so we reach the path check)
         assert!(
-            AzureKeyVaultProvider::parse_cmk_path("https://vault.azure.net/secrets/mysecret")
-                .is_err()
+            AzureKeyVaultProvider::parse_cmk_path(
+                "https://myvault.vault.azure.net/secrets/mysecret",
+                &trusted(),
+            )
+            .is_err()
         );
 
         // Missing key name
-        assert!(AzureKeyVaultProvider::parse_cmk_path("https://vault.azure.net/keys").is_err());
+        assert!(
+            AzureKeyVaultProvider::parse_cmk_path(
+                "https://myvault.vault.azure.net/keys",
+                &trusted(),
+            )
+            .is_err()
+        );
+    }
+
+    /// Issue #162: a server-supplied CMK path pointing at an untrusted host
+    /// must be rejected — otherwise a malicious server could redirect key
+    /// operations and exfiltrate the Key-Vault-scoped access token.
+    #[test]
+    fn test_parse_cmk_path_rejects_untrusted_host() {
+        // Attacker-controlled host
+        let err = AzureKeyVaultProvider::parse_cmk_path(
+            "https://attacker.example.com/keys/mykey",
+            &trusted(),
+        )
+        .expect_err("untrusted host must be rejected");
+        assert!(err.to_string().contains("not a trusted Key Vault endpoint"));
+
+        // Suffix-spoofing: trusted suffix appears as a non-suffix label.
+        assert!(
+            AzureKeyVaultProvider::parse_cmk_path(
+                "https://vault.azure.net.attacker.com/keys/mykey",
+                &trusted(),
+            )
+            .is_err()
+        );
+
+        // http downgrade is rejected even for a trusted host.
+        assert!(
+            AzureKeyVaultProvider::parse_cmk_path(
+                "http://myvault.vault.azure.net/keys/mykey",
+                &trusted(),
+            )
+            .is_err()
+        );
+    }
+
+    /// Issue #162: a custom trusted-endpoint list permits private deployments
+    /// while still rejecting everything outside it.
+    #[test]
+    fn test_with_trusted_endpoints_override() {
+        let custom = vec![".vault.contoso.example".to_string()];
+        assert!(
+            AzureKeyVaultProvider::parse_cmk_path(
+                "https://kv1.vault.contoso.example/keys/mykey",
+                &custom,
+            )
+            .is_ok()
+        );
+        // The Azure default is no longer trusted under the override.
+        assert!(
+            AzureKeyVaultProvider::parse_cmk_path(
+                "https://myvault.vault.azure.net/keys/mykey",
+                &custom,
+            )
+            .is_err()
+        );
     }
 
     #[test]

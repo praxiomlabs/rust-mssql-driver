@@ -74,6 +74,13 @@ unwrapping, CEK caching) with `InMemoryKeyStore`, `AzureKeyVaultProvider`,
 so it does not protect against a malicious DBA or server compromise the way Always
 Encrypted does. See the [`mssql-client` `encryption` module docs](https://docs.rs/mssql-client/latest/mssql_client/encryption/).
 
+**Trusted key paths.** The column master key (CMK) path in Always Encrypted
+metadata is supplied by the server. `AzureKeyVaultProvider` restricts that path
+to Microsoft-operated Key Vault / Managed HSM endpoints by default, so a malicious
+server cannot redirect key operations to an attacker-controlled host and exfiltrate
+the access token. Private or sovereign deployments can supply their own allowlist
+via `AzureKeyVaultProvider::with_trusted_endpoints`.
+
 ## Dependency Security
 
 Dependencies are audited with `cargo deny check` (RustSec advisories, unmaintained
