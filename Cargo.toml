@@ -4,7 +4,7 @@ members = ["crates/*", "xtask"]
 exclude = ["fuzz"]  # Fuzz tests have their own workspace (required by cargo-fuzz)
 
 [workspace.package]
-version = "0.11.0"
+version = "0.12.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
@@ -19,13 +19,13 @@ categories = ["database"]
 #   Primary (user-facing): mssql-client (main API), mssql-driver-pool (connection pooling)
 #   Internal (implementation): tds-protocol, mssql-types, mssql-tls, mssql-codec, mssql-auth, mssql-derive
 #   Dev-only (publish = false): mssql-testing
-tds-protocol = { version = "0.11.0", path = "crates/tds-protocol" }
-mssql-tls = { version = "0.11.0", path = "crates/mssql-tls" }
-mssql-codec = { version = "0.11.0", path = "crates/mssql-codec" }
-mssql-types = { version = "0.11.0", path = "crates/mssql-types" }
-mssql-auth = { version = "0.11.0", path = "crates/mssql-auth" }
-mssql-driver-pool = { version = "0.11.0", path = "crates/mssql-pool" }
-mssql-client = { version = "0.11.0", path = "crates/mssql-client" }
+tds-protocol = { version = "0.12.0", path = "crates/tds-protocol" }
+mssql-tls = { version = "0.12.0", path = "crates/mssql-tls" }
+mssql-codec = { version = "0.12.0", path = "crates/mssql-codec" }
+mssql-types = { version = "0.12.0", path = "crates/mssql-types" }
+mssql-auth = { version = "0.12.0", path = "crates/mssql-auth" }
+mssql-driver-pool = { version = "0.12.0", path = "crates/mssql-pool" }
+mssql-client = { version = "0.12.0", path = "crates/mssql-client" }
 # Versioned: mssql-derive is now an optional NORMAL dependency of mssql-client
 # (the `derive` feature re-exports its macros), so it must carry a version to
 # be packaged into mssql-client's published manifest, and release-plz publishes
@@ -33,7 +33,7 @@ mssql-client = { version = "0.11.0", path = "crates/mssql-client" }
 # proc-macro2/quote/syn, so there is no cycle). The v0.11.0 incident this list
 # guards against was a versioned *dev*-dependency; the publish-invariants check
 # only flags dev/build-deps, which this is not.
-mssql-derive = { version = "0.11.0", path = "crates/mssql-derive" }
+mssql-derive = { version = "0.12.0", path = "crates/mssql-derive" }
 # Path-only for the same reason as mssql-derive: never published
 # (publish = false), so a version field can only drift (it was stuck at 0.10.0
 # while the crate itself moved with the workspace).
