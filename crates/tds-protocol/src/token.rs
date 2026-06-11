@@ -864,7 +864,10 @@ impl ColMetaData {
         let flags = src.get_u16_le();
         let col_type = src.get_u8();
 
-        let type_id = TypeId::from_u8(col_type).unwrap_or(TypeId::Null); // Default to Null for unknown types
+        // An unknown type byte must be a hard error: treating it as Null (a
+        // zero-length column) misaligns every subsequent column and row,
+        // producing plausible garbage values (issue #157).
+        let type_id = TypeId::from_u8(col_type).ok_or(ProtocolError::InvalidDataType(col_type))?;
 
         // Parse type-specific metadata
         let type_info = decode_type_info(src, type_id, col_type)?;
@@ -937,7 +940,7 @@ impl ColMetaData {
         let flags = src.get_u16_le();
         let col_type = src.get_u8();
 
-        let type_id = TypeId::from_u8(col_type).unwrap_or(TypeId::Null);
+        let type_id = TypeId::from_u8(col_type).ok_or(ProtocolError::InvalidDataType(col_type))?;
 
         // Parse type-specific metadata (for encrypted columns, this is the transport type)
         let type_info = decode_type_info(src, type_id, col_type)?;
@@ -1477,7 +1480,7 @@ impl ReturnValue {
         let flags = src.get_u16_le();
         let col_type = src.get_u8();
 
-        let type_id = TypeId::from_u8(col_type).unwrap_or(TypeId::Null);
+        let type_id = TypeId::from_u8(col_type).ok_or(ProtocolError::InvalidDataType(col_type))?;
 
         // Parse type info
         let type_info = decode_type_info(src, type_id, col_type)?;

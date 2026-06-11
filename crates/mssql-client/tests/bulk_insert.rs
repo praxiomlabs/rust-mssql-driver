@@ -285,7 +285,13 @@ async fn test_bulk_insert_null_values() {
 
     let data: Vec<(i32, Option<String>, Option<i32>)> = rows
         .filter_map(|r| r.ok())
-        .map(|row| (row.get(0).unwrap(), row.try_get(1), row.try_get(2)))
+        .map(|row| {
+            (
+                row.get(0).unwrap(),
+                row.try_get(1).unwrap(),
+                row.try_get(2).unwrap(),
+            )
+        })
         .collect();
 
     assert_eq!(data.len(), 4);

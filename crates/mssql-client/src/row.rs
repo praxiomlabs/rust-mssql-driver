@@ -570,28 +570,52 @@ impl Row {
         self.get(index)
     }
 
-    /// Try to get a value by column index, returning None if NULL or not found.
-    pub fn try_get<T: FromSql>(&self, index: usize) -> Option<T> {
+    /// Try to get a value by column index.
+    ///
+    /// Returns `Ok(None)` when the column is NULL or the index is out of
+    /// bounds. Decode and conversion failures are errors — they were
+    /// previously swallowed as `None`, which made a type mismatch on a
+    /// nullable column silently read as NULL (issue #157).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TypeError`] if the column value cannot be decoded or
+    /// converted to `T`.
+    pub fn try_get<T: FromSql>(&self, index: usize) -> Result<Option<T>, TypeError> {
         // If we have cached values, use them
         if let Some(ref values) = self.values {
-            return values
-                .get(index)
-                .and_then(|v| T::from_sql_nullable(v).ok().flatten());
+            return match values.get(index) {
+                Some(v) => T::from_sql_nullable(v),
+                None => Ok(None),
+            };
         }
 
         // Otherwise check the slice
-        let slice = self.slices.get(index)?;
+        let Some(slice) = self.slices.get(index) else {
+            return Ok(None);
+        };
         if slice.is_null {
-            return None;
+            return Ok(None);
         }
 
-        self.get(index).ok()
+        self.get(index).map(Some)
     }
 
-    /// Try to get a value by column name, returning None if NULL or not found.
-    pub fn try_get_by_name<T: FromSql>(&self, name: &str) -> Option<T> {
-        let index = self.metadata.find_by_name(name)?;
-        self.try_get(index)
+    /// Try to get a value by column name.
+    ///
+    /// Returns `Ok(None)` when the column is NULL or no column with this
+    /// name exists. Decode and conversion failures are errors — see
+    /// [`try_get`](Self::try_get).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TypeError`] if the column value cannot be decoded or
+    /// converted to `T`.
+    pub fn try_get_by_name<T: FromSql>(&self, name: &str) -> Result<Option<T>, TypeError> {
+        match self.metadata.find_by_name(name) {
+            Some(index) => self.try_get(index),
+            None => Ok(None),
+        }
     }
 
     // ========================================================================
@@ -758,7 +782,7 @@ impl<'a> IntoIterator for &'a Row {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -866,6 +890,38 @@ mod tests {
         assert_eq!(row.columns().len(), 1);
         assert_eq!(row.columns()[0].name, "col1");
         assert_eq!(row.metadata().len(), 1);
+    }
+
+    /// Issue #157 regression: `try_get` must distinguish SQL NULL (Ok(None))
+    /// from a decode/conversion failure (Err). Previously both collapsed to
+    /// `None`, so a type mismatch on a nullable column silently read as NULL.
+    #[test]
+    fn test_try_get_distinguishes_null_from_conversion_error() {
+        let columns = vec![Column::new("a", 0, "NVARCHAR"), Column::new("b", 1, "INT")];
+        let row = Row::from_values(
+            columns,
+            vec![SqlValue::String("not a number".into()), SqlValue::Null],
+        );
+
+        // NULL → Ok(None)
+        let b: Option<i32> = row.try_get(1).expect("NULL must be Ok(None)");
+        assert!(b.is_none());
+
+        // Missing column/index → Ok(None) (lenient lookup is unchanged)
+        let missing: Option<i32> = row.try_get(9).expect("missing index must be Ok(None)");
+        assert!(missing.is_none());
+        let missing: Option<i32> = row
+            .try_get_by_name("no_such_column")
+            .expect("missing name must be Ok(None)");
+        assert!(missing.is_none());
+
+        // Conversion failure → Err, NOT Ok(None)
+        assert!(row.try_get::<i32>(0).is_err());
+        assert!(row.try_get_by_name::<i32>("a").is_err());
+
+        // The successful typed read still works
+        let a: Option<String> = row.try_get(0).expect("string read must succeed");
+        assert_eq!(a.as_deref(), Some("not a number"));
     }
 
     #[test]

@@ -174,8 +174,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for result in rows {
         let row = result?;
-        let tier: Option<String> = row.try_get(0);
-        let edition: Option<String> = row.try_get(1);
+        let tier: Option<String> = row.try_get(0).expect("tier should decode");
+        let edition: Option<String> = row.try_get(1).expect("edition should decode");
         println!("  Service Tier: {tier:?}");
         println!("  Edition: {edition:?}");
     }

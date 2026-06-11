@@ -50,7 +50,7 @@
 use tds_protocol::rpc::{RpcParam, RpcRequest, TypeInfo as RpcTypeInfo};
 
 use crate::client::Client;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::state::ConnectionState;
 use crate::stream::ProcedureResult;
 
@@ -80,6 +80,9 @@ pub struct ProcedureBuilder<'a, S: ConnectionState> {
     client: &'a mut Client<S>,
     proc_name: String,
     params: Vec<RpcParam>,
+    /// First parameter-conversion failure, surfaced by `execute()`. Kept as
+    /// a field so `input()` stays chainable.
+    deferred_error: Option<Error>,
 }
 
 impl<'a, S: ConnectionState> ProcedureBuilder<'a, S> {
@@ -91,6 +94,7 @@ impl<'a, S: ConnectionState> ProcedureBuilder<'a, S> {
             client,
             proc_name: proc_name.to_string(),
             params: Vec::new(),
+            deferred_error: None,
         }
     }
 
@@ -112,7 +116,10 @@ impl<'a, S: ConnectionState> ProcedureBuilder<'a, S> {
     /// ```
     pub fn input(&mut self, name: &str, value: &(dyn crate::ToSql + Sync)) -> &mut Self {
         // Use the shared conversion logic from params.rs.
-        // If conversion fails, the error is deferred to execute().
+        // If conversion fails, the error is deferred to execute() — the call
+        // must NOT proceed with a substituted value: the server cannot tell
+        // a placeholder apart from an intentional NULL, so the procedure
+        // would silently run with wrong data (issue #157).
         match Client::<S>::convert_single_param(
             name,
             value,
@@ -122,10 +129,9 @@ impl<'a, S: ConnectionState> ProcedureBuilder<'a, S> {
             Ok(param) => self.params.push(param),
             Err(e) => {
                 tracing::warn!(name = name, error = %e, "failed to convert input parameter");
-                // Store a null placeholder so parameter ordering is preserved.
-                // The error will surface if the server rejects the call.
-                self.params
-                    .push(RpcParam::null(name, RpcTypeInfo::nvarchar(1)));
+                if self.deferred_error.is_none() {
+                    self.deferred_error = Some(e);
+                }
             }
         }
         self
@@ -218,7 +224,16 @@ impl<'a, S: ConnectionState> ProcedureBuilder<'a, S> {
     /// Sends an RPC request to SQL Server with the accumulated parameters
     /// and reads the complete response including result sets, output
     /// parameters, and the procedure return value.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first parameter-conversion error from [`input`](Self::input)
+    /// before anything is sent — the procedure is never called with a
+    /// substituted value.
     pub async fn execute(&mut self) -> Result<ProcedureResult> {
+        if let Some(e) = self.deferred_error.take() {
+            return Err(e);
+        }
         let mut rpc = RpcRequest::named(&self.proc_name);
         for param in self.params.drain(..) {
             rpc = rpc.param(param);

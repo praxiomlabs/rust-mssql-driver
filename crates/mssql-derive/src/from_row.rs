@@ -61,21 +61,26 @@ pub(crate) fn impl_from_row(input: &DeriveInput) -> syn::Result<TokenStream2> {
         });
 
         if config.default {
-            // Use try_get_by_name which returns Option, fallback to Default
+            // try_get_by_name returns Ok(None) for NULL/missing columns
+            // (fallback to Default) but propagates decode/conversion errors —
+            // a type mismatch must not silently become the default value.
             if is_option_type(field_type) {
                 field_extractions.push(quote! {
                     #field_name: row.try_get_by_name(#column_name)
+                        .map_err(mssql_client::Error::from)?
                 });
             } else {
                 field_extractions.push(quote! {
                     #field_name: row.try_get_by_name(#column_name)
+                        .map_err(mssql_client::Error::from)?
                         .unwrap_or_else(::std::default::Default::default)
                 });
             }
         } else if is_option_type(field_type) {
-            // Option types use try_get which handles NULL gracefully
+            // Option types map NULL to None but propagate decode errors
             field_extractions.push(quote! {
                 #field_name: row.try_get_by_name(#column_name)
+                    .map_err(mssql_client::Error::from)?
             });
         } else {
             // Required fields use get_by_name which returns Result

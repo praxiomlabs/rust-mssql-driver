@@ -331,9 +331,11 @@ impl CryptoMetadata {
         let base_user_type = src.get_u32_le();
         let base_col_type = src.get_u8();
 
-        // Parse base type info using the shared decoder from token.rs
-        let base_type_id =
-            crate::types::TypeId::from_u8(base_col_type).unwrap_or(crate::types::TypeId::Null);
+        // Parse base type info using the shared decoder from token.rs. An
+        // unknown base type byte must be a hard error: defaulting to Null
+        // (zero-length) misaligns the rest of the metadata (issue #157).
+        let base_type_id = crate::types::TypeId::from_u8(base_col_type)
+            .ok_or(ProtocolError::InvalidDataType(base_col_type))?;
         let base_type_info = crate::token::decode_type_info(src, base_type_id, base_col_type)?;
 
         // algorithm_id (1) + encryption_type (1) + normalization_version (1) = 3
