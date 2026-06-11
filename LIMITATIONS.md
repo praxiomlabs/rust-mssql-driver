@@ -15,6 +15,7 @@ For supported features, see [README.md](README.md).
 | Protocol | True LOB Streaming | Chunked reads via SQL |
 | Protocol | Server-Side Cursors | Use OFFSET/FETCH pagination |
 | Data Types | NUMERIC/DECIMAL beyond 28-29 significant digits | CAST to narrower NUMERIC, FLOAT, or VARCHAR |
+| Collations | OEM code pages CP437 / CP850 (legacy SQL collations) | Use a CP125x or UTF-8 collation, or CAST to NVARCHAR |
 | Data Types | GEOMETRY, GEOGRAPHY | Use `STAsText()` or `STAsGeoJSON()` |
 | Data Types | HIERARCHYID | Use `.ToString()` |
 | Data Types | CLR UDTs | Cast to VARBINARY |
@@ -143,6 +144,25 @@ live validation lands.
 
 **Workaround:** SQL authentication and cross-platform NTLM are the
 validated paths.
+
+---
+
+### Legacy OEM Code Page Collations (CP437, CP850)
+
+**Status:** Not decodable; the code page is reported but no transcoding occurs
+
+SQL collations whose SortId maps to the OEM code pages 437 or 850 (e.g.
+`SQL_Latin1_General_CP850_BIN`, `SQL_Latin1_General_CP437_CI_AS`) cannot be
+transcoded: [`encoding_rs`] implements the WHATWG encoding set, which does
+not include CP437 or CP850. `Collation::code_page()` still reports the true
+code page (for diagnostics); `Collation::encoding()` returns `None`. All
+CP125x SQL collations (1250–1257) and the CJK SQL collations are fully
+supported via their SortId.
+
+[`encoding_rs`]: https://docs.rs/encoding_rs
+
+**Workaround:** Use a `CP125x` or `_UTF8` collation, or `CAST` the column to
+`NVARCHAR` in the query so the value arrives as UTF-16.
 
 ---
 

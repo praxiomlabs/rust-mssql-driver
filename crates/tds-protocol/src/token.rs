@@ -282,6 +282,12 @@ impl Collation {
     /// ```
     #[cfg(feature = "encoding")]
     pub fn encoding(&self) -> Option<&'static encoding_rs::Encoding> {
+        // A non-zero SortId means a SQL collation, whose code page derives
+        // from the SortId, not the LCID (MS-TDS). Consulting only the LCID
+        // silently decoded these as windows-1252 (issue #158).
+        if self.sort_id != 0 {
+            return crate::collation::encoding_for_sort_id(self.sort_id);
+        }
         crate::collation::encoding_for_lcid(self.lcid)
     }
 
@@ -303,6 +309,11 @@ impl Collation {
     /// The code page number (e.g., 1252 for Western European, 932 for Japanese).
     #[cfg(feature = "encoding")]
     pub fn code_page(&self) -> Option<u16> {
+        // SQL collations (non-zero SortId) derive their code page from the
+        // SortId, not the LCID (issue #158).
+        if self.sort_id != 0 {
+            return crate::collation::code_page_for_sort_id(self.sort_id);
+        }
         crate::collation::code_page_for_lcid(self.lcid)
     }
 
@@ -311,6 +322,12 @@ impl Collation {
     /// Useful for error messages and debugging.
     #[cfg(feature = "encoding")]
     pub fn encoding_name(&self) -> &'static str {
+        if self.sort_id != 0 {
+            return match crate::collation::encoding_for_sort_id(self.sort_id) {
+                Some(enc) => enc.name(),
+                None => "unsupported",
+            };
+        }
         crate::collation::encoding_name_for_lcid(self.lcid)
     }
 }
