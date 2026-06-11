@@ -322,6 +322,15 @@ pub struct MockServerConfig {
     database: String,
     /// TLS acceptor for encrypted connections (None = plaintext only).
     tls_acceptor: Option<TlsAcceptor>,
+    /// When set, respond to LOGIN7 with an ENVCHANGE Routing token redirecting
+    /// to this `(host, port)` instead of completing the login (simulates the
+    /// Azure SQL Gateway redirect).
+    login_routing: Option<(String, u16)>,
+    /// Route every login back to this server's own address (resolved after
+    /// bind). Simulates a routing loop.
+    login_routing_to_self: bool,
+    /// Socket address to bind (default `127.0.0.1:0`).
+    bind_addr: String,
 }
 
 /// Builder for `MockTdsServer`.
@@ -340,6 +349,9 @@ impl MockServerBuilder {
                 tds_version: 0x74000004, // TDS 7.4
                 database: "master".to_string(),
                 tls_acceptor: None,
+                login_routing: None,
+                login_routing_to_self: false,
+                bind_addr: "127.0.0.1:0".to_string(),
             },
         }
     }
@@ -365,6 +377,27 @@ impl MockServerBuilder {
     /// Set the default database.
     pub fn with_database(mut self, db: impl Into<String>) -> Self {
         self.config.database = db.into();
+        self
+    }
+
+    /// Respond to LOGIN7 with an ENVCHANGE Routing token redirecting to
+    /// `(host, port)`, simulating the Azure SQL Gateway redirect during login.
+    pub fn with_login_routing(mut self, host: impl Into<String>, port: u16) -> Self {
+        self.config.login_routing = Some((host.into(), port));
+        self
+    }
+
+    /// Respond to every LOGIN7 with a routing token pointing back at this
+    /// server's own address, simulating an endless redirect loop.
+    pub fn with_login_routing_to_self(mut self) -> Self {
+        self.config.login_routing_to_self = true;
+        self
+    }
+
+    /// Bind to a specific socket address instead of the default
+    /// `127.0.0.1:0` (e.g. `[::1]:1433` to listen on the IPv6 loopback).
+    pub fn with_bind_addr(mut self, addr: impl Into<String>) -> Self {
+        self.config.bind_addr = addr.into();
         self
     }
 
@@ -411,6 +444,8 @@ pub struct MockTdsServer {
     config: Arc<MockServerConfig>,
     /// Connection count.
     connection_count: Arc<Mutex<usize>>,
+    /// Cumulative number of connections ever accepted (never decremented).
+    total_connections: Arc<Mutex<usize>>,
 }
 
 impl MockTdsServer {
@@ -420,18 +455,24 @@ impl MockTdsServer {
     }
 
     /// Start the mock server on an available port.
-    pub async fn start(config: MockServerConfig) -> Result<Self> {
-        let listener = TcpListener::bind("127.0.0.1:0").await?;
+    pub async fn start(mut config: MockServerConfig) -> Result<Self> {
+        let listener = TcpListener::bind(config.bind_addr.as_str()).await?;
         let addr = listener.local_addr()?;
+        // Self-routing can only be resolved once the ephemeral port is known.
+        if config.login_routing_to_self {
+            config.login_routing = Some((addr.ip().to_string(), addr.port()));
+        }
         let (shutdown_tx, _) = broadcast::channel(1);
         let config = Arc::new(config);
         let connection_count = Arc::new(Mutex::new(0usize));
+        let total_connections = Arc::new(Mutex::new(0usize));
 
         let server = Self {
             addr,
             shutdown_tx: shutdown_tx.clone(),
             config: config.clone(),
             connection_count: connection_count.clone(),
+            total_connections: total_connections.clone(),
         };
 
         // Spawn the accept loop
@@ -444,6 +485,10 @@ impl MockTdsServer {
                             Ok((stream, _peer_addr)) => {
                                 let config = config.clone();
                                 let count = connection_count.clone();
+                                {
+                                    let mut t = total_connections.lock().await;
+                                    *t += 1;
+                                }
                                 tokio::spawn(async move {
                                     {
                                         let mut c = count.lock().await;
@@ -497,6 +542,15 @@ impl MockTdsServer {
     /// Get the current connection count.
     pub async fn connection_count(&self) -> usize {
         *self.connection_count.lock().await
+    }
+
+    /// Get the cumulative number of connections ever accepted.
+    ///
+    /// Unlike [`connection_count`](Self::connection_count), this never
+    /// decreases when connections close — useful for asserting how many
+    /// connection *attempts* a scenario produced (e.g. redirect chains).
+    pub async fn total_connection_count(&self) -> usize {
+        *self.total_connections.lock().await
     }
 
     /// Stop the server.
@@ -782,11 +836,21 @@ async fn send_prelogin_response_with_encryption(
 }
 
 /// Send LOGIN7 response (LoginAck + EnvChange + Done).
+///
+/// When `login_routing` is configured, the response is an ENVCHANGE Routing
+/// token followed by Done — the login is not acknowledged, mirroring the
+/// Azure SQL Gateway redirect flow.
 async fn send_login_response<S: AsyncWrite + Unpin>(
     stream: &mut S,
     config: &MockServerConfig,
 ) -> Result<()> {
     let mut response = BytesMut::new();
+
+    if let Some((host, port)) = &config.login_routing {
+        encode_env_change_routing(&mut response, host, *port);
+        encode_done(&mut response, 0, false);
+        return write_packet(stream, PacketType::TabularResult, &response).await;
+    }
 
     // EnvChange: Database
     encode_env_change(&mut response, EnvChangeType::Database, &config.database, "");
@@ -825,6 +889,31 @@ fn encode_env_change(dst: &mut BytesMut, env_type: EnvChangeType, new_val: &str,
     for c in &old_utf16 {
         dst.put_u16_le(*c);
     }
+}
+
+/// Encode an ENVCHANGE Routing token (type 20) per MS-TDS 2.2.7.9.
+///
+/// Layout: token(1) + length(2) + env_type(1) +
+/// RoutingDataValue { length(2), protocol(1), port(2), server_len(2),
+/// server(UTF-16LE) } + zero-length OldValue(2).
+fn encode_env_change_routing(dst: &mut BytesMut, host: &str, port: u16) {
+    let host_utf16: Vec<u16> = host.encode_utf16().collect();
+    let routing_len = 1 + 2 + 2 + host_utf16.len() * 2;
+    let data_len = 1 + 2 + routing_len + 2;
+
+    dst.put_u8(TokenType::EnvChange as u8);
+    dst.put_u16_le(data_len as u16);
+    dst.put_u8(EnvChangeType::Routing as u8);
+
+    dst.put_u16_le(routing_len as u16);
+    dst.put_u8(0); // protocol: TCP
+    dst.put_u16_le(port);
+    dst.put_u16_le(host_utf16.len() as u16);
+    for c in &host_utf16 {
+        dst.put_u16_le(*c);
+    }
+
+    dst.put_u16_le(0); // OldValue: zero-length US_VARBYTE
 }
 
 /// Encode a LoginAck token.
