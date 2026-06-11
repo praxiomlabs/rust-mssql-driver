@@ -44,10 +44,11 @@ pub struct Collation {
 impl Collation {
     /// Check if this collation uses UTF-8 encoding (SQL Server 2019+).
     ///
-    /// UTF-8 collations have bit 27 (0x0800_0000) set in the LCID.
+    /// UTF-8 collations have fUTF8, bit 26 (0x0400_0000), set in the
+    /// collation info field (bit 27 is FRESERVEDBIT per MS-TDS).
     #[must_use]
     pub fn is_utf8(&self) -> bool {
-        (self.lcid & 0x0800_0000) != 0
+        (self.lcid & 0x0400_0000) != 0
     }
 
     /// Get the encoding for this collation.
@@ -61,9 +62,10 @@ impl Collation {
     }
 }
 
-/// UTF-8 collation flag bit (bit 27).
+/// UTF-8 collation flag bit — fUTF8, bit 26 per the MS-TDS Collation Rule
+/// Definition (bit 27 is FRESERVEDBIT).
 #[cfg(feature = "encoding")]
-const UTF8_COLLATION_FLAG: u32 = 0x0800_0000;
+const UTF8_COLLATION_FLAG: u32 = 0x0400_0000;
 
 /// Get the encoding for an LCID value.
 #[cfg(feature = "encoding")]

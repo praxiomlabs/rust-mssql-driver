@@ -228,7 +228,7 @@ pub struct Collation {
     /// contain the primary language ID, and bits 16-19 contain the sort ID
     /// for some collations.
     ///
-    /// For UTF-8 collations (SQL Server 2019+), bit 27 (0x0800_0000) is set.
+    /// For UTF-8 collations (SQL Server 2019+), fUTF8 (bit 26, 0x0400_0000) is set.
     pub lcid: u32,
     /// Sort ID.
     ///
