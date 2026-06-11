@@ -44,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Merge pull request #137 from praxiomlabs/fix/cek-envelope-interop
 - *(mssql-auth)* commit the CEK fixture regeneration harness
 - bump libgssapi 0.9 -> 0.11 and adapt to its new API
+- *(deps)* bump OpenTelemetry stack: opentelemetry/opentelemetry_sdk 0.31 -> 0.32, tracing-opentelemetry 0.32 -> 0.33 (changes mssql-client's published `otel` requirements)
+- *(deps)* bump lru 0.17 -> 0.18 (changes mssql-client's published requirement)
 - convert feature-example snippets to versionless cargo add
 - fix version/feature-default drift and guard it in the linter
 
