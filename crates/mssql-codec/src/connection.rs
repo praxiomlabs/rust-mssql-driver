@@ -138,7 +138,7 @@ where
                         // stays latched and a later drain eats the *next*
                         // request's response.
                         if self.is_cancelling() {
-                            if Self::payload_has_attention_done(&message.payload) {
+                            if Self::payload_ends_with_attention_done(&message.payload) {
                                 tracing::debug!(
                                     "received DONE with ATTENTION, cancellation complete"
                                 );
@@ -246,7 +246,7 @@ where
         writer.flush().await
     }
 
-    /// Drain packets after cancellation until DONE with ATTENTION is received.
+    /// Drain messages after cancellation until DONE with ATTENTION is received.
     ///
     /// Returns [`CodecError::Cancelled`] once the acknowledgement is consumed;
     /// the connection is then clean for the next request.
@@ -259,15 +259,18 @@ where
         loop {
             match self.reader.next().await {
                 Some(Ok(packet)) => {
-                    // Check for DONE token with ATTENTION flag
-                    // The DONE token is at the start of the payload
-                    if packet.header.packet_type == PacketType::TabularResult
-                        && !packet.payload.is_empty()
-                        && self.check_attention_done(&packet)
-                    {
-                        tracing::debug!("received DONE with ATTENTION, cancellation complete");
-                        self.finish_cancel();
-                        return Err(CodecError::Cancelled);
+                    // Assemble complete messages so the acknowledgement check
+                    // runs on the message trailer — a per-packet check would
+                    // miss a DONE token straddling a packet boundary.
+                    if let Some(message) = self.assembler.push(packet) {
+                        if message.packet_type == PacketType::TabularResult
+                            && Self::payload_ends_with_attention_done(&message.payload)
+                        {
+                            tracing::debug!("received DONE with ATTENTION, cancellation complete");
+                            self.finish_cancel();
+                            return Err(CodecError::Cancelled);
+                        }
+                        tracing::debug!("discarding message from cancelled request");
                     }
                     // Continue draining
                 }
@@ -294,32 +297,25 @@ where
         self.cancel_notify.notify_waiters();
     }
 
-    /// Check if a packet contains a DONE token with ATTENTION flag.
-    fn check_attention_done(&self, packet: &Packet) -> bool {
-        Self::payload_has_attention_done(&packet.payload)
-    }
-
-    /// Scan a message payload for a DONE token (0xFD) with the ATTN status
-    /// flag (0x0020).
+    /// Check whether a message payload terminates in a DONE token carrying
+    /// the ATTN status flag (the attention acknowledgement).
     ///
-    /// DONE token format: token_type(1) + status(2) + cur_cmd(2) + row_count(8).
-    /// This is a byte scan, not a token parse, so it can in principle
-    /// false-positive on 0xFD bytes inside row data — acceptable here because
-    /// it is only consulted for messages that arrive while a cancellation is
-    /// pending, where the stream carries DONE tokens rather than rows.
-    fn payload_has_attention_done(payload: &[u8]) -> bool {
-        for i in 0..payload.len() {
-            if payload[i] == 0xFD && i + 3 <= payload.len() {
-                // Found DONE token, check status
-                let status = u16::from_le_bytes([payload[i + 1], payload[i + 2]]);
-                // DONE_ATTN = 0x0020
-                if status & 0x0020 != 0 {
-                    return true;
-                }
-            }
-        }
-
-        false
+    /// Every tabular response message ends with a fixed 13-byte DONE-family
+    /// token (token(1) + status(2) + cur_cmd(2) + row_count(8)), and per
+    /// MS-TDS 2.2.7.6 the acknowledgement is a DONE (0xFD) with DONE_ATTN as
+    /// the final token of the cancelled stream. Anchoring the check to the
+    /// trailer means row bytes that happen to contain `0xFD, 0x20` (entirely
+    /// possible in binary/integer cell data arriving during the cancel
+    /// window) cannot be mistaken for the acknowledgement — an interior byte
+    /// scan was proven to clear the cancel flag early and leak the real
+    /// acknowledgement into the next request.
+    fn payload_ends_with_attention_done(payload: &[u8]) -> bool {
+        let Some(start) = payload.len().checked_sub(13) else {
+            return false;
+        };
+        // DONE token type = 0xFD; DONE_ATTN = 0x0020 in the LE status word.
+        payload[start] == 0xFD
+            && u16::from_le_bytes([payload[start + 1], payload[start + 2]]) & 0x0020 != 0
     }
 
     /// Get a reference to the read codec.
@@ -476,14 +472,24 @@ mod tests {
         let packet_no_attn = Packet::new(header, payload_no_attn);
 
         assert!(
-            Connection::<tokio::io::DuplexStream>::payload_has_attention_done(
+            Connection::<tokio::io::DuplexStream>::payload_ends_with_attention_done(
                 &packet_with_attn.payload
             )
         );
         assert!(
-            !Connection::<tokio::io::DuplexStream>::payload_has_attention_done(
+            !Connection::<tokio::io::DuplexStream>::payload_ends_with_attention_done(
                 &packet_no_attn.payload
             )
+        );
+
+        // Interior 0xFD,0x20 bytes (e.g. row data) must not register: only
+        // the trailing token position counts.
+        let mut interior = vec![0xD1, 0x08, 0xFD, 0x20, 0xAA, 0xBB];
+        interior.extend_from_slice(&[
+            0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ]);
+        assert!(
+            !Connection::<tokio::io::DuplexStream>::payload_ends_with_attention_done(&interior)
         );
     }
 
@@ -601,6 +607,74 @@ mod tests {
         assert_eq!(
             u16::from_le_bytes([message.payload[1], message.payload[2]]),
             0x0010
+        );
+    }
+
+    /// PR #143 review, Blocker 1: row bytes that happen to contain
+    /// `0xFD, 0x20` must NOT be mistaken for the DONE_ATTN acknowledgement.
+    ///
+    /// During the cancel window the cancelled request's *data* (rows already
+    /// in flight) can arrive before the real acknowledgement. A byte-scan
+    /// for any interior 0xFD with bit 5 set false-positives on such data,
+    /// clears the cancel flag early, and the genuine ack then poisons the
+    /// next request — the exact failure the cancellation fix claims to
+    /// eliminate.
+    #[tokio::test]
+    async fn test_cancel_race_row_bytes_do_not_fake_the_attention_ack() {
+        use std::task::{Context, Poll};
+        use tokio::io::AsyncWriteExt;
+
+        let (client_io, mut server_io) = tokio::io::duplex(4096);
+        let mut conn = Connection::new(client_io);
+        let cancel = conn.cancel_handle();
+
+        // Park a read, then cancel while it waits (the realistic ordering).
+        let mut read_fut = Box::pin(conn.read_message());
+        let waker = std::task::Waker::noop();
+        let mut cx = Context::from_waker(waker);
+        assert!(matches!(read_fut.as_mut().poll(&mut cx), Poll::Pending));
+        cancel.cancel().await.expect("send attention");
+
+        // Message 1: the cancelled request's data — row-ish bytes whose
+        // *interior* contains 0xFD followed by a byte with bit 5 set (e.g. a
+        // BIGINT cell value), terminated by a DONE with MORE and no ATTN.
+        let mut row_data = vec![0xD1, 0x08]; // ROW token, length-ish prefix
+        row_data.extend_from_slice(&[0xFD, 0x20, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
+        row_data.extend_from_slice(&done_token(0x0001)); // DONE_MORE, no ATTN
+        server_io.write_all(&raw_message(&row_data)).await.unwrap();
+
+        // Message 2: the genuine acknowledgement.
+        server_io
+            .write_all(&raw_message(&done_token(0x0020)))
+            .await
+            .unwrap();
+
+        // Message 3: the next request's response.
+        server_io
+            .write_all(&raw_message(&done_token(0x0010)))
+            .await
+            .unwrap();
+
+        let result = read_fut.await;
+        assert!(
+            matches!(result, Err(CodecError::Cancelled)),
+            "cancelled read must end in Cancelled, got {result:?}"
+        );
+        assert!(!conn.is_cancelling());
+
+        // The next read must deliver message 3 — not the stale ack from
+        // message 2.
+        let message = conn
+            .read_message()
+            .await
+            .expect("next read")
+            .expect("next message");
+        let status = u16::from_le_bytes([message.payload[1], message.payload[2]]);
+        assert_eq!(
+            status, 0x0010,
+            "next request's response must come through intact; 0x0020 means \
+             the interior row bytes were mistaken for the ack and the real \
+             ack leaked into the next request"
         );
     }
 }
