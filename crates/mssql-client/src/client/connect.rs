@@ -44,6 +44,31 @@ impl Client<Disconnected> {
     /// # }
     /// ```
     pub async fn connect(config: Config) -> Result<Client<Ready>> {
+        // FEDAUTH-based credentials (Azure AD / Entra and client certificate)
+        // are not yet wired into the login sequence: providers can acquire
+        // tokens, but LOGIN7 carries no FEDAUTH feature extension, so the
+        // server would receive an empty-credential login and reject it with
+        // an opaque error 18456. Fail fast with an actionable error instead.
+        // Full FEDAUTH support is tracked in issue #155.
+        match &config.credentials {
+            mssql_auth::Credentials::SqlServer { .. } => {}
+            #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+            mssql_auth::Credentials::Integrated => {}
+            // Every other credential type (Azure access token, managed
+            // identity, service principal, client certificate) is
+            // FEDAUTH-based and rejected here.
+            _ => {
+                return Err(Error::Config(
+                    "Azure AD / Entra and client certificate (FEDAUTH) authentication \
+                     are not yet supported: the LOGIN7 FEDAUTH feature extension is not \
+                     implemented (tracked in \
+                     https://github.com/praxiomlabs/rust-mssql-driver/issues/155). \
+                     Use SQL Server or integrated authentication."
+                        .into(),
+                ));
+            }
+        }
+
         let retry = config.retry.clone();
         let max_redirects = config.redirect.max_redirects;
         let follow_redirects = config.redirect.follow_redirects;

@@ -1,30 +1,38 @@
 //! Azure AD / Entra ID authentication implementation.
 //!
-//! This module provides Azure AD federated authentication for SQL Server,
+//! This module provides token handling for Azure AD federated authentication,
 //! supporting both pre-acquired tokens and (with feature flags) token acquisition.
 //!
-//! ## Authentication Flow
+//! ## ⚠️ Login wiring not yet implemented
+//!
+//! The token-acquisition side below works, but the LOGIN7 FEDAUTH feature
+//! extension is **not yet implemented** in `mssql-client`, so these
+//! credentials cannot complete a login end-to-end. `Client::connect` rejects
+//! them with a clear error. Tracked in
+//! [#155](https://github.com/praxiomlabs/rust-mssql-driver/issues/155).
+//!
+//! ## Authentication Flow (target design)
 //!
 //! Azure AD authentication uses the TDS FEDAUTH feature extension:
 //!
-//! 1. Client includes FEDAUTH feature in Login7 packet
+//! 1. Client includes FEDAUTH feature in Login7 packet *(not yet implemented)*
 //! 2. Server responds with FEDAUTHINFO containing STS URL and SPN
-//! 3. Client acquires token (or uses pre-acquired token)
-//! 4. Client sends FEDAUTH token packet
+//! 3. Client acquires token (or uses pre-acquired token) ✅ this module
+//! 4. Client sends FEDAUTH token packet *(not yet implemented)*
 //! 5. Server validates token and completes authentication
 //!
-//! ## Token Sources (Tier 1 - Core) ✅ Implemented
+//! ## Token Sources (Tier 1 - Core)
 //!
 //! - Pre-acquired access token (user provides token directly)
 //!
-//! ## Token Sources (Tier 2 - azure-identity feature) ✅ Implemented
+//! ## Token Sources (Tier 2 - azure-identity feature)
 //!
 //! These require the `azure-identity` feature flag:
 //!
 //! - `ManagedIdentityAuth` - Azure VM/Container identity
 //! - `ServicePrincipalAuth` - Client ID + Secret
 //!
-//! ## Token Sources (Tier 3 - cert-auth feature) ✅ Implemented
+//! ## Token Sources (Tier 3 - cert-auth feature)
 //!
 //! - `CertificateAuth` - X.509 client certificate
 
