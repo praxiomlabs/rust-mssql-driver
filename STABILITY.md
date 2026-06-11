@@ -49,9 +49,9 @@ The following APIs are considered stable and covered by semver guarantees:
 | `Config::new()` + `with_*` builders | Stable |
 | `Row::get()` | Stable |
 | `Row::try_get()` | Stable |
-| `Transaction::commit()` | Stable |
-| `Transaction::rollback()` | Stable |
-| `Transaction::save_point()` | Stable |
+| `Client<InTransaction>::commit()` | Stable |
+| `Client<InTransaction>::rollback()` | Stable |
+| `Client::save_point()` | Stable |
 | `Client::call_procedure()` | Stable |
 | `Client::procedure()` | Stable |
 | `ProcedureBuilder::input()` | Stable |

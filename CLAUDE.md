@@ -17,7 +17,7 @@ A high-performance MS SQL Server driver for Rust that aims to surpass `prisma/ti
 
 ## Key Architecture Decisions
 
-Refer to `ARCHITECTURE.md` (v1.2.0) for complete details. Critical decisions:
+Refer to `ARCHITECTURE.md` (v1.8.0) for complete details. Critical decisions:
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|

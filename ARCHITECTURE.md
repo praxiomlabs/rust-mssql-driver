@@ -1,6 +1,6 @@
 # Architectural Reference: Rust MS SQL Driver
 
-**Version:** 1.6.0
+**Version:** 1.8.0
 **Status:** Design Complete
 **Target Protocol:** MS-TDS 7.3 – 8.0 (SQL Server 2008 – 2025)
 **Toolchain Standard:** Rust 2024 Edition (v1.85+, released February 20, 2025)
@@ -354,7 +354,7 @@ Server=tcp:hostname,port;Database=dbname;User Id=user;Password=pass;Encrypt=stri
 | `Password` | `PWD` | SQL authentication password |
 | `Encrypt` | | `true`, `false`, `strict`, `no_tls` |
 | `TrustServerCertificate` | | Skip certificate validation |
-| `Authentication` | | `SqlPassword`, `ActiveDirectoryPassword`, `ActiveDirectoryManagedIdentity`, `ActiveDirectoryServicePrincipal` |
+| `Authentication` (recognized, **not yet supported** — FEDAUTH login wiring pending, see #155) | | `SqlPassword`, `ActiveDirectoryPassword`, `ActiveDirectoryManagedIdentity`, `ActiveDirectoryServicePrincipal` |
 | `Application Name` | | Application identifier |
 | `Connect Timeout` | | Connection timeout in seconds |
 | `Command Timeout` | | Default command timeout |
@@ -868,7 +868,7 @@ alongside the response-streaming work.
 
 **Status:** Implemented
 
-**Decision:** Always Encrypted client-side encryption is fully implemented with production-ready key providers.
+**Decision:** Always Encrypted client-side decryption (the read path) is fully implemented with production-ready key providers. The encrypt-before-send write path is not yet implemented (only `NULL` can be written to encrypted columns); see LIMITATIONS.md.
 
 **Implemented (v0.2.0):**
 - AEAD_AES_256_CBC_HMAC_SHA256 encryption/decryption
@@ -2005,7 +2005,7 @@ Features are defined on `mssql-client` and forwarded to internal crates as neede
 | `azure-identity` | No | mssql-auth | All | `azure_identity` (pulls OpenSSL transitively) |
 | `integrated-auth` | No | mssql-auth | Linux/macOS | `gssapi`, `libkrb5-dev` |
 | `sspi-auth` | No | mssql-auth | Windows | `sspi-rs` |
-| `cert-auth` | No | mssql-auth | All | None (uses rustls) |
+| `cert-auth` | No | mssql-auth | All | `azure_identity/client_certificate` (pulls OpenSSL transitively) |
 
 Features on `mssql-auth` only (not exposed via `mssql-client`):
 
@@ -2049,6 +2049,7 @@ quick-reference cheat sheet.
 | 1.5.0 | 2026-01-01 | Updated for v0.5.0 release: Collation-aware VARCHAR decoding, encoding feature, Column marked non_exhaustive |
 | 1.6.0 | 2026-04-07 | Updated for v0.7.0 release: MSRV bumped to 1.88, SSPI integrated auth wired into client login, RUSTSEC advisories resolved, 33 public enums marked non_exhaustive for semver safety, deprecated APIs removed before 1.0 |
 | 1.7.0 | 2026-04-13 | Updated for v0.8.0 release: Stored procedure support (§4.7), SQL Browser instance resolution, pool test_on_checkin, Azure SDK 0.34, mock TLS cross-platform fix |
+| 1.8.0 | 2026-06-11 | Doc-accuracy corrections (#166): header version aligned with history; ADR-002 marks `Authentication` keyword as recognized-but-not-yet-supported (FEDAUTH pending, #155); ADR-013 clarifies Always Encrypted is read-path only (write path NULL-only); §8.3 corrects `cert-auth` dependency (pulls OpenSSL via azure_identity, not pure-rustls) |
 
 ---
 
