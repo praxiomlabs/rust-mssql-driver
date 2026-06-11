@@ -346,14 +346,14 @@ async fn test_azure_credentials_fail_fast_before_io() {
         .await
         .expect_err("Azure credentials must be rejected at connect time");
 
-    match err {
-        mssql_client::Error::Config(msg) => {
-            assert!(msg.contains("FEDAUTH"), "error should name FEDAUTH: {msg}");
-            assert!(
-                msg.contains("155"),
-                "error should link tracking issue: {msg}"
-            );
-        }
-        other => panic!("expected Error::Config, got {other:?}"),
-    }
+    let msg = err.to_string();
+    assert!(
+        matches!(err, mssql_client::Error::Config(_)),
+        "expected Error::Config, got: {msg}"
+    );
+    assert!(msg.contains("FEDAUTH"), "error should name FEDAUTH: {msg}");
+    assert!(
+        msg.contains("155"),
+        "error should link tracking issue: {msg}"
+    );
 }
