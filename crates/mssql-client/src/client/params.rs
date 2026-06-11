@@ -510,14 +510,17 @@ impl<S: ConnectionState> Client<S> {
             #[cfg(feature = "chrono")]
             SqlValue::DateTimeOffset(dto) => {
                 use chrono::{Offset, Timelike};
+                // The wire date/time portion is UTC per MS-TDS §2.2.5.5.1.9,
+                // not the local wall-clock.
+                let utc = dto.naive_utc();
                 // Time component (in 100-nanosecond intervals)
-                let nanos = dto.time().num_seconds_from_midnight() as u64 * 1_000_000_000
-                    + dto.time().nanosecond() as u64;
+                let nanos = utc.time().num_seconds_from_midnight() as u64 * 1_000_000_000
+                    + utc.time().nanosecond() as u64;
                 let intervals = nanos / 100;
                 // Date component (days since 0001-01-01)
                 let base =
                     chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
-                let days = dto.date_naive().signed_duration_since(base).num_days() as u32;
+                let days = utc.date().signed_duration_since(base).num_days() as u32;
                 // Timezone offset in minutes
                 let offset_minutes = (dto.offset().fix().local_minus_utc() / 60) as i16;
                 let scale = match wire_type {

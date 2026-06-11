@@ -18,7 +18,8 @@ For supported features, see [README.md](README.md).
 | Data Types | HIERARCHYID | Use `.ToString()` |
 | Data Types | CLR UDTs | Cast to VARBINARY |
 | Performance | Prepared statement cache (not wired) | `sp_executesql` server plan cache |
-| Auth | Kerberos untested against live KDC | SQL auth, NTLM, or Azure AD |
+| Auth | Azure AD / Entra and certificate auth (FEDAUTH not wired) | SQL auth or NTLM |
+| Auth | Kerberos untested against live KDC | SQL auth or NTLM |
 | Platforms | SQL Server 2005 and earlier | Upgrade to SQL Server 2008+ |
 | Platforms | 32-bit systems | Use 64-bit |
 | Runtime | Non-Tokio runtimes | Use Tokio |
@@ -110,6 +111,26 @@ Client-side handle caching is planned.
 
 ---
 
+### Azure AD / Entra and Certificate Authentication (FEDAUTH Not Wired)
+
+**Status:** Token acquisition implemented; login wiring not implemented
+
+The `mssql-auth` providers for Azure AD access tokens, Managed Identity,
+Service Principals, and client certificates can acquire tokens, but the
+LOGIN7 FEDAUTH feature extension is not yet implemented in `mssql-client`,
+so these credential types cannot complete a login. `Client::connect`
+rejects them with a clear configuration error instead of sending an
+empty-credential login (which the server would reject with an opaque
+error 18456).
+
+Full FEDAUTH support is tracked in
+[#155](https://github.com/praxiomlabs/rust-mssql-driver/issues/155).
+
+**Workaround:** SQL authentication or cross-platform NTLM. For Azure SQL,
+SQL authentication works on every tier.
+
+---
+
 ### Kerberos / Integrated Authentication (Untested Live)
 
 **Status:** Implemented but never validated against a live KDC
@@ -119,8 +140,8 @@ has unit tests, but no end-to-end authentication against a real KDC or
 domain-joined SQL Server has been performed. Treat it as experimental until
 live validation lands.
 
-**Workaround:** SQL authentication, cross-platform NTLM, or Azure AD are
-the validated paths.
+**Workaround:** SQL authentication and cross-platform NTLM are the
+validated paths.
 
 ---
 

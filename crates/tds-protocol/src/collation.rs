@@ -43,8 +43,10 @@ use encoding_rs::Encoding;
 use crate::prelude::*;
 
 /// Flag bit indicating UTF-8 collation (SQL Server 2019+).
-/// This is bit 27 (0x0800_0000) in the collation info field.
-pub const COLLATION_FLAG_UTF8: u32 = 0x0800_0000;
+/// This is fUTF8, bit 26 (0x0400_0000) in the collation info field per the
+/// MS-TDS Collation Rule Definition (bit 27 is FRESERVEDBIT). Matches
+/// mssql-jdbc's `UTF8_IN_TDSCOLLATION = 0x4000000`.
+pub const COLLATION_FLAG_UTF8: u32 = 0x0400_0000;
 
 /// Mask to extract the primary LCID from the collation info.
 /// The LCID is stored in the lower 20 bits.
@@ -56,7 +58,7 @@ pub const PRIMARY_LANGUAGE_MASK: u32 = 0x0000_FFFF;
 /// Returns whether the collation uses UTF-8 encoding.
 ///
 /// SQL Server 2019+ supports UTF-8 collations with the `_UTF8` suffix.
-/// These collations set bit 27 in the collation info field.
+/// These collations set fUTF8 (bit 26) in the collation info field.
 #[inline]
 pub fn is_utf8_collation(lcid: u32) -> bool {
     lcid & COLLATION_FLAG_UTF8 != 0
@@ -382,9 +384,14 @@ mod tests {
 
     #[test]
     fn test_utf8_detection() {
-        // UTF-8 collation flag
-        assert!(is_utf8_collation(0x0800_0409)); // English with UTF-8
+        // UTF-8 collation flag: fUTF8 is bit 26 (0x0400_0000), matching
+        // mssql-jdbc's UTF8_IN_TDSCOLLATION. A real Latin1_General_100_*_UTF8
+        // collation info field has this bit set.
+        assert!(is_utf8_collation(0x0400_0409)); // English with UTF-8
         assert!(!is_utf8_collation(0x0409)); // English without UTF-8
+        // Regression: bit 27 is FRESERVEDBIT, not fUTF8. Treating it as UTF-8
+        // made is_utf8() always false for real _UTF8 collations (issue #153).
+        assert!(!is_utf8_collation(0x0800_0409));
     }
 
     /// Unmappable characters must become `?` (SQL Server / ADO.NET / JDBC
@@ -558,7 +565,7 @@ mod tests {
     fn test_encoding_name() {
         assert_eq!(encoding_name_for_lcid(0x0411), "Shift_JIS");
         assert_eq!(encoding_name_for_lcid(0x0419), "windows-1251");
-        assert_eq!(encoding_name_for_lcid(0x0800_0409), "UTF-8");
+        assert_eq!(encoding_name_for_lcid(0x0400_0409), "UTF-8");
         assert_eq!(encoding_name_for_lcid(0x9999), "windows-1252"); // fallback
     }
 

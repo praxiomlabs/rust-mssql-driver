@@ -156,7 +156,8 @@ impl Column {
     /// Check if this column uses UTF-8 encoding.
     ///
     /// Returns `true` if the column has a SQL Server 2019+ UTF-8 collation,
-    /// which is indicated by bit 27 (0x0800_0000) being set in the LCID.
+    /// which is indicated by fUTF8 (bit 26, 0x0400_0000) being set in the
+    /// collation info field.
     #[must_use]
     pub fn is_utf8_collation(&self) -> bool {
         #[cfg(feature = "encoding")]

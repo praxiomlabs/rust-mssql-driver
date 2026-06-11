@@ -1079,9 +1079,11 @@ impl BulkInsert {
                 let time_len = time_byte_length(scale);
                 let total_len = time_len + 3 + 2;
                 buf.put_u8(total_len);
-                // Use mssql_types encode
-                encode_time_with_scale(dto.time(), scale, buf);
-                mssql_types::encode::encode_date(dto.date_naive(), buf);
+                // The wire date/time portion is UTC per MS-TDS §2.2.5.5.1.9,
+                // not the local wall-clock.
+                let utc = dto.naive_utc();
+                encode_time_with_scale(utc.time(), scale, buf);
+                mssql_types::encode::encode_date(utc.date(), buf);
                 // Timezone offset in minutes
                 use chrono::Offset;
                 let offset_minutes = (dto.offset().fix().local_minus_utc() / 60) as i16;

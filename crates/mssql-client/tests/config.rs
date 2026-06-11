@@ -325,3 +325,35 @@ fn test_repeated_keys_last_wins() {
 
     assert_eq!(config.host, "third");
 }
+
+// ============================================================================
+// FEDAUTH Credential Gate (issue #159)
+// ============================================================================
+
+/// Azure AD credentials are not yet wired into the login sequence (no LOGIN7
+/// FEDAUTH feature extension — see #155). connect() must fail fast with an
+/// actionable configuration error instead of sending an empty-credential
+/// login that the server rejects with an opaque 18456.
+#[tokio::test]
+async fn test_azure_credentials_fail_fast_before_io() {
+    let config = Config::new()
+        .host("host-that-must-never-be-contacted.invalid")
+        .credentials(mssql_client::Credentials::AzureAccessToken {
+            token: "test-token".into(),
+        });
+
+    let err = mssql_client::Client::connect(config)
+        .await
+        .expect_err("Azure credentials must be rejected at connect time");
+
+    let msg = err.to_string();
+    assert!(
+        matches!(err, mssql_client::Error::Config(_)),
+        "expected Error::Config, got: {msg}"
+    );
+    assert!(msg.contains("FEDAUTH"), "error should name FEDAUTH: {msg}");
+    assert!(
+        msg.contains("155"),
+        "error should link tracking issue: {msg}"
+    );
+}
