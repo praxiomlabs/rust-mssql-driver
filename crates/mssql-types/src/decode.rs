@@ -862,10 +862,9 @@ fn decode_datetimeoffset(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlVal
     let offset = chrono::FixedOffset::east_opt((offset_minutes as i32) * 60)
         .ok_or_else(|| TypeError::InvalidDateTime(format!("invalid offset: {offset_minutes}")))?;
 
-    let datetime = offset
-        .from_local_datetime(&date.and_time(time))
-        .single()
-        .ok_or_else(|| TypeError::InvalidDateTime("ambiguous datetime".to_string()))?;
+    // The wire date/time portion is UTC per MS-TDS §2.2.5.5.1.9; attach the
+    // offset without shifting the instant.
+    let datetime = offset.from_utc_datetime(&date.and_time(time));
 
     Ok(SqlValue::DateTimeOffset(datetime))
 }
@@ -1089,6 +1088,58 @@ mod tests {
         data.extend_from_slice(&0u32.to_le_bytes());
         let mut buf = Bytes::from(data);
         assert!(decode_datetime(&mut buf).is_err());
+    }
+
+    /// Issue #152 regression: the DATETIMEOFFSET wire date/time portion is
+    /// the UTC instant per MS-TDS §2.2.5.5.1.9; decoding must attach the
+    /// offset without shifting it. Wire 10:00 UTC with +02:00 → 12:00+02:00.
+    /// The previous from_local_datetime decode produced 10:00+02:00 (a
+    /// different instant), which round-tripped only against our own equally
+    /// inverted encoder.
+    #[cfg(feature = "chrono")]
+    #[test]
+    fn test_datetimeoffset_decodes_wire_as_utc() {
+        use chrono::TimeZone;
+
+        let mut data = Vec::new();
+        data.push(10u8); // BYTELEN: 5 time + 3 date + 2 offset
+        let intervals: u64 = 10 * 3600 * 10_000_000; // 10:00:00 UTC, scale 7
+        for i in 0..5 {
+            data.push(((intervals >> (8 * i)) & 0xFF) as u8);
+        }
+        let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
+        let days = (chrono::NaiveDate::from_ymd_opt(2024, 3, 15).unwrap() - base).num_days() as u32;
+        data.push((days & 0xFF) as u8);
+        data.push(((days >> 8) & 0xFF) as u8);
+        data.push(((days >> 16) & 0xFF) as u8);
+        data.extend_from_slice(&120i16.to_le_bytes()); // +02:00
+
+        let type_info = TypeInfo {
+            type_id: 0x2B,
+            length: None,
+            scale: Some(7),
+            precision: None,
+            collation: None,
+        };
+        let mut buf = Bytes::from(data);
+        let value = decode_datetimeoffset(&mut buf, &type_info).unwrap();
+
+        let offset = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
+        let expected = offset.with_ymd_and_hms(2024, 3, 15, 12, 0, 0).unwrap();
+        match value {
+            SqlValue::DateTimeOffset(dt) => {
+                assert_eq!(dt, expected);
+                assert_eq!(dt.offset().local_minus_utc(), 7200);
+                assert_eq!(
+                    dt.naive_utc(),
+                    chrono::NaiveDate::from_ymd_opt(2024, 3, 15)
+                        .unwrap()
+                        .and_hms_opt(10, 0, 0)
+                        .unwrap()
+                );
+            }
+            other => panic!("expected DateTimeOffset, got {other:?}"),
+        }
     }
 
     #[test]

@@ -431,14 +431,17 @@ pub fn encode_datetime2(datetime: chrono::NaiveDateTime, buf: &mut BytesMut) {
 
 /// Encode a DATETIMEOFFSET value.
 ///
-/// DATETIMEOFFSET is encoded as TIME + DATE + offset (in minutes).
+/// DATETIMEOFFSET is encoded as TIME + DATE + offset (in minutes). Per
+/// MS-TDS §2.2.5.5.1.9 the date/time portion is the **UTC** instant, not the
+/// local wall-clock; the offset is carried separately.
 #[cfg(feature = "chrono")]
 pub fn encode_datetimeoffset(datetime: chrono::DateTime<chrono::FixedOffset>, buf: &mut BytesMut) {
     use chrono::Offset;
 
-    // Encode time and date components
-    encode_time(datetime.time(), buf);
-    encode_date(datetime.date_naive(), buf);
+    // Encode the UTC date/time components
+    let utc = datetime.naive_utc();
+    encode_time(utc.time(), buf);
+    encode_date(utc.date(), buf);
 
     // Encode timezone offset in minutes (signed 16-bit)
     let offset_seconds = datetime.offset().fix().local_minus_utc();
@@ -450,6 +453,41 @@ pub fn encode_datetimeoffset(datetime: chrono::DateTime<chrono::FixedOffset>, bu
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    /// Issue #152 regression: the DATETIMEOFFSET wire date/time portion is
+    /// the UTC instant per MS-TDS §2.2.5.5.1.9. 12:00 at +02:00 must encode
+    /// a 10:00 time portion. The previous encoder wrote the local wall-clock,
+    /// shifting every non-zero-offset value when read by other drivers or
+    /// compared server-side.
+    #[cfg(feature = "chrono")]
+    #[test]
+    fn test_datetimeoffset_encodes_utc_instant() {
+        use chrono::TimeZone;
+
+        let offset = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
+        let dto = offset.with_ymd_and_hms(2024, 3, 15, 12, 0, 0).unwrap();
+
+        let mut buf = BytesMut::new();
+        encode_datetimeoffset(dto, &mut buf);
+        assert_eq!(buf.len(), 10); // 5 time + 3 date + 2 offset
+
+        // Time portion: 100ns intervals since midnight of the UTC instant.
+        let mut intervals: u64 = 0;
+        for i in 0..5 {
+            intervals |= u64::from(buf[i]) << (8 * i);
+        }
+        assert_eq!(intervals, 10 * 3600 * 10_000_000, "time must be 10:00 UTC");
+
+        // Date portion: days since 0001-01-01 of the UTC date.
+        let days = u32::from(buf[5]) | (u32::from(buf[6]) << 8) | (u32::from(buf[7]) << 16);
+        let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
+        let expected_days =
+            (chrono::NaiveDate::from_ymd_opt(2024, 3, 15).unwrap() - base).num_days() as u32;
+        assert_eq!(days, expected_days);
+
+        // Offset: +120 minutes, unchanged.
+        assert_eq!(i16::from_le_bytes([buf[8], buf[9]]), 120);
+    }
 
     #[test]
     fn test_encode_int() {

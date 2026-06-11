@@ -713,10 +713,9 @@ pub fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue>
                         .unwrap_or_else(|| {
                             chrono::FixedOffset::east_opt(0).expect("UTC offset 0 is valid")
                         });
-                    let datetime = offset
-                        .from_local_datetime(&date.and_time(time))
-                        .single()
-                        .unwrap_or_else(|| offset.from_utc_datetime(&date.and_time(time)));
+                    // The wire date/time portion is UTC per MS-TDS §2.2.5.5.1.9;
+                    // attach the offset without shifting the instant.
+                    let datetime = offset.from_utc_datetime(&date.and_time(time));
                     SqlValue::DateTimeOffset(datetime)
                 }
                 #[cfg(not(feature = "chrono"))]
@@ -1454,10 +1453,9 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
                     .unwrap_or_else(|| {
                         chrono::FixedOffset::east_opt(0).expect("UTC offset 0 is valid")
                     });
-                let datetime = offset
-                    .from_local_datetime(&date.and_time(time))
-                    .single()
-                    .unwrap_or_else(|| offset.from_utc_datetime(&date.and_time(time)));
+                // The wire date/time portion is UTC per MS-TDS §2.2.5.5.1.9;
+                // attach the offset without shifting the instant.
+                let datetime = offset.from_utc_datetime(&date.and_time(time));
                 Ok(SqlValue::DateTimeOffset(datetime))
             }
             #[cfg(not(feature = "chrono"))]
