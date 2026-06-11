@@ -115,6 +115,10 @@ where
     /// Read the next complete message from the connection.
     ///
     /// This handles multi-packet message reassembly automatically.
+    ///
+    /// Returns [`CodecError::Cancelled`] when the in-flight request was
+    /// cancelled via Attention and the server's DONE_ATTN acknowledgement has
+    /// been consumed — the connection is then clean for the next request.
     pub async fn read_message(&mut self) -> Result<Option<Message>, CodecError> {
         loop {
             // Check for cancellation
@@ -126,6 +130,24 @@ where
             match self.reader.next().await {
                 Some(Ok(packet)) => {
                     if let Some(message) = self.assembler.push(packet) {
+                        // The cancel flag may have been set while this read was
+                        // parked in `next()`. In that case the message belongs
+                        // to the request being cancelled (the server discards
+                        // it and acknowledges with DONE_ATTN), so it must not
+                        // be surfaced as a response — otherwise `cancelling`
+                        // stays latched and a later drain eats the *next*
+                        // request's response.
+                        if self.is_cancelling() {
+                            if Self::payload_ends_with_attention_done(&message.payload) {
+                                tracing::debug!(
+                                    "received DONE with ATTENTION, cancellation complete"
+                                );
+                                self.finish_cancel();
+                                return Err(CodecError::Cancelled);
+                            }
+                            tracing::debug!("discarding message from cancelled request");
+                            continue;
+                        }
                         return Ok(Some(message));
                     }
                     // Continue reading packets until message complete
@@ -224,7 +246,10 @@ where
         writer.flush().await
     }
 
-    /// Drain packets after cancellation until DONE with ATTENTION is received.
+    /// Drain messages after cancellation until DONE with ATTENTION is received.
+    ///
+    /// Returns [`CodecError::Cancelled`] once the acknowledgement is consumed;
+    /// the connection is then clean for the next request.
     async fn drain_after_cancel(&mut self) -> Result<Option<Message>, CodecError> {
         tracing::debug!("draining packets after cancellation");
 
@@ -234,21 +259,18 @@ where
         loop {
             match self.reader.next().await {
                 Some(Ok(packet)) => {
-                    // Check for DONE token with ATTENTION flag
-                    // The DONE token is at the start of the payload
-                    if packet.header.packet_type == PacketType::TabularResult
-                        && !packet.payload.is_empty()
-                    {
-                        // TokenType::Done = 0xFD
-                        // Check if this packet contains a Done token
-                        // and the status has ATTN flag (0x0020)
-                        if self.check_attention_done(&packet) {
+                    // Assemble complete messages so the acknowledgement check
+                    // runs on the message trailer — a per-packet check would
+                    // miss a DONE token straddling a packet boundary.
+                    if let Some(message) = self.assembler.push(packet) {
+                        if message.packet_type == PacketType::TabularResult
+                            && Self::payload_ends_with_attention_done(&message.payload)
+                        {
                             tracing::debug!("received DONE with ATTENTION, cancellation complete");
-                            self.cancelling
-                                .store(false, std::sync::atomic::Ordering::Release);
-                            self.cancel_notify.notify_waiters();
-                            return Ok(None);
+                            self.finish_cancel();
+                            return Err(CodecError::Cancelled);
                         }
+                        tracing::debug!("discarding message from cancelled request");
                     }
                     // Continue draining
                 }
@@ -258,32 +280,42 @@ where
                     return Err(e);
                 }
                 None => {
+                    // EOF while waiting for the acknowledgement: the
+                    // connection really is gone.
                     self.cancelling
                         .store(false, std::sync::atomic::Ordering::Release);
-                    return Ok(None);
+                    return Err(CodecError::ConnectionClosed);
                 }
             }
         }
     }
 
-    /// Check if a packet contains a DONE token with ATTENTION flag.
-    fn check_attention_done(&self, packet: &Packet) -> bool {
-        // Look for DONE token (0xFD) with ATTN status flag (bit 5)
-        // DONE token format: token_type(1) + status(2) + cur_cmd(2) + row_count(8)
-        let payload = &packet.payload;
+    /// Mark the in-flight cancellation as acknowledged and wake waiters.
+    fn finish_cancel(&self) {
+        self.cancelling
+            .store(false, std::sync::atomic::Ordering::Release);
+        self.cancel_notify.notify_waiters();
+    }
 
-        for i in 0..payload.len() {
-            if payload[i] == 0xFD && i + 3 <= payload.len() {
-                // Found DONE token, check status
-                let status = u16::from_le_bytes([payload[i + 1], payload[i + 2]]);
-                // DONE_ATTN = 0x0020
-                if status & 0x0020 != 0 {
-                    return true;
-                }
-            }
-        }
-
-        false
+    /// Check whether a message payload terminates in a DONE token carrying
+    /// the ATTN status flag (the attention acknowledgement).
+    ///
+    /// Every tabular response message ends with a fixed 13-byte DONE-family
+    /// token (token(1) + status(2) + cur_cmd(2) + row_count(8)), and per
+    /// MS-TDS 2.2.7.6 the acknowledgement is a DONE (0xFD) with DONE_ATTN as
+    /// the final token of the cancelled stream. Anchoring the check to the
+    /// trailer means row bytes that happen to contain `0xFD, 0x20` (entirely
+    /// possible in binary/integer cell data arriving during the cancel
+    /// window) cannot be mistaken for the acknowledgement — an interior byte
+    /// scan was proven to clear the cancel flag early and leak the real
+    /// acknowledgement into the next request.
+    fn payload_ends_with_attention_done(payload: &[u8]) -> bool {
+        let Some(start) = payload.len().checked_sub(13) else {
+            return false;
+        };
+        // DONE token type = 0xFD; DONE_ATTN = 0x0020 in the LE status word.
+        payload[start] == 0xFD
+            && u16::from_le_bytes([payload[start + 1], payload[start + 2]]) & 0x0020 != 0
     }
 
     /// Get a reference to the read codec.
@@ -396,7 +428,7 @@ where
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -439,22 +471,210 @@ mod tests {
         );
         let packet_no_attn = Packet::new(header, payload_no_attn);
 
-        // We can't easily test check_attention_done without a Connection,
-        // so we verify the token detection logic directly
-        let check_done = |packet: &Packet| -> bool {
-            let payload = &packet.payload;
-            for i in 0..payload.len() {
-                if payload[i] == 0xFD && i + 3 <= payload.len() {
-                    let status = u16::from_le_bytes([payload[i + 1], payload[i + 2]]);
-                    if status & 0x0020 != 0 {
-                        return true;
-                    }
-                }
-            }
-            false
-        };
+        assert!(
+            Connection::<tokio::io::DuplexStream>::payload_ends_with_attention_done(
+                &packet_with_attn.payload
+            )
+        );
+        assert!(
+            !Connection::<tokio::io::DuplexStream>::payload_ends_with_attention_done(
+                &packet_no_attn.payload
+            )
+        );
 
-        assert!(check_done(&packet_with_attn));
-        assert!(!check_done(&packet_no_attn));
+        // Interior 0xFD,0x20 bytes (e.g. row data) must not register: only
+        // the trailing token position counts.
+        let mut interior = vec![0xD1, 0x08, 0xFD, 0x20, 0xAA, 0xBB];
+        interior.extend_from_slice(&[
+            0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ]);
+        assert!(
+            !Connection::<tokio::io::DuplexStream>::payload_ends_with_attention_done(&interior)
+        );
+    }
+
+    /// Build a raw single-packet TabularResult TDS message around `payload`.
+    fn raw_message(payload: &[u8]) -> Vec<u8> {
+        let mut v = vec![0x04, 0x01]; // TabularResult, END_OF_MESSAGE
+        v.extend_from_slice(&((payload.len() + 8) as u16).to_be_bytes());
+        v.extend_from_slice(&[0, 0, 1, 0]); // spid, packet id, window
+        v.extend_from_slice(payload);
+        v
+    }
+
+    /// DONE token bytes with the given status.
+    fn done_token(status: u16) -> [u8; 13] {
+        let s = status.to_le_bytes();
+        [
+            0xFD, s[0], s[1], 0xC1, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ]
+    }
+
+    /// Regression test for the cancel-mid-read race.
+    ///
+    /// When `cancel()` fires while `read_message()` is already parked on the
+    /// socket, the cancelled request's response stream (here: DONE(ERROR)
+    /// followed by the DONE(ATTN) acknowledgement) arrives through the
+    /// *normal* read path. It must be discarded — not surfaced as a query
+    /// response — and the read must end in `CodecError::Cancelled` with the
+    /// `cancelling` flag cleared, so the next request's response is delivered
+    /// intact. Before the fix, the first DONE was returned as the response,
+    /// the flag stayed latched, and a later drain ate the next response.
+    #[tokio::test]
+    async fn test_cancel_mid_read_discards_cancelled_stream() {
+        use std::task::{Context, Poll};
+        use tokio::io::AsyncWriteExt;
+
+        let (client_io, mut server_io) = tokio::io::duplex(4096);
+        let mut conn = Connection::new(client_io);
+        let cancel = conn.cancel_handle();
+
+        // Park a read with nothing to deliver yet (mimics waiting on a slow
+        // query). A noop waker is fine: the future is re-polled via `.await`
+        // below after data is written.
+        let mut read_fut = Box::pin(conn.read_message());
+        let waker = std::task::Waker::noop();
+        let mut cx = Context::from_waker(waker);
+        assert!(matches!(read_fut.as_mut().poll(&mut cx), Poll::Pending));
+
+        // Cancel while the read is parked, then deliver the cancelled
+        // request's stream plus the next request's response.
+        cancel.cancel().await.expect("send attention");
+        server_io
+            .write_all(&raw_message(&done_token(0x0002))) // DONE_ERROR
+            .await
+            .unwrap();
+        server_io
+            .write_all(&raw_message(&done_token(0x0020))) // DONE_ATTN ack
+            .await
+            .unwrap();
+        server_io
+            .write_all(&raw_message(&done_token(0x0010))) // next response
+            .await
+            .unwrap();
+
+        let result = read_fut.await;
+        assert!(
+            matches!(result, Err(CodecError::Cancelled)),
+            "parked read must consume the cancelled stream and report \
+             Cancelled, got {result:?}"
+        );
+        assert!(!conn.is_cancelling(), "cancel flag must be cleared");
+
+        // The next request's response must come through untouched.
+        let message = conn
+            .read_message()
+            .await
+            .expect("next read")
+            .expect("next message");
+        assert_eq!(message.payload[0], 0xFD);
+        assert_eq!(
+            u16::from_le_bytes([message.payload[1], message.payload[2]]),
+            0x0010,
+            "next response must not be eaten by a stale drain"
+        );
+    }
+
+    /// Cancellation requested before the read starts takes the drain path and
+    /// must behave identically to the mid-read race.
+    #[tokio::test]
+    async fn test_cancel_before_read_drains_to_attention_ack() {
+        use tokio::io::AsyncWriteExt;
+
+        let (client_io, mut server_io) = tokio::io::duplex(4096);
+        let mut conn = Connection::new(client_io);
+        let cancel = conn.cancel_handle();
+
+        cancel.cancel().await.expect("send attention");
+        server_io
+            .write_all(&raw_message(&done_token(0x0022))) // ERROR | ATTN ack
+            .await
+            .unwrap();
+        server_io
+            .write_all(&raw_message(&done_token(0x0010))) // next response
+            .await
+            .unwrap();
+
+        let result = conn.read_message().await;
+        assert!(matches!(result, Err(CodecError::Cancelled)));
+        assert!(!conn.is_cancelling());
+
+        let message = conn
+            .read_message()
+            .await
+            .expect("next read")
+            .expect("next message");
+        assert_eq!(
+            u16::from_le_bytes([message.payload[1], message.payload[2]]),
+            0x0010
+        );
+    }
+
+    /// PR #143 review, Blocker 1: row bytes that happen to contain
+    /// `0xFD, 0x20` must NOT be mistaken for the DONE_ATTN acknowledgement.
+    ///
+    /// During the cancel window the cancelled request's *data* (rows already
+    /// in flight) can arrive before the real acknowledgement. A byte-scan
+    /// for any interior 0xFD with bit 5 set false-positives on such data,
+    /// clears the cancel flag early, and the genuine ack then poisons the
+    /// next request — the exact failure the cancellation fix claims to
+    /// eliminate.
+    #[tokio::test]
+    async fn test_cancel_race_row_bytes_do_not_fake_the_attention_ack() {
+        use std::task::{Context, Poll};
+        use tokio::io::AsyncWriteExt;
+
+        let (client_io, mut server_io) = tokio::io::duplex(4096);
+        let mut conn = Connection::new(client_io);
+        let cancel = conn.cancel_handle();
+
+        // Park a read, then cancel while it waits (the realistic ordering).
+        let mut read_fut = Box::pin(conn.read_message());
+        let waker = std::task::Waker::noop();
+        let mut cx = Context::from_waker(waker);
+        assert!(matches!(read_fut.as_mut().poll(&mut cx), Poll::Pending));
+        cancel.cancel().await.expect("send attention");
+
+        // Message 1: the cancelled request's data — row-ish bytes whose
+        // *interior* contains 0xFD followed by a byte with bit 5 set (e.g. a
+        // BIGINT cell value), terminated by a DONE with MORE and no ATTN.
+        let mut row_data = vec![0xD1, 0x08]; // ROW token, length-ish prefix
+        row_data.extend_from_slice(&[0xFD, 0x20, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
+        row_data.extend_from_slice(&done_token(0x0001)); // DONE_MORE, no ATTN
+        server_io.write_all(&raw_message(&row_data)).await.unwrap();
+
+        // Message 2: the genuine acknowledgement.
+        server_io
+            .write_all(&raw_message(&done_token(0x0020)))
+            .await
+            .unwrap();
+
+        // Message 3: the next request's response.
+        server_io
+            .write_all(&raw_message(&done_token(0x0010)))
+            .await
+            .unwrap();
+
+        let result = read_fut.await;
+        assert!(
+            matches!(result, Err(CodecError::Cancelled)),
+            "cancelled read must end in Cancelled, got {result:?}"
+        );
+        assert!(!conn.is_cancelling());
+
+        // The next read must deliver message 3 — not the stale ack from
+        // message 2.
+        let message = conn
+            .read_message()
+            .await
+            .expect("next read")
+            .expect("next message");
+        let status = u16::from_le_bytes([message.payload[1], message.payload[2]]);
+        assert_eq!(
+            status, 0x0010,
+            "next request's response must come through intact; 0x0020 means \
+             the interior row bytes were mistaken for the ack and the real \
+             ack leaked into the next request"
+        );
     }
 }

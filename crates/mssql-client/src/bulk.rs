@@ -70,11 +70,15 @@ use crate::error::Error;
 /// affect performance, logging, and constraint checking.
 #[derive(Debug, Clone)]
 pub struct BulkOptions {
-    /// Number of rows per batch commit.
+    /// Rows-per-batch hint sent to the server.
     ///
-    /// Smaller batches use less memory but have more overhead.
-    /// Larger batches are more efficient but hold locks longer.
-    /// Default: 0 (single batch for entire operation).
+    /// When non-zero this is emitted as the `ROWS_PER_BATCH` hint on the
+    /// `INSERT BULK` statement, which helps the server pick a query plan.
+    /// It does **not** change client-side behavior: [`BulkWriter`] buffers
+    /// all rows in memory and sends them as a single batch on
+    /// [`finish()`](BulkWriter::finish). Incremental flushing is planned
+    /// alongside the response-streaming work.
+    /// Default: 0 (no hint).
     pub batch_size: usize,
 
     /// Check constraints during insert.
@@ -335,6 +339,8 @@ pub struct BulkInsertResult {
     /// Total number of rows inserted.
     pub rows_affected: u64,
     /// Number of batches committed.
+    ///
+    /// [`BulkWriter`] always sends a single batch, so this is currently 1.
     pub batches_committed: u32,
     /// Whether any errors were encountered.
     pub has_errors: bool,
@@ -1299,6 +1305,10 @@ impl BulkInsert {
     }
 
     /// Check if a batch flush is needed.
+    ///
+    /// Note: [`BulkWriter`] does not consult this — it buffers every row and
+    /// sends one batch on finish. This is a helper for callers driving the
+    /// lower-level [`BulkInsert`] packet API manually.
     pub fn should_flush(&self) -> bool {
         self.batch_size > 0 && self.rows_in_batch >= self.batch_size
     }

@@ -11,6 +11,33 @@ use crate::state::ConnectionState;
 use super::{Client, ConnectionHandle};
 
 impl<S: ConnectionState> Client<S> {
+    /// Read the next response message from the connection.
+    ///
+    /// Translates the codec's cancellation signal: when the in-flight request
+    /// was cancelled via [`crate::CancelHandle`], the codec drains through the
+    /// server's DONE_ATTN acknowledgement and reports
+    /// `CodecError::Cancelled` — the connection is clean again, so
+    /// `in_flight` is cleared and the caller gets [`Error::Cancelled`].
+    pub(crate) async fn read_response_message(&mut self) -> Result<mssql_codec::Message> {
+        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
+        let result = match connection {
+            #[cfg(feature = "tls")]
+            ConnectionHandle::Tls(conn) => conn.read_message().await,
+            #[cfg(feature = "tls")]
+            ConnectionHandle::TlsPrelogin(conn) => conn.read_message().await,
+            ConnectionHandle::Plain(conn) => conn.read_message().await,
+        };
+        match result {
+            Ok(Some(message)) => Ok(message),
+            Ok(None) => Err(Error::ConnectionClosed),
+            Err(mssql_codec::CodecError::Cancelled) => {
+                self.in_flight = false;
+                Err(Error::Cancelled)
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Create a TokenParser with encryption awareness when configured.
     pub(super) fn create_parser(&self, payload: bytes::Bytes) -> TokenParser {
         let parser = TokenParser::new(payload);
@@ -100,16 +127,7 @@ impl<S: ConnectionState> Client<S> {
     /// the "payload + `Vec<Row>` simultaneously in memory" doubling that the
     /// prior eager path had.
     pub(super) async fn read_query_response(&mut self) -> Result<RawQueryResponse> {
-        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
-
-        let message = match connection {
-            #[cfg(feature = "tls")]
-            ConnectionHandle::Tls(conn) => conn.read_message().await?,
-            #[cfg(feature = "tls")]
-            ConnectionHandle::TlsPrelogin(conn) => conn.read_message().await?,
-            ConnectionHandle::Plain(conn) => conn.read_message().await?,
-        }
-        .ok_or(Error::ConnectionClosed)?;
+        let message = self.read_response_message().await?;
 
         // Full response received from wire — connection is clean for next request
         self.in_flight = false;
@@ -245,18 +263,9 @@ impl<S: ConnectionState> Client<S> {
 
     /// Read execute result (row count) from the response.
     pub(super) async fn read_execute_result(&mut self) -> Result<u64> {
-        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
-
-        let message = match connection {
-            #[cfg(feature = "tls")]
-            ConnectionHandle::Tls(conn) => conn.read_message().await?,
-            #[cfg(feature = "tls")]
-            ConnectionHandle::TlsPrelogin(conn) => conn.read_message().await?,
-            // Note: execute() doesn't read row values, so no decryption needed.
-            // But we still need the encryption-aware parser for ColMetaData/Row token parsing.
-            ConnectionHandle::Plain(conn) => conn.read_message().await?,
-        }
-        .ok_or(Error::ConnectionClosed)?;
+        // Note: execute() doesn't read row values, so no decryption needed.
+        // But we still need the encryption-aware parser for ColMetaData/Row token parsing.
+        let message = self.read_response_message().await?;
 
         // Full response received from wire — connection is clean for next request
         self.in_flight = false;
@@ -353,16 +362,7 @@ impl<S: ConnectionState> Client<S> {
     /// the transaction descriptor (8-byte value) that must be included in subsequent
     /// ALL_HEADERS sections for requests within this transaction.
     pub(super) async fn read_transaction_begin_result(&mut self) -> Result<u64> {
-        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
-
-        let message = match connection {
-            #[cfg(feature = "tls")]
-            ConnectionHandle::Tls(conn) => conn.read_message().await?,
-            #[cfg(feature = "tls")]
-            ConnectionHandle::TlsPrelogin(conn) => conn.read_message().await?,
-            ConnectionHandle::Plain(conn) => conn.read_message().await?,
-        }
-        .ok_or(Error::ConnectionClosed)?;
+        let message = self.read_response_message().await?;
 
         // Full response received from wire — connection is clean for next request
         self.in_flight = false;
@@ -450,16 +450,7 @@ impl<S: ConnectionState> Client<S> {
     /// - `DoneProc`: final token, break when `!more`
     /// - `Error` / `Info` / `EnvChange`: standard handling
     pub(crate) async fn read_procedure_result(&mut self) -> Result<crate::stream::ProcedureResult> {
-        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
-
-        let message = match connection {
-            #[cfg(feature = "tls")]
-            ConnectionHandle::Tls(conn) => conn.read_message().await?,
-            #[cfg(feature = "tls")]
-            ConnectionHandle::TlsPrelogin(conn) => conn.read_message().await?,
-            ConnectionHandle::Plain(conn) => conn.read_message().await?,
-        }
-        .ok_or(Error::ConnectionClosed)?;
+        let message = self.read_response_message().await?;
 
         // Full response received from wire — connection is clean for next request
         self.in_flight = false;
@@ -678,16 +669,7 @@ impl Client<Ready> {
     pub(super) async fn read_multi_result_response(
         &mut self,
     ) -> Result<Vec<crate::stream::ResultSet>> {
-        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
-
-        let message = match connection {
-            #[cfg(feature = "tls")]
-            ConnectionHandle::Tls(conn) => conn.read_message().await?,
-            #[cfg(feature = "tls")]
-            ConnectionHandle::TlsPrelogin(conn) => conn.read_message().await?,
-            ConnectionHandle::Plain(conn) => conn.read_message().await?,
-        }
-        .ok_or(Error::ConnectionClosed)?;
+        let message = self.read_response_message().await?;
 
         // Full response received from wire — connection is clean for next request
         self.in_flight = false;

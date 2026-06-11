@@ -654,6 +654,104 @@ async fn test_bulk_insert_varbinary_max() {
     client.close().await.expect("Failed to close");
 }
 
+/// Falsification test for the "full BCP" claim at realistic LOB sizes: the
+/// existing PLP tests top out at 10 KB, which never leaves a single packet.
+/// 16 MiB VARBINARY(MAX) + ~8 MB NVARCHAR(MAX) in one batch forces the PLP
+/// chunk and the codec packet-chunking paths through thousands of packets.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_insert_large_plp_round_trip() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    client
+        .execute(
+            "CREATE TABLE #BulkLargePlp (id INT NOT NULL, blob VARBINARY(MAX) NULL, doc NVARCHAR(MAX) NULL)",
+            &[],
+        )
+        .await
+        .expect("Failed to create table");
+
+    let builder = BulkInsertBuilder::new("#BulkLargePlp").with_typed_columns(vec![
+        BulkColumn::new("id", "INT", 0).unwrap(),
+        BulkColumn::new("blob", "VARBINARY(MAX)", 1)
+            .unwrap()
+            .with_nullable(true),
+        BulkColumn::new("doc", "NVARCHAR(MAX)", 2)
+            .unwrap()
+            .with_nullable(true),
+    ]);
+
+    // Position-dependent pattern so truncation, reordering, or off-by-one
+    // chunking shows up as inequality, not just a length mismatch.
+    let blob: Vec<u8> = (0..16 * 1024 * 1024u32)
+        .map(|i| (i.wrapping_mul(31).wrapping_add(i >> 8)) as u8)
+        .collect();
+    let mut doc = String::with_capacity(4 * 1024 * 1024 + 8);
+    doc.push_str("é₿");
+    for i in 0..262_144u32 {
+        // 16 chars per block, hex-stamped with the block index every block.
+        doc.push_str(&format!("{i:08x}-block-\u{00e9}"));
+    }
+    doc.push_str("₿é");
+
+    let mut writer = client
+        .bulk_insert(&builder)
+        .await
+        .expect("Failed to start bulk insert");
+    writer
+        .send_row_values(&[
+            SqlValue::Int(1),
+            SqlValue::Binary(blob.clone().into()),
+            SqlValue::String(doc.clone()),
+        ])
+        .expect("send large row");
+    writer
+        .send_row_values(&[SqlValue::Int(2), SqlValue::Null, SqlValue::Null])
+        .expect("send null row");
+
+    let result = writer.finish().await.expect("Failed to finish bulk insert");
+    assert_eq!(result.rows_affected, 2);
+
+    let rows = client
+        .query(
+            "SELECT id, DATALENGTH(blob), DATALENGTH(doc), blob, doc FROM #BulkLargePlp ORDER BY id",
+            &[],
+        )
+        .await
+        .expect("Query failed");
+
+    type LargePlpRow = (
+        i32,
+        Option<i64>,
+        Option<i64>,
+        Option<Vec<u8>>,
+        Option<String>,
+    );
+    let data: Vec<LargePlpRow> = rows
+        .filter_map(|r| r.ok())
+        .map(|row| {
+            (
+                row.get(0).unwrap(),
+                row.get(1).unwrap(),
+                row.get(2).unwrap(),
+                row.get(3).unwrap(),
+                row.get(4).unwrap(),
+            )
+        })
+        .collect();
+
+    assert_eq!(data.len(), 2);
+    assert_eq!(data[0].1, Some(16 * 1024 * 1024));
+    assert_eq!(data[0].2, Some(2 * (doc.chars().count() as i64)));
+    assert_eq!(data[0].3.as_deref(), Some(blob.as_slice()));
+    assert_eq!(data[0].4.as_deref(), Some(doc.as_str()));
+    assert_eq!(data[1].3, None);
+    assert_eq!(data[1].4, None);
+
+    client.close().await.expect("Failed to close");
+}
+
 // =============================================================================
 // Bulk Options
 // =============================================================================

@@ -24,7 +24,7 @@ Refer to `ARCHITECTURE.md` (v1.2.0) for complete details. Critical decisions:
 | TLS | rustls | Pure Rust, auditable, no OpenSSL dependency |
 | Async Runtime | Tokio 1.48+ | Dominant ecosystem, hard dependency simplifies design |
 | Error Handling | thiserror 2.0 | Derive macros, stable API |
-| Observability | OpenTelemetry 0.31 | Industry standard, version-aligned crates |
+| Observability | OpenTelemetry 0.32 | Industry standard, version-aligned crates |
 | Edition | Rust 2024 | Latest language features, MSRV 1.88 |
 
 ## Security-Critical Guidelines
@@ -262,13 +262,13 @@ All workflows use `concurrency: cancel-in-progress` for non-main branches to sav
 
 ## OpenTelemetry Dependencies
 
-The three core otel crates are version-aligned at 0.31. `tracing-opentelemetry` tracks 0.32, which depends on otel 0.31 (see the note in `Cargo.toml`):
+The three core otel crates are version-aligned at 0.32. `tracing-opentelemetry` tracks 0.33, which depends on otel 0.32 (see the note in `Cargo.toml`):
 
 ```toml
-opentelemetry = "0.31"
-opentelemetry_sdk = "0.31"
-opentelemetry-otlp = "0.31"
-tracing-opentelemetry = "0.32"
+opentelemetry = "0.32"
+opentelemetry_sdk = "0.32"
+opentelemetry-otlp = "0.32"
+tracing-opentelemetry = "0.33"
 ```
 
 ## Testing Strategy

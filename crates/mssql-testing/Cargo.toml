@@ -12,6 +12,8 @@ publish = false
 
 [features]
 default = []
+# Enables the OTel metrics emission test against the mock server.
+otel = ["mssql-client/otel"]
 
 [dependencies]
 mssql-client = { workspace = true }
@@ -27,6 +29,12 @@ testcontainers = { workspace = true }
 
 [dev-dependencies]
 mssql-tls = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
+
+[[test]]
+name = "otel_metrics"
+required-features = ["otel"]
 
 [package.metadata.cargo-machete]
 # mssql-client is a peer dependency for test consumers

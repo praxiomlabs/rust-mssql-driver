@@ -9,7 +9,8 @@ use tds_protocol::rpc::{RpcParam, TypeInfo as RpcTypeInfo};
 use tds_protocol::tvp::encode_tvp_decimal;
 use tds_protocol::tvp::{
     TvpColumnDef as TvpWireColumnDef, TvpEncoder, TvpWireType, encode_tvp_bit, encode_tvp_float,
-    encode_tvp_int, encode_tvp_null, encode_tvp_nvarchar, encode_tvp_varbinary, encode_tvp_varchar,
+    encode_tvp_int, encode_tvp_null, encode_tvp_nvarchar, encode_tvp_varbinary,
+    encode_tvp_varchar_with_collation,
 };
 #[cfg(feature = "chrono")]
 use tds_protocol::tvp::{encode_tvp_datetime, encode_tvp_smalldatetime};
@@ -153,7 +154,7 @@ impl<S: ConnectionState> Client<S> {
             }
             #[cfg(feature = "json")]
             SqlValue::Json(j) => RpcParam::nvarchar(name, &j.to_string()),
-            SqlValue::Tvp(tvp_data) => Self::encode_tvp_param(name, tvp_data)?,
+            SqlValue::Tvp(tvp_data) => Self::encode_tvp_param(name, tvp_data, collation)?,
             _ => {
                 return Err(Error::Type(mssql_types::TypeError::UnsupportedConversion {
                     from: sql_value.type_name().to_string(),
@@ -238,8 +239,14 @@ impl<S: ConnectionState> Client<S> {
     /// Encode a TVP parameter for RPC.
     ///
     /// This encodes the complete TVP structure including metadata and row data
-    /// into the TDS wire format.
-    fn encode_tvp_param(name: &str, tvp_data: &mssql_types::TvpData) -> Result<RpcParam> {
+    /// into the TDS wire format. `collation` (captured from the login
+    /// ENVCHANGE) determines the codepage VARCHAR cells are encoded with and
+    /// declared as; without it they fall back to Windows-1252.
+    fn encode_tvp_param(
+        name: &str,
+        tvp_data: &mssql_types::TvpData,
+        collation: Option<&tds_protocol::token::Collation>,
+    ) -> Result<RpcParam> {
         // Convert mssql-types column definitions to wire format
         let wire_columns: Vec<TvpWireColumnDef> = tvp_data
             .columns
@@ -261,14 +268,14 @@ impl<S: ConnectionState> Client<S> {
         let mut buf = BytesMut::with_capacity(256);
 
         // Encode metadata
-        encoder.encode_metadata(&mut buf);
+        encoder.encode_metadata_with_collation(&mut buf, collation);
 
         // Encode each row
         for row in &tvp_data.rows {
             encoder.encode_row(&mut buf, |row_buf| {
                 for (col_idx, value) in row.iter().enumerate() {
                     let wire_type = &wire_columns[col_idx].wire_type;
-                    Self::encode_tvp_value(value, wire_type, row_buf);
+                    Self::encode_tvp_value(value, wire_type, collation, row_buf);
                 }
             });
         }
@@ -348,6 +355,7 @@ impl<S: ConnectionState> Client<S> {
     fn encode_tvp_value(
         value: &mssql_types::SqlValue,
         wire_type: &TvpWireType,
+        collation: Option<&tds_protocol::token::Collation>,
         buf: &mut BytesMut,
     ) {
         use mssql_types::SqlValue;
@@ -382,7 +390,7 @@ impl<S: ConnectionState> Client<S> {
                     encode_tvp_nvarchar(s, *max_length, buf);
                 }
                 TvpWireType::VarChar { max_length } => {
-                    encode_tvp_varchar(s, *max_length, buf);
+                    encode_tvp_varchar_with_collation(s, *max_length, collation, buf);
                 }
                 _ => {
                     encode_tvp_nvarchar(s, 4000, buf);

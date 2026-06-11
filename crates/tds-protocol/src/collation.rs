@@ -310,14 +310,45 @@ pub fn encoding_name_for_lcid(lcid: u32) -> &'static str {
     }
 }
 
+/// Encode UTF-8 text into the given codepage, replacing unmappable
+/// characters with `?`.
+///
+/// `encoding_rs`'s convenience `Encoding::encode()` performs HTML-form
+/// substitution — unmappable characters become decimal numeric character
+/// references like `&#20320;`. That is never what a database client wants:
+/// one CJK character would silently expand into eight ASCII characters of
+/// markup. SQL Server itself and the other first-party drivers (ADO.NET,
+/// JDBC, ODBC) substitute `?`, so this drives the lower-level encoder by
+/// hand to match that convention.
+#[cfg(feature = "encoding")]
+fn encode_lossy_question_mark(value: &str, encoding: &'static encoding_rs::Encoding) -> Vec<u8> {
+    let mut encoder = encoding.new_encoder();
+    let mut out = Vec::with_capacity(value.len());
+    let mut buf = [0u8; 1024];
+    let mut input = value;
+    loop {
+        let (result, read, written) =
+            encoder.encode_from_utf8_without_replacement(input, &mut buf, true);
+        out.extend_from_slice(&buf[..written]);
+        input = &input[read..];
+        match result {
+            encoding_rs::EncoderResult::InputEmpty => break,
+            encoding_rs::EncoderResult::OutputFull => {}
+            encoding_rs::EncoderResult::Unmappable(_) => out.push(b'?'),
+        }
+    }
+    out
+}
+
 /// Transcode a Rust `&str` into single-byte VARCHAR bytes for the given collation.
 ///
 /// - UTF-8 collations (SQL Server 2019+) pass through as raw UTF-8 bytes.
 /// - Known non-UTF-8 LCIDs transcode via the matching `encoding_rs` codec.
 /// - Unknown or `None` collations fall back to Windows-1252 (Latin1_General_CI_AS).
 ///
-/// When the `encoding` feature is disabled, characters ≤ 0xFF pass through as
-/// Latin-1 bytes and everything else becomes `?`.
+/// Characters not representable in the target codepage are replaced with `?`,
+/// matching SQL Server's own conversion behavior and the other first-party
+/// drivers. (Regardless of whether the `encoding` feature is enabled.)
 pub fn encode_str_for_collation(
     value: &str,
     collation: Option<&crate::token::Collation>,
@@ -329,12 +360,10 @@ pub fn encode_str_for_collation(
                 return value.as_bytes().to_vec();
             }
             if let Some(encoding) = c.encoding() {
-                let (encoded, _, _) = encoding.encode(value);
-                return encoded.into_owned();
+                return encode_lossy_question_mark(value, encoding);
             }
         }
-        let (encoded, _, _) = encoding_rs::WINDOWS_1252.encode(value);
-        encoded.into_owned()
+        encode_lossy_question_mark(value, encoding_rs::WINDOWS_1252)
     }
     #[cfg(not(feature = "encoding"))]
     {
@@ -356,6 +385,31 @@ mod tests {
         // UTF-8 collation flag
         assert!(is_utf8_collation(0x0800_0409)); // English with UTF-8
         assert!(!is_utf8_collation(0x0409)); // English without UTF-8
+    }
+
+    /// Unmappable characters must become `?` (SQL Server / ADO.NET / JDBC
+    /// convention), NOT the decimal numeric character references
+    /// (`&#20320;`) that `encoding_rs::Encoding::encode()` produces for HTML
+    /// form submission. A regression here silently expands one CJK char into
+    /// eight ASCII chars of markup in the database.
+    #[test]
+    fn test_unmappable_chars_become_question_marks() {
+        // Windows-1252 fallback: Ω and 你 are unmappable, € maps to 0x80.
+        let encoded = encode_str_for_collation("aΩ€你b", None);
+        assert_eq!(encoded, b"a?\x80?b");
+        // No NCR entities anywhere.
+        let one_each = encode_str_for_collation("你好世界", None);
+        assert_eq!(one_each, b"????");
+
+        // Collation-specific path: GB18030 maps the CJK chars but not every
+        // codepoint; the mappable ones must round through the codec.
+        let chinese = crate::token::Collation {
+            lcid: 0x0804,
+            sort_id: 0,
+        };
+        let encoded = encode_str_for_collation("你好", Some(&chinese));
+        let (expected, _, _) = encoding_rs::GB18030.encode("你好");
+        assert_eq!(encoded, expected.into_owned());
     }
 
     #[test]

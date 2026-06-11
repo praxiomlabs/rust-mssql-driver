@@ -2573,6 +2573,8 @@ dependencies = [
  "bytes",
  "mssql-client",
  "mssql-tls",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "rcgen",
  "rustls",
  "tds-protocol",
@@ -2844,6 +2846,7 @@ dependencies = [
  "portable-atomic",
  "rand 0.9.2",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

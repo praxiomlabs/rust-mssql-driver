@@ -324,9 +324,11 @@ impl ChangeTrackingQuery {
         // Build the SELECT column list
         let select_cols = self.build_select_columns();
 
+        // SQL Server requires an alias on CHANGETABLE ("A table returned by
+        // the CHANGETABLE function must be aliased.", error 22104).
         format!(
-            "SELECT {} FROM CHANGETABLE(CHANGES {}, {}{})",
-            select_cols, self.table_name, self.last_sync_version, force_seek
+            "SELECT {} FROM CHANGETABLE(CHANGES {}, {}{}) AS {}",
+            select_cols, self.table_name, self.last_sync_version, force_seek, self.alias
         )
     }
 
@@ -553,8 +555,9 @@ impl ChangeTracking {
     #[must_use]
     pub fn enable_table_sql(table_name: &str, track_columns_updated: bool) -> String {
         let track_cols = if track_columns_updated { "ON" } else { "OFF" };
+        let table = Self::bracket_table_name(table_name);
         format!(
-            "ALTER TABLE [{table_name}] ENABLE CHANGE_TRACKING \
+            "ALTER TABLE {table} ENABLE CHANGE_TRACKING \
              WITH (TRACK_COLUMNS_UPDATED = {track_cols})"
         )
     }
@@ -562,7 +565,26 @@ impl ChangeTracking {
     /// Generate SQL to disable change tracking on a table.
     #[must_use]
     pub fn disable_table_sql(table_name: &str) -> String {
-        format!("ALTER TABLE [{table_name}] DISABLE CHANGE_TRACKING")
+        let table = Self::bracket_table_name(table_name);
+        format!("ALTER TABLE {table} DISABLE CHANGE_TRACKING")
+    }
+
+    /// Bracket a possibly schema-qualified table name part by part:
+    /// `dbo.Items` → `[dbo].[Items]`. Bracketing the whole string as one
+    /// identifier (`[dbo.Items]`) names a table literally called
+    /// "dbo.Items", which fails with error 4902 on real servers.
+    ///
+    /// Interior `]` characters are doubled (the T-SQL QUOTENAME rule), so a
+    /// hostile name like ``foo]; DROP TABLE bar--`` stays a single quoted
+    /// identifier instead of terminating it early and smuggling a second
+    /// statement into the batch. Pass names unbracketed; pre-bracketed input
+    /// is treated as literal characters of the name.
+    fn bracket_table_name(table_name: &str) -> String {
+        table_name
+            .split('.')
+            .map(|part| format!("[{}]", part.replace(']', "]]")))
+            .collect::<Vec<_>>()
+            .join(".")
     }
 
     /// Generate SQL to disable change tracking on a database.
@@ -695,6 +717,13 @@ mod tests {
         assert!(sql.contains("CHANGETABLE(CHANGES Products, 42)"));
         assert!(sql.contains("SYS_CHANGE_VERSION"));
         assert!(sql.contains("SYS_CHANGE_OPERATION"));
+        // SQL Server rejects CHANGETABLE without an alias (error 22104) —
+        // the substring above matches the broken pre-alias SQL too, so pin
+        // the alias explicitly.
+        assert!(
+            sql.contains(") AS CT"),
+            "CHANGETABLE must be aliased or the query is not executable: {sql}"
+        );
     }
 
     #[test]
@@ -760,6 +789,33 @@ mod tests {
         let table_sql = ChangeTracking::enable_table_sql("Products", true);
         assert!(table_sql.contains("[Products]"));
         assert!(table_sql.contains("TRACK_COLUMNS_UPDATED = ON"));
+
+        // Schema-qualified names must be bracketed part by part —
+        // `[dbo.Products]` is a single (nonexistent) identifier and fails
+        // with error 4902 on a real server.
+        let qualified = ChangeTracking::enable_table_sql("dbo.Products", true);
+        assert!(qualified.contains("ALTER TABLE [dbo].[Products]"));
+        let disable = ChangeTracking::disable_table_sql("dbo.Products");
+        assert!(disable.contains("ALTER TABLE [dbo].[Products]"));
+    }
+
+    /// PR #143 review, Blocker 2: interior `]` must be doubled (QUOTENAME
+    /// rule) so a hostile table name cannot terminate the bracketed
+    /// identifier early and smuggle a second statement into the batch.
+    #[test]
+    fn test_bracket_escapes_closing_brackets() {
+        let sql = ChangeTracking::enable_table_sql("foo]; DROP TABLE bar--", true);
+        assert!(
+            sql.contains("ALTER TABLE [foo]]; DROP TABLE bar--]"),
+            "interior ] must be doubled, got: {sql}"
+        );
+        assert!(
+            !sql.contains("ALTER TABLE [foo];"),
+            "the identifier must not be terminated early: {sql}"
+        );
+
+        let sql = ChangeTracking::disable_table_sql("we]ird.na]me");
+        assert!(sql.contains("ALTER TABLE [we]]ird].[na]]me]"));
     }
 
     #[test]

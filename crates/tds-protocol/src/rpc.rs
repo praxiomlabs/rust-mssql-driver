@@ -607,19 +607,7 @@ impl RpcParam {
     /// Encode a string as single-byte VARCHAR data using the default
     /// Windows-1252 encoding (or Latin-1 fallback without the `encoding` feature).
     fn encode_varchar_bytes(value: &str) -> Vec<u8> {
-        #[cfg(feature = "encoding")]
-        {
-            let (encoded, _, _) = encoding_rs::WINDOWS_1252.encode(value);
-            encoded.into_owned()
-        }
-        #[cfg(not(feature = "encoding"))]
-        {
-            // Latin-1 fallback: chars ≤ 0xFF pass through, others become '?'
-            value
-                .chars()
-                .map(|ch| if (ch as u32) <= 0xFF { ch as u8 } else { b'?' })
-                .collect()
-        }
+        crate::collation::encode_str_for_collation(value, None)
     }
 
     /// Create a VARCHAR parameter using the server's collation for encoding.

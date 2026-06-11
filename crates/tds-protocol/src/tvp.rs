@@ -146,8 +146,29 @@ impl TvpWireType {
     }
 
     /// Encode the TYPE_INFO for this column type.
+    ///
+    /// String columns are declared with the default Latin1_General_CI_AS
+    /// collation; use [`encode_type_info_with_collation`](Self::encode_type_info_with_collation)
+    /// to declare the server's actual collation.
     pub fn encode_type_info(&self, buf: &mut BytesMut) {
+        self.encode_type_info_with_collation(buf, None);
+    }
+
+    /// Encode the TYPE_INFO for this column type, declaring `collation` for
+    /// string columns.
+    ///
+    /// The collation declared here tells the server which codepage VARCHAR
+    /// cell bytes are in. It must match the encoding used for the cell data
+    /// (see [`encode_tvp_varchar_with_collation`]). `None` falls back to
+    /// [`DEFAULT_COLLATION`] (Latin1_General_CI_AS / Windows-1252).
+    pub fn encode_type_info_with_collation(
+        &self,
+        buf: &mut BytesMut,
+        collation: Option<&crate::token::Collation>,
+    ) {
         buf.put_u8(self.type_id());
+
+        let collation_bytes = collation.map_or(DEFAULT_COLLATION, |c| c.to_bytes());
 
         match self {
             Self::Bit => {
@@ -163,11 +184,11 @@ impl TvpWireType {
             }
             Self::NVarChar { max_length } => {
                 buf.put_u16_le(*max_length);
-                buf.put_slice(&DEFAULT_COLLATION);
+                buf.put_slice(&collation_bytes);
             }
             Self::VarChar { max_length } => {
                 buf.put_u16_le(*max_length);
-                buf.put_slice(&DEFAULT_COLLATION);
+                buf.put_slice(&collation_bytes);
             }
             Self::VarBinary { max_length } => {
                 buf.put_u16_le(*max_length);
@@ -254,6 +275,15 @@ impl TvpColumnDef {
     ///
     /// Format: UserType (4) + Flags (2) + TYPE_INFO + ColName (B_VARCHAR, must be empty)
     pub fn encode(&self, buf: &mut BytesMut) {
+        self.encode_with_collation(buf, None);
+    }
+
+    /// Encode the column metadata, declaring `collation` for string columns.
+    pub fn encode_with_collation(
+        &self,
+        buf: &mut BytesMut,
+        collation: Option<&crate::token::Collation>,
+    ) {
         // UserType (always 0 for TVP columns)
         buf.put_u32_le(0);
 
@@ -261,7 +291,8 @@ impl TvpColumnDef {
         buf.put_u16_le(self.flags.to_bits());
 
         // TYPE_INFO
-        self.wire_type.encode_type_info(buf);
+        self.wire_type
+            .encode_type_info_with_collation(buf, collation);
 
         // ColName - MUST be zero-length per MS-TDS spec
         buf.put_u8(0);
@@ -302,7 +333,25 @@ impl<'a> TvpEncoder<'a> {
     ///
     /// After calling this, use [`Self::encode_row`] for each row, then
     /// [`Self::encode_end`] to finish.
+    ///
+    /// String columns are declared with the default Latin1_General_CI_AS
+    /// collation; use [`Self::encode_metadata_with_collation`] to declare the
+    /// server's actual collation.
     pub fn encode_metadata(&self, buf: &mut BytesMut) {
+        self.encode_metadata_with_collation(buf, None);
+    }
+
+    /// Encode the complete TVP type info and metadata, declaring `collation`
+    /// for string columns.
+    ///
+    /// Pass the collation captured from the login `ENVCHANGE` so VARCHAR cell
+    /// bytes (encoded with the same collation) are interpreted in the right
+    /// codepage by the server.
+    pub fn encode_metadata_with_collation(
+        &self,
+        buf: &mut BytesMut,
+        collation: Option<&crate::token::Collation>,
+    ) {
         // TVP type ID
         buf.put_u8(TVP_TYPE_ID);
 
@@ -334,7 +383,7 @@ impl<'a> TvpEncoder<'a> {
 
             // Encode each column
             for col in self.columns {
-                col.encode(buf);
+                col.encode_with_collation(buf, collation);
             }
         }
 
@@ -469,9 +518,26 @@ pub fn encode_tvp_nvarchar(value: &str, max_length: u16, buf: &mut BytesMut) {
 /// character: "abc" would be stored as "a\0b\0c\0".
 ///
 /// Encodes using Windows-1252 (Latin1_General_CI_AS), matching [`DEFAULT_COLLATION`]
-/// declared in TVP column metadata.
+/// declared in TVP column metadata. Use
+/// [`encode_tvp_varchar_with_collation`] to encode for the server's actual
+/// collation.
 pub fn encode_tvp_varchar(value: &str, max_length: u16, buf: &mut BytesMut) {
-    let encoded = crate::collation::encode_str_for_collation(value, None);
+    encode_tvp_varchar_with_collation(value, max_length, None, buf);
+}
+
+/// Encode a VARCHAR value for TVP using the codepage of `collation`.
+///
+/// The collation must match the one declared in the TVP column metadata
+/// (see [`TvpWireType::encode_type_info_with_collation`]) so the server
+/// interprets the cell bytes in the codepage they were encoded with.
+/// Characters not representable in the codepage are replaced with `?`.
+pub fn encode_tvp_varchar_with_collation(
+    value: &str,
+    max_length: u16,
+    collation: Option<&crate::token::Collation>,
+    buf: &mut BytesMut,
+) {
+    let encoded = crate::collation::encode_str_for_collation(value, collation);
     let byte_len = encoded.len();
 
     if max_length == 0xFFFF {
@@ -890,5 +956,39 @@ mod tests {
             &[0],
             "DATETIMEN NULL is a single length-zero byte"
         );
+    }
+
+    /// VARCHAR TVP columns must declare the provided collation in
+    /// TYPE_INFO instead of the hardcoded Latin1 default, and cell data
+    /// must be transcoded with that collation's codepage. Mismatched
+    /// declaration/encoding silently corrupts non-Latin1 data (the same
+    /// defect class as the v0.10 plain-param collation fix).
+    #[test]
+    #[cfg(feature = "encoding")]
+    fn test_tvp_varchar_with_collation_declares_and_encodes() {
+        let chinese = crate::token::Collation {
+            lcid: 0x0804, // Chinese_PRC → GB18030 / CP936
+            sort_id: 0,
+        };
+
+        // TYPE_INFO declares the caller's collation bytes.
+        let mut buf = BytesMut::new();
+        TvpWireType::VarChar { max_length: 100 }
+            .encode_type_info_with_collation(&mut buf, Some(&chinese));
+        assert_eq!(buf[0], 0xA7, "BIGVARCHARTYPE");
+        assert_eq!(&buf[1..3], &100u16.to_le_bytes());
+        assert_eq!(&buf[3..8], &chinese.to_bytes());
+
+        // Without a collation the default Latin1 bytes are declared.
+        let mut buf = BytesMut::new();
+        TvpWireType::VarChar { max_length: 100 }.encode_type_info(&mut buf);
+        assert_eq!(&buf[3..8], &DEFAULT_COLLATION);
+
+        // Cell data is transcoded with the declared collation's codepage.
+        let mut buf = BytesMut::new();
+        encode_tvp_varchar_with_collation("你好", 100, Some(&chinese), &mut buf);
+        let (expected, _, _) = encoding_rs::GB18030.encode("你好");
+        assert_eq!(&buf[..2], &(expected.len() as u16).to_le_bytes());
+        assert_eq!(&buf[2..], &expected[..]);
     }
 }
