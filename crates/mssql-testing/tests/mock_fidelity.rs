@@ -572,6 +572,82 @@ async fn test_tls_handshake_rejects_untrusted_cert_when_validation_on() {
     server.stop();
 }
 
+/// Issue #164: exercise the TDS 8.0 strict-mode TLS path, which previously
+/// had zero executed coverage. Strict mode does TLS-first (direct, no PreLogin
+/// wrapping) with ALPN `tds/8.0` and full certificate validation. This drives
+/// the driver's own connector in strict mode against a server that presents a
+/// trusted cert and advertises `tds/8.0`, and asserts both that the handshake
+/// succeeds and that `tds/8.0` is negotiated.
+#[tokio::test]
+async fn test_tds8_strict_handshake_negotiates_alpn() {
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+
+    mssql_testing::tls::ensure_crypto_provider_for_test();
+
+    // Self-signed cert; capture its DER so the client can trust it as a root.
+    let cert_key = mssql_testing::generate_test_certificate();
+    let cert_der = cert_key.cert.der().clone();
+    let key_der = rustls::pki_types::PrivateKeyDer::try_from(cert_key.signing_key.serialize_der())
+        .expect("key DER");
+
+    // Server config with the cert AND ALPN tds/8.0 advertised.
+    let mut server_config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert_der.clone()], key_der)
+        .expect("server config");
+    server_config.alpn_protocols = vec![b"tds/8.0".to_vec()];
+    server_config.send_tls13_tickets = 0;
+    let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        // Direct TLS accept (strict mode — no PreLogin wrapping).
+        let mut tls = acceptor.accept(stream).await.expect("server accept");
+        let mut buf = [0u8; 16];
+        let n = tls.read(&mut buf).await.unwrap();
+        tls.write_all(&buf[..n]).await.unwrap();
+        tls.flush().await.unwrap();
+    });
+
+    // Client: the driver's connector in strict mode, trusting the cert as a
+    // root and offering ALPN tds/8.0.
+    use mssql_tls::{TlsConfig, TlsConnector};
+    let tls_config = TlsConfig::new()
+        .strict_mode(true)
+        .with_alpn_protocols(vec![b"tds/8.0".to_vec()])
+        .add_root_certificate_der(cert_der.to_vec());
+    let connector = TlsConnector::new(tls_config).expect("connector");
+    assert!(connector.is_strict_mode());
+
+    let tcp = TcpStream::connect(addr).await.unwrap();
+    let mut tls = connector
+        .connect(tcp, "localhost")
+        .await
+        .expect("strict TLS-first handshake must succeed against a trusted cert");
+
+    // ALPN must have negotiated tds/8.0.
+    let alpn = tls.get_ref().1.alpn_protocol().map(<[u8]>::to_vec);
+    assert_eq!(
+        alpn.as_deref(),
+        Some(&b"tds/8.0"[..]),
+        "TDS 8.0 strict mode must negotiate the tds/8.0 ALPN protocol"
+    );
+
+    // The encrypted channel works.
+    tls.write_all(b"ping").await.unwrap();
+    tls.flush().await.unwrap();
+    let mut buf = [0u8; 4];
+    tls.read_exact(&mut buf).await.unwrap();
+    assert_eq!(&buf, b"ping");
+
+    server.await.unwrap();
+}
+
 /// Test raw TLS handshake (no PreLogin wrapping) to isolate TLS from wrapping.
 #[tokio::test]
 async fn test_raw_tls_data_exchange() {
