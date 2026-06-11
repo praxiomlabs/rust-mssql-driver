@@ -331,8 +331,22 @@ When making changes here, remember:
 
 4. **Respect the release rules** documented in RELEASING.md (irreversibility, never cancel a publish mid-run, recovery is re-run). They exist because of specific past incidents. Don't work around them — if you find them inconvenient, propose a process change via an issue.
 
-5. **Trunk-based development.** Work happens on short-lived feature branches merged into `main` via PRs (no squash-merging — history stays linked). CI runs on every push and PR; cross-platform issues surface immediately, not at release time.
+5. **Trunk-based development.** Work happens on short-lived feature branches merged into `main` via PRs (no squash-merging — history stays linked). CI (`ci.yml`) triggers on pushes to `main` and on PRs whose base is `main` — not on feature-branch pushes that lack an open PR to `main`. Cross-platform issues surface at PR time, not at release time.
 
 6. **Update CLAUDE.md when you add new infrastructure.** This document is the entry point for future AI assistants working on the repo. Adding a new tool, workflow, or policy without updating CLAUDE.md leaves future sessions flying blind. The Process and Governance section above should reference all the discoverable infrastructure.
 
 7. **Use issue/PR templates.** They ask the right questions. If you're opening an issue or PR, fill out the template completely — it helps the human reviewer and it helps future AI sessions parse the intent.
+
+8. **Run the full local CI mirror before every push; never trust a subset.** `cargo check` and unit tests do not catch the `-D warnings`-class failures CI rejects. This repo's gate is reproduced by `just ci-all` (fmt + clippy `--all-features --all-targets -D warnings` + nextest all-features + `cargo doc -D warnings` + examples). `ci-all` does NOT compose two gates CI enforces, so the real pre-push command is:
+
+   ```bash
+   just ci-all && just typos && \
+     MSSQL_HOST=localhost MSSQL_PORT=1433 MSSQL_USER=sa MSSQL_PASSWORD='YourStrong@Passw0rd' \
+       cargo nextest run --all-features --run-ignored ignored-only --no-fail-fast \
+       -E 'not (binary(azure_sql) or test(azure_identity_auth) or test(cert_auth))'
+   ```
+
+   - `just typos` runs the same bare `typos` (whole-tree, `typos.toml`-aware) the CI Hygiene job runs. It needs the tool installed at an MSRV-1.88-compatible version: `cargo install typos-cli --version 1.42.3 --locked` (newer requires rustc 1.91). The recipe still prints a WARN and passes if typos is absent, so confirm it is actually installed — a silent skip is how a spell-check failure reaches CI.
+   - The ignored-only suite needs a local SQL Server 2022 container (`just sql-server-start`). `ci-all` and unit tests will NOT catch live-only failures (e.g. bulk temporal, decimal high-scale).
+   - **Never open a PR stacked on another feature branch.** CI only triggers on PRs based on `main` (see convention 5), so a stacked PR gets zero CI until it is retargeted to `main`.
+   - **Branch protection requires up-to-date-with-`main`.** Merge each green PR before opening the next to minimize the `update-branch` + CI-re-run churn that comes from keeping many PRs in flight at once.
