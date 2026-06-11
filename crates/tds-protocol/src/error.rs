@@ -85,12 +85,15 @@ pub enum ProtocolError {
 impl ProtocolError {
     /// Check if this error is transient and may succeed on retry.
     ///
-    /// Protocol errors are almost always terminal — they indicate malformed data
-    /// or driver bugs. The only transient case is `UnexpectedEof`, which may
-    /// occur during connection loss.
+    /// Protocol errors are always terminal — they indicate malformed data or
+    /// driver bugs. In particular `UnexpectedEof` is produced when a token
+    /// inside a fully-received message is truncated or misparsed; retrying
+    /// deterministically fails again. Genuine connection loss surfaces at the
+    /// transport layer (`CodecError::Io` / `CodecError::ConnectionClosed`),
+    /// which remains transient.
     #[must_use]
     pub fn is_transient(&self) -> bool {
-        matches!(self, Self::UnexpectedEof)
+        false
     }
 
     /// Check if this error is terminal and will never succeed on retry.
@@ -100,5 +103,20 @@ impl ProtocolError {
     #[must_use]
     pub fn is_terminal(&self) -> bool {
         !self.is_transient()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Issue #160 regression: `UnexpectedEof` is produced for malformed
+    /// tokens inside a fully-received buffer (dozens of parse sites), so it
+    /// must not be classified retryable — retry layers honoring
+    /// `is_transient` would re-run a deterministically failing parse.
+    #[test]
+    fn unexpected_eof_is_terminal_not_transient() {
+        assert!(!ProtocolError::UnexpectedEof.is_transient());
+        assert!(ProtocolError::UnexpectedEof.is_terminal());
     }
 }
