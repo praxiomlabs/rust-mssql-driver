@@ -445,6 +445,81 @@ async fn test_long_running_query() {
     client.close().await.expect("Failed to close");
 }
 
+/// Issue #156 regression: `query_with_timeout` must cancel via Attention and
+/// leave the connection usable, not desync it by dropping the read future.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_query_with_timeout_leaves_connection_usable() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // A 10s server-side delay against a 1s command timeout must fail fast...
+    let start = std::time::Instant::now();
+    let result = client
+        .query_with_timeout(
+            "WAITFOR DELAY '00:00:10'; SELECT 1 AS n",
+            &[],
+            Duration::from_secs(1),
+        )
+        .await;
+    let elapsed = start.elapsed();
+    match result {
+        Err(mssql_client::Error::CommandTimeout) => {}
+        Err(other) => panic!("expected CommandTimeout, got {other:?}"),
+        Ok(_) => panic!("expected CommandTimeout, query unexpectedly succeeded"),
+    }
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "timeout must fire near 1s, not wait out the 10s query; took {elapsed:?}"
+    );
+
+    // ...and the very next query on the SAME client must succeed with the
+    // correct result — proving the connection was not left desynced.
+    let rows = client
+        .query("SELECT 42 AS answer", &[])
+        .await
+        .expect("connection must be usable after a command timeout");
+    let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    assert_eq!(data.len(), 1);
+    let answer: i32 = data[0].get(0).expect("must read the fresh result");
+    assert_eq!(answer, 42, "stale response would yield wrong data");
+
+    client.close().await.expect("Failed to close");
+}
+
+/// Issue #156 regression: the default `command_timeout` is enforced on a
+/// plain `query()` (no explicit timeout), and the connection stays usable.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_default_command_timeout_enforced() {
+    let mut config = get_test_config().expect("SQL Server config required");
+    config.command_timeout = Duration::from_secs(1);
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    let start = std::time::Instant::now();
+    let result = client.query("WAITFOR DELAY '00:00:10'", &[]).await;
+    let elapsed = start.elapsed();
+    match result {
+        Err(mssql_client::Error::CommandTimeout) => {}
+        Err(other) => panic!("default command_timeout must cancel; got {other:?}"),
+        Ok(_) => panic!("default command_timeout must cancel; query succeeded"),
+    }
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "default timeout must fire near 1s; took {elapsed:?}"
+    );
+
+    let rows = client
+        .query("SELECT 7 AS n", &[])
+        .await
+        .expect("connection must be usable after a default-timeout cancel");
+    let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    let n: i32 = data[0].get(0).expect("must read fresh result");
+    assert_eq!(n, 7);
+
+    client.close().await.expect("Failed to close");
+}
+
 /// Test that short timeout interrupts long-running query.
 #[tokio::test]
 #[ignore = "Requires SQL Server"]

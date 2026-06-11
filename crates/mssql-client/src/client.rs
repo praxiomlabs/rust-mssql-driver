@@ -35,7 +35,6 @@ use tds_protocol::packet::PacketType;
 use tds_protocol::rpc::RpcRequest;
 use tds_protocol::token::{EnvChange, EnvChangeType};
 use tokio::net::TcpStream;
-use tokio::time::timeout;
 
 use crate::config::Config;
 use crate::error::{Error, Result};
@@ -45,6 +44,39 @@ use crate::state::{ConnectionState, InTransaction, Ready};
 use crate::statement_cache::StatementCache;
 use crate::stream::{MultiResultStream, QueryStream};
 use crate::transaction::SavePoint;
+
+/// Run a network future under an optional command deadline.
+///
+/// On timeout this sends an Attention packet via `canceller` and then awaits
+/// the future so its own read loop drains the server's DONE_ATTN
+/// acknowledgement, leaving the connection clean before returning
+/// [`Error::CommandTimeout`]. This is the cancel-safe alternative to dropping
+/// the future (e.g. via `tokio::time::timeout`), which would leave unconsumed
+/// TDS data in the connection buffer and desync the next request.
+async fn run_with_deadline<F, T>(
+    fut: F,
+    deadline: Option<std::time::Duration>,
+    canceller: crate::cancel::CancelHandle,
+) -> Result<T>
+where
+    F: std::future::Future<Output = Result<T>>,
+{
+    let Some(d) = deadline else {
+        return fut.await;
+    };
+    tokio::pin!(fut);
+    tokio::select! {
+        biased;
+        res = &mut fut => res,
+        () = tokio::time::sleep(d) => {
+            // Signal cancellation, then let the in-flight read consume the
+            // server's attention acknowledgement so the connection stays usable.
+            let _ = canceller.cancel().await;
+            let _ = fut.await;
+            Err(Error::CommandTimeout)
+        }
+    }
+}
 
 /// SQL Server client with type-state connection management.
 ///
@@ -105,6 +137,15 @@ enum ConnectionHandle {
 
 // Private helper methods available to all connection states
 impl<S: ConnectionState> Client<S> {
+    /// The default per-command deadline from `command_timeout`.
+    ///
+    /// Returns `None` when `command_timeout` is zero, which means "no limit"
+    /// (matching ADO.NET's `SqlCommand.CommandTimeout = 0`).
+    fn command_deadline(&self) -> Option<std::time::Duration> {
+        let t = self.config.command_timeout;
+        if t.is_zero() { None } else { Some(t) }
+    }
+
     /// Process transaction-related EnvChange tokens.
     ///
     /// This handles BeginTransaction, CommitTransaction, and RollbackTransaction
@@ -677,6 +718,17 @@ impl Client<Ready> {
         sql: &str,
         params: &[&(dyn crate::ToSql + Sync)],
     ) -> Result<QueryStream<'a>> {
+        let deadline = self.command_deadline();
+        self.query_inner(sql, params, deadline).await
+    }
+
+    /// Shared query implementation with an explicit command deadline.
+    async fn query_inner<'a>(
+        &'a mut self,
+        sql: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+        deadline: Option<std::time::Duration>,
+    ) -> Result<QueryStream<'a>> {
         tracing::debug!(sql = sql, params_count = params.len(), "executing query");
 
         #[cfg(feature = "otel")]
@@ -688,21 +740,26 @@ impl Client<Ready> {
             crate::instrumentation::extract_operation(sql),
         );
 
-        let result = async {
-            if params.is_empty() {
-                // Simple query without parameters - use SQL batch
-                self.send_sql_batch(sql).await?;
-            } else {
-                // Parameterized query - use sp_executesql via RPC
-                let rpc_params =
-                    Self::convert_params(params, self.send_unicode(), self.server_collation())?;
-                let rpc = RpcRequest::execute_sql(sql, rpc_params);
-                self.send_rpc(&rpc).await?;
-            }
+        let canceller = self.cancel_handle();
+        let result = run_with_deadline(
+            async {
+                if params.is_empty() {
+                    // Simple query without parameters - use SQL batch
+                    self.send_sql_batch(sql).await?;
+                } else {
+                    // Parameterized query - use sp_executesql via RPC
+                    let rpc_params =
+                        Self::convert_params(params, self.send_unicode(), self.server_collation())?;
+                    let rpc = RpcRequest::execute_sql(sql, rpc_params);
+                    self.send_rpc(&rpc).await?;
+                }
 
-            // Read complete response including columns and rows
-            self.read_query_response().await
-        }
+                // Read complete response including columns and rows
+                self.read_query_response().await
+            },
+            deadline,
+            canceller,
+        )
         .await;
 
         #[cfg(feature = "otel")]
@@ -741,7 +798,9 @@ impl Client<Ready> {
     ///
     /// This overrides the default `command_timeout` from the connection configuration
     /// for this specific query. If the query does not complete within the specified
-    /// duration, an error is returned.
+    /// duration, the driver sends an Attention packet to cancel it server-side,
+    /// drains the acknowledgement, and returns [`Error::CommandTimeout`] with the
+    /// connection left usable for the next request.
     ///
     /// # Arguments
     ///
@@ -773,9 +832,7 @@ impl Client<Ready> {
         params: &[&(dyn crate::ToSql + Sync)],
         timeout_duration: std::time::Duration,
     ) -> Result<QueryStream<'a>> {
-        timeout(timeout_duration, self.query(sql, params))
-            .await
-            .map_err(|_| Error::CommandTimeout)?
+        self.query_inner(sql, params, Some(timeout_duration)).await
     }
 
     /// Execute a batch that may return multiple result sets.
@@ -842,6 +899,17 @@ impl Client<Ready> {
         sql: &str,
         params: &[&(dyn crate::ToSql + Sync)],
     ) -> Result<u64> {
+        let deadline = self.command_deadline();
+        self.execute_inner(sql, params, deadline).await
+    }
+
+    /// Shared execute implementation with an explicit command deadline.
+    async fn execute_inner(
+        &mut self,
+        sql: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+        deadline: Option<std::time::Duration>,
+    ) -> Result<u64> {
         tracing::debug!(
             sql = sql,
             params_count = params.len(),
@@ -857,21 +925,26 @@ impl Client<Ready> {
             crate::instrumentation::extract_operation(sql),
         );
 
-        let result = async {
-            if params.is_empty() {
-                // Simple statement without parameters - use SQL batch
-                self.send_sql_batch(sql).await?;
-            } else {
-                // Parameterized statement - use sp_executesql via RPC
-                let rpc_params =
-                    Self::convert_params(params, self.send_unicode(), self.server_collation())?;
-                let rpc = RpcRequest::execute_sql(sql, rpc_params);
-                self.send_rpc(&rpc).await?;
-            }
+        let canceller = self.cancel_handle();
+        let result = run_with_deadline(
+            async {
+                if params.is_empty() {
+                    // Simple statement without parameters - use SQL batch
+                    self.send_sql_batch(sql).await?;
+                } else {
+                    // Parameterized statement - use sp_executesql via RPC
+                    let rpc_params =
+                        Self::convert_params(params, self.send_unicode(), self.server_collation())?;
+                    let rpc = RpcRequest::execute_sql(sql, rpc_params);
+                    self.send_rpc(&rpc).await?;
+                }
 
-            // Read response and get row count
-            self.read_execute_result().await
-        }
+                // Read response and get row count
+                self.read_execute_result().await
+            },
+            deadline,
+            canceller,
+        )
         .await;
 
         #[cfg(feature = "otel")]
@@ -893,7 +966,9 @@ impl Client<Ready> {
     ///
     /// This overrides the default `command_timeout` from the connection configuration
     /// for this specific statement. If the statement does not complete within the
-    /// specified duration, an error is returned.
+    /// specified duration, the driver sends an Attention packet to cancel it
+    /// server-side, drains the acknowledgement, and returns
+    /// [`Error::CommandTimeout`] with the connection left usable.
     ///
     /// # Arguments
     ///
@@ -925,9 +1000,8 @@ impl Client<Ready> {
         params: &[&(dyn crate::ToSql + Sync)],
         timeout_duration: std::time::Duration,
     ) -> Result<u64> {
-        timeout(timeout_duration, self.execute(sql, params))
+        self.execute_inner(sql, params, Some(timeout_duration))
             .await
-            .map_err(|_| Error::CommandTimeout)?
     }
 
     /// Begin a transaction.
@@ -1233,6 +1307,17 @@ impl Client<InTransaction> {
         sql: &str,
         params: &[&(dyn crate::ToSql + Sync)],
     ) -> Result<QueryStream<'a>> {
+        let deadline = self.command_deadline();
+        self.query_inner(sql, params, deadline).await
+    }
+
+    /// Shared query implementation with an explicit command deadline.
+    async fn query_inner<'a>(
+        &'a mut self,
+        sql: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+        deadline: Option<std::time::Duration>,
+    ) -> Result<QueryStream<'a>> {
         tracing::debug!(
             sql = sql,
             params_count = params.len(),
@@ -1248,21 +1333,26 @@ impl Client<InTransaction> {
             crate::instrumentation::extract_operation(sql),
         );
 
-        let result = async {
-            if params.is_empty() {
-                // Simple query without parameters - use SQL batch
-                self.send_sql_batch(sql).await?;
-            } else {
-                // Parameterized query - use sp_executesql via RPC
-                let rpc_params =
-                    Self::convert_params(params, self.send_unicode(), self.server_collation())?;
-                let rpc = RpcRequest::execute_sql(sql, rpc_params);
-                self.send_rpc(&rpc).await?;
-            }
+        let canceller = self.cancel_handle();
+        let result = run_with_deadline(
+            async {
+                if params.is_empty() {
+                    // Simple query without parameters - use SQL batch
+                    self.send_sql_batch(sql).await?;
+                } else {
+                    // Parameterized query - use sp_executesql via RPC
+                    let rpc_params =
+                        Self::convert_params(params, self.send_unicode(), self.server_collation())?;
+                    let rpc = RpcRequest::execute_sql(sql, rpc_params);
+                    self.send_rpc(&rpc).await?;
+                }
 
-            // Read complete response including columns and rows
-            self.read_query_response().await
-        }
+                // Read complete response including columns and rows
+                self.read_query_response().await
+            },
+            deadline,
+            canceller,
+        )
         .await;
 
         #[cfg(feature = "otel")]
@@ -1305,6 +1395,17 @@ impl Client<InTransaction> {
         sql: &str,
         params: &[&(dyn crate::ToSql + Sync)],
     ) -> Result<u64> {
+        let deadline = self.command_deadline();
+        self.execute_inner(sql, params, deadline).await
+    }
+
+    /// Shared execute implementation with an explicit command deadline.
+    async fn execute_inner(
+        &mut self,
+        sql: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+        deadline: Option<std::time::Duration>,
+    ) -> Result<u64> {
         tracing::debug!(
             sql = sql,
             params_count = params.len(),
@@ -1320,21 +1421,26 @@ impl Client<InTransaction> {
             crate::instrumentation::extract_operation(sql),
         );
 
-        let result = async {
-            if params.is_empty() {
-                // Simple statement without parameters - use SQL batch
-                self.send_sql_batch(sql).await?;
-            } else {
-                // Parameterized statement - use sp_executesql via RPC
-                let rpc_params =
-                    Self::convert_params(params, self.send_unicode(), self.server_collation())?;
-                let rpc = RpcRequest::execute_sql(sql, rpc_params);
-                self.send_rpc(&rpc).await?;
-            }
+        let canceller = self.cancel_handle();
+        let result = run_with_deadline(
+            async {
+                if params.is_empty() {
+                    // Simple statement without parameters - use SQL batch
+                    self.send_sql_batch(sql).await?;
+                } else {
+                    // Parameterized statement - use sp_executesql via RPC
+                    let rpc_params =
+                        Self::convert_params(params, self.send_unicode(), self.server_collation())?;
+                    let rpc = RpcRequest::execute_sql(sql, rpc_params);
+                    self.send_rpc(&rpc).await?;
+                }
 
-            // Read response and get row count
-            self.read_execute_result().await
-        }
+                // Read response and get row count
+                self.read_execute_result().await
+            },
+            deadline,
+            canceller,
+        )
         .await;
 
         #[cfg(feature = "otel")]
@@ -1361,9 +1467,7 @@ impl Client<InTransaction> {
         params: &[&(dyn crate::ToSql + Sync)],
         timeout_duration: std::time::Duration,
     ) -> Result<QueryStream<'a>> {
-        timeout(timeout_duration, self.query(sql, params))
-            .await
-            .map_err(|_| Error::CommandTimeout)?
+        self.query_inner(sql, params, Some(timeout_duration)).await
     }
 
     /// Execute a statement within the transaction with a specific timeout.
@@ -1375,9 +1479,8 @@ impl Client<InTransaction> {
         params: &[&(dyn crate::ToSql + Sync)],
         timeout_duration: std::time::Duration,
     ) -> Result<u64> {
-        timeout(timeout_duration, self.execute(sql, params))
+        self.execute_inner(sql, params, Some(timeout_duration))
             .await
-            .map_err(|_| Error::CommandTimeout)?
     }
 
     /// Open a FILESTREAM BLOB for async reading and/or writing.
