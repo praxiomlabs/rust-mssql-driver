@@ -216,6 +216,179 @@ async fn test_nvarchar_unicode() -> Result<(), Error> {
 /// Verify VARCHAR RPC param round-trip when the server's default collation
 /// is NOT the hardcoded Latin1_General_CI_AS fallback.
 ///
+/// Capability audit: TVP string cells on a non-Latin1 server.
+///
+/// Two scenarios against a Chinese_PRC_CI_AS (GB18030 / CP936) database:
+///
+/// 1. **NVARCHAR-declared TVP column** (what `#[derive(Tvp)]` always produces
+///    for `String` fields) feeding a `VARCHAR` table column: the server
+///    converts NVARCHAR → VARCHAR using the column's collation, so CJK data
+///    must round-trip verbatim.
+/// 2. **VARCHAR-declared TVP column** (reachable only via a hand-written
+///    `Tvp` impl or raw `TvpData`): the encoder transcodes cells with the
+///    declared collation. CJK data must round-trip — if it comes back as
+///    `????`, TVP VARCHAR cells are stuck on the hardcoded Windows-1252
+///    fallback (the same defect class fixed for plain VARCHAR params in
+///    v0.10) and corrupt silently.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_tvp_varchar_collation_round_trip() -> Result<(), Error> {
+    use mssql_client::{Tvp, TvpColumn, TvpRow, TvpValue};
+    use mssql_types::SqlValue;
+
+    let host = std::env::var("MSSQL_HOST").unwrap_or_else(|_| "localhost".into());
+    let user = std::env::var("MSSQL_USER").unwrap_or_else(|_| "sa".into());
+    let password = std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "YourStrong@Passw0rd".into());
+
+    let db_name = format!(
+        "mssql_driver_test_tvp_cn_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+
+    let setup_conn = format!(
+        "Server={host};Database=master;User Id={user};Password={password};\
+         TrustServerCertificate=true;Encrypt=true"
+    );
+    let setup_config = Config::from_connection_string(&setup_conn)?;
+
+    {
+        let mut setup = Client::connect(setup_config.clone()).await?;
+        setup
+            .execute(
+                &format!("CREATE DATABASE {db_name} COLLATE Chinese_PRC_CI_AS"),
+                &[],
+            )
+            .await?;
+        setup.close().await?;
+    }
+
+    let run = async {
+        let conn = format!(
+            "Server={host};Database={db_name};User Id={user};Password={password};\
+             TrustServerCertificate=true;Encrypt=true"
+        );
+        let mut client = Client::connect(Config::from_connection_string(&conn)?).await?;
+
+        client
+            .execute("CREATE TYPE dbo.NvcList AS TABLE (txt NVARCHAR(100))", &[])
+            .await?;
+        client
+            .execute("CREATE TYPE dbo.VcList AS TABLE (txt VARCHAR(100))", &[])
+            .await?;
+        client
+            .execute(
+                "CREATE TABLE dbo.tvp_vc_target (id INT IDENTITY, txt VARCHAR(100))",
+                &[],
+            )
+            .await?;
+
+        let chinese = "你好世界";
+
+        // Scenario 1: derive-shaped NVARCHAR TVP column into a VARCHAR table
+        // column. Server-side conversion uses the column collation.
+        #[derive(Debug)]
+        struct NvcRow {
+            txt: String,
+        }
+        impl Tvp for NvcRow {
+            fn type_name() -> &'static str {
+                "dbo.NvcList"
+            }
+            fn columns() -> Vec<TvpColumn> {
+                vec![TvpColumn::new("txt", "NVARCHAR(100)", 0)]
+            }
+            fn to_row(&self) -> Result<TvpRow, mssql_types::TypeError> {
+                Ok(TvpRow::new(vec![SqlValue::String(self.txt.clone())]))
+            }
+        }
+
+        let nvc = vec![NvcRow {
+            txt: chinese.into(),
+        }];
+        client
+            .execute(
+                "INSERT INTO dbo.tvp_vc_target (txt) SELECT txt FROM @p1",
+                &[&TvpValue::new(&nvc)?],
+            )
+            .await?;
+
+        let rows = client
+            .query(
+                "SELECT txt, DATALENGTH(txt) FROM dbo.tvp_vc_target WHERE id = 1",
+                &[],
+            )
+            .await?;
+        let row = rows.into_iter().next().expect("row from NVARCHAR TVP")?;
+        let txt: String = row.get(0)?;
+        let len: i32 = row.get(1)?;
+        assert_eq!(
+            txt, chinese,
+            "NVARCHAR-declared TVP cell into VARCHAR column must round-trip via \
+             server-side conversion"
+        );
+        assert_eq!(len, 8, "GB18030 stores these four code points as 8 bytes");
+
+        // Scenario 2: VARCHAR-declared TVP column, read straight back out of
+        // the TVP. The cell bytes and the declared collation both come from
+        // the client encoder.
+        #[derive(Debug)]
+        struct VcRow {
+            txt: String,
+        }
+        impl Tvp for VcRow {
+            fn type_name() -> &'static str {
+                "dbo.VcList"
+            }
+            fn columns() -> Vec<TvpColumn> {
+                vec![TvpColumn::new("txt", "VARCHAR(100)", 0)]
+            }
+            fn to_row(&self) -> Result<TvpRow, mssql_types::TypeError> {
+                Ok(TvpRow::new(vec![SqlValue::String(self.txt.clone())]))
+            }
+        }
+
+        let vc = vec![VcRow {
+            txt: chinese.into(),
+        }];
+        let rows = client
+            .query("SELECT txt FROM @p1", &[&TvpValue::new(&vc)?])
+            .await?;
+        let row = rows.into_iter().next().expect("row from VARCHAR TVP")?;
+        let txt: String = row.get(0)?;
+        assert_eq!(
+            txt, chinese,
+            "VARCHAR-declared TVP cell must round-trip on a GB18030 server; \
+             \"????\" means TVP VARCHAR encoding ignores the server collation \
+             (hardcoded Windows-1252) and corrupts silently"
+        );
+
+        client.close().await?;
+        Ok::<_, Error>(())
+    }
+    .await;
+
+    {
+        let mut cleanup = Client::connect(setup_config).await?;
+        let _ = cleanup
+            .execute(
+                &format!(
+                    "IF DB_ID('{db_name}') IS NOT NULL BEGIN \
+                        ALTER DATABASE {db_name} SET SINGLE_USER WITH ROLLBACK IMMEDIATE; \
+                        DROP DATABASE {db_name}; \
+                     END"
+                ),
+                &[],
+            )
+            .await;
+        cleanup.close().await?;
+    }
+
+    run
+}
+
 /// Regression pin for item 3.9: when `SendStringParametersAsUnicode=false` is
 /// active, the driver must encode VARCHAR parameters via the collation captured
 /// from the SqlCollation ENVCHANGE during login, not the hardcoded
