@@ -478,7 +478,10 @@ impl ChangeTracking {
     /// ```
     #[must_use]
     pub fn min_valid_version_sql(table_name: &str) -> String {
-        format!("SELECT CHANGE_TRACKING_MIN_VALID_VERSION(OBJECT_ID(N'{table_name}'))")
+        format!(
+            "SELECT CHANGE_TRACKING_MIN_VALID_VERSION(OBJECT_ID(N'{}'))",
+            escape_nvarchar_literal(table_name)
+        )
     }
 
     /// Generate SQL to check if a column is in a change mask.
@@ -491,21 +494,34 @@ impl ChangeTracking {
     /// * `column_name` - The column to check
     /// * `mask_variable` - The name of the variable holding the change mask
     ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidIdentifier`](crate::Error::InvalidIdentifier)
+    /// if `mask_variable` is not a valid SQL Server identifier — unlike the
+    /// name arguments (which are escaped into quoted literals), the variable
+    /// is spliced into the statement verbatim, so it must be validated.
+    ///
     /// # Example
     ///
     /// ```rust
     /// use mssql_client::change_tracking::ChangeTracking;
     ///
-    /// let sql = ChangeTracking::column_in_mask_sql("Products", "Price", "@mask");
+    /// let sql = ChangeTracking::column_in_mask_sql("Products", "Price", "@mask").unwrap();
     /// assert!(sql.contains("CHANGE_TRACKING_IS_COLUMN_IN_MASK"));
     /// ```
-    #[must_use]
-    pub fn column_in_mask_sql(table_name: &str, column_name: &str, mask_variable: &str) -> String {
-        format!(
+    pub fn column_in_mask_sql(
+        table_name: &str,
+        column_name: &str,
+        mask_variable: &str,
+    ) -> Result<String, crate::Error> {
+        crate::validation::validate_identifier(mask_variable)?;
+        Ok(format!(
             "SELECT CHANGE_TRACKING_IS_COLUMN_IN_MASK(\
-             COLUMNPROPERTY(OBJECT_ID(N'{table_name}'), N'{column_name}', 'ColumnId'), \
-             {mask_variable})"
-        )
+             COLUMNPROPERTY(OBJECT_ID(N'{}'), N'{}', 'ColumnId'), \
+             {mask_variable})",
+            escape_nvarchar_literal(table_name),
+            escape_nvarchar_literal(column_name)
+        ))
     }
 
     /// Generate SQL to enable change tracking on a database.
@@ -532,8 +548,9 @@ impl ChangeTracking {
     ) -> String {
         let cleanup = if auto_cleanup { "ON" } else { "OFF" };
         format!(
-            "ALTER DATABASE [{database_name}] SET CHANGE_TRACKING = ON \
-             (CHANGE_RETENTION = {retention_days} DAYS, AUTO_CLEANUP = {cleanup})"
+            "ALTER DATABASE [{}] SET CHANGE_TRACKING = ON \
+             (CHANGE_RETENTION = {retention_days} DAYS, AUTO_CLEANUP = {cleanup})",
+            database_name.replace(']', "]]")
         )
     }
 
@@ -590,8 +607,18 @@ impl ChangeTracking {
     /// Generate SQL to disable change tracking on a database.
     #[must_use]
     pub fn disable_database_sql(database_name: &str) -> String {
-        format!("ALTER DATABASE [{database_name}] SET CHANGE_TRACKING = OFF")
+        format!(
+            "ALTER DATABASE [{}] SET CHANGE_TRACKING = OFF",
+            database_name.replace(']', "]]")
+        )
     }
+}
+
+/// Escape a string for inclusion in an `N'...'` literal: per T-SQL rules a
+/// single quote inside a string literal is escaped by doubling it, which
+/// makes any input inert — it cannot terminate the literal early.
+fn escape_nvarchar_literal(s: &str) -> String {
+    s.replace('\'', "''")
 }
 
 /// Result of checking if a sync version is still valid.
@@ -640,6 +667,7 @@ impl SyncVersionStatus {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -773,10 +801,57 @@ mod tests {
         assert!(min_sql.contains("CHANGE_TRACKING_MIN_VALID_VERSION"));
         assert!(min_sql.contains("Products"));
 
-        let mask_sql = ChangeTracking::column_in_mask_sql("Products", "Price", "@mask");
+        let mask_sql = ChangeTracking::column_in_mask_sql("Products", "Price", "@mask").unwrap();
         assert!(mask_sql.contains("CHANGE_TRACKING_IS_COLUMN_IN_MASK"));
         assert!(mask_sql.contains("Price"));
         assert!(mask_sql.contains("@mask"));
+    }
+
+    /// Issue #144: the helpers that embed names in `N'...'` literals must
+    /// double interior single quotes so a hostile name cannot terminate the
+    /// literal and smuggle SQL into the statement.
+    #[test]
+    fn test_nvarchar_literal_names_cannot_break_out() {
+        let hostile = "x'); SELECT 1--";
+
+        let sql = ChangeTracking::min_valid_version_sql(hostile);
+        assert!(
+            sql.contains("N'x''); SELECT 1--'"),
+            "single quotes must be doubled, got: {sql}"
+        );
+        assert!(!sql.contains("N'x');"), "literal must not end early: {sql}");
+
+        let sql = ChangeTracking::column_in_mask_sql(hostile, hostile, "@mask").unwrap();
+        assert!(sql.contains("N'x''); SELECT 1--'"));
+        assert!(!sql.contains("N'x');"));
+    }
+
+    /// Issue #144: `mask_variable` is spliced verbatim (no quoting can make
+    /// it safe), so it must be validated as an identifier.
+    #[test]
+    fn test_mask_variable_is_validated() {
+        assert!(ChangeTracking::column_in_mask_sql("T", "C", "@mask").is_ok());
+        assert!(ChangeTracking::column_in_mask_sql("T", "C", "@mask); DROP TABLE x--").is_err());
+        assert!(ChangeTracking::column_in_mask_sql("T", "C", "1 OR 1=1").is_err());
+        assert!(ChangeTracking::column_in_mask_sql("T", "C", "").is_err());
+    }
+
+    /// Issue #144: the database-level helpers bracket-quote the name and must
+    /// double interior `]` (QUOTENAME rule), matching the table helpers.
+    #[test]
+    fn test_database_name_brackets_are_escaped() {
+        let hostile = "x]; DROP DATABASE foo--";
+
+        let sql = ChangeTracking::enable_database_sql(hostile, 2, true);
+        assert!(
+            sql.contains("ALTER DATABASE [x]]; DROP DATABASE foo--]"),
+            "interior ] must be doubled, got: {sql}"
+        );
+        assert!(!sql.contains("ALTER DATABASE [x];"));
+
+        let sql = ChangeTracking::disable_database_sql(hostile);
+        assert!(sql.contains("ALTER DATABASE [x]]; DROP DATABASE foo--]"));
+        assert!(!sql.contains("ALTER DATABASE [x];"));
     }
 
     #[test]
