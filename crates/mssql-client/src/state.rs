@@ -9,12 +9,13 @@
 //! Disconnected -> Connected (via TCP connect)
 //! Connected -> Ready (via authentication)
 //! Ready -> InTransaction (via begin_transaction())
-//! Ready -> Streaming (via query() that returns stream)
 //! InTransaction -> Ready (via commit() or rollback())
-//! InTransaction -> Streaming (via query() within transaction)
-//! Streaming -> Ready (via stream completion or cancellation)
-//! Streaming -> InTransaction (via stream completion within transaction)
 //! ```
+//!
+//! Queries do not change the connection state: `query()` borrows the client
+//! mutably and returns an iterable result. The [`Streaming`] state type is
+//! declared for the planned socket-streaming work but no API currently
+//! transitions into it.
 
 use std::marker::PhantomData;
 

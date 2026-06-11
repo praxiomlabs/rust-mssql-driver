@@ -1,7 +1,8 @@
-//! Streaming query results example.
+//! Lazy row decoding example.
 //!
-//! This example demonstrates memory-efficient processing of large result sets
-//! using the streaming API based on the Arc<Bytes> pattern from ADR-004.
+//! This example iterates a large result set with `QueryStream`: the response
+//! is buffered, but rows decode lazily as they are consumed (the Arc<Bytes>
+//! pattern from ADR-004), so only one decoded `Row` is alive at a time.
 //!
 //! # Running
 //!
