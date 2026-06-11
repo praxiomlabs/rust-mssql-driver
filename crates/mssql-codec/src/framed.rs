@@ -299,3 +299,58 @@ where
             .finish()
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use futures_util::{SinkExt, StreamExt};
+    use tds_protocol::packet::{PacketHeader, PacketStatus, PacketType};
+
+    /// Issue #165: `PacketStream` (Sink + Stream over `TdsCodec`) must
+    /// round-trip a packet through a transport — the framing adapter that had
+    /// no direct tests.
+    #[tokio::test]
+    async fn test_packet_stream_round_trip() {
+        let (a, b) = tokio::io::duplex(4096);
+        let mut writer = PacketStream::new(a);
+        let mut reader = PacketStream::new(b);
+
+        let header = PacketHeader::new(PacketType::SqlBatch, PacketStatus::END_OF_MESSAGE, 0);
+        let sent = Packet::new(header, BytesMut::from(&b"hello"[..]));
+
+        writer.send(sent).await.expect("send packet");
+
+        let got = reader
+            .next()
+            .await
+            .expect("a packet must arrive")
+            .expect("decode must succeed");
+        assert_eq!(got.header.packet_type, PacketType::SqlBatch);
+        assert!(got.header.is_end_of_message());
+        assert_eq!(&got.payload[..], b"hello");
+    }
+
+    /// Issue #165: the split `PacketWriter` → `PacketReader` halves used for
+    /// cancellation-safe I/O (ADR-005) must also round-trip.
+    #[tokio::test]
+    async fn test_split_reader_writer_round_trip() {
+        let (a, b) = tokio::io::duplex(4096);
+        let mut writer = PacketWriter::new(a);
+        let mut reader = PacketReader::new(b);
+
+        let header = PacketHeader::new(PacketType::Rpc, PacketStatus::END_OF_MESSAGE, 0);
+        writer
+            .send(Packet::new(header, BytesMut::from(&b"world"[..])))
+            .await
+            .expect("send packet");
+
+        let got = reader
+            .next()
+            .await
+            .expect("a packet must arrive")
+            .expect("decode must succeed");
+        assert_eq!(got.header.packet_type, PacketType::Rpc);
+        assert_eq!(&got.payload[..], b"world");
+    }
+}

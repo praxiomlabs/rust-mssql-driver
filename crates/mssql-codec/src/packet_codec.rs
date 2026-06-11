@@ -176,7 +176,7 @@ impl Encoder<Packet> for TdsCodec {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use tds_protocol::packet::{PacketStatus, PacketType};
@@ -232,5 +232,135 @@ mod tests {
 
         let result = codec.decode(&mut data).unwrap();
         assert!(result.is_none()); // Should return None for incomplete
+    }
+
+    /// Build an 8-byte TDS header with an arbitrary length field (which may be
+    /// intentionally invalid for testing).
+    fn header_with_length(len: u16) -> BytesMut {
+        let mut data = BytesMut::new();
+        data.put_u8(PacketType::SqlBatch as u8);
+        data.put_u8(PacketStatus::END_OF_MESSAGE.bits());
+        data.put_u16(len);
+        data.put_u16(0); // spid
+        data.put_u8(1); // packet_id
+        data.put_u8(0); // window
+        data
+    }
+
+    /// Issue #165: a length field smaller than the 8-byte header is malformed
+    /// and must be rejected, not silently accepted or panicked on.
+    #[test]
+    fn test_decode_rejects_length_below_header_size() {
+        let mut codec = TdsCodec::new();
+        let mut data = header_with_length(4); // < PACKET_HEADER_SIZE (8)
+        assert!(matches!(
+            codec.decode(&mut data),
+            Err(CodecError::InvalidHeader)
+        ));
+    }
+
+    /// Issue #165: a declared length above the negotiated maximum must be
+    /// rejected before any allocation/read of the claimed size.
+    #[test]
+    fn test_decode_rejects_packet_too_large() {
+        let mut codec = TdsCodec::new().with_max_packet_size(16);
+        // Header claims 20 bytes; only the 8-byte header is present, but the
+        // size check must fire before the completeness check.
+        let mut data = header_with_length(20);
+        match codec.decode(&mut data) {
+            Err(CodecError::PacketTooLarge { size, max }) => {
+                assert_eq!(size, 20);
+                assert_eq!(max, 16);
+            }
+            other => panic!("expected PacketTooLarge, got {other:?}"),
+        }
+    }
+
+    /// Issue #165: encoding a packet whose total length exceeds the maximum
+    /// must error rather than emit a truncated/overflowing length field.
+    #[test]
+    fn test_encode_rejects_packet_too_large() {
+        let mut codec = TdsCodec::new().with_max_packet_size(16);
+        let header = PacketHeader::new(PacketType::SqlBatch, PacketStatus::END_OF_MESSAGE, 0);
+        // 8-byte header + 16-byte payload = 24 > 16.
+        let payload = BytesMut::from(&[0u8; 16][..]);
+        let mut dst = BytesMut::new();
+        match codec.encode(Packet::new(header, payload), &mut dst) {
+            Err(CodecError::PacketTooLarge { size, max }) => {
+                assert_eq!(size, 24);
+                assert_eq!(max, 16);
+            }
+            other => panic!("expected PacketTooLarge, got {other:?}"),
+        }
+    }
+
+    /// Issue #165: the packet-id counter wraps 255 → 1, skipping 0 (TDS
+    /// packet IDs are 1-based; a 0 would be misread by the server).
+    #[test]
+    fn test_packet_id_wraps_past_zero() {
+        let mut codec = TdsCodec::new();
+        let mut saw_zero = false;
+        let mut saw_wrap_to_one = false;
+        let mut prev = codec.next_packet_id(); // first id (1)
+        for _ in 0..600 {
+            let id = codec.next_packet_id();
+            if id == 0 {
+                saw_zero = true;
+            }
+            if prev == 255 {
+                assert_eq!(id, 1, "after 255 the id must skip 0 and become 1");
+                saw_wrap_to_one = true;
+            }
+            prev = id;
+        }
+        assert!(!saw_zero, "packet id 0 must never be emitted");
+        assert!(saw_wrap_to_one, "the test must exercise the 255→1 wrap");
+    }
+
+    /// Issue #165: two complete packets concatenated in one buffer must both
+    /// decode, with the buffer fully consumed.
+    #[test]
+    fn test_decode_two_packets_from_one_buffer() {
+        let mut codec = TdsCodec::new();
+        let mut data = BytesMut::new();
+        for tag in [b"aaaa", b"bbbb"] {
+            data.put_u8(PacketType::SqlBatch as u8);
+            data.put_u8(PacketStatus::END_OF_MESSAGE.bits());
+            data.put_u16(12);
+            data.put_u16(0);
+            data.put_u8(1);
+            data.put_u8(0);
+            data.put_slice(tag);
+        }
+
+        let p1 = codec.decode(&mut data).unwrap().expect("first packet");
+        assert_eq!(&p1.payload[..], b"aaaa");
+        let p2 = codec.decode(&mut data).unwrap().expect("second packet");
+        assert_eq!(&p2.payload[..], b"bbbb");
+        assert!(data.is_empty(), "buffer must be fully consumed");
+        assert!(codec.decode(&mut data).unwrap().is_none());
+    }
+
+    /// Issue #165: a packet arriving in two reads (partial header, then the
+    /// rest) must decode once the full packet is present.
+    #[test]
+    fn test_decode_incremental_feed() {
+        let mut codec = TdsCodec::new();
+        let mut full = header_with_length(12);
+        full.put_slice(b"test");
+
+        // Feed only the first 5 bytes (partial header).
+        let mut data = BytesMut::new();
+        data.put_slice(&full[..5]);
+        assert!(codec.decode(&mut data).unwrap().is_none());
+
+        // Feed the remaining bytes; now it decodes.
+        data.put_slice(&full[5..]);
+        let p = codec
+            .decode(&mut data)
+            .unwrap()
+            .expect("packet after full feed");
+        assert_eq!(&p.payload[..], b"test");
+        assert!(data.is_empty());
     }
 }
