@@ -499,6 +499,79 @@ async fn test_mock_server_tls_full_connection() {
     server.stop();
 }
 
+/// Issue #163 regression: the negative control for TLS trust. The mock server
+/// presents a self-signed certificate that the driver's default trust store
+/// (webpki roots) does not trust. With `TrustServerCertificate=false` the TLS
+/// handshake MUST fail — a wiring bug that always installed the dangerous
+/// verifier would make `test_mock_server_tls_full_connection` (which uses
+/// `trust_server_certificate(true)`) pass while silently disabling validation,
+/// and nothing else would catch it.
+#[tokio::test]
+async fn test_tls_handshake_rejects_untrusted_cert_when_validation_on() {
+    use bytes::BufMut;
+    use tds_protocol::prelogin::{EncryptionLevel, PreLogin};
+    use tds_protocol::{PACKET_HEADER_SIZE, PacketHeader, PacketStatus, PacketType};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
+
+    let server = MockTdsServer::builder()
+        .with_server_name("TlsRejectTest")
+        .with_tls()
+        .build()
+        .await
+        .expect("Server should start");
+
+    let mut stream = TcpStream::connect(server.addr())
+        .await
+        .expect("Should connect");
+
+    // PreLogin with Encrypt=On to drive the server into the TLS handshake.
+    let prelogin = PreLogin::new().with_encryption(EncryptionLevel::On);
+    let prelogin_bytes = prelogin.encode();
+    let header = PacketHeader::new(
+        PacketType::PreLogin,
+        PacketStatus::END_OF_MESSAGE,
+        (PACKET_HEADER_SIZE + prelogin_bytes.len()) as u16,
+    );
+    let mut packet_buf = bytes::BytesMut::with_capacity(PACKET_HEADER_SIZE + prelogin_bytes.len());
+    header.encode(&mut packet_buf);
+    packet_buf.put_slice(&prelogin_bytes);
+    stream
+        .write_all(&packet_buf)
+        .await
+        .expect("Should send PreLogin");
+
+    let mut header_buf = [0u8; PACKET_HEADER_SIZE];
+    stream
+        .read_exact(&mut header_buf)
+        .await
+        .expect("Should read header");
+    let response_length = u16::from_be_bytes([header_buf[2], header_buf[3]]) as usize;
+    let payload_length = response_length.saturating_sub(PACKET_HEADER_SIZE);
+    let mut response_buf = vec![0u8; payload_length];
+    stream
+        .read_exact(&mut response_buf)
+        .await
+        .expect("Should read payload");
+
+    // Attempt the handshake with validation ON against the self-signed cert.
+    use mssql_tls::{TlsConfig, TlsConnector};
+    let tls_config = TlsConfig::new().trust_server_certificate(false);
+    let tls_connector = TlsConnector::new(tls_config).expect("Should create connector");
+
+    let result = tls_connector
+        .connect_with_prelogin(stream, "localhost")
+        .await;
+
+    assert!(
+        result.is_err(),
+        "TLS handshake against an untrusted self-signed cert must fail when \
+         TrustServerCertificate=false"
+    );
+
+    server.stop();
+}
+
 /// Test raw TLS handshake (no PreLogin wrapping) to isolate TLS from wrapping.
 #[tokio::test]
 async fn test_raw_tls_data_exchange() {
