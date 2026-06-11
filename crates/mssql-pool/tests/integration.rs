@@ -1204,3 +1204,62 @@ async fn test_cancel_safety_pool_discards_inflight_connection() {
 
     pool.close().await;
 }
+
+// =============================================================================
+// Permit Accounting (issue #151)
+// =============================================================================
+
+/// Regression test for #151: the reaper called `add_permits` when evicting
+/// idle connections, but idle connections hold no permits (permits are owned
+/// by checkouts and released on checkin), so every reap permanently inflated
+/// capacity past `max_connections`.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_reaper_does_not_inflate_max_connections() {
+    let client_config = get_test_config().expect("SQL Server config required");
+
+    let pool_config = mssql_driver_pool::PoolConfig::new()
+        .min_connections(0)
+        .max_connections(2)
+        .connection_timeout(Duration::from_millis(500))
+        .idle_timeout(Duration::from_millis(100))
+        .test_on_checkout(false)
+        .health_check_interval(Duration::from_millis(200)); // reaper tick
+
+    let pool = Pool::builder()
+        .client_config(client_config)
+        .pool_config(pool_config)
+        .build()
+        .await
+        .expect("Failed to create pool");
+
+    // Fill the pool, then return both connections to idle.
+    let c1 = pool.get().await.expect("checkout 1");
+    let c2 = pool.get().await.expect("checkout 2");
+    drop(c1);
+    drop(c2);
+
+    // Let the reaper evict both idle connections (idle_timeout 100ms,
+    // reaper tick 200ms; generous margin for slow CI).
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    let metrics = pool.metrics();
+    assert!(
+        metrics.connections_idle_expired >= 2,
+        "reaper should have evicted the idle connections (evicted: {})",
+        metrics.connections_idle_expired
+    );
+
+    // Capacity must still be max_connections: two checkouts succeed...
+    let _h1 = pool.get().await.expect("checkout after reap 1");
+    let _h2 = pool.get().await.expect("checkout after reap 2");
+    // ...and a third must fail on the acquire timeout rather than exceed the
+    // cap. Before the fix the reap had added two phantom permits, so this
+    // third checkout incorrectly succeeded.
+    let third = pool.get().await;
+    assert!(
+        third.is_err(),
+        "third concurrent checkout must fail with max_connections=2"
+    );
+
+    pool.close().await;
+}

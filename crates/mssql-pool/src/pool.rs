@@ -423,10 +423,11 @@ impl Pool {
                 }
                 inner.record_pool_status();
 
-                // Release semaphore permits for closed connections
-                inner
-                    .semaphore
-                    .add_permits((expired_lifetime + expired_idle) as usize);
+                // Deliberately no semaphore.add_permits here: idle connections
+                // hold no permits (permits are owned by checkouts and released
+                // on checkin; warm-up drops its permit after pushing to idle),
+                // so evicting idle entries frees nothing. Adding permits here
+                // inflated capacity past max_connections on every reap (#151).
             } else {
                 inner.metrics.lock().reaper_runs += 1;
             }
