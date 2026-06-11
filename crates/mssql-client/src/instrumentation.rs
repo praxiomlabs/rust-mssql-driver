@@ -243,7 +243,7 @@ pub fn extract_operation(sql: &str) -> &'static str {
 
 /// Instrumentation context for database operations.
 #[cfg(feature = "otel")]
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct InstrumentationContext {
     /// Server address.
     pub server_address: String,
@@ -253,6 +253,21 @@ pub struct InstrumentationContext {
     pub database: Option<String>,
     /// Sanitization configuration.
     pub sanitization: SanitizationConfig,
+    /// Operation-level metrics (duration histogram, operation/error counters)
+    /// bound to this connection's server attributes.
+    metrics: std::sync::Arc<DatabaseMetrics>,
+}
+
+#[cfg(feature = "otel")]
+impl std::fmt::Debug for InstrumentationContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InstrumentationContext")
+            .field("server_address", &self.server_address)
+            .field("server_port", &self.server_port)
+            .field("database", &self.database)
+            .field("sanitization", &self.sanitization)
+            .finish_non_exhaustive()
+    }
 }
 
 #[cfg(feature = "otel")]
@@ -260,12 +275,20 @@ impl InstrumentationContext {
     /// Create a new instrumentation context.
     #[must_use]
     pub fn new(server_address: String, server_port: u16) -> Self {
+        let metrics = std::sync::Arc::new(DatabaseMetrics::new(None, &server_address, server_port));
         Self {
             server_address,
             server_port,
             database: None,
             sanitization: SanitizationConfig::default(),
+            metrics,
         }
+    }
+
+    /// Operation-level metrics for this connection.
+    #[must_use]
+    pub fn metrics(&self) -> &DatabaseMetrics {
+        &self.metrics
     }
 
     /// Set the database name.

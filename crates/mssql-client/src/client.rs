@@ -340,15 +340,7 @@ impl<S: ConnectionState> Client<S> {
         let meta_query = format!("SELECT TOP 0 * FROM {}", builder.table_name());
         self.send_sql_batch(&meta_query).await?;
 
-        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
-        let message = match connection {
-            #[cfg(feature = "tls")]
-            ConnectionHandle::Tls(conn) => conn.read_message().await?,
-            #[cfg(feature = "tls")]
-            ConnectionHandle::TlsPrelogin(conn) => conn.read_message().await?,
-            ConnectionHandle::Plain(conn) => conn.read_message().await?,
-        }
-        .ok_or(Error::ConnectionClosed)?;
+        let message = self.read_response_message().await?;
         self.in_flight = false;
 
         // Capture both the raw COLMETADATA bytes and parsed column info
@@ -691,6 +683,10 @@ impl Client<Ready> {
         let instrumentation = self.instrumentation.clone();
         #[cfg(feature = "otel")]
         let mut span = instrumentation.query_span(sql);
+        #[cfg(feature = "otel")]
+        let timer = crate::instrumentation::OperationTimer::start(
+            crate::instrumentation::extract_operation(sql),
+        );
 
         let result = async {
             if params.is_empty() {
@@ -714,6 +710,8 @@ impl Client<Ready> {
             Ok(_) => InstrumentationContext::record_success(&mut span, None),
             Err(e) => InstrumentationContext::record_error(&mut span, e),
         }
+        #[cfg(feature = "otel")]
+        timer.finish(instrumentation.metrics(), result.is_ok());
 
         // Drop the span before returning
         #[cfg(feature = "otel")]
@@ -854,6 +852,10 @@ impl Client<Ready> {
         let instrumentation = self.instrumentation.clone();
         #[cfg(feature = "otel")]
         let mut span = instrumentation.query_span(sql);
+        #[cfg(feature = "otel")]
+        let timer = crate::instrumentation::OperationTimer::start(
+            crate::instrumentation::extract_operation(sql),
+        );
 
         let result = async {
             if params.is_empty() {
@@ -877,6 +879,8 @@ impl Client<Ready> {
             Ok(rows) => InstrumentationContext::record_success(&mut span, Some(*rows)),
             Err(e) => InstrumentationContext::record_error(&mut span, e),
         }
+        #[cfg(feature = "otel")]
+        timer.finish(instrumentation.metrics(), result.is_ok());
 
         // Drop the span before returning
         #[cfg(feature = "otel")]
@@ -1239,6 +1243,10 @@ impl Client<InTransaction> {
         let instrumentation = self.instrumentation.clone();
         #[cfg(feature = "otel")]
         let mut span = instrumentation.query_span(sql);
+        #[cfg(feature = "otel")]
+        let timer = crate::instrumentation::OperationTimer::start(
+            crate::instrumentation::extract_operation(sql),
+        );
 
         let result = async {
             if params.is_empty() {
@@ -1262,6 +1270,8 @@ impl Client<InTransaction> {
             Ok(_) => InstrumentationContext::record_success(&mut span, None),
             Err(e) => InstrumentationContext::record_error(&mut span, e),
         }
+        #[cfg(feature = "otel")]
+        timer.finish(instrumentation.metrics(), result.is_ok());
 
         // Drop the span before returning
         #[cfg(feature = "otel")]
@@ -1305,6 +1315,10 @@ impl Client<InTransaction> {
         let instrumentation = self.instrumentation.clone();
         #[cfg(feature = "otel")]
         let mut span = instrumentation.query_span(sql);
+        #[cfg(feature = "otel")]
+        let timer = crate::instrumentation::OperationTimer::start(
+            crate::instrumentation::extract_operation(sql),
+        );
 
         let result = async {
             if params.is_empty() {
@@ -1328,6 +1342,8 @@ impl Client<InTransaction> {
             Ok(rows) => InstrumentationContext::record_success(&mut span, Some(*rows)),
             Err(e) => InstrumentationContext::record_error(&mut span, e),
         }
+        #[cfg(feature = "otel")]
+        timer.finish(instrumentation.metrics(), result.is_ok());
 
         // Drop the span before returning
         #[cfg(feature = "otel")]
