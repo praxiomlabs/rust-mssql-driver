@@ -466,6 +466,127 @@ async fn test_query_cancelled_by_timeout() {
     // Depending on driver implementation, it may or may not be reusable
 }
 
+/// Capability audit: explicit cancellation must actually kill the query
+/// **server-side**, not just abandon the client-side future.
+///
+/// The claims under test (cancel.rs rustdoc): `CancelHandle::cancel()` sends
+/// Attention, the current query returns an error, the response is drained
+/// (DONE_ATTN), and the same connection remains usable. This proves all four
+/// plus the part no other test covers: the request disappears from
+/// `sys.dm_exec_requests`, observed from a second connection.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_explicit_cancel_terminates_query_server_side() {
+    let config = get_test_config().expect("SQL Server config required");
+    let mut client = Client::connect(config.clone()).await.expect("connect A");
+    let mut observer = Client::connect(config).await.expect("connect B");
+
+    // Identify connection A's session so the observer can watch its request.
+    let rows = client
+        .query("SELECT CAST(@@SPID AS INT)", &[])
+        .await
+        .expect("spid query");
+    let spid: i32 = rows
+        .into_iter()
+        .next()
+        .expect("spid row")
+        .expect("spid row ok")
+        .get(0)
+        .expect("spid value");
+
+    let canceller = client.cancel_handle();
+
+    // While A is stuck in WAITFOR: positive control (the request must be
+    // visible server-side), then cancel.
+    let watcher = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        let rows = observer
+            .query(
+                "SELECT COUNT(*) FROM sys.dm_exec_requests \
+                 WHERE session_id = @p1 AND command = 'WAITFOR'",
+                &[&spid],
+            )
+            .await
+            .expect("observer query");
+        let running: i32 = rows
+            .into_iter()
+            .next()
+            .expect("count row")
+            .expect("count row ok")
+            .get(0)
+            .expect("count value");
+
+        canceller.cancel().await.expect("cancel send");
+        (observer, running)
+    });
+
+    let started = std::time::Instant::now();
+    let result = client.query("WAITFOR DELAY '00:00:30'", &[]).await;
+    let elapsed = started.elapsed();
+
+    let err = result.err().expect("cancelled query must return an error");
+    assert!(
+        matches!(err, mssql_client::Error::Cancelled),
+        "cancelled query must return Error::Cancelled, got {err:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(10),
+        "cancel must interrupt the 30s WAITFOR promptly; took {elapsed:?}"
+    );
+
+    let (mut observer, running_before) = watcher.await.expect("watcher task");
+    assert_eq!(
+        running_before, 1,
+        "positive control: the WAITFOR request must be visible in \
+         sys.dm_exec_requests before cancellation"
+    );
+
+    // Server side: the request must be gone shortly after the cancel.
+    let mut still_running = i32::MAX;
+    for _ in 0..30 {
+        let rows = observer
+            .query(
+                "SELECT COUNT(*) FROM sys.dm_exec_requests \
+                 WHERE session_id = @p1 AND command = 'WAITFOR'",
+                &[&spid],
+            )
+            .await
+            .expect("observer recheck");
+        still_running = rows
+            .into_iter()
+            .next()
+            .expect("recheck row")
+            .expect("recheck row ok")
+            .get(0)
+            .expect("recheck value");
+        if still_running == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        still_running, 0,
+        "the WAITFOR request must terminate server-side after Attention"
+    );
+
+    // Same connection must be clean and reusable (DONE_ATTN drained).
+    let rows = client
+        .query("SELECT 42", &[])
+        .await
+        .expect("query on the same connection after cancel must succeed");
+    let value: i32 = rows
+        .into_iter()
+        .next()
+        .expect("reuse row")
+        .expect("reuse row ok")
+        .get(0)
+        .expect("reuse value");
+    assert_eq!(value, 42);
+
+    observer.close().await.expect("close observer");
+    client.close().await.expect("close client");
+}
+
 // =============================================================================
 // Error Boundary Tests
 // =============================================================================

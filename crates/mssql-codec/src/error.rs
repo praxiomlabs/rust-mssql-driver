@@ -38,6 +38,12 @@ pub enum CodecError {
     #[error("connection closed")]
     ConnectionClosed,
 
+    /// The in-flight request was cancelled via an Attention signal and the
+    /// server acknowledged the cancellation (DONE_ATTN). The connection is
+    /// drained and remains usable for new requests.
+    #[error("request cancelled")]
+    Cancelled,
+
     /// Encoding error.
     #[error("encoding error: {0}")]
     Encoding(String),
