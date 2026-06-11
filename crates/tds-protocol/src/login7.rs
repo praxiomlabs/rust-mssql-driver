@@ -679,6 +679,34 @@ mod tests {
         assert_eq!(tds_version, TdsVersion::V7_4.raw());
     }
 
+    /// `ApplicationIntent=ReadOnly` is wired to the LOGIN7 `READONLY_INTENT`
+    /// bit (TypeFlags bit 5, MS-TDS §2.2.6.4) — pin both the flag encoding
+    /// and its position in the encoded packet (byte 26: after Length,
+    /// TDSVersion, PacketSize, ClientProgVer, ClientPID, ConnectionID,
+    /// OptionFlags1, OptionFlags2).
+    #[test]
+    fn test_login7_read_only_intent_bit() {
+        let read_only = Login7::new()
+            .with_sql_auth("u", "p")
+            .with_read_only_intent(true);
+        assert_eq!(read_only.type_flags.to_byte() & 0x20, 0x20);
+        let encoded = read_only.encode();
+        assert_eq!(
+            encoded[26] & 0x20,
+            0x20,
+            "READONLY_INTENT must be set in the encoded TypeFlags byte"
+        );
+
+        let read_write = Login7::new().with_sql_auth("u", "p");
+        assert_eq!(read_write.type_flags.to_byte() & 0x20, 0);
+        let encoded = read_write.encode();
+        assert_eq!(
+            encoded[26] & 0x20,
+            0,
+            "READONLY_INTENT must be clear by default"
+        );
+    }
+
     #[test]
     fn test_password_obfuscation() {
         // Known test case: "a" should encode to specific bytes
