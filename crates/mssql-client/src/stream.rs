@@ -1,7 +1,8 @@
-//! Streaming query result support.
+//! Query result sets with lazy per-row decoding.
 //!
-//! This module provides streaming result sets for memory-efficient
-//! processing of large query results.
+//! The full server response is buffered in memory first; rows are then
+//! *decoded* lazily as callers pull them. This is not incremental
+//! network streaming — see the next section for what that means for memory.
 //!
 //! ## Buffered vs True Streaming
 //!
@@ -55,10 +56,14 @@ pub(crate) enum PendingRow {
     Nbc(NbcRow),
 }
 
-/// A streaming result set from a query.
+/// A result set from a query, yielding rows one at a time.
 ///
-/// This stream yields rows one at a time, allowing processing of
-/// large result sets without loading everything into memory.
+/// The complete server response is already buffered in memory by the time
+/// this is returned; each [`Row`] is *decoded* lazily as it is pulled, not
+/// fetched incrementally from the network. Peak memory is therefore roughly
+/// the size of the raw response payload regardless of how you iterate. For
+/// genuinely large result sets, page with `OFFSET`/`FETCH` in SQL rather
+/// than relying on this type to bound memory.
 ///
 /// # Example
 ///
