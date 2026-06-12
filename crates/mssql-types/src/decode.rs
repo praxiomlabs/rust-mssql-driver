@@ -1322,7 +1322,7 @@ mod tests {
             // This is the scenario where Tiberius panics
             let mut buf = BytesMut::new();
             let date = NaiveDate::from_ymd_opt(1753, 1, 1).unwrap();
-            crate::encode::encode_date(date, &mut buf);
+            crate::encode::encode_date(date, &mut buf).unwrap();
             assert_eq!(buf.len(), 3, "DATE encoding is always 3 bytes");
         }
 
@@ -1331,7 +1331,7 @@ mod tests {
             // The DATE epoch: 0001-01-01
             let mut buf = BytesMut::new();
             let date = NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
-            crate::encode::encode_date(date, &mut buf);
+            crate::encode::encode_date(date, &mut buf).unwrap();
             // Days since 0001-01-01 = 0
             assert_eq!(&buf[..], &[0, 0, 0]);
         }
@@ -1341,7 +1341,7 @@ mod tests {
             // SQL Server max DATE: 9999-12-31
             let mut buf = BytesMut::new();
             let date = NaiveDate::from_ymd_opt(9999, 12, 31).unwrap();
-            crate::encode::encode_date(date, &mut buf);
+            crate::encode::encode_date(date, &mut buf).unwrap();
             assert_eq!(buf.len(), 3, "DATE encoding is always 3 bytes");
             // 3652058 days from 0001-01-01 — fits in 3 bytes (max ~16M)
             let days = buf[0] as u32 | ((buf[1] as u32) << 8) | ((buf[2] as u32) << 16);
@@ -1473,7 +1473,7 @@ mod tests {
             ) {
                 let date = NaiveDate::from_ymd_opt(year, month, day).unwrap();
                 let mut buf = BytesMut::new();
-                crate::encode::encode_date(date, &mut buf);
+                crate::encode::encode_date(date, &mut buf).unwrap();
                 prop_assert_eq!(buf.len(), 3);
             }
         }
