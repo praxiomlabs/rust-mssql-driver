@@ -28,8 +28,8 @@
 //! `available == 0` while requests are waiting ([`PoolStatus::has_waiters`]).
 
 use std::collections::VecDeque;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use mssql_client::{Client, Config as ClientConfig, DatabaseMetrics, Ready};
@@ -53,6 +53,15 @@ use crate::lifecycle::ConnectionMetadata;
 /// - Configurable min/max pool sizes
 /// - Connection timeout and idle timeout
 /// - Automatic reconnection on transient failures
+///
+/// # Shutdown
+///
+/// [`close()`](Pool::close) is the graceful path: it drains idle
+/// connections immediately and records their closure in the metrics.
+/// Dropping the pool without closing it does not leak — the background
+/// reaper holds only a weak reference, so idle connections are released
+/// when the last handle (or last outstanding [`PooledConnection`]) drops,
+/// and the reaper exits on its next tick.
 ///
 /// # Example
 ///
@@ -228,16 +237,20 @@ impl Pool {
         // Start the reaper task for connection cleanup.
         // The task is wrapped in a restart loop so that a panic in one
         // iteration does not permanently kill idle-connection eviction.
-        let reaper_inner = Arc::clone(&inner);
+        //
+        // The reaper holds only a Weak reference: if it held a strong Arc,
+        // a Pool dropped without close() would keep the idle connections
+        // and the ticking task alive for the life of the process (#190).
+        let reaper_inner = Arc::downgrade(&inner);
         let reaper_interval = config.health_check_interval;
         tokio::spawn(async move {
             loop {
-                let inner = Arc::clone(&reaper_inner);
-                let result = tokio::task::spawn(Self::reaper_task(inner, reaper_interval)).await;
+                let weak = Weak::clone(&reaper_inner);
+                let result = tokio::task::spawn(Self::reaper_task(weak, reaper_interval)).await;
 
                 match result {
                     Ok(()) => {
-                        // Reaper exited cleanly (pool closed)
+                        // Reaper exited cleanly (pool closed or dropped)
                         break;
                     }
                     Err(join_error) => {
@@ -248,9 +261,11 @@ impl Pool {
                         );
                         tokio::time::sleep(Duration::from_secs(5)).await;
 
-                        // If the pool was closed while we were sleeping, stop
-                        if reaper_inner.closed.load(Ordering::Acquire) {
-                            break;
+                        // If the pool was closed or dropped while we were
+                        // sleeping, stop
+                        match reaper_inner.upgrade() {
+                            Some(inner) if !inner.closed.load(Ordering::Acquire) => {}
+                            _ => break,
                         }
                     }
                 }
@@ -340,12 +355,19 @@ impl Pool {
     /// - Removes connections that exceed `idle_timeout` (keeping at least `min_connections`)
     /// - When `test_while_idle` is enabled, pings remaining idle connections
     ///   and discards any that fail the health check
-    async fn reaper_task(inner: Arc<PoolInner>, interval: Duration) {
+    async fn reaper_task(pool: Weak<PoolInner>, interval: Duration) {
         let mut ticker = tokio::time::interval(interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
             ticker.tick().await;
+
+            // Upgrade per tick: the strong reference lives only for one
+            // iteration, so the reaper never keeps a dropped pool alive.
+            let Some(inner) = pool.upgrade() else {
+                tracing::debug!("reaper task stopping: pool dropped");
+                break;
+            };
 
             // Check if pool is closed
             if inner.closed.load(Ordering::Acquire) {
@@ -1330,6 +1352,31 @@ impl Drop for PooledConnection {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    /// Issue #190: dropping the pool without `close()` must not leak. The
+    /// reaper holds only a `Weak` reference, so the pool state — and any
+    /// idle connections it owns — is released as soon as the last handle
+    /// drops. With a strong `Arc` in the reaper (the old behavior) the
+    /// upgrade below succeeds and the state lives until process exit.
+    #[tokio::test]
+    async fn test_drop_without_close_releases_pool_state() {
+        let pool_config = PoolConfig::new().min_connections(0);
+        let client_config = ClientConfig::from_connection_string(
+            "Server=localhost;User Id=sa;Password=unused;TrustServerCertificate=true",
+        )
+        .unwrap();
+
+        // min_connections = 0 ⇒ no warm-up, so no server is contacted.
+        let pool = Pool::new(pool_config, client_config).await.unwrap();
+        let weak = Arc::downgrade(&pool.inner);
+
+        drop(pool);
+
+        assert!(
+            weak.upgrade().is_none(),
+            "dropping the last Pool handle must release PoolInner"
+        );
+    }
 
     #[test]
     fn test_pool_status_utilization() {
