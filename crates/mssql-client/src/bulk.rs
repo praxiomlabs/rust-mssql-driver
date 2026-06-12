@@ -1394,7 +1394,15 @@ impl<'a, S: crate::state::ConnectionState> BulkWriter<'a, S> {
     ///
     /// Writes the DONE token, sends the accumulated row data as a BulkLoad
     /// (0x07) message, and reads the server's response.
+    ///
+    /// The transfer runs under
+    /// [`command_timeout`](crate::Config::command_timeout). On expiry it
+    /// returns [`Error::CommandTimeout`] and
+    /// the connection is abandoned mid-request (a cancel cannot be
+    /// interleaved into a partially-sent BulkLoad message), so the pool
+    /// discards it — the same semantics as `SqlBulkCopy.BulkCopyTimeout`.
     pub async fn finish(mut self) -> Result<BulkInsertResult, Error> {
+        let deadline = self.client.command_deadline();
         let total_rows = self.bulk.total_rows();
         tracing::debug!(total_rows = total_rows, "finishing bulk insert");
 
@@ -1402,8 +1410,21 @@ impl<'a, S: crate::state::ConnectionState> BulkWriter<'a, S> {
         self.bulk.write_done();
         let payload = self.bulk.buffer.split().freeze();
 
-        // Send BulkLoad data and read server response
-        let rows_affected = self.client.send_and_read_bulk_load(payload).await?;
+        // Send BulkLoad data and read server response.
+        //
+        // The command timeout here is a hard abandon, not an ATTENTION
+        // cancel: an Attention packet cannot be interleaved into a
+        // partially-sent BulkLoad message without corrupting the framing.
+        // On expiry the connection is left mid-request (in_flight stays
+        // set), so the pool discards it instead of reusing it —
+        // SqlBulkCopy's BulkCopyTimeout behaves the same way.
+        let send_and_read = self.client.send_and_read_bulk_load(payload);
+        let rows_affected = match deadline {
+            Some(d) => tokio::time::timeout(d, send_and_read)
+                .await
+                .map_err(|_| Error::CommandTimeout)??,
+            None => send_and_read.await?,
+        };
 
         Ok(BulkInsertResult {
             rows_affected,

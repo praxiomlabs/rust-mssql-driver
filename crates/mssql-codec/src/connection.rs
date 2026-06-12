@@ -57,6 +57,8 @@ where
     cancel_notify: Arc<Notify>,
     /// Flag indicating cancellation is in progress.
     cancelling: Arc<std::sync::atomic::AtomicBool>,
+    /// Maximum assembled message size in bytes; 0 means unlimited.
+    max_message_size: usize,
 }
 
 impl<T> Connection<T>
@@ -75,6 +77,7 @@ where
             assembler: MessageAssembler::new(),
             cancel_notify: Arc::new(Notify::new()),
             cancelling: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            max_message_size: 0,
         }
     }
 
@@ -91,7 +94,19 @@ where
             assembler: MessageAssembler::new(),
             cancel_notify: Arc::new(Notify::new()),
             cancelling: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            max_message_size: 0,
         }
+    }
+
+    /// Cap the size of an assembled response message; 0 means unlimited.
+    ///
+    /// Responses are buffered in full before token parsing, so without a
+    /// cap a single large SELECT is unbounded client memory. When the cap
+    /// is exceeded, [`read_message`](Self::read_message) returns
+    /// [`CodecError::MessageTooLarge`] mid-message — the connection is no
+    /// longer usable for that request and should be discarded.
+    pub fn set_max_message_size(&mut self, limit: usize) {
+        self.max_message_size = limit;
     }
 
     /// Get a handle for cancelling queries on this connection.
@@ -129,7 +144,25 @@ where
 
             match self.reader.next().await {
                 Some(Ok(packet)) => {
-                    if let Some(message) = self.assembler.push(packet) {
+                    let result = self.assembler.push(packet);
+                    // Enforce the response-size cap on the accumulating
+                    // buffer AND the completed message (the final packet can
+                    // jump past the limit). Exceeding it abandons the
+                    // message mid-stream: the caller must discard the
+                    // connection.
+                    if self.max_message_size != 0 {
+                        let size = result
+                            .as_ref()
+                            .map_or_else(|| self.assembler.buffer_len(), |m| m.payload.len());
+                        if size > self.max_message_size {
+                            self.assembler.clear();
+                            return Err(CodecError::MessageTooLarge {
+                                size,
+                                limit: self.max_message_size,
+                            });
+                        }
+                    }
+                    if let Some(message) = result {
                         // The cancel flag may have been set while this read was
                         // parked in `next()`. In that case the message belongs
                         // to the request being cancelled (the server discards
@@ -766,5 +799,70 @@ mod tests {
              the interior row bytes were mistaken for the ack and the real \
              ack leaked into the next request"
         );
+    }
+
+    /// Build a raw non-EOM (continuation) TabularResult packet.
+    fn raw_packet_non_eom(payload: &[u8]) -> Vec<u8> {
+        let mut v = vec![0x04, 0x00]; // TabularResult, more packets follow
+        v.extend_from_slice(&((payload.len() + 8) as u16).to_be_bytes());
+        v.extend_from_slice(&[0, 0, 1, 0]);
+        v.extend_from_slice(payload);
+        v
+    }
+
+    /// Issue #167: the assembled response can be capped so a huge SELECT is
+    /// a loud error instead of unbounded client memory. The cap must fire
+    /// mid-assembly, before the message completes.
+    #[tokio::test]
+    async fn test_max_message_size_cap_fires_mid_assembly() {
+        use tokio::io::AsyncWriteExt;
+        let (client, mut server) = tokio::io::duplex(1 << 16);
+        let mut conn = Connection::new(client);
+        conn.set_max_message_size(1000);
+
+        let chunk = vec![0xAA; 600];
+        let mut stream = raw_packet_non_eom(&chunk);
+        stream.extend_from_slice(&raw_packet_non_eom(&chunk)); // buffer hits 1200
+        server.write_all(&stream).await.unwrap();
+
+        let result = conn.read_message().await;
+        let Err(CodecError::MessageTooLarge { size, limit }) = result else {
+            unreachable!("expected MessageTooLarge, got {result:?}");
+        };
+        assert_eq!(limit, 1000);
+        assert!(size > 1000);
+    }
+
+    /// The cap must also catch a message whose final (EOM) packet jumps it
+    /// past the limit.
+    #[tokio::test]
+    async fn test_max_message_size_cap_fires_on_completing_packet() {
+        use tokio::io::AsyncWriteExt;
+        let (client, mut server) = tokio::io::duplex(1 << 16);
+        let mut conn = Connection::new(client);
+        conn.set_max_message_size(1000);
+
+        let chunk = vec![0xAA; 600];
+        let mut stream = raw_packet_non_eom(&chunk);
+        stream.extend_from_slice(&raw_message(&chunk)); // completes at 1200
+        server.write_all(&stream).await.unwrap();
+
+        assert!(matches!(
+            conn.read_message().await,
+            Err(CodecError::MessageTooLarge { .. })
+        ));
+    }
+
+    /// Zero (the default) means unlimited — existing behavior unchanged.
+    #[tokio::test]
+    async fn test_max_message_size_zero_is_unlimited() {
+        use tokio::io::AsyncWriteExt;
+        let (client, mut server) = tokio::io::duplex(1 << 16);
+        let mut conn = Connection::new(client);
+
+        let payload = vec![0xAA; 5000];
+        server.write_all(&raw_message(&payload)).await.unwrap();
+        let msg = conn.read_message().await.unwrap().unwrap();
+        assert_eq!(msg.payload.len(), 5000);
     }
 }

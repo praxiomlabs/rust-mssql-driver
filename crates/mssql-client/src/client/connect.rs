@@ -359,6 +359,7 @@ impl Client<Disconnected> {
 
         // Create connection wrapper
         let mut connection = Connection::new(tls_stream);
+        connection.set_max_message_size(config.max_response_size);
 
         // Send PreLogin (encrypted in strict mode)
         let prelogin = Self::build_prelogin(config, EncryptionLevel::Required);
@@ -654,6 +655,7 @@ impl Client<Disconnected> {
 
                 // Create Connection from plain TCP for reading response
                 let mut connection = Connection::new(tcp_stream);
+                connection.set_max_message_size(config.max_response_size);
 
                 // Process login response (comes in plaintext, with timeout)
                 let (server_version, current_database, routing, server_collation) = timeout(
@@ -699,6 +701,7 @@ impl Client<Disconnected> {
                 // Full Encryption (ENCRYPT_ON per MS-TDS spec):
                 // - All communication after TLS handshake goes through TLS
                 let mut connection = Connection::new(tls_stream);
+                connection.set_max_message_size(config.max_response_size);
 
                 // Create SSPI negotiator if integrated auth
                 #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
@@ -763,6 +766,8 @@ impl Client<Disconnected> {
             );
 
             let mut connection = Connection::new(tcp_stream);
+
+            connection.set_max_message_size(config.max_response_size);
 
             // Create SSPI negotiator if integrated auth
             #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
@@ -893,6 +898,8 @@ impl Client<Disconnected> {
         tracing::debug!("Server accepted unencrypted connection");
 
         let mut connection = Connection::new(tcp_stream);
+
+        connection.set_max_message_size(config.max_response_size);
 
         // Create SSPI negotiator if integrated auth
         #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]

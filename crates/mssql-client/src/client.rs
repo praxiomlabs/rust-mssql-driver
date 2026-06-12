@@ -431,9 +431,17 @@ impl<S: ConnectionState> Client<S> {
         // This gives us the exact type encoding the server expects for BulkLoad,
         // following the pattern established by Tiberius.
         let meta_query = format!("SELECT TOP 0 * FROM {}", builder.table_name());
-        self.send_sql_batch(&meta_query).await?;
-
-        let message = self.read_response_message().await?;
+        let deadline = self.command_deadline();
+        let canceller = self.connection_cancel_handle();
+        let message = run_with_deadline(
+            async {
+                self.send_sql_batch(&meta_query).await?;
+                self.read_response_message().await
+            },
+            deadline,
+            canceller,
+        )
+        .await?;
         self.in_flight = false;
 
         // Capture both the raw COLMETADATA bytes and parsed column info
@@ -493,8 +501,17 @@ impl<S: ConnectionState> Client<S> {
 
         // Step 2: Send INSERT BULK statement to put server in bulk load mode
         let stmt = builder.build_insert_bulk_statement()?;
-        self.send_sql_batch(&stmt).await?;
-        self.read_execute_result().await?;
+        let deadline = self.command_deadline();
+        let canceller = self.connection_cancel_handle();
+        run_with_deadline(
+            async {
+                self.send_sql_batch(&stmt).await?;
+                self.read_execute_result().await
+            },
+            deadline,
+            canceller,
+        )
+        .await?;
 
         // Step 3: Create bulk writer with server's metadata
         let raw_meta = if meta_end > meta_start {
@@ -542,8 +559,17 @@ impl<S: ConnectionState> Client<S> {
 
         // Send INSERT BULK statement to put server in bulk load mode
         let stmt = builder.build_insert_bulk_statement()?;
-        self.send_sql_batch(&stmt).await?;
-        self.read_execute_result().await?;
+        let deadline = self.command_deadline();
+        let canceller = self.connection_cancel_handle();
+        run_with_deadline(
+            async {
+                self.send_sql_batch(&stmt).await?;
+                self.read_execute_result().await
+            },
+            deadline,
+            canceller,
+        )
+        .await?;
 
         // Create bulk writer with hand-crafted metadata
         let bulk =

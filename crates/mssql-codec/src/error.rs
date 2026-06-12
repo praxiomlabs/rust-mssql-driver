@@ -23,6 +23,15 @@ pub enum CodecError {
         max: usize,
     },
 
+    /// Assembled response message exceeded the configured size limit.
+    #[error("response message too large: {size} bytes exceeds the {limit}-byte limit")]
+    MessageTooLarge {
+        /// Bytes accumulated when the limit was exceeded.
+        size: usize,
+        /// The configured limit.
+        limit: usize,
+    },
+
     /// Incomplete packet data.
     #[error("incomplete packet: need {needed} more bytes")]
     IncompletePacket {

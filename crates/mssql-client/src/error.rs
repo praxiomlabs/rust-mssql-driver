@@ -73,7 +73,23 @@ pub enum Error {
 
     /// Codec error.
     #[error("codec error: {0}")]
-    Codec(#[from] mssql_codec::CodecError),
+    Codec(mssql_codec::CodecError),
+
+    /// Response exceeded [`Config::max_response_size`](crate::Config::max_response_size).
+    ///
+    /// The response was abandoned mid-stream, so the connection is no longer
+    /// usable and is discarded by the pool. Paginate, narrow the SELECT, or
+    /// raise the cap.
+    #[error(
+        "response too large: {size} bytes exceeds the configured {limit}-byte cap; \
+         paginate, narrow the SELECT, or raise Config::max_response_size"
+    )]
+    ResponseTooLarge {
+        /// Bytes accumulated when the cap was exceeded.
+        size: usize,
+        /// The configured cap.
+        limit: usize,
+    },
 
     /// Type conversion error.
     #[error("type error: {0}")]
@@ -225,6 +241,17 @@ impl std::fmt::Display for SharedIoError {
 impl std::error::Error for SharedIoError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.0.source()
+    }
+}
+
+impl From<mssql_codec::CodecError> for Error {
+    fn from(e: mssql_codec::CodecError) -> Self {
+        match e {
+            mssql_codec::CodecError::MessageTooLarge { size, limit } => {
+                Self::ResponseTooLarge { size, limit }
+            }
+            other => Self::Codec(other),
+        }
     }
 }
 
