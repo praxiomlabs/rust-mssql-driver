@@ -256,6 +256,18 @@ jobs:
           # Exclude mssql-testing: testing utilities have relaxed API stability
           # requirements and are not published to crates.io (publish = false).
           exclude: mssql-testing
+          # Pinned: the action defaults to floating latest stable (it ignores
+          # rust-toolchain.toml), and a 2026-06-12 stable release broke the
+          # *baseline* build (E0119 in the time crate via the locked sspi dep
+          # tree), turning this job red on every PR (#202). Bump deliberately
+          # after verifying the baseline tag still builds on the new release.
+          rust-toolchain: "1.92.0"
+          # Explicit all-features: the default heuristic already enables most
+          # features, but be exact about coverage. KNOWN BLIND SPOT either
+          # way: return-type changes pass undetected in cargo-semver-checks
+          # 0.42 (reproduced in #202), so commit-message breaking markers and
+          # Release-PR verification (CLAUDE.md) remain the primary guards.
+          feature-group: all-features
 
   coverage:
     name: Code Coverage

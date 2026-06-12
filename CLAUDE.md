@@ -313,10 +313,10 @@ Key differences for migrators:
 - **Breaking changes MUST carry the conventional marker**: `!` after the type
   (`fix(types)!:`) or a `BREAKING CHANGE:` footer. A `BREAKING:` line in the
   commit body is **ignored** by release-plz — and the `cargo-semver-checks`
-  backstop runs with default features, so breaking changes in feature-gated
-  API (chrono/uuid/decimal codecs, Always Encrypted, FILESTREAM) are invisible
-  to it (#202). Version correctness rests on the commit message. Precedent:
-  the v0.13.2 wrong bump, corrected by PR #201 before release.
+  backstop has demonstrated blind spots: version 0.42 passes return-type
+  changes (`()` → `Result<...>`) without a finding, reproduced in #202.
+  Version correctness rests on the commit message. Precedent: the v0.13.2
+  wrong bump, corrected by PR #201 before release.
 - Run `cargo fmt --all` **before** committing, not after the CI mirror flags
   it — fmt-check is the first gate in `just ci-all`, and a failure there
   costs a full gauntlet cycle plus a commit amend.
