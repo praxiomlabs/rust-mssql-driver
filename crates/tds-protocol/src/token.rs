@@ -2138,51 +2138,103 @@ impl SspiToken {
 }
 
 impl FedAuthInfo {
+    /// `FedAuthInfoID` for the service principal name (MS-TDS §2.2.7.12).
+    const ID_SPN: u8 = 0x01;
+    /// `FedAuthInfoID` for the STS URL (MS-TDS §2.2.7.12).
+    const ID_STSURL: u8 = 0x02;
+    /// Size of one `FedAuthInfoOpt` header: ID (1) + DataLen (4) + DataOffset (4).
+    const OPT_HEADER_LEN: usize = 9;
+
     /// Decode a FEDAUTHINFO token from bytes.
+    ///
+    /// Wire layout per MS-TDS §2.2.7.12 (after the 0xEE token byte):
+    /// `TokenLength` (DWORD) covering everything that follows, then
+    /// `CountOfInfoIDs` (DWORD), then `CountOfInfoIDs` option headers of
+    /// ID (BYTE) + `FedAuthInfoDataLen` (DWORD) + `FedAuthInfoDataOffset`
+    /// (DWORD), then the data block. Offsets are relative to the start of
+    /// the `CountOfInfoIDs` field, and the option data is UTF-16LE.
+    ///
+    /// Exactly `TokenLength` bytes are consumed, so tokens that follow
+    /// FEDAUTHINFO in the login stream (LOGINACK, DONE) are preserved.
     pub fn decode(src: &mut impl Buf) -> Result<Self, ProtocolError> {
         if src.remaining() < 4 {
             return Err(ProtocolError::UnexpectedEof);
         }
-
-        let _length = src.get_u32_le();
-
-        if src.remaining() < 5 {
+        let token_len = src.get_u32_le() as usize;
+        if src.remaining() < token_len {
             return Err(ProtocolError::UnexpectedEof);
         }
 
-        let _count = src.get_u8();
+        // Offsets in the option headers are relative to the start of this
+        // region (the CountOfInfoIDs field), so address into it directly.
+        let region = src.copy_to_bytes(token_len);
+        if region.len() < 4 {
+            return Err(ProtocolError::UnexpectedEof);
+        }
+        let count = u32::from_le_bytes([region[0], region[1], region[2], region[3]]) as usize;
 
-        // Read option data
+        // All headers must fit between the count field and the end of the
+        // token. The checked math also rejects hostile counts that would
+        // overflow the offset arithmetic.
+        let headers_end = count
+            .checked_mul(Self::OPT_HEADER_LEN)
+            .and_then(|n| n.checked_add(4))
+            .ok_or(ProtocolError::UnexpectedEof)?;
+        if headers_end > region.len() {
+            return Err(ProtocolError::UnexpectedEof);
+        }
+
         let mut sts_url = String::new();
         let mut spn = String::new();
 
-        // Parse info options until we have both
-        while src.has_remaining() {
-            if src.remaining() < 9 {
-                break;
+        for i in 0..count {
+            let h = 4 + i * Self::OPT_HEADER_LEN;
+            let info_id = region[h];
+            let data_len =
+                u32::from_le_bytes([region[h + 1], region[h + 2], region[h + 3], region[h + 4]])
+                    as usize;
+            let data_off =
+                u32::from_le_bytes([region[h + 5], region[h + 6], region[h + 7], region[h + 8]])
+                    as usize;
+
+            // Unknown IDs are skipped without validating their data, per the
+            // spec's instruction to ignore unrecognized options.
+            if info_id != Self::ID_SPN && info_id != Self::ID_STSURL {
+                continue;
             }
 
-            let info_id = src.get_u8();
-            let info_len = src.get_u32_le() as usize;
-            let _info_offset = src.get_u32_le();
-
-            if src.remaining() < info_len {
-                break;
+            let data_end = data_off
+                .checked_add(data_len)
+                .ok_or(ProtocolError::UnexpectedEof)?;
+            if data_end > region.len() {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            if data_len % 2 != 0 {
+                return Err(ProtocolError::StringEncoding(
+                    #[cfg(feature = "std")]
+                    "FEDAUTHINFO option data has odd length, not UTF-16".to_string(),
+                    #[cfg(not(feature = "std"))]
+                    "FEDAUTHINFO option data has odd length, not UTF-16",
+                ));
             }
 
-            // Read UTF-16LE string
-            let char_count = info_len / 2;
-            let mut chars = Vec::with_capacity(char_count);
-            for _ in 0..char_count {
-                chars.push(src.get_u16_le());
-            }
+            let chars: Vec<u16> = region[data_off..data_end]
+                .chunks_exact(2)
+                .map(|b| u16::from_le_bytes([b[0], b[1]]))
+                .collect();
+            let value = String::from_utf16(&chars).map_err(|_| {
+                ProtocolError::StringEncoding(
+                    #[cfg(feature = "std")]
+                    "invalid UTF-16 in FEDAUTHINFO option".to_string(),
+                    #[cfg(not(feature = "std"))]
+                    "invalid UTF-16 in FEDAUTHINFO option",
+                )
+            })?;
 
-            if let Ok(value) = String::from_utf16(&chars) {
-                match info_id {
-                    0x01 => spn = value,
-                    0x02 => sts_url = value,
-                    _ => {}
-                }
+            if info_id == Self::ID_SPN {
+                spn = value;
+            } else {
+                sts_url = value;
             }
         }
 
@@ -3935,5 +3987,143 @@ mod tests {
         let data = Bytes::from_static(&[0xAA, 0x20, 0x00]);
         let mut parser = TokenParser::new(data);
         assert!(parser.next_token().is_err());
+    }
+
+    // ========================================================================
+    // FEDAUTHINFO (issue #189: parser must follow MS-TDS §2.2.7.12)
+    // ========================================================================
+
+    /// Build a spec-exact FEDAUTHINFO token (including the 0xEE type byte):
+    /// DWORD TokenLength, DWORD CountOfInfoIDs, option headers of
+    /// ID/DataLen/DataOffset, then UTF-16LE data addressed by the offsets
+    /// (relative to the start of the count field).
+    fn build_fed_auth_info_token(options: &[(u8, &str)]) -> Vec<u8> {
+        let headers_end = 4 + options.len() * 9;
+        let mut data_block = Vec::new();
+        let mut headers = Vec::new();
+        for (id, value) in options {
+            let encoded: Vec<u8> = value.encode_utf16().flat_map(u16::to_le_bytes).collect();
+            let offset = headers_end + data_block.len();
+            headers.push(*id);
+            headers.extend_from_slice(&u32::try_from(encoded.len()).unwrap().to_le_bytes());
+            headers.extend_from_slice(&u32::try_from(offset).unwrap().to_le_bytes());
+            data_block.extend_from_slice(&encoded);
+        }
+
+        let token_len = 4 + headers.len() + data_block.len();
+        let mut out = vec![0xEE];
+        out.extend_from_slice(&u32::try_from(token_len).unwrap().to_le_bytes());
+        out.extend_from_slice(&u32::try_from(options.len()).unwrap().to_le_bytes());
+        out.extend_from_slice(&headers);
+        out.extend_from_slice(&data_block);
+        out
+    }
+
+    #[test]
+    fn test_fed_auth_info_decodes_spec_layout() {
+        const STS: &str = "https://login.microsoftonline.com/common";
+        const SPN: &str = "https://database.windows.net/";
+        // STSURL (0x02) listed first, SPN (0x01) second, like real servers.
+        let token = build_fed_auth_info_token(&[(0x02, STS), (0x01, SPN)]);
+
+        let mut parser = TokenParser::new(Bytes::from(token));
+        let parsed = parser.next_token().unwrap().unwrap();
+        let Token::FedAuthInfo(info) = parsed else {
+            panic!("expected FedAuthInfo, got {parsed:?}");
+        };
+        assert_eq!(info.sts_url, STS);
+        assert_eq!(info.spn, SPN);
+        assert!(parser.next_token().unwrap().is_none(), "exact consumption");
+    }
+
+    #[test]
+    fn test_fed_auth_info_preserves_following_tokens() {
+        // The old parser looped over the whole remaining stream, swallowing
+        // the tokens that follow FEDAUTHINFO during login. A DONE token
+        // appended after it must survive.
+        let mut stream = build_fed_auth_info_token(&[
+            (0x02, "https://sts.example/"),
+            (0x01, "https://db.example/"),
+        ]);
+        stream.push(0xFD); // DONE
+        stream.extend_from_slice(&0u16.to_le_bytes()); // status
+        stream.extend_from_slice(&0u16.to_le_bytes()); // curcmd
+        stream.extend_from_slice(&0u64.to_le_bytes()); // rowcount
+
+        let mut parser = TokenParser::new(Bytes::from(stream));
+        assert!(matches!(
+            parser.next_token().unwrap(),
+            Some(Token::FedAuthInfo(_))
+        ));
+        assert!(
+            matches!(parser.next_token().unwrap(), Some(Token::Done(_))),
+            "DONE after FEDAUTHINFO must not be swallowed"
+        );
+        assert!(parser.next_token().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_fed_auth_info_unknown_ids_ignored() {
+        // Spec: unrecognized FedAuthInfoIDs must be ignored.
+        let token =
+            build_fed_auth_info_token(&[(0x7F, "ignore-me"), (0x02, "https://sts.example/")]);
+        let mut parser = TokenParser::new(Bytes::from(token));
+        let Some(Token::FedAuthInfo(info)) = parser.next_token().unwrap() else {
+            panic!("expected FedAuthInfo");
+        };
+        assert_eq!(info.sts_url, "https://sts.example/");
+        assert_eq!(info.spn, "");
+    }
+
+    #[test]
+    fn test_fed_auth_info_hostile_inputs_error() {
+        // TokenLength longer than the buffer.
+        let mut truncated = build_fed_auth_info_token(&[(0x02, "https://sts.example/")]);
+        truncated.truncate(truncated.len() - 4);
+        assert!(
+            TokenParser::new(Bytes::from(truncated))
+                .next_token()
+                .is_err()
+        );
+
+        // CountOfInfoIDs claims more headers than the token holds
+        // (also covers hostile counts whose header math would overflow).
+        let mut bad_count = build_fed_auth_info_token(&[(0x02, "https://sts.example/")]);
+        bad_count[5..9].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(
+            TokenParser::new(Bytes::from(bad_count))
+                .next_token()
+                .is_err()
+        );
+
+        // Data offset pointing past the end of the token.
+        let mut bad_offset = build_fed_auth_info_token(&[(0x02, "https://sts.example/")]);
+        bad_offset[14..18].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(
+            TokenParser::new(Bytes::from(bad_offset))
+                .next_token()
+                .is_err()
+        );
+
+        // Odd data length cannot be UTF-16.
+        let mut odd_len = build_fed_auth_info_token(&[(0x02, "https://sts.example/")]);
+        odd_len[10..14].copy_from_slice(&3u32.to_le_bytes());
+        assert!(TokenParser::new(Bytes::from(odd_len)).next_token().is_err());
+    }
+
+    #[test]
+    fn test_fed_auth_info_parse_and_skip_agree() {
+        // Issue #189: decode() and skip_token() must consume the same bytes
+        // (the old decode ran past the token while skip honored the length).
+        let token = build_fed_auth_info_token(&[(0x02, "https://sts.example/")]);
+        let total = token.len();
+
+        let mut parser = TokenParser::new(Bytes::from(token.clone()));
+        parser.next_token().unwrap();
+        assert_eq!(parser.position(), total, "decode consumption");
+
+        let mut skipper = TokenParser::new(Bytes::from(token));
+        skipper.skip_token().unwrap();
+        assert_eq!(skipper.position(), total, "skip consumption");
     }
 }
