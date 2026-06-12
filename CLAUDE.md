@@ -17,7 +17,7 @@ A high-performance MS SQL Server driver for Rust that aims to surpass `prisma/ti
 
 ## Key Architecture Decisions
 
-Refer to `ARCHITECTURE.md` (v1.8.0) for complete details. Critical decisions:
+Refer to `ARCHITECTURE.md` (v1.9.0) for complete details. Critical decisions:
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
@@ -88,6 +88,7 @@ The `Config::from_connection_string()` parser conforms to the Microsoft ADO.NET 
 - **`MultiSubnetFailover`**: Parallel TCP connect to all resolved IPs for AG listener failover.
 - **`SendStringParametersAsUnicode`**: When `false`, sends string params as VARCHAR (Windows-1252) instead of NVARCHAR (UTF-16) for index seek compatibility.
 - **`Encrypt`**: Supports `strict`, `mandatory`, `optional`, `no_tls`, plus standard booleans.
+- **`Authentication`**: `SqlPassword`, `ActiveDirectoryServicePrincipal` (`User Id=<client-id>@<tenant-id>`, `Password=<secret>`), `ActiveDirectoryManagedIdentity`/`ActiveDirectoryMSI` — the Azure AD values log in via the LOGIN7 FEDAUTH feature extension (SecurityToken workflow, #155 Phase 1) and require the `azure-identity` feature. FEDAUTH never goes over plaintext (`no_tls` combinations are rejected). The ADAL/MSAL workflows (`ActiveDirectoryPassword`, `Interactive`, …) error with a pointer to #155 Phase 2.
 - **Pool keywords** (`Max Pool Size`, etc.): Recognized with info-level log directing to `PoolConfig`.
 - **Known-but-unsupported keywords** (30+): Recognized at info level instead of silently ignored.
 
@@ -377,4 +378,4 @@ When making changes here, remember:
    - **Never open a PR stacked on another feature branch.** CI only triggers on PRs based on `main` (see convention 5), so a stacked PR gets zero CI until it is retargeted to `main`.
    - **Branch protection requires up-to-date-with-`main`.** Merge each green PR before opening the next to minimize the `update-branch` + CI-re-run churn that comes from keeping many PRs in flight at once.
    - **The Semver Check CI job is advisory** (`continue-on-error: true`), but `gh pr checks --watch` still exits 1 when it fails — a red advisory check is not a blocked PR. Before concluding a PR is stuck, check the required checks / `mergeable` state (`gh api .../pulls/N -q .mergeable_state`). The job's known blind spots are tracked in #202.
-   - The tests excluded from the pre-push command (`azure_sql`, `azure_identity_auth`, `cert_auth`) need a **live Azure SQL environment**, not the local container. One exists for #155 work (credentials live outside the repo, e.g. a local gitignored `.tmp/azure.env`); run that suite when touching authentication or Azure-path code.
+   - The tests excluded from the pre-push command (`azure_sql`, `azure_identity_auth`, `cert_auth`) need a **live Azure SQL environment**, not the local container. One exists (credentials live outside the repo, e.g. a local gitignored `.tmp/azure.env`); run that suite when touching authentication or Azure-path code. The `azure_sql` suite includes live FEDAUTH service-principal login tests (`--features azure-identity`) reading `AZURE_SQL_TENANT_ID`/`AZURE_SQL_CLIENT_ID`/`AZURE_SQL_CLIENT_SECRET` with fallback to the `AZURE_`-prefixed names in the standing env file.
