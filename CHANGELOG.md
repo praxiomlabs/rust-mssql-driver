@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.13.1...v0.14.0) - 2026-06-12
+
+### Added
+
+- *(client)* add max_response_size cap; enforce command_timeout on bulk insert
+
+### Fixed
+
+- *(types)* error on dates outside the DATE range instead of wrapping
+- *(protocol)* decode ENVCHANGE frame-strictly so under-declared frames cannot over-consume
+- *(protocol)* decode FEDAUTHINFO per MS-TDS 2.2.7.12
+- *(types)* [**breaking**] structure the fallible date-encoder error docs
+- *(types)* error on out-of-range NUMERIC in decode_value instead of degrading to f64
+- *(tls)* split oversized handshake flights into 4096-byte PRELOGIN packets
+- *(pool)* hold the pool weakly from the reaper so drop without close() cannot leak
+
 ## [0.13.1](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.13.0...v0.13.1) - 2026-06-12
 
 ### Fixed
