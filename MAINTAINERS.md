@@ -38,6 +38,27 @@ Maintainers are responsible for:
 5. **Continuity** — When a maintainer will be away for an extended period, note
    it in a pinned issue so contributors know what to expect.
 
+## Becoming a Maintainer
+
+The project actively welcomes co-maintainers — a single-maintainer bus factor
+is the main non-technical risk for a driver that sits in other people's
+production paths, and we would rather grow the team than guard the gate.
+
+The path is ordinary open-source trust-building, not a formal process:
+
+1. Contribute — issues labeled
+   [`good first issue`](https://github.com/praxiomlabs/rust-mssql-driver/labels/good%20first%20issue)
+   and [`help wanted`](https://github.com/praxiomlabs/rust-mssql-driver/labels/help%20wanted)
+   are curated entry points, and review feedback on any PR is fast.
+2. Stick around — a few merged PRs and constructive review participation
+   matter more than any single large contribution.
+3. Ask — open an issue or email the maintainers (see Contact below). An
+   existing maintainer will propose the addition, and acceptance means being
+   added to this file, CODEOWNERS, and the relevant access lists.
+
+Areas where help is most wanted: Windows-native surfaces (SSPI, FILESTREAM,
+certificate store), Azure integration testing, and performance benchmarking.
+
 ## Contact
 
 - **Bug reports, feature requests, questions:** Use the
