@@ -1,0 +1,59 @@
+name: Fuzz Nightly
+
+# Long-budget fuzzing of the wire parsers. The per-PR fuzz-smoke job in
+# ci.yml only proves the targets build and survive 15 seconds of shallow
+# inputs; this run gives libFuzzer enough time to reach deeper states.
+# Crashing inputs are uploaded as artifacts so they can be turned into
+# regression tests.
+
+on:
+  schedule:
+    # 03:17 UTC daily — staggered off the hour to avoid the GitHub
+    # scheduled-job thundering herd, and off the weekly security audit.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz (5 min/target)
+    runs-on: ubuntu-latest
+    # 12 targets x 300s plus build time; cap well below the 6h default.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - name: Fuzz each target
+        # Mirrors the load-bearing structure of the fuzz-smoke job in
+        # ci.yml (set -euo pipefail + empty-list check + pinned gnu
+        # target); keep the two in sync when editing either.
+        run: |
+          set -euo pipefail
+          mapfile -t targets < <(cargo +nightly fuzz list)
+          if [ "${#targets[@]}" -eq 0 ]; then
+            echo "::error::cargo fuzz list returned no targets"
+            exit 1
+          fi
+          echo "Fuzzing ${#targets[@]} targets: ${targets[*]}"
+          for target in "${targets[@]}"; do
+            echo "::group::fuzz $target"
+            cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$target" \
+              -- -max_total_time=300 -rss_limit_mb=4096
+            echo "::endgroup::"
+          done
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+          retention-days: 30
