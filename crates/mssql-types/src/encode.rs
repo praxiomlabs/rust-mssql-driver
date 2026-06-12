@@ -88,27 +88,18 @@ impl TdsEncode for SqlValue {
                 Ok(())
             }
             #[cfg(feature = "chrono")]
-            SqlValue::Date(d) => {
-                encode_date(*d, buf);
-                Ok(())
-            }
+            SqlValue::Date(d) => encode_date(*d, buf),
             #[cfg(feature = "chrono")]
             SqlValue::Time(t) => {
                 encode_time(*t, buf);
                 Ok(())
             }
             #[cfg(feature = "chrono")]
-            SqlValue::DateTime(dt) => {
-                encode_datetime2(*dt, buf);
-                Ok(())
-            }
+            SqlValue::DateTime(dt) => encode_datetime2(*dt, buf),
             #[cfg(feature = "chrono")]
             SqlValue::SmallDateTime(dt) => encode_smalldatetime(*dt, buf),
             #[cfg(feature = "chrono")]
-            SqlValue::DateTimeOffset(dto) => {
-                encode_datetimeoffset(*dto, buf);
-                Ok(())
-            }
+            SqlValue::DateTimeOffset(dto) => encode_datetimeoffset(*dto, buf),
             #[cfg(feature = "json")]
             SqlValue::Json(j) => {
                 // JSON is sent as NVARCHAR string
@@ -388,16 +379,29 @@ pub fn encode_smalldatetime(
 /// Encode a DATE value.
 ///
 /// TDS DATE is the number of days since 0001-01-01.
+///
+/// Returns an error if the date is outside SQL Server's DATE range
+/// (0001-01-01 through 9999-12-31). chrono permits dates beyond both ends,
+/// which previously wrapped silently into garbage wire values.
 #[cfg(feature = "chrono")]
-pub fn encode_date(date: chrono::NaiveDate, buf: &mut BytesMut) {
-    // Calculate days since 0001-01-01
+pub fn encode_date(date: chrono::NaiveDate, buf: &mut BytesMut) -> Result<(), TypeError> {
+    /// Days from 0001-01-01 to 9999-12-31, the last representable DATE.
+    const MAX_DAYS: i64 = 3_652_058;
+
     let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("valid date");
-    let days = date.signed_duration_since(base).num_days() as u32;
+    let days = date.signed_duration_since(base).num_days();
+    if !(0..=MAX_DAYS).contains(&days) {
+        return Err(TypeError::InvalidDateTime(format!(
+            "DATE must be between 0001-01-01 and 9999-12-31, got {date}"
+        )));
+    }
+    let days = days as u32;
 
     // DATE is encoded as 3 bytes (little-endian)
     buf.put_u8((days & 0xFF) as u8);
     buf.put_u8(((days >> 8) & 0xFF) as u8);
     buf.put_u8(((days >> 16) & 0xFF) as u8);
+    Ok(())
 }
 
 /// Encode a TIME value.
@@ -423,10 +427,16 @@ pub fn encode_time(time: chrono::NaiveTime, buf: &mut BytesMut) {
 /// Encode a DATETIME2 value.
 ///
 /// DATETIME2 is encoded as TIME followed by DATE.
+///
+/// Returns an error if the date portion is outside the DATE range; see
+/// [`encode_date`].
 #[cfg(feature = "chrono")]
-pub fn encode_datetime2(datetime: chrono::NaiveDateTime, buf: &mut BytesMut) {
+pub fn encode_datetime2(
+    datetime: chrono::NaiveDateTime,
+    buf: &mut BytesMut,
+) -> Result<(), TypeError> {
     encode_time(datetime.time(), buf);
-    encode_date(datetime.date(), buf);
+    encode_date(datetime.date(), buf)
 }
 
 /// Encode a DATETIMEOFFSET value.
@@ -435,18 +445,22 @@ pub fn encode_datetime2(datetime: chrono::NaiveDateTime, buf: &mut BytesMut) {
 /// MS-TDS §2.2.5.5.1.9 the date/time portion is the **UTC** instant, not the
 /// local wall-clock; the offset is carried separately.
 #[cfg(feature = "chrono")]
-pub fn encode_datetimeoffset(datetime: chrono::DateTime<chrono::FixedOffset>, buf: &mut BytesMut) {
+pub fn encode_datetimeoffset(
+    datetime: chrono::DateTime<chrono::FixedOffset>,
+    buf: &mut BytesMut,
+) -> Result<(), TypeError> {
     use chrono::Offset;
 
     // Encode the UTC date/time components
     let utc = datetime.naive_utc();
     encode_time(utc.time(), buf);
-    encode_date(utc.date(), buf);
+    encode_date(utc.date(), buf)?;
 
     // Encode timezone offset in minutes (signed 16-bit)
     let offset_seconds = datetime.offset().fix().local_minus_utc();
     let offset_minutes = (offset_seconds / 60) as i16;
     buf.put_i16_le(offset_minutes);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -468,7 +482,7 @@ mod tests {
         let dto = offset.with_ymd_and_hms(2024, 3, 15, 12, 0, 0).unwrap();
 
         let mut buf = BytesMut::new();
-        encode_datetimeoffset(dto, &mut buf);
+        encode_datetimeoffset(dto, &mut buf).unwrap();
         assert_eq!(buf.len(), 10); // 5 time + 3 date + 2 offset
 
         // Time portion: 100ns intervals since midnight of the UTC instant.
@@ -532,11 +546,44 @@ mod tests {
     }
 
     #[cfg(feature = "chrono")]
+    /// Issue #167 regression: chrono dates outside SQL Server's DATE range
+    /// (0001-01-01..9999-12-31) silently wrapped `num_days() as u32` into
+    /// garbage wire values. They must error; the boundaries must encode.
+    #[test]
+    fn test_encode_date_range_enforced() {
+        let mut buf = BytesMut::new();
+
+        // Both boundaries encode.
+        let min = chrono::NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
+        encode_date(min, &mut buf).unwrap();
+        assert_eq!(&buf[buf.len() - 3..], &[0, 0, 0]);
+        let max = chrono::NaiveDate::from_ymd_opt(9999, 12, 31).unwrap();
+        encode_date(max, &mut buf).unwrap();
+        // 3_652_058 = 0x37B9DA little-endian
+        assert_eq!(&buf[buf.len() - 3..], &[0xDA, 0xB9, 0x37]);
+
+        // One day past either boundary errors instead of wrapping.
+        let before = chrono::NaiveDate::from_ymd_opt(0, 12, 31).unwrap();
+        assert!(matches!(
+            encode_date(before, &mut buf),
+            Err(TypeError::InvalidDateTime(_))
+        ));
+        let after = chrono::NaiveDate::from_ymd_opt(10000, 1, 1).unwrap();
+        assert!(matches!(
+            encode_date(after, &mut buf),
+            Err(TypeError::InvalidDateTime(_))
+        ));
+
+        // The composite encoders propagate the range error.
+        let dt = before.and_hms_opt(12, 0, 0).unwrap();
+        assert!(encode_datetime2(dt, &mut buf).is_err());
+    }
+
     #[test]
     fn test_encode_date() {
         let mut buf = BytesMut::new();
         let date = chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
-        encode_date(date, &mut buf);
+        encode_date(date, &mut buf).unwrap();
         // Should be 3 bytes representing days since 0001-01-01
         assert_eq!(buf.len(), 3);
     }

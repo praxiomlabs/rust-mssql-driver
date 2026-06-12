@@ -1006,7 +1006,7 @@ impl BulkInsert {
             #[cfg(feature = "chrono")]
             SqlValue::Date(d) => {
                 buf.put_u8(3); // Length
-                mssql_types::encode::encode_date(*d, buf);
+                mssql_types::encode::encode_date(*d, buf)?;
             }
 
             #[cfg(feature = "chrono")]
@@ -1045,7 +1045,7 @@ impl BulkInsert {
                     buf.put_u8(total_len);
                     // Encode time then date
                     encode_time_with_scale(dt.time(), scale, buf);
-                    mssql_types::encode::encode_date(dt.date(), buf);
+                    mssql_types::encode::encode_date(dt.date(), buf)?;
                 }
             }
             #[cfg(feature = "chrono")]
@@ -1083,7 +1083,7 @@ impl BulkInsert {
                 // not the local wall-clock.
                 let utc = dto.naive_utc();
                 encode_time_with_scale(utc.time(), scale, buf);
-                mssql_types::encode::encode_date(utc.date(), buf);
+                mssql_types::encode::encode_date(utc.date(), buf)?;
                 // Timezone offset in minutes
                 use chrono::Offset;
                 let offset_minutes = (dto.offset().fix().local_minus_utc() / 60) as i16;

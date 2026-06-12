@@ -125,7 +125,7 @@ impl<S: ConnectionState> Client<S> {
             #[cfg(feature = "chrono")]
             SqlValue::Date(d) => {
                 let mut buf = BytesMut::with_capacity(3);
-                mssql_types::encode::encode_date(*d, &mut buf);
+                mssql_types::encode::encode_date(*d, &mut buf)?;
                 RpcParam::new(name, RpcTypeInfo::date(), buf.freeze())
             }
             #[cfg(feature = "chrono")]
@@ -137,7 +137,7 @@ impl<S: ConnectionState> Client<S> {
             #[cfg(feature = "chrono")]
             SqlValue::DateTime(dt) => {
                 let mut buf = BytesMut::with_capacity(8);
-                mssql_types::encode::encode_datetime2(*dt, &mut buf);
+                mssql_types::encode::encode_datetime2(*dt, &mut buf)?;
                 RpcParam::new(name, RpcTypeInfo::datetime2(7), buf.freeze())
             }
             #[cfg(feature = "chrono")]
@@ -149,7 +149,7 @@ impl<S: ConnectionState> Client<S> {
             #[cfg(feature = "chrono")]
             SqlValue::DateTimeOffset(dto) => {
                 let mut buf = BytesMut::with_capacity(10);
-                mssql_types::encode::encode_datetimeoffset(*dto, &mut buf);
+                mssql_types::encode::encode_datetimeoffset(*dto, &mut buf)?;
                 RpcParam::new(name, RpcTypeInfo::datetimeoffset(7), buf.freeze())
             }
             #[cfg(feature = "json")]
