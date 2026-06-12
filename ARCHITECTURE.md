@@ -1,6 +1,6 @@
 # Architectural Reference: Rust MS SQL Driver
 
-**Version:** 1.8.0
+**Version:** 1.9.0
 **Status:** Design Complete
 **Target Protocol:** MS-TDS 7.3 – 8.0 (SQL Server 2008 – 2025)
 **Toolchain Standard:** Rust 2024 Edition (v1.85+, released February 20, 2025)
@@ -354,7 +354,7 @@ Server=tcp:hostname,port;Database=dbname;User Id=user;Password=pass;Encrypt=stri
 | `Password` | `PWD` | SQL authentication password |
 | `Encrypt` | | `true`, `false`, `strict`, `no_tls` |
 | `TrustServerCertificate` | | Skip certificate validation |
-| `Authentication` (recognized, **not yet supported** — FEDAUTH login wiring pending, see #155) | | `SqlPassword`, `ActiveDirectoryPassword`, `ActiveDirectoryManagedIdentity`, `ActiveDirectoryServicePrincipal` |
+| `Authentication` | | `SqlPassword`, `ActiveDirectoryServicePrincipal` (`User Id=<client-id>@<tenant-id>`), `ActiveDirectoryManagedIdentity` / `ActiveDirectoryMSI` — Azure AD values use the FEDAUTH SecurityToken workflow and require the `azure-identity` feature (#155 Phase 1). `ActiveDirectoryPassword` and the other ADAL/MSAL workflows remain unsupported (#155 Phase 2) |
 | `Application Name` | | Application identifier |
 | `Connect Timeout` | | Connection timeout in seconds |
 | `Command Timeout` | | Default command timeout |
@@ -2050,6 +2050,7 @@ quick-reference cheat sheet.
 | 1.6.0 | 2026-04-07 | Updated for v0.7.0 release: MSRV bumped to 1.88, SSPI integrated auth wired into client login, RUSTSEC advisories resolved, 33 public enums marked non_exhaustive for semver safety, deprecated APIs removed before 1.0 |
 | 1.7.0 | 2026-04-13 | Updated for v0.8.0 release: Stored procedure support (§4.7), SQL Browser instance resolution, pool test_on_checkin, Azure SDK 0.34, mock TLS cross-platform fix |
 | 1.8.0 | 2026-06-11 | Doc-accuracy corrections (#166): header version aligned with history; ADR-002 marks `Authentication` keyword as recognized-but-not-yet-supported (FEDAUTH pending, #155); ADR-013 clarifies Always Encrypted is read-path only (write path NULL-only); §8.3 corrects `cert-auth` dependency (pulls OpenSSL via azure_identity, not pure-rustls) |
+| 1.9.0 | 2026-06-12 | #155 Phase 1: Azure AD / Entra logins via the FEDAUTH SecurityToken workflow (pre-acquired token, managed identity, service principal); ADR-002 `Authentication` keyword supported for SqlPassword / ActiveDirectoryServicePrincipal / ActiveDirectoryManagedIdentity; `azure-identity` feature added to mssql-client |
 
 ---
 

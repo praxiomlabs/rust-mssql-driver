@@ -3,23 +3,18 @@
 //! This module provides token handling for Azure AD federated authentication,
 //! supporting both pre-acquired tokens and (with feature flags) token acquisition.
 //!
-//! ## ⚠️ Login wiring not yet implemented
+//! ## Authentication Flow
 //!
-//! The token-acquisition side below works, but the LOGIN7 FEDAUTH feature
-//! extension is **not yet implemented** in `mssql-client`, so these
-//! credentials cannot complete a login end-to-end. `Client::connect` rejects
-//! them with a clear error. Tracked in
-//! [#155](https://github.com/praxiomlabs/rust-mssql-driver/issues/155).
+//! Azure AD authentication uses the TDS FEDAUTH feature extension
+//! (MS-TDS §2.2.6.4). Two workflows exist:
 //!
-//! ## Authentication Flow (target design)
-//!
-//! Azure AD authentication uses the TDS FEDAUTH feature extension:
-//!
-//! 1. Client includes FEDAUTH feature in Login7 packet *(not yet implemented)*
-//! 2. Server responds with FEDAUTHINFO containing STS URL and SPN
-//! 3. Client acquires token (or uses pre-acquired token) ✅ this module
-//! 4. Client sends FEDAUTH token packet *(not yet implemented)*
-//! 5. Server validates token and completes authentication
+//! - **SecurityToken** (implemented, #155 Phase 1): the client acquires a
+//!   token *before* login and sends it inside the LOGIN7 FEDAUTH feature
+//!   extension ([`build_security_token_feature_data`]). No FEDAUTHINFO
+//!   round-trip occurs.
+//! - **ADAL/MSAL** (pending, #155 Phase 2): the client declares intent in
+//!   LOGIN7, the server responds with FEDAUTHINFO (STS URL + SPN), and the
+//!   client acquires a token and sends it in a separate FEDAUTH message.
 //!
 //! ## Token Sources (Tier 1 - Core)
 //!
@@ -39,33 +34,73 @@
 use std::borrow::Cow;
 use std::time::{Duration, Instant};
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 
 use crate::credentials::Credentials;
 use crate::error::AuthError;
 use crate::provider::{AuthData, AuthMethod, AuthProvider};
 
-/// FEDAUTH library options for Login7.
+/// FEDAUTH library identifiers for the LOGIN7 FEDAUTH feature extension.
 ///
-/// These values indicate to the server which token library the client uses.
+/// Per MS-TDS §2.2.6.4, `bFedAuthLibrary` is a 7-bit value that occupies the
+/// high 7 bits of the feature data's Options byte (the low bit is
+/// `fFedAuthEcho`). Live ID Compact Token (0x00) is legacy and not supported;
+/// 0x7F is reserved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 #[non_exhaustive]
 pub enum FedAuthLibrary {
-    /// ADAL (Azure Active Directory Authentication Library) - legacy.
-    Adal = 0x01,
-    /// Security token (raw JWT).
-    SecurityToken = 0x02,
-    /// MSAL (Microsoft Authentication Library) - current.
-    Msal = 0x03,
+    /// Security token: a token acquired by the client before login and sent
+    /// inside LOGIN7 (the workflow used for pre-acquired Azure AD tokens).
+    SecurityToken = 0x01,
+    /// ADAL: the client declares intent and acquires the token after the
+    /// server's FEDAUTHINFO response. MSAL (ADAL's successor) uses this same
+    /// wire identifier.
+    Adal = 0x02,
 }
 
 impl FedAuthLibrary {
-    /// Get the byte value for the FEDAUTH feature extension.
+    /// Get the 7-bit library identifier (unshifted).
+    ///
+    /// In the Options byte this value is shifted left by one bit to make room
+    /// for `fFedAuthEcho`: `options = (library << 1) | echo`.
     #[must_use]
     pub fn to_byte(self) -> u8 {
         self as u8
     }
+}
+
+/// Build the LOGIN7 FEDAUTH feature extension data for the SecurityToken
+/// workflow (MS-TDS §2.2.6.4, `bFedAuthLibrary` = 0x01).
+///
+/// Layout:
+///
+/// ```text
+/// Options       = 1 byte: (0x01 << 1) | fFedAuthEcho
+/// FedAuthToken  = DWORD (LE) byte length + token as UTF-16LE
+/// ```
+///
+/// No trailing nonce is emitted: per spec the nonce MUST be present if and
+/// only if the server's PRELOGIN response carried a NONCE option, and this
+/// driver does not send NONCEOPT in PRELOGIN.
+///
+/// `fed_auth_echo` MUST be set if and only if the server's PRELOGIN response
+/// contained FEDAUTHREQUIRED with value 0x01 — the server validates this echo
+/// to detect tampering.
+///
+/// The token must be non-empty (the spec forbids a zero-length FedAuthToken);
+/// callers are expected to validate this before login.
+#[must_use]
+pub fn build_security_token_feature_data(token: &str, fed_auth_echo: bool) -> Bytes {
+    debug_assert!(!token.is_empty(), "FedAuthToken length MUST NOT be 0");
+
+    let token_utf16: Vec<u8> = token.encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
+
+    let mut data = BytesMut::with_capacity(1 + 4 + token_utf16.len());
+    data.put_u8((FedAuthLibrary::SecurityToken.to_byte() << 1) | u8::from(fed_auth_echo));
+    data.put_u32_le(token_utf16.len() as u32);
+    data.put_slice(&token_utf16);
+    data.freeze()
 }
 
 /// FEDAUTH workflow types.
@@ -102,8 +137,6 @@ pub struct AzureAdAuth {
     token: Cow<'static, str>,
     /// When the token expires (if known).
     expires_at: Option<Instant>,
-    /// The library type to report to the server.
-    library: FedAuthLibrary,
 }
 
 impl AzureAdAuth {
@@ -119,7 +152,6 @@ impl AzureAdAuth {
         Self {
             token: token.into(),
             expires_at: None,
-            library: FedAuthLibrary::SecurityToken,
         }
     }
 
@@ -136,7 +168,6 @@ impl AzureAdAuth {
         Self {
             token: token.into(),
             expires_at: Some(Instant::now() + expires_in),
-            library: FedAuthLibrary::SecurityToken,
         }
     }
 
@@ -150,13 +181,6 @@ impl AzureAdAuth {
                 "AzureAdAuth requires Azure AD credentials".into(),
             )),
         }
-    }
-
-    /// Set the library type to report to the server.
-    #[must_use]
-    pub fn with_library(mut self, library: FedAuthLibrary) -> Self {
-        self.library = library;
-        self
     }
 
     /// Check if the token is expired.
@@ -175,28 +199,14 @@ impl AzureAdAuth {
             .unwrap_or(false)
     }
 
-    /// Build the FEDAUTH feature extension data for Login7.
+    /// Build the FEDAUTH feature extension data for Login7 (SecurityToken
+    /// workflow).
     ///
-    /// Format:
-    /// - 1 byte: Library type (ADAL=1, SecurityToken=2, MSAL=3)
-    /// - 1 byte: Workflow (0x00 for pre-acquired token)
-    /// - 4 bytes: FedAuth token length (big-endian)
-    /// - N bytes: FedAuth token (UTF-16LE encoded)
+    /// See [`build_security_token_feature_data`] for the wire layout and the
+    /// `fed_auth_echo` contract.
     #[must_use]
-    pub fn build_feature_data(&self) -> Bytes {
-        let mut data = Vec::with_capacity(6);
-
-        // Library type (1 byte)
-        data.push(self.library.to_byte());
-
-        // Workflow - 0x00 for non-interactive/pre-acquired token
-        data.push(0x00);
-
-        // For FEDAUTH, the actual token is sent in a separate FEDAUTH token packet,
-        // not in the Login7 feature extension. The feature extension just indicates
-        // that we want to use FEDAUTH.
-
-        Bytes::from(data)
+    pub fn build_feature_data(&self, fed_auth_echo: bool) -> Bytes {
+        build_security_token_feature_data(&self.token, fed_auth_echo)
     }
 
     /// Build the FEDAUTH token packet data.
@@ -241,9 +251,10 @@ impl AuthProvider for AzureAdAuth {
         })
     }
 
-    fn feature_extension_data(&self) -> Option<Bytes> {
-        Some(self.build_feature_data())
-    }
+    // Note: `feature_extension_data` deliberately uses the trait default
+    // (`None`). The FEDAUTH feature data depends on the server's PRELOGIN
+    // FEDAUTHREQUIRED response (the echo bit), which is unknowable here;
+    // the login path builds it via `build_feature_data(echo)` instead.
 
     fn needs_refresh(&self) -> bool {
         // Refresh if token expires within 5 minutes
@@ -256,7 +267,6 @@ impl std::fmt::Debug for AzureAdAuth {
         f.debug_struct("AzureAdAuth")
             .field("token", &"[REDACTED]")
             .field("expires_at", &self.expires_at)
-            .field("library", &self.library)
             .finish()
     }
 }
@@ -291,13 +301,57 @@ mod tests {
         assert!(matches!(result, Err(AuthError::TokenExpired)));
     }
 
+    /// Wire-exact encoding of the SecurityToken FEDAUTH feature data per
+    /// MS-TDS §2.2.6.4: Options byte = (0x01 << 1) | echo, then a
+    /// little-endian DWORD byte length, then the token as UTF-16LE. No nonce.
+    #[test]
+    fn test_security_token_feature_data_wire_exact() {
+        // "AB" -> UTF-16LE 41 00 42 00, length 4.
+        let no_echo = build_security_token_feature_data("AB", false);
+        assert_eq!(
+            no_echo.as_ref(),
+            &[0x02, 0x04, 0x00, 0x00, 0x00, 0x41, 0x00, 0x42, 0x00],
+            "echo clear: options must be 0x02 (SecurityToken << 1)"
+        );
+
+        let echo = build_security_token_feature_data("AB", true);
+        assert_eq!(
+            echo.as_ref(),
+            &[0x03, 0x04, 0x00, 0x00, 0x00, 0x41, 0x00, 0x42, 0x00],
+            "echo set: fFedAuthEcho is the low bit of the options byte"
+        );
+    }
+
+    /// Non-BMP characters must encode as UTF-16 surrogate pairs and the DWORD
+    /// length must count bytes (not code units or chars).
+    #[test]
+    fn test_security_token_feature_data_surrogate_pair() {
+        // U+1F600 -> surrogates D83D DE00 -> LE bytes 3D D8 00 DE.
+        let data = build_security_token_feature_data("\u{1F600}", false);
+        assert_eq!(
+            data.as_ref(),
+            &[0x02, 0x04, 0x00, 0x00, 0x00, 0x3D, 0xD8, 0x00, 0xDE]
+        );
+    }
+
+    /// The method form delegates to the free function with the same token.
     #[test]
     fn test_azure_ad_feature_data() {
         let auth = AzureAdAuth::with_token("test_token");
-        let data = auth.build_feature_data();
+        let data = auth.build_feature_data(true);
 
-        assert!(!data.is_empty());
-        assert_eq!(data[0], FedAuthLibrary::SecurityToken.to_byte());
+        assert_eq!(data, build_security_token_feature_data("test_token", true));
+        // Library bits: options >> 1 must be the SecurityToken identifier.
+        assert_eq!(data[0] >> 1, FedAuthLibrary::SecurityToken.to_byte());
+        assert_eq!(data[0] & 1, 1);
+    }
+
+    /// The wire identifiers come from MS-TDS §2.2.6.4 and must never drift:
+    /// SecurityToken = 0x01, ADAL (also used by MSAL) = 0x02.
+    #[test]
+    fn test_fed_auth_library_wire_values() {
+        assert_eq!(FedAuthLibrary::SecurityToken.to_byte(), 0x01);
+        assert_eq!(FedAuthLibrary::Adal.to_byte(), 0x02);
     }
 
     #[test]

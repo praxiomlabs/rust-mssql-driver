@@ -456,3 +456,164 @@ async fn test_azure_datetime_types() {
 
     client.close().await.expect("Close failed");
 }
+
+// =============================================================================
+// Azure AD / Entra Authentication (FEDAUTH SecurityToken workflow, #155)
+// =============================================================================
+
+/// Service principal fixture from the environment.
+///
+/// Prefers the `AZURE_SQL_`-prefixed names from the issue; falls back to the
+/// generic `AZURE_` names used by azure_identity's EnvironmentCredential and
+/// the standing test fixture.
+#[cfg(feature = "azure-identity")]
+fn get_azure_sp_env() -> Option<(String, String, String)> {
+    fn var2(primary: &str, fallback: &str) -> Option<String> {
+        std::env::var(primary)
+            .or_else(|_| std::env::var(fallback))
+            .ok()
+    }
+    let tenant_id = var2("AZURE_SQL_TENANT_ID", "AZURE_TENANT_ID")?;
+    let client_id = var2("AZURE_SQL_CLIENT_ID", "AZURE_CLIENT_ID")?;
+    let client_secret = var2("AZURE_SQL_CLIENT_SECRET", "AZURE_CLIENT_SECRET")?;
+    Some((tenant_id, client_id, client_secret))
+}
+
+#[cfg(feature = "azure-identity")]
+fn get_azure_host_db() -> Option<(String, String)> {
+    let host = std::env::var("AZURE_SQL_HOST").ok()?;
+    let database = std::env::var("AZURE_SQL_DATABASE").ok()?;
+    Some((host, database))
+}
+
+/// Query the authenticated principal and the login's authentication type.
+#[cfg(feature = "azure-identity")]
+async fn current_principal(
+    client: &mut mssql_client::Client<mssql_client::Ready>,
+) -> (String, String) {
+    let rows = client
+        .query(
+            "SELECT SUSER_SNAME() AS principal, \
+             (SELECT authentication_type_desc FROM sys.database_principals \
+              WHERE name = USER_NAME()) AS auth_type",
+            &[],
+        )
+        .await
+        .expect("principal query failed");
+
+    let mut result = (String::new(), String::new());
+    for row_result in rows {
+        let row = row_result.expect("Row error");
+        result.0 = row.get::<String>(0).expect("principal");
+        result.1 = row
+            .get::<Option<String>>(1)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+    }
+    result
+}
+
+/// End-to-end FEDAUTH login with service principal credentials: the driver
+/// acquires the token from Entra ID and sends it in the LOGIN7 FEDAUTH
+/// feature extension (SecurityToken workflow).
+#[cfg(feature = "azure-identity")]
+#[tokio::test]
+#[ignore = "Requires Azure SQL Database and an Entra service principal"]
+async fn test_azure_ad_service_principal_login() {
+    use mssql_client::Client;
+
+    let (tenant_id, client_id, client_secret) =
+        get_azure_sp_env().expect("service principal env vars required");
+    let (host, database) = get_azure_host_db().expect("AZURE_SQL_HOST/DATABASE required");
+
+    let config = Config::new().host(host).database(database).credentials(
+        mssql_client::Credentials::AzureServicePrincipal {
+            tenant_id: tenant_id.into(),
+            client_id: client_id.clone().into(),
+            client_secret: client_secret.into(),
+        },
+    );
+
+    let mut client = Client::connect(config).await.expect("FEDAUTH login failed");
+
+    let (principal, auth_type) = current_principal(&mut client).await;
+    println!("service principal login: principal={principal}, auth_type={auth_type}");
+    // Azure SQL reports service principals as <client-id>@<tenant-id>.
+    assert!(
+        principal
+            .to_lowercase()
+            .starts_with(&client_id.to_lowercase()),
+        "SUSER_SNAME() ({principal}) must identify the service principal ({client_id})"
+    );
+    assert_eq!(
+        auth_type, "EXTERNAL",
+        "service principal must authenticate as an EXTERNAL (Entra) principal"
+    );
+
+    client.close().await.expect("Close failed");
+}
+
+/// Pre-acquired token path: acquire via mssql-auth's ServicePrincipalAuth,
+/// then log in with Credentials::AzureAccessToken (Tier 1 — what users with
+/// their own token plumbing do).
+#[cfg(feature = "azure-identity")]
+#[tokio::test]
+#[ignore = "Requires Azure SQL Database and an Entra service principal"]
+async fn test_azure_ad_access_token_login() {
+    use mssql_client::Client;
+
+    let (tenant_id, client_id, client_secret) =
+        get_azure_sp_env().expect("service principal env vars required");
+    let (host, database) = get_azure_host_db().expect("AZURE_SQL_HOST/DATABASE required");
+
+    let auth = mssql_auth::ServicePrincipalAuth::new(tenant_id, client_id, client_secret)
+        .expect("credential construction failed");
+    let token = auth.get_token().await.expect("token acquisition failed");
+
+    let config = Config::new()
+        .host(host)
+        .database(database)
+        .credentials(mssql_client::Credentials::azure_token(token));
+
+    let mut client = Client::connect(config).await.expect("FEDAUTH login failed");
+
+    let (principal, auth_type) = current_principal(&mut client).await;
+    println!("access token login: principal={principal}, auth_type={auth_type}");
+    assert_eq!(auth_type, "EXTERNAL");
+
+    client.close().await.expect("Close failed");
+}
+
+/// Connection-string path: Authentication=ActiveDirectoryServicePrincipal
+/// with User Id=<client-id>@<tenant-id> (ADR-002).
+#[cfg(feature = "azure-identity")]
+#[tokio::test]
+#[ignore = "Requires Azure SQL Database and an Entra service principal"]
+async fn test_azure_ad_connection_string_service_principal() {
+    use mssql_client::Client;
+
+    let (tenant_id, client_id, client_secret) =
+        get_azure_sp_env().expect("service principal env vars required");
+    let (host, database) = get_azure_host_db().expect("AZURE_SQL_HOST/DATABASE required");
+
+    let conn_str = format!(
+        "Server={host};Database={database};Encrypt=mandatory;\
+         Authentication=Active Directory Service Principal;\
+         User Id={client_id}@{tenant_id};Password={client_secret}"
+    );
+    let config = Config::from_connection_string(&conn_str).expect("Valid connection string");
+
+    let mut client = Client::connect(config).await.expect("FEDAUTH login failed");
+
+    let rows = client
+        .query("SELECT 1", &[])
+        .await
+        .expect("query after FEDAUTH login failed");
+    for row_result in rows {
+        let row = row_result.expect("Row error");
+        assert_eq!(row.get::<i32>(0).expect("value"), 1);
+    }
+
+    client.close().await.expect("Close failed");
+}

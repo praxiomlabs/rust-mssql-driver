@@ -2,7 +2,7 @@
 //!
 //! Tests edge cases that users commonly encounter with connection strings.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use mssql_client::Config;
 
@@ -327,33 +327,224 @@ fn test_repeated_keys_last_wins() {
 }
 
 // ============================================================================
-// FEDAUTH Credential Gate (issue #159)
+// FEDAUTH Credential Gate (issues #159, #155)
 // ============================================================================
+//
+// Azure AD credentials are wired into the login sequence (LOGIN7 FEDAUTH
+// feature extension, SecurityToken workflow — #155 Phase 1), so they are no
+// longer rejected wholesale. The gate now fails fast only on configurations
+// that cannot produce a valid (or safe) FEDAUTH login. All tests use an
+// unresolvable host: the error must arrive before any network I/O.
 
-/// Azure AD credentials are not yet wired into the login sequence (no LOGIN7
-/// FEDAUTH feature extension — see #155). connect() must fail fast with an
-/// actionable configuration error instead of sending an empty-credential
-/// login that the server rejects with an opaque 18456.
+/// A bearer token must never be sent over a plaintext connection.
 #[tokio::test]
-async fn test_azure_credentials_fail_fast_before_io() {
-    let config = Config::new()
-        .host("host-that-must-never-be-contacted.invalid")
-        .credentials(mssql_client::Credentials::AzureAccessToken {
-            token: "test-token".into(),
-        });
+async fn test_azure_credentials_rejected_with_no_tls() {
+    let config = Config::from_connection_string(
+        "Server=host-that-must-never-be-contacted.invalid;Encrypt=no_tls",
+    )
+    .unwrap()
+    .credentials(mssql_client::Credentials::AzureAccessToken {
+        token: "test-token".into(),
+    });
 
     let err = mssql_client::Client::connect(config)
         .await
-        .expect_err("Azure credentials must be rejected at connect time");
+        .expect_err("FEDAUTH over no_tls must be rejected at connect time");
 
     let msg = err.to_string();
     assert!(
         matches!(err, mssql_client::Error::Config(_)),
         "expected Error::Config, got: {msg}"
     );
-    assert!(msg.contains("FEDAUTH"), "error should name FEDAUTH: {msg}");
+    assert!(
+        msg.contains("no_tls") && msg.contains("plaintext"),
+        "error should explain the plaintext-token hazard: {msg}"
+    );
+}
+
+/// The FEDAUTH token length must not be zero (MS-TDS §2.2.6.4); an empty
+/// token is a configuration mistake caught before any network I/O.
+#[tokio::test]
+async fn test_azure_credentials_rejected_with_empty_token() {
+    let config = Config::new()
+        .host("host-that-must-never-be-contacted.invalid")
+        .credentials(mssql_client::Credentials::AzureAccessToken { token: "".into() });
+
+    let err = mssql_client::Client::connect(config)
+        .await
+        .expect_err("an empty Azure access token must be rejected");
+
+    let msg = err.to_string();
+    assert!(
+        matches!(err, mssql_client::Error::Config(_)),
+        "expected Error::Config, got: {msg}"
+    );
+    assert!(
+        msg.contains("empty"),
+        "error should say the token is empty: {msg}"
+    );
+}
+
+/// The FEDAUTH feature extension requires the LOGIN7 FeatureExt block, which
+/// exists only in TDS 7.4+.
+#[tokio::test]
+async fn test_azure_credentials_rejected_below_tds_74() {
+    let config = Config::from_connection_string(
+        "Server=host-that-must-never-be-contacted.invalid;TdsVersion=7.3",
+    )
+    .unwrap()
+    .credentials(mssql_client::Credentials::AzureAccessToken {
+        token: "test-token".into(),
+    });
+
+    let err = mssql_client::Client::connect(config)
+        .await
+        .expect_err("FEDAUTH below TDS 7.4 must be rejected");
+
+    let msg = err.to_string();
+    assert!(
+        matches!(err, mssql_client::Error::Config(_)),
+        "expected Error::Config, got: {msg}"
+    );
+    assert!(
+        msg.contains("7.4"),
+        "error should name the TDS floor: {msg}"
+    );
+}
+
+// ============================================================================
+// Authentication keyword (ADR-002, #155)
+// ============================================================================
+
+#[test]
+fn test_authentication_sql_password_keeps_sql_credentials() {
+    let config = Config::from_connection_string(
+        "Server=s;User Id=sa;Password=pw;Authentication=SqlPassword",
+    )
+    .unwrap();
+
+    match config.credentials {
+        mssql_client::Credentials::SqlServer { username, password } => {
+            assert_eq!(username.as_ref(), "sa");
+            assert_eq!(password.as_ref(), "pw");
+        }
+        other => panic!("expected SqlServer credentials, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_authentication_unsupported_ad_value_errors_with_tracking_issue() {
+    let err = Config::from_connection_string(
+        "Server=s;User Id=u;Password=p;Authentication=ActiveDirectoryPassword",
+    )
+    .expect_err("ActiveDirectoryPassword is not supported");
+
+    let msg = err.to_string();
+    assert!(msg.contains("not supported"), "{msg}");
     assert!(
         msg.contains("155"),
-        "error should link tracking issue: {msg}"
+        "should reference the tracking issue: {msg}"
     );
+}
+
+#[test]
+fn test_authentication_invalid_value_errors() {
+    let err = Config::from_connection_string("Server=s;Authentication=BogusMethod")
+        .expect_err("unknown Authentication value must error");
+
+    let msg = err.to_string();
+    assert!(msg.contains("invalid Authentication value"), "{msg}");
+}
+
+#[cfg(feature = "azure-identity")]
+mod authentication_azure_identity {
+    use super::*;
+
+    #[test]
+    fn test_service_principal_parses_client_and_tenant() {
+        // Spaced ADO.NET form, and Authentication placed BEFORE the
+        // credentials it reinterprets — order must not matter.
+        let config = Config::from_connection_string(
+            "Server=s;Authentication=Active Directory Service Principal;\
+             User Id=client-guid@tenant-guid;Password=s3cret",
+        )
+        .unwrap();
+
+        match config.credentials {
+            mssql_client::Credentials::AzureServicePrincipal {
+                tenant_id,
+                client_id,
+                client_secret,
+            } => {
+                assert_eq!(client_id.as_ref(), "client-guid");
+                assert_eq!(tenant_id.as_ref(), "tenant-guid");
+                assert_eq!(client_secret.as_ref(), "s3cret");
+            }
+            other => panic!("expected AzureServicePrincipal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_service_principal_requires_tenant_in_user_id() {
+        let err = Config::from_connection_string(
+            "Server=s;User Id=client-only;Password=s3cret;\
+             Authentication=ActiveDirectoryServicePrincipal",
+        )
+        .expect_err("missing tenant id must error");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("<client-id>@<tenant-id>"),
+            "error must show the expected User Id format: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_service_principal_requires_secret() {
+        let err = Config::from_connection_string(
+            "Server=s;User Id=c@t;Authentication=ActiveDirectoryServicePrincipal",
+        )
+        .expect_err("missing client secret must error");
+
+        assert!(err.to_string().contains("client secret"), "{err}");
+    }
+
+    #[test]
+    fn test_managed_identity_system_assigned() {
+        let config = Config::from_connection_string(
+            "Server=s;Authentication=ActiveDirectoryManagedIdentity",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.credentials,
+            mssql_client::Credentials::AzureManagedIdentity { client_id: None }
+        ));
+    }
+
+    #[test]
+    fn test_managed_identity_user_assigned_via_user_id_and_msi_alias() {
+        let config = Config::from_connection_string(
+            "Server=s;User Id=uami-client-id;Authentication=Active Directory MSI",
+        )
+        .unwrap();
+
+        match config.credentials {
+            mssql_client::Credentials::AzureManagedIdentity {
+                client_id: Some(id),
+            } => assert_eq!(id.as_ref(), "uami-client-id"),
+            other => panic!("expected user-assigned AzureManagedIdentity, got {other:?}"),
+        }
+    }
+}
+
+#[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+#[test]
+fn test_authentication_conflicts_with_integrated_security() {
+    let err = Config::from_connection_string(
+        "Server=s;Integrated Security=true;Authentication=SqlPassword",
+    )
+    .expect_err("Authentication + Integrated Security must error");
+
+    assert!(err.to_string().contains("Integrated Security"), "{err}");
 }

@@ -41,9 +41,10 @@
 //!
 //! | Keyword | Aliases | Default | Description |
 //! |---------|---------|---------|-------------|
-//! | `User Id` | `UID`, `User` | (empty) | SQL Server login username. |
-//! | `Password` | `PWD` | (empty) | SQL Server login password. |
+//! | `User Id` | `UID`, `User` | (empty) | SQL Server login username. Reinterpreted by `Authentication` (see below). |
+//! | `Password` | `PWD` | (empty) | SQL Server login password. Reinterpreted by `Authentication` (see below). |
 //! | `Database` | `Initial Catalog` | none | Target database. |
+//! | `Authentication` | — | none | Authentication method (ADO.NET `SqlAuthenticationMethod`; spaced forms like `Active Directory Service Principal` also accepted). `SqlPassword`: SQL authentication (the default). `ActiveDirectoryServicePrincipal`: Azure AD service principal — `User Id=<client-id>@<tenant-id>`, `Password=<client secret>`; requires the `azure-identity` feature. `ActiveDirectoryManagedIdentity` (alias `ActiveDirectoryMSI`): Azure managed identity — optional `User Id=<client-id>` selects a user-assigned identity; requires the `azure-identity` feature. Azure AD methods log in via the FEDAUTH SecurityToken workflow and require an encrypted connection. The ADAL/MSAL values (`ActiveDirectoryPassword`, `ActiveDirectoryInteractive`, …) are recognized but unsupported ([#155](https://github.com/praxiomlabs/rust-mssql-driver/issues/155)). |
 //!
 //! ### Security
 //!
@@ -466,6 +467,11 @@ impl Config {
         let mut config = Self::default();
         let pairs = split_connection_string(conn_str)?;
 
+        // The Authentication keyword is recorded during the loop and applied
+        // afterwards, so the outcome does not depend on whether it appears
+        // before or after User Id / Password.
+        let mut authentication: Option<String> = None;
+
         for (key, value) in &pairs {
             let key = key.trim().to_lowercase();
             let value = value.trim();
@@ -527,6 +533,12 @@ impl Config {
                         config.credentials =
                             Credentials::sql_server(username.clone(), value.to_string());
                     }
+                }
+                // ADO.NET accepts both spaced ("Active Directory Service
+                // Principal") and compact (ActiveDirectoryServicePrincipal)
+                // forms; normalize for the post-loop match.
+                "authentication" => {
+                    authentication = non_empty(value).map(|v| v.to_lowercase().replace(' ', ""));
                 }
                 // --- Application ---
                 "application name" | "app" => {
@@ -705,7 +717,6 @@ impl Config {
                 | "async"
                 | "transparentnetworkipresolution"
                 | "poolblockingperiod"
-                | "authentication"
                 | "hostnameincertificate"
                 | "servercertificate" => {
                     tracing::info!(
@@ -725,7 +736,125 @@ impl Config {
             }
         }
 
+        if let Some(method) = authentication {
+            config.apply_authentication_keyword(&method)?;
+        }
+
         Ok(config)
+    }
+
+    /// Apply a (normalized) `Authentication=` connection-string value.
+    ///
+    /// Called after the keyword loop: `User Id` / `Password` have their final
+    /// values, which the Azure AD methods reinterpret (client id / secret).
+    /// Values follow ADO.NET `SqlAuthenticationMethod` and ADR-002.
+    fn apply_authentication_keyword(&mut self, method: &str) -> Result<(), crate::error::Error> {
+        // ADO.NET semantics: Authentication and Integrated Security are
+        // mutually exclusive, whatever the Authentication value.
+        #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+        if matches!(self.credentials, Credentials::Integrated) {
+            return Err(crate::error::Error::Config(
+                "the Authentication keyword cannot be combined with Integrated Security".into(),
+            ));
+        }
+
+        match method {
+            // Explicit SQL authentication: User Id / Password already hold
+            // the credentials; nothing to transform.
+            "sqlpassword" => {}
+            "activedirectorymanagedidentity" | "activedirectorymsi" => {
+                #[cfg(not(feature = "azure-identity"))]
+                return Err(crate::error::Error::Config(format!(
+                    "Authentication={method} requires the 'azure-identity' feature. \
+                     Enable it in your Cargo.toml: \
+                     mssql-client = {{ features = [\"azure-identity\"] }}"
+                )));
+                #[cfg(feature = "azure-identity")]
+                {
+                    // Optional User Id selects a user-assigned identity.
+                    let client_id = match &self.credentials {
+                        Credentials::SqlServer { username, .. } if !username.is_empty() => {
+                            Some(username.clone())
+                        }
+                        _ => None,
+                    };
+                    self.credentials = Credentials::AzureManagedIdentity { client_id };
+                }
+            }
+            "activedirectoryserviceprincipal" => {
+                #[cfg(not(feature = "azure-identity"))]
+                return Err(crate::error::Error::Config(format!(
+                    "Authentication={method} requires the 'azure-identity' feature. \
+                     Enable it in your Cargo.toml: \
+                     mssql-client = {{ features = [\"azure-identity\"] }}"
+                )));
+                #[cfg(feature = "azure-identity")]
+                {
+                    let Credentials::SqlServer { username, password } = &self.credentials else {
+                        return Err(crate::error::Error::Config(
+                            "Authentication=ActiveDirectoryServicePrincipal requires \
+                             User Id and Password (client id and secret)"
+                                .into(),
+                        ));
+                    };
+                    // The tenant rides in User Id: client-side token
+                    // acquisition (FEDAUTH SecurityToken workflow) needs it
+                    // before any server contact.
+                    let Some((client_id, tenant_id)) = username.split_once('@') else {
+                        return Err(crate::error::Error::Config(
+                            "Authentication=ActiveDirectoryServicePrincipal requires \
+                             User Id=<client-id>@<tenant-id> (the tenant id is needed \
+                             for client-side token acquisition)"
+                                .into(),
+                        ));
+                    };
+                    if client_id.is_empty() || tenant_id.is_empty() {
+                        return Err(crate::error::Error::Config(
+                            "Authentication=ActiveDirectoryServicePrincipal: client id \
+                             and tenant id must both be non-empty in \
+                             User Id=<client-id>@<tenant-id>"
+                                .into(),
+                        ));
+                    }
+                    if password.is_empty() {
+                        return Err(crate::error::Error::Config(
+                            "Authentication=ActiveDirectoryServicePrincipal requires \
+                             Password=<client secret>"
+                                .into(),
+                        ));
+                    }
+                    let (client_id, tenant_id) = (client_id.to_string(), tenant_id.to_string());
+                    let client_secret = password.clone();
+                    self.credentials = Credentials::AzureServicePrincipal {
+                        tenant_id: tenant_id.into(),
+                        client_id: client_id.into(),
+                        client_secret,
+                    };
+                }
+            }
+            "activedirectorypassword"
+            | "activedirectoryintegrated"
+            | "activedirectoryinteractive"
+            | "activedirectorydefault"
+            | "activedirectorydevicecodeflow" => {
+                return Err(crate::error::Error::Config(format!(
+                    "Authentication value '{method}' is not supported. Supported values: \
+                     SqlPassword, ActiveDirectoryServicePrincipal, \
+                     ActiveDirectoryManagedIdentity (alias ActiveDirectoryMSI). The remaining \
+                     ADAL/MSAL workflows are tracked in \
+                     https://github.com/praxiomlabs/rust-mssql-driver/issues/155"
+                )));
+            }
+            other => {
+                return Err(crate::error::Error::Config(format!(
+                    "invalid Authentication value: '{other}'. Supported values: \
+                     SqlPassword, ActiveDirectoryServicePrincipal, \
+                     ActiveDirectoryManagedIdentity (alias ActiveDirectoryMSI)"
+                )));
+            }
+        }
+
+        Ok(())
     }
 
     /// Set the server host.

@@ -189,6 +189,19 @@ impl PreLogin {
         self
     }
 
+    /// Advertise federated authentication support (FEDAUTHREQUIRED option).
+    ///
+    /// When set on a client PreLogin, the encoded message carries the
+    /// FEDAUTHREQUIRED option with value 0x01. The server's response echoes
+    /// its own FEDAUTHREQUIRED value in [`PreLogin::fed_auth_required`]; per
+    /// MS-TDS §2.2.6.4 the LOGIN7 FEDAUTH feature extension's `fFedAuthEcho`
+    /// bit MUST mirror that response value.
+    #[must_use]
+    pub fn with_fed_auth_required(mut self, required: bool) -> Self {
+        self.fed_auth_required = required;
+        self
+    }
+
     /// Encode the pre-login message to bytes.
     #[must_use]
     pub fn encode(&self) -> Bytes {
@@ -454,6 +467,32 @@ mod tests {
         assert!(EncryptionLevel::On.is_required());
         assert!(!EncryptionLevel::Off.is_required());
         assert!(!EncryptionLevel::NotSupported.is_required());
+    }
+
+    /// FEDAUTHREQUIRED (option 0x06) must be emitted with payload 0x01 when
+    /// requested and omitted otherwise, and must survive an encode/decode
+    /// round trip — the login path reads the decoded flag back as the
+    /// LOGIN7 `fFedAuthEcho` source.
+    #[test]
+    fn test_prelogin_fed_auth_required_roundtrip() {
+        let without = PreLogin::new().encode();
+        let decoded = PreLogin::decode(without.as_ref()).unwrap();
+        assert!(
+            !decoded.fed_auth_required,
+            "FEDAUTHREQUIRED must default to absent/false"
+        );
+
+        let with = PreLogin::new().with_fed_auth_required(true).encode();
+        // Option header present: type 0x06 somewhere in the header section.
+        let header_end = with.iter().position(|&b| b == 0xFF).unwrap();
+        assert!(
+            with[..header_end]
+                .chunks(5)
+                .any(|opt| opt[0] == PreLoginOption::FedAuthRequired as u8),
+            "encoded PreLogin must contain a FEDAUTHREQUIRED option header"
+        );
+        let decoded = PreLogin::decode(with.as_ref()).unwrap();
+        assert!(decoded.fed_auth_required);
     }
 
     #[test]
