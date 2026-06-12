@@ -10,18 +10,22 @@
 //! | Method | Feature Flag | Status | Description |
 //! |--------|--------------|--------|-------------|
 //! | SQL Authentication | default | ✅ Implemented | Username/password |
-//! | Azure AD Token | default | ⚠️ Token handling only¹ | Pre-obtained access token |
-//! | Azure Managed Identity | `azure-identity` | ⚠️ Token acquisition only¹ | VM/container identity |
-//! | Service Principal | `azure-identity` | ⚠️ Token acquisition only¹ | App credentials |
+//! | Azure AD Token | default | ✅ Implemented | Pre-obtained access token |
+//! | Azure Managed Identity | `azure-identity` | ✅ Implemented | VM/container identity |
+//! | Service Principal | `azure-identity` | ✅ Implemented | App credentials |
 //! | Integrated (Kerberos) | `integrated-auth` | ✅ Implemented | GSSAPI/Kerberos (Linux/macOS) |
 //! | Windows SSPI | `sspi-auth` | ✅ Implemented | Native Windows SSPI |
 //! | Certificate | `cert-auth` | ⚠️ Token acquisition only¹ | Client certificate (mTLS) |
 //!
-//! ¹ These providers acquire tokens, but the LOGIN7 FEDAUTH feature
-//! extension is not yet implemented in `mssql-client`, so they cannot
-//! complete a login end-to-end. `Client::connect` rejects these credential
-//! types with a clear error. Tracked in
+//! ¹ `CertificateAuth` acquires tokens, but `mssql-client` does not yet wire
+//! certificate credentials into the login sequence; `Client::connect` rejects
+//! them with a clear error. Tracked in
 //! [#155](https://github.com/praxiomlabs/rust-mssql-driver/issues/155).
+//!
+//! The Azure AD methods use the FEDAUTH SecurityToken workflow: the token is
+//! acquired client-side and sent in the LOGIN7 FEDAUTH feature extension
+//! (see [`azure_ad::build_security_token_feature_data`]). The ADAL/MSAL
+//! workflow (server-directed acquisition via FEDAUTHINFO) is #155 Phase 2.
 //!
 //! ## Authentication Tiers
 //!
@@ -30,9 +34,9 @@
 //! ### Tier 1 (Core - Pure Rust, Default)
 //!
 //! - [`SqlServerAuth`] - Username/password via Login7 ✅ Implemented
-//! - [`AzureAdAuth`] - Pre-acquired access token ⚠️ FEDAUTH login wiring pending (#155)
+//! - [`AzureAdAuth`] - Pre-acquired access token ✅ Implemented
 //!
-//! ### Tier 2 (Azure Native - `azure-identity` feature) ⚠️ FEDAUTH login wiring pending (#155)
+//! ### Tier 2 (Azure Native - `azure-identity` feature) ✅ Implemented
 //!
 //! - `ManagedIdentityAuth` - Azure VM/Container identity
 //! - `ServicePrincipalAuth` - Client ID + Secret
@@ -42,7 +46,7 @@
 //! - `IntegratedAuth` - Kerberos (Linux/macOS via GSSAPI)
 //! - `SspiAuth` - Windows SSPI (native Windows, cross-platform via sspi-rs)
 //!
-//! ### Tier 4 (Certificate - `cert-auth` feature) ⚠️ FEDAUTH login wiring pending (#155)
+//! ### Tier 4 (Certificate - `cert-auth` feature) ⚠️ login wiring pending (#155)
 //!
 //! - `CertificateAuth` - Client certificate authentication (mTLS)
 //!
