@@ -267,7 +267,8 @@ jobs:
       # it will not be semver-checked.
       #
       # KNOWN BLIND SPOT regardless of configuration: return-type changes
-      # pass undetected (reproduced in #202 on cargo-semver-checks 0.42), so
+      # pass undetected (reproduced in #202 on cargo-semver-checks 0.42 and
+      # verified again on 0.48.0), so
       # commit-message breaking markers and Release-PR verification
       # (CLAUDE.md) remain the primary guards.
       - name: Semver check (all features, crates without fragile dep trees)
@@ -512,3 +513,37 @@ jobs:
             exit 1
           fi
           echo "No AI-branding trailers in PR commit range."
+
+  commit-breaking-markers:
+    name: Breaking-Marker Hygiene
+    # PR-only: needs a base..head commit range. release-plz derives versions
+    # from commit messages, and a body line like "BREAKING: ..." is NOT a
+    # conventional-commits marker — it is silently ignored, which is exactly
+    # how the v0.13.2 under-bump happened (#202). Fail loudly instead.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Reject BREAKING body lines that release-plz would ignore
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          bad=0
+          for sha in $(git rev-list --no-merges "$base..$head"); do
+            subject=$(git log -1 --format='%s' "$sha")
+            body=$(git log -1 --format='%b' "$sha")
+            # Real markers: `!` before the subject colon, or a
+            # `BREAKING CHANGE:` / `BREAKING-CHANGE:` footer line.
+            if grep -qE '^BREAKING' <<<"$body" \
+              && ! grep -qE '^BREAKING[- ]CHANGE:' <<<"$body" \
+              && ! grep -qE '^[a-z]+(\([^)]*\))?!:' <<<"$subject"; then
+              echo "::error::Commit $sha ('$subject') has a BREAKING body line that release-plz ignores. Use 'type!:' in the subject or a 'BREAKING CHANGE:' footer (or rephrase the line)."
+              bad=1
+            fi
+          done
+          if [ "$bad" -ne 0 ]; then
+            exit 1
+          fi
+          echo "No ignored BREAKING body lines in PR commit range."

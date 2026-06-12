@@ -269,7 +269,7 @@ Rules for agents: **never run `cargo publish`, never create version tags, never 
 
 ### CI/CD workflows
 
-- `.github/workflows/ci.yml` — runs on pushes to main and PRs to main. Cross-platform matrix (Linux / macOS / Windows) plus hygiene (typos, unused deps), ADR-011 (no mod.rs), doc-consistency, and AI-branding gates. Has `workflow_dispatch` for manual reruns.
+- `.github/workflows/ci.yml` — runs on pushes to main and PRs to main. Cross-platform matrix (Linux / macOS / Windows) plus hygiene (typos, unused deps), ADR-011 (no mod.rs), doc-consistency, AI-branding, and breaking-marker gates. Has `workflow_dispatch` for manual reruns.
 - `.github/workflows/benchmarks.yml` — runs on pushes/PRs to main. Performance regression detection.
 - `.github/workflows/fuzz-nightly.yml` — daily scheduled long-budget fuzzing (5 min per target, all 12 targets); crash artifacts uploaded for triage. The per-PR `fuzz-smoke` job in ci.yml stays at 15 s/target.
 - `.github/workflows/security-audit.yml` — weekly schedule + dep-file changes on pushes/PRs to main.
@@ -313,9 +313,11 @@ Key differences for migrators:
 - Use conventional commits (feat, fix, refactor, docs, test)
 - **Breaking changes MUST carry the conventional marker**: `!` after the type
   (`fix(types)!:`) or a `BREAKING CHANGE:` footer. A `BREAKING:` line in the
-  commit body is **ignored** by release-plz — and the `cargo-semver-checks`
-  backstop has demonstrated blind spots: version 0.42 passes return-type
-  changes (`()` → `Result<...>`) without a finding, reproduced in #202.
+  commit body is **ignored** by release-plz — CI's Breaking-Marker Hygiene
+  job fails PRs containing one without a real marker — and the
+  `cargo-semver-checks` backstop has demonstrated blind spots: versions
+  through 0.48.0 pass return-type changes (`()` → `Result<...>`) without a
+  finding, verified in #202.
   Version correctness rests on the commit message. Precedent: the v0.13.2
   wrong bump, corrected by PR #201 before release.
 - Run `cargo fmt --all` **before** committing, not after the CI mirror flags
@@ -377,5 +379,5 @@ When making changes here, remember:
    - The ignored-only suite needs a local SQL Server 2022 container (`just sql-server-start`). `ci-all` and unit tests will NOT catch live-only failures (e.g. bulk temporal, decimal high-scale).
    - **Never open a PR stacked on another feature branch.** CI only triggers on PRs based on `main` (see convention 5), so a stacked PR gets zero CI until it is retargeted to `main`.
    - **Branch protection requires up-to-date-with-`main`.** Merge each green PR before opening the next to minimize the `update-branch` + CI-re-run churn that comes from keeping many PRs in flight at once.
-   - **The Semver Check CI job is advisory** (`continue-on-error: true`), but `gh pr checks --watch` still exits 1 when it fails — a red advisory check is not a blocked PR. Before concluding a PR is stuck, check the required checks / `mergeable` state (`gh api .../pulls/N -q .mergeable_state`). The job's known blind spots are tracked in #202.
+   - **The Semver Check CI job is advisory** (`continue-on-error: true`), but `gh pr checks --watch` still exits 1 when it fails — a red advisory check is not a blocked PR. Before concluding a PR is stuck, check the required checks / `mergeable` state (`gh api .../pulls/N -q .mergeable_state`). The job's known blind spots are documented in #202 (closed: the job stays advisory; return-type blindness verified through semver-checks 0.48.0). On a Release PR this job is always vacuously green — the already-bumped version makes every lint skip — so never read it as confirmation the API diff was checked.
    - The tests excluded from the pre-push command (`azure_sql`, `azure_identity_auth`, `cert_auth`) need a **live Azure SQL environment**, not the local container. One exists (credentials live outside the repo, e.g. a local gitignored `.tmp/azure.env`); run that suite when touching authentication or Azure-path code. The `azure_sql` suite includes live FEDAUTH service-principal login tests (`--features azure-identity`) reading `AZURE_SQL_TENANT_ID`/`AZURE_SQL_CLIENT_ID`/`AZURE_SQL_CLIENT_SECRET` with fallback to the `AZURE_`-prefixed names in the standing env file.
