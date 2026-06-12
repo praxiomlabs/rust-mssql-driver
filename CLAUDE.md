@@ -255,6 +255,7 @@ Rules for agents: **never run `cargo publish`, never create version tags, never 
 
 - `.github/workflows/ci.yml` — runs on pushes to main and PRs to main. Cross-platform matrix (Linux / macOS / Windows) plus hygiene (typos, unused deps), ADR-011 (no mod.rs), doc-consistency, and AI-branding gates. Has `workflow_dispatch` for manual reruns.
 - `.github/workflows/benchmarks.yml` — runs on pushes/PRs to main. Performance regression detection.
+- `.github/workflows/fuzz-nightly.yml` — daily scheduled long-budget fuzzing (5 min per target, all 12 targets); crash artifacts uploaded for triage. The per-PR `fuzz-smoke` job in ci.yml stays at 15 s/target.
 - `.github/workflows/security-audit.yml` — weekly schedule + dep-file changes on pushes/PRs to main.
 - `.github/workflows/release-plz.yml` — runs on push to main. Maintains the Release PR and performs the publish when one merges (see above).
 
