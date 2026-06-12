@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.12.0...v0.13.0) - 2026-06-12
+
+### Fixed
+
+- *(client)* cancel on timeout via ATTENTION; enforce command_timeout
+- *(client)* [**breaking**] error on conversion/decode failures instead of substituting NULL or lossy values
+- *(client)* encode bulk-insert DATETIMEOFFSET as UTC; drop panic from gate test
+- *(auth)* reject FEDAUTH credentials at connect time until #155 lands
+- *(types)* encode/decode DATETIMEOFFSET wire value as UTC, not local time
+- *(collation)* test fUTF8 bit 26, not reserved bit 27, for UTF-8 collations
+- *(collation)* derive SQL collation code page from SortId, not LCID
+- *(protocol)* read UDT and XML metadata name fields as B_VARCHAR
+- *(codec)* send one EOM packet for empty payloads; add error-path tests
+- *(auth)* restrict Always Encrypted CMK host to trusted Key Vault endpoints
+- *(pool)* stop adding semaphore permits when reaping idle connections
+
+### Other
+
+- correct false "streaming"/low-memory claims for query results
+- Merge main into fix/review-tier2b
+
 ## [0.12.0](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.11.0...v0.12.0) - 2026-06-11
 
 ### Added
