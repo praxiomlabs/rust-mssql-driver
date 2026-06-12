@@ -248,26 +248,43 @@ jobs:
           LATEST_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
           echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
           echo "Latest tag: $LATEST_TAG"
-      - uses: obi1kenobi/cargo-semver-checks-action@v2
+      # cargo-semver-checks builds each crate in a TEMP project with FRESH
+      # dependency resolution — Cargo.lock is not consulted on either side
+      # (verified in #202). A new release of any transitive dep can therefore
+      # break this job while every lockfile-honoring build stays green:
+      # time 0.3.48 (published 2026-06-12) conflicts with picky-asn1 0.10.1
+      # (E0119) and broke the mssql-auth check exactly that way. Hence the
+      # split below: mssql-auth is checked with default features only
+      # (default = [], skipping the fragile sspi/picky/time optional tree),
+      # every other crate with all features. Revisit the split when upstream
+      # resolves the conflict.
+      #
+      # KNOWN BLIND SPOT regardless of configuration: return-type changes
+      # pass undetected (reproduced in #202 on cargo-semver-checks 0.42), so
+      # commit-message breaking markers and Release-PR verification
+      # (CLAUDE.md) remain the primary guards.
+      - name: Semver check (all crates except mssql-auth, all features)
+        uses: obi1kenobi/cargo-semver-checks-action@v2
         with:
           # Use git tag as baseline to avoid workspace dependency issues.
           # When using crates.io baseline, workspace deps get mixed with local versions.
           baseline-rev: ${{ steps.latest_tag.outputs.tag }}
           # Exclude mssql-testing: testing utilities have relaxed API stability
           # requirements and are not published to crates.io (publish = false).
-          exclude: mssql-testing
-          # Pinned: the action defaults to floating latest stable (it ignores
-          # rust-toolchain.toml), and a 2026-06-12 stable release broke the
-          # *baseline* build (E0119 in the time crate via the locked sspi dep
-          # tree), turning this job red on every PR (#202). Bump deliberately
-          # after verifying the baseline tag still builds on the new release.
+          exclude: mssql-testing,mssql-auth
+          # Pinned for reproducibility — the action otherwise floats on
+          # latest stable (ignoring rust-toolchain.toml). Bump deliberately.
           rust-toolchain: "1.92.0"
-          # Explicit all-features: the default heuristic already enables most
-          # features, but be exact about coverage. KNOWN BLIND SPOT either
-          # way: return-type changes pass undetected in cargo-semver-checks
-          # 0.42 (reproduced in #202), so commit-message breaking markers and
-          # Release-PR verification (CLAUDE.md) remain the primary guards.
           feature-group: all-features
+      - name: Semver check (mssql-auth, default features)
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          baseline-rev: ${{ steps.latest_tag.outputs.tag }}
+          package: mssql-auth
+          rust-toolchain: "1.92.0"
+          # default = [] for mssql-auth: checks the core API surface without
+          # the optional dep trees that fresh resolution keeps breaking.
+          feature-group: default-features
 
   coverage:
     name: Code Coverage
