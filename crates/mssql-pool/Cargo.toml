@@ -16,6 +16,9 @@ features = ["otel", "filestream"]
 
 [features]
 default = []
+# Azure Managed Identity / Service Principal token acquisition for Azure AD
+# (FEDAUTH) logins; each pooled connection acquires a fresh token.
+azure-identity = ["mssql-client/azure-identity"]
 # Integrated authentication (Kerberos/SPNEGO) - Linux/macOS
 integrated-auth = ["mssql-client/integrated-auth"]
 # Windows SSPI integrated authentication

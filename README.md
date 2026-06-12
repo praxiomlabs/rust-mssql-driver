@@ -159,6 +159,7 @@ for result in rows {
 | `encoding` | Yes | Collation-aware VARCHAR decoding |
 | `json` | No | JSON type support via serde_json |
 | `tls` | Yes | TLS/SSL encryption via rustls (disable for `Encrypt=no_tls` environments) |
+| `azure-identity` | No | Azure AD / Entra logins with Managed Identity or Service Principal credentials (pre-acquired tokens work without it) |
 | `otel` | No | OpenTelemetry tracing and metrics |
 | `zeroize` | No | Secure credential wiping |
 | `filestream` | No | FILESTREAM BLOB access (Windows only, requires OLE DB Driver) |

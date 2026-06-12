@@ -21,7 +21,7 @@ For supported features, see [README.md](README.md).
 | Data Types | HIERARCHYID | Use `.ToString()` |
 | Data Types | CLR UDTs | Cast to VARBINARY |
 | Performance | Prepared statement cache (not wired) | `sp_executesql` server plan cache |
-| Auth | Azure AD / Entra and certificate auth (FEDAUTH not wired) | SQL auth or NTLM |
+| Auth | Certificate auth and ADAL/MSAL workflows (FEDAUTH Phase 2) | Azure AD token / service principal / managed identity, SQL auth, or NTLM |
 | Auth | Kerberos untested against live KDC | SQL auth or NTLM |
 | Platforms | SQL Server 2005 and earlier | Upgrade to SQL Server 2008+ |
 | Platforms | 32-bit systems | Use 64-bit |
@@ -135,23 +135,34 @@ Client-side handle caching is planned.
 
 ---
 
-### Azure AD / Entra and Certificate Authentication (FEDAUTH Not Wired)
+### Certificate Authentication and ADAL/MSAL Workflows (FEDAUTH Phase 2)
 
-**Status:** Token acquisition implemented; login wiring not implemented
+**Status:** Azure AD logins implemented (SecurityToken workflow);
+certificate credentials and server-directed token acquisition not wired
 
-The `mssql-auth` providers for Azure AD access tokens, Managed Identity,
-Service Principals, and client certificates can acquire tokens, but the
-LOGIN7 FEDAUTH feature extension is not yet implemented in `mssql-client`,
-so these credential types cannot complete a login. `Client::connect`
-rejects them with a clear configuration error instead of sending an
-empty-credential login (which the server would reject with an opaque
-error 18456).
+Azure AD / Entra credentials — pre-acquired access tokens, Managed
+Identity, and Service Principals — complete logins via the LOGIN7 FEDAUTH
+feature extension (SecurityToken workflow: the token is acquired
+client-side before login; validated against live Azure SQL).
 
-Full FEDAUTH support is tracked in
-[#155](https://github.com/praxiomlabs/rust-mssql-driver/issues/155).
+Still unwired:
 
-**Workaround:** SQL authentication or cross-platform NTLM. For Azure SQL,
-SQL authentication works on every tier.
+- **Client certificate credentials** (`cert-auth`): token acquisition
+  works, but `Client::connect` rejects the credential type with a clear
+  configuration error.
+- **ADAL/MSAL workflows** (`Authentication=ActiveDirectoryPassword`,
+  `ActiveDirectoryInteractive`, …): these need the FEDAUTHINFO
+  round-trip in which the server directs token acquisition; the
+  connection-string parser rejects them with a pointer to the tracking
+  issue.
+
+Both are tracked in
+[#155](https://github.com/praxiomlabs/rust-mssql-driver/issues/155)
+(Phase 2).
+
+**Workaround:** a service principal secret or a pre-acquired token covers
+most certificate-credential scenarios; SQL authentication works on every
+Azure SQL tier.
 
 ---
 
