@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.14.0...v0.15.0) - 2026-06-12
+
+### Added
+
+- *(client)* Azure AD / Entra logins via the FEDAUTH SecurityToken workflow
+- *(protocol)* PreLogin builder for the FEDAUTHREQUIRED option
+
+### Fixed
+
+- *(protocol)* FEDAUTHINFO option IDs were swapped (STSURL=0x01, SPN=0x02)
+- *(auth)* [**breaking**] correct FEDAUTH wire constants and SecurityToken feature data per MS-TDS §2.2.6.4
+
+### Other
+
+- *(client)* live Azure AD FEDAUTH login tests against Azure SQL
+- move Azure AD out of the FEDAUTH limitation; forward azure-identity through the pool crate
+
 ## [0.14.0](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.13.1...v0.14.0) - 2026-06-12
 
 ### Added
