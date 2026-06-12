@@ -115,3 +115,35 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      # release-plz bumps Cargo.toml + CHANGELOG but not the README install
+      # snippets (`mssql-client = "X.Y"`), so the doc-consistency gate fails on
+      # every Release PR until they are hand-bumped. Sync them automatically on
+      # the Release PR branch. Pushing to that branch (never main) re-runs CI
+      # but does not re-trigger this workflow, and self-heals on the next main
+      # push because this step runs again.
+      - name: Sync README dep-version snippets on the Release PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          # The Release PR branch is always named release-plz-*.
+          pr_branch=$(gh pr list --state open --json headRefName \
+            --jq '[.[] | select(.headRefName | startswith("release-plz-"))][0].headRefName' \
+            2>/dev/null || true)
+          if [ -z "$pr_branch" ]; then
+            echo "No open Release PR; nothing to sync."
+            exit 0
+          fi
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch "$remote" "$pr_branch"
+          git checkout -B "$pr_branch" FETCH_HEAD
+          bash scripts/sync-readme-version.sh
+          if git diff --quiet; then
+            echo "Dep-version snippets already in sync."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "docs: sync first-party dep version snippets to the release version"
+          git push "$remote" "HEAD:$pr_branch"
+          echo "Synced dep-version snippets on $pr_branch."
