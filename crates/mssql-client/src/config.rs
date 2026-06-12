@@ -270,6 +270,17 @@ pub struct Config {
     /// Command timeout.
     pub command_timeout: Duration,
 
+    /// Maximum size in bytes of a single buffered response (default: 0 =
+    /// unlimited).
+    ///
+    /// Query responses are buffered in full before rows are decoded (see the
+    /// crate-level notes on streaming), so a very large SELECT is otherwise
+    /// unbounded client memory. When the cap is exceeded the call fails with
+    /// [`Error::ResponseTooLarge`](crate::Error::ResponseTooLarge) and the
+    /// connection is discarded (the response was abandoned mid-stream).
+    /// Paginate, narrow the SELECT, or raise the cap.
+    pub max_response_size: usize,
+
     /// TDS packet size.
     pub packet_size: u16,
 
@@ -411,6 +422,7 @@ impl Default for Config {
             application_name: "mssql-client".to_string(),
             connect_timeout: timeouts.connect_timeout,
             command_timeout: timeouts.command_timeout,
+            max_response_size: 0,
             packet_size: 4096,
             strict_mode: false,
             trust_server_certificate: false,

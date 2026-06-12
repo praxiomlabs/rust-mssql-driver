@@ -520,6 +520,36 @@ async fn test_default_command_timeout_enforced() {
     client.close().await.expect("Failed to close");
 }
 
+/// Issue #167: `max_response_size` caps the buffered response. A SELECT
+/// producing more than the cap must fail loudly instead of buffering
+/// without bound — and the connection is abandoned mid-response.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_max_response_size_cap_enforced() {
+    let mut config = get_test_config().expect("SQL Server config required");
+    config.max_response_size = 64 * 1024;
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    // ~1 MB of data, far past the 64 KiB cap.
+    let result = client
+        .query(
+            "SELECT REPLICATE(CAST('x' AS VARCHAR(MAX)), 1000000) AS big",
+            &[],
+        )
+        .await;
+    match result {
+        Err(mssql_client::Error::ResponseTooLarge { size, limit }) => {
+            assert_eq!(limit, 64 * 1024);
+            assert!(size > limit, "reported size must exceed the cap");
+        }
+        Err(other) => panic!("expected ResponseTooLarge, got {other:?}"),
+        Ok(_) => panic!("expected ResponseTooLarge, query succeeded"),
+    }
+    // The response was abandoned mid-stream: the connection is poisoned by
+    // design (in_flight stays set, the pool would discard it). Close only.
+    let _ = client.close().await;
+}
+
 /// Issue #185 regression: `command_timeout` must cover the stored-procedure,
 /// named-parameter, and multi-result paths — previously only `query()` and
 /// `execute()` ran under the deadline.
