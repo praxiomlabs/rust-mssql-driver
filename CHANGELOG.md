@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.13.0...v0.13.1) - 2026-06-12
+
+### Fixed
+
+- *(client)* bound the post-attention drain; enforce command_timeout on all command paths
+- *(client)* bracket identifiers in ChangeTrackingQuery SQL builders
+- *(collation)* map SortId 201 (Korean Wansung CS) to CP949, not CP950
+
 ## [0.13.0](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.12.0...v0.13.0) - 2026-06-12
 
 ### Fixed
