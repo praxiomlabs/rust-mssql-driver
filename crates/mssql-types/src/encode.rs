@@ -363,6 +363,8 @@ pub fn datetime_to_smalldatetime_days_minutes(
 /// minutes since midnight (`u16` LE). Seconds are rounded to the nearest
 /// minute (30s rounds up per SQL Server semantics).
 ///
+/// # Errors
+///
 /// Returns an error if the date is outside the SMALLDATETIME range
 /// (1900-01-01 through 2079-06-06).
 #[cfg(feature = "chrono")]
@@ -379,6 +381,8 @@ pub fn encode_smalldatetime(
 /// Encode a DATE value.
 ///
 /// TDS DATE is the number of days since 0001-01-01.
+///
+/// # Errors
 ///
 /// Returns an error if the date is outside SQL Server's DATE range
 /// (0001-01-01 through 9999-12-31). chrono permits dates beyond both ends,
@@ -427,6 +431,8 @@ pub fn encode_time(time: chrono::NaiveTime, buf: &mut BytesMut) {
 /// Encode a DATETIME2 value.
 ///
 /// DATETIME2 is encoded as TIME followed by DATE.
+///
+/// # Errors
 ///
 /// Returns an error if the date portion is outside the DATE range; see
 /// [`encode_date`].
