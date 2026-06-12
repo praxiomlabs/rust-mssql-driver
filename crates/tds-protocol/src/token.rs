@@ -2146,10 +2146,11 @@ impl SspiToken {
 }
 
 impl FedAuthInfo {
-    /// `FedAuthInfoID` for the service principal name (MS-TDS §2.2.7.12).
-    const ID_SPN: u8 = 0x01;
-    /// `FedAuthInfoID` for the STS URL (MS-TDS §2.2.7.12).
-    const ID_STSURL: u8 = 0x02;
+    /// `FedAuthInfoID` for the STS URL (MS-TDS §2.2.7.12: %0x01 = STSURL).
+    const ID_STSURL: u8 = 0x01;
+    /// `FedAuthInfoID` for the service principal name (MS-TDS §2.2.7.12:
+    /// %0x02 = SPN).
+    const ID_SPN: u8 = 0x02;
     /// Size of one `FedAuthInfoOpt` header: ID (1) + DataLen (4) + DataOffset (4).
     const OPT_HEADER_LEN: usize = 9;
 
@@ -4072,8 +4073,10 @@ mod tests {
     fn test_fed_auth_info_decodes_spec_layout() {
         const STS: &str = "https://login.microsoftonline.com/common";
         const SPN: &str = "https://database.windows.net/";
-        // STSURL (0x02) listed first, SPN (0x01) second, like real servers.
-        let token = build_fed_auth_info_token(&[(0x02, STS), (0x01, SPN)]);
+        // STSURL (0x01) listed first, SPN (0x02) second. Real Azure servers
+        // list SPN first (see the captured-token test below); decoding must
+        // not depend on option order.
+        let token = build_fed_auth_info_token(&[(0x01, STS), (0x02, SPN)]);
 
         let mut parser = TokenParser::new(Bytes::from(token));
         let parsed = parser.next_token().unwrap().unwrap();
@@ -4091,8 +4094,8 @@ mod tests {
         // the tokens that follow FEDAUTHINFO during login. A DONE token
         // appended after it must survive.
         let mut stream = build_fed_auth_info_token(&[
-            (0x02, "https://sts.example/"),
-            (0x01, "https://db.example/"),
+            (0x01, "https://sts.example/"),
+            (0x02, "https://db.example/"),
         ]);
         stream.push(0xFD); // DONE
         stream.extend_from_slice(&0u16.to_le_bytes()); // status
@@ -4115,7 +4118,7 @@ mod tests {
     fn test_fed_auth_info_unknown_ids_ignored() {
         // Spec: unrecognized FedAuthInfoIDs must be ignored.
         let token =
-            build_fed_auth_info_token(&[(0x7F, "ignore-me"), (0x02, "https://sts.example/")]);
+            build_fed_auth_info_token(&[(0x7F, "ignore-me"), (0x01, "https://sts.example/")]);
         let mut parser = TokenParser::new(Bytes::from(token));
         let Some(Token::FedAuthInfo(info)) = parser.next_token().unwrap() else {
             panic!("expected FedAuthInfo");
@@ -4174,5 +4177,50 @@ mod tests {
         let mut skipper = TokenParser::new(Bytes::from(token));
         skipper.skip_token().unwrap();
         assert_eq!(skipper.position(), total, "skip consumption");
+    }
+
+    /// A FEDAUTHINFO token captured from a live Azure SQL Database login on
+    /// 2026-06-12 (the client declared the ADAL library in LOGIN7; the server
+    /// responded with this token). The tenant GUID inside the STS URL is
+    /// replaced with an all-zero GUID of identical length, so every offset
+    /// and length is byte-identical to the wire capture.
+    ///
+    /// This is the regression test deferred from PR #193, and it earns its
+    /// keep: the real token proves FedAuthInfoID 0x01 = STSURL and
+    /// 0x02 = SPN (Azure lists SPN first), which the synthetic tests
+    /// originally had swapped.
+    #[test]
+    fn test_fed_auth_info_captured_from_azure() {
+        const CAPTURED: &[u8] = &[
+            0xEE, 0xCC, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x3A, 0x00, 0x00, 0x00,
+            0x16, 0x00, 0x00, 0x00, 0x01, 0x7C, 0x00, 0x00, 0x00, 0x50, 0x00, 0x00, 0x00, 0x68,
+            0x00, 0x74, 0x00, 0x74, 0x00, 0x70, 0x00, 0x73, 0x00, 0x3A, 0x00, 0x2F, 0x00, 0x2F,
+            0x00, 0x64, 0x00, 0x61, 0x00, 0x74, 0x00, 0x61, 0x00, 0x62, 0x00, 0x61, 0x00, 0x73,
+            0x00, 0x65, 0x00, 0x2E, 0x00, 0x77, 0x00, 0x69, 0x00, 0x6E, 0x00, 0x64, 0x00, 0x6F,
+            0x00, 0x77, 0x00, 0x73, 0x00, 0x2E, 0x00, 0x6E, 0x00, 0x65, 0x00, 0x74, 0x00, 0x2F,
+            0x00, 0x68, 0x00, 0x74, 0x00, 0x74, 0x00, 0x70, 0x00, 0x73, 0x00, 0x3A, 0x00, 0x2F,
+            0x00, 0x2F, 0x00, 0x6C, 0x00, 0x6F, 0x00, 0x67, 0x00, 0x69, 0x00, 0x6E, 0x00, 0x2E,
+            0x00, 0x77, 0x00, 0x69, 0x00, 0x6E, 0x00, 0x64, 0x00, 0x6F, 0x00, 0x77, 0x00, 0x73,
+            0x00, 0x2E, 0x00, 0x6E, 0x00, 0x65, 0x00, 0x74, 0x00, 0x2F, 0x00, 0x30, 0x00, 0x30,
+            0x00, 0x30, 0x00, 0x30, 0x00, 0x30, 0x00, 0x30, 0x00, 0x30, 0x00, 0x30, 0x00, 0x2D,
+            0x00, 0x30, 0x00, 0x30, 0x00, 0x30, 0x00, 0x30, 0x00, 0x2D, 0x00, 0x30, 0x00, 0x30,
+            0x00, 0x30, 0x00, 0x30, 0x00, 0x2D, 0x00, 0x30, 0x00, 0x30, 0x00, 0x30, 0x00, 0x30,
+            0x00, 0x2D, 0x00, 0x30, 0x00, 0x30, 0x00, 0x30, 0x00, 0x30, 0x00, 0x30, 0x00, 0x30,
+            0x00, 0x30, 0x00, 0x30, 0x00, 0x30, 0x00, 0x30, 0x00, 0x30, 0x00, 0x30, 0x00,
+        ];
+
+        let mut parser = TokenParser::new(Bytes::from_static(CAPTURED));
+        let Some(Token::FedAuthInfo(info)) = parser.next_token().unwrap() else {
+            panic!("expected FedAuthInfo");
+        };
+        assert_eq!(
+            info.sts_url,
+            "https://login.windows.net/00000000-0000-0000-0000-000000000000"
+        );
+        assert_eq!(info.spn, "https://database.windows.net/");
+        assert!(
+            parser.next_token().unwrap().is_none(),
+            "the captured token must be consumed exactly"
+        );
     }
 }
