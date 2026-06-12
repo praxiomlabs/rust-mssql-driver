@@ -282,8 +282,8 @@ pub fn encoding_for_sort_id(sort_id: u8) -> Option<&'static Encoding> {
         144..=146 => Some(encoding_rs::WINDOWS_1256),
         152..=160 => Some(encoding_rs::WINDOWS_1257),
         192 | 193 | 200 => Some(encoding_rs::SHIFT_JIS), // CP932
-        194 | 195 => Some(encoding_rs::EUC_KR),          // CP949
-        196 | 197 | 201 | 202 => Some(encoding_rs::BIG5), // CP950
+        194 | 195 | 201 => Some(encoding_rs::EUC_KR),    // CP949
+        196 | 197 | 202 => Some(encoding_rs::BIG5),      // CP950
         198 | 199 | 203 => Some(encoding_rs::GB18030),   // CP936
         204..=206 => Some(encoding_rs::WINDOWS_874),
         _ => None,
@@ -310,8 +310,8 @@ pub fn code_page_for_sort_id(sort_id: u8) -> Option<u16> {
         144..=146 => Some(1256),
         152..=160 => Some(1257),
         192 | 193 | 200 => Some(932),
-        194 | 195 => Some(949),
-        196 | 197 | 201 | 202 => Some(950),
+        194 | 195 | 201 => Some(949),
+        196 | 197 | 202 => Some(950),
         198 | 199 | 203 => Some(936),
         204..=206 => Some(874),
         _ => None,
@@ -650,6 +650,13 @@ mod tests {
             Some("Shift_JIS")
         );
         assert_eq!(encoding_for_sort_id(198).map(|e| e.name()), Some("gb18030"));
+
+        // Issue #187: SortId 201 is NLS_CP949_CS (Korean Wansung
+        // case-sensitive) → CP949, not CP950/Big5. Its neighbors stay CP950.
+        assert_eq!(encoding_for_sort_id(201).map(|e| e.name()), Some("EUC-KR"));
+        assert_eq!(code_page_for_sort_id(201), Some(949));
+        assert_eq!(encoding_for_sort_id(202).map(|e| e.name()), Some("Big5"));
+        assert_eq!(code_page_for_sort_id(202), Some(950));
 
         // CP437/CP850 are not representable in encoding_rs: no encoding, but
         // the true code page is still reported for error messages.

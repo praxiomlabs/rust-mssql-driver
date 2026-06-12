@@ -239,8 +239,17 @@ impl<'a, S: ConnectionState> ProcedureBuilder<'a, S> {
             rpc = rpc.param(param);
         }
 
-        self.client.send_rpc(&rpc).await?;
-        self.client.read_procedure_result().await
+        let deadline = self.client.command_deadline();
+        let canceller = self.client.connection_cancel_handle();
+        crate::client::run_with_deadline(
+            async {
+                self.client.send_rpc(&rpc).await?;
+                self.client.read_procedure_result().await
+            },
+            deadline,
+            canceller,
+        )
+        .await
     }
 }
 

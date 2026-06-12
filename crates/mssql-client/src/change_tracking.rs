@@ -316,7 +316,11 @@ impl ChangeTrackingQuery {
 
     /// Generate the SQL query string.
     ///
-    /// This returns a query that can be executed directly.
+    /// This returns a query that can be executed directly. The table name is
+    /// bracket-quoted part by part (`dbo.Items` → `[dbo].[Items]`) and the
+    /// alias, primary key, and column names are bracket-quoted as single
+    /// identifiers; pass all of them unbracketed — pre-bracketed input is
+    /// treated as literal characters of the name.
     #[must_use]
     pub fn to_sql(&self) -> String {
         let force_seek = if self.force_seek { ", FORCESEEK" } else { "" };
@@ -328,7 +332,11 @@ impl ChangeTrackingQuery {
         // the CHANGETABLE function must be aliased.", error 22104).
         format!(
             "SELECT {} FROM CHANGETABLE(CHANGES {}, {}{}) AS {}",
-            select_cols, self.table_name, self.last_sync_version, force_seek, self.alias
+            select_cols,
+            ChangeTracking::bracket_table_name(&self.table_name),
+            self.last_sync_version,
+            force_seek,
+            bracket_identifier(&self.alias)
         )
     }
 
@@ -354,7 +362,7 @@ impl ChangeTrackingQuery {
     #[must_use]
     pub fn to_sql_with_data(&self, data_columns: &[&str]) -> String {
         let force_seek = if self.force_seek { ", FORCESEEK" } else { "" };
-        let alias = &self.alias;
+        let alias = bracket_identifier(&self.alias);
 
         // Build change tracking columns
         let ct_cols = format!(
@@ -365,7 +373,7 @@ impl ChangeTrackingQuery {
         // Build data columns (prefixed with table alias)
         let data_cols: String = data_columns
             .iter()
-            .map(|c| format!("T.{c}"))
+            .map(|c| format!("T.{}", bracket_identifier(c)))
             .collect::<Vec<_>>()
             .join(", ");
 
@@ -375,7 +383,7 @@ impl ChangeTrackingQuery {
             .as_ref()
             .map(|pks| {
                 pks.iter()
-                    .map(|pk| format!("{alias}.{pk}"))
+                    .map(|pk| format!("{alias}.{}", bracket_identifier(pk)))
                     .collect::<Vec<_>>()
                     .join(", ")
             })
@@ -387,7 +395,10 @@ impl ChangeTrackingQuery {
             .as_ref()
             .map(|pks| {
                 pks.iter()
-                    .map(|pk| format!("{alias}.{pk} = T.{pk}"))
+                    .map(|pk| {
+                        let pk = bracket_identifier(pk);
+                        format!("{alias}.{pk} = T.{pk}")
+                    })
                     .collect::<Vec<_>>()
                     .join(" AND ")
             })
@@ -403,13 +414,13 @@ impl ChangeTrackingQuery {
             "SELECT {select_cols} \
              FROM CHANGETABLE(CHANGES {table}, {version}{force_seek}) AS {alias} \
              LEFT OUTER JOIN {table} AS T ON {join_condition}",
-            table = self.table_name,
+            table = ChangeTracking::bracket_table_name(&self.table_name),
             version = self.last_sync_version,
         )
     }
 
     fn build_select_columns(&self) -> String {
-        let alias = &self.alias;
+        let alias = bracket_identifier(&self.alias);
 
         // Always include change tracking system columns
         let mut cols = vec![
@@ -423,14 +434,14 @@ impl ChangeTrackingQuery {
         // Add primary key columns if specified
         if let Some(ref pks) = self.primary_keys {
             for pk in pks {
-                cols.push(format!("{alias}.{pk}"));
+                cols.push(format!("{alias}.{}", bracket_identifier(pk)));
             }
         }
 
         // Add data columns if specified
         if let Some(ref data_cols) = self.columns {
             for col in data_cols {
-                cols.push(format!("{alias}.{col}"));
+                cols.push(format!("{alias}.{}", bracket_identifier(col)));
             }
         }
 
@@ -621,6 +632,15 @@ fn escape_nvarchar_literal(s: &str) -> String {
     s.replace('\'', "''")
 }
 
+/// Bracket a single identifier (alias, column, or primary-key name) with
+/// interior `]` doubled (the T-SQL QUOTENAME rule), so hostile input stays
+/// one quoted identifier instead of escaping into the surrounding statement.
+/// Pass names unbracketed; pre-bracketed input is treated as literal
+/// characters of the name.
+fn bracket_identifier(name: &str) -> String {
+    format!("[{}]", name.replace(']', "]]"))
+}
+
 /// Result of checking if a sync version is still valid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -742,14 +762,14 @@ mod tests {
         let query = ChangeTrackingQuery::changes("Products", 42);
         let sql = query.to_sql();
 
-        assert!(sql.contains("CHANGETABLE(CHANGES Products, 42)"));
+        assert!(sql.contains("CHANGETABLE(CHANGES [Products], 42)"));
         assert!(sql.contains("SYS_CHANGE_VERSION"));
         assert!(sql.contains("SYS_CHANGE_OPERATION"));
         // SQL Server rejects CHANGETABLE without an alias (error 22104) —
         // the substring above matches the broken pre-alias SQL too, so pin
         // the alias explicitly.
         assert!(
-            sql.contains(") AS CT"),
+            sql.contains(") AS [CT]"),
             "CHANGETABLE must be aliased or the query is not executable: {sql}"
         );
     }
@@ -759,8 +779,8 @@ mod tests {
         let query = ChangeTrackingQuery::changes("Products", 42).with_columns(&["Name", "Price"]);
         let sql = query.to_sql();
 
-        assert!(sql.contains("CT.Name"));
-        assert!(sql.contains("CT.Price"));
+        assert!(sql.contains("[CT].[Name]"));
+        assert!(sql.contains("[CT].[Price]"));
     }
 
     #[test]
@@ -768,7 +788,7 @@ mod tests {
         let query = ChangeTrackingQuery::changes("Products", 42).with_primary_keys(&["ProductId"]);
         let sql = query.to_sql();
 
-        assert!(sql.contains("CT.ProductId"));
+        assert!(sql.contains("[CT].[ProductId]"));
     }
 
     #[test]
@@ -784,10 +804,48 @@ mod tests {
         let query = ChangeTrackingQuery::changes("Products", 42).with_primary_keys(&["ProductId"]);
         let sql = query.to_sql_with_data(&["Name", "Price"]);
 
-        assert!(sql.contains("LEFT OUTER JOIN Products AS T"));
-        assert!(sql.contains("CT.ProductId = T.ProductId"));
-        assert!(sql.contains("T.Name"));
-        assert!(sql.contains("T.Price"));
+        assert!(sql.contains("LEFT OUTER JOIN [Products] AS T"));
+        assert!(sql.contains("[CT].[ProductId] = T.[ProductId]"));
+        assert!(sql.contains("T.[Name]"));
+        assert!(sql.contains("T.[Price]"));
+    }
+
+    /// Issue #186: the query builder spliced identifiers verbatim, so a
+    /// hostile table name could terminate CHANGETABLE(...) and smuggle a
+    /// second statement into the batch. Same rules as the #144 helpers:
+    /// per-part bracketing for the table name, single-identifier bracketing
+    /// with `]`-doubling for alias/column/PK names.
+    #[test]
+    fn test_change_tracking_query_brackets_hostile_identifiers() {
+        let hostile_table = "T, 0) AS CT; DROP TABLE x--";
+        let sql = ChangeTrackingQuery::changes(hostile_table, 42).to_sql();
+        assert!(
+            sql.contains("CHANGETABLE(CHANGES [T, 0) AS CT; DROP TABLE x--], 42)"),
+            "hostile table name must stay one quoted identifier: {sql}"
+        );
+
+        // `]` is doubled so the identifier cannot be closed early.
+        let sql = ChangeTrackingQuery::changes("foo]; DROP TABLE bar--", 1).to_sql();
+        assert!(sql.contains("CHANGETABLE(CHANGES [foo]]; DROP TABLE bar--], 1)"));
+
+        // Schema-qualified names bracket part by part.
+        let sql = ChangeTrackingQuery::changes("dbo.Items", 1).to_sql();
+        assert!(sql.contains("CHANGETABLE(CHANGES [dbo].[Items], 1)"));
+
+        // Alias and column names are bracketed in the SELECT list.
+        let sql = ChangeTrackingQuery::changes("Products", 1)
+            .with_alias("A]; DROP TABLE x--")
+            .with_columns(&["C] FROM x--"])
+            .to_sql();
+        assert!(sql.contains("AS [A]]; DROP TABLE x--]"));
+        assert!(sql.contains("[A]]; DROP TABLE x--].[C]] FROM x--]"));
+
+        // PK and data-column names are bracketed in the join form too.
+        let sql = ChangeTrackingQuery::changes("Products", 1)
+            .with_primary_keys(&["P]--"])
+            .to_sql_with_data(&["D]--"]);
+        assert!(sql.contains("[CT].[P]]--] = T.[P]]--]"));
+        assert!(sql.contains("T.[D]]--]"));
     }
 
     #[test]

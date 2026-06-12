@@ -520,6 +520,84 @@ async fn test_default_command_timeout_enforced() {
     client.close().await.expect("Failed to close");
 }
 
+/// Issue #185 regression: `command_timeout` must cover the stored-procedure,
+/// named-parameter, and multi-result paths — previously only `query()` and
+/// `execute()` ran under the deadline.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_command_timeout_covers_all_command_paths() {
+    let mut config = get_test_config().expect("SQL Server config required");
+    config.command_timeout = Duration::from_secs(1);
+    let mut client = Client::connect(config).await.expect("Failed to connect");
+
+    const SLOW: &str = "WAITFOR DELAY '00:00:10'";
+
+    client
+        .execute(
+            "CREATE OR ALTER PROCEDURE dbo.slow_proc_185 AS WAITFOR DELAY '00:00:10'",
+            &[],
+        )
+        .await
+        .expect("creating the slow procedure must succeed");
+
+    // Each closure result is checked the same way: CommandTimeout near 1s,
+    // and the connection must answer a fresh query afterwards.
+    fn expect_timeout<T: std::fmt::Debug>(
+        path: &str,
+        start: std::time::Instant,
+        result: Result<T, mssql_client::Error>,
+    ) {
+        match result {
+            Err(mssql_client::Error::CommandTimeout) => {}
+            Err(other) => panic!("{path}: expected CommandTimeout, got {other:?}"),
+            Ok(v) => panic!("{path}: expected CommandTimeout, got Ok({v:?})"),
+        }
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "{path}: timeout must fire near 1s, not wait out the 10s delay; took {elapsed:?}"
+        );
+    }
+
+    let start = std::time::Instant::now();
+    let result = client.call_procedure("dbo.slow_proc_185", &[]).await;
+    expect_timeout("call_procedure", start, result);
+
+    let start = std::time::Instant::now();
+    let result = client
+        .procedure("dbo.slow_proc_185")
+        .expect("valid procedure name")
+        .execute()
+        .await;
+    expect_timeout("ProcedureBuilder::execute", start, result);
+
+    let start = std::time::Instant::now();
+    let result = client.execute_named(SLOW, &[]).await;
+    expect_timeout("execute_named", start, result);
+
+    let start = std::time::Instant::now();
+    let result = client
+        .query_multiple(&format!("{SLOW}; SELECT 1 AS n"), &[])
+        .await
+        .map(|_| ());
+    expect_timeout("query_multiple", start, result);
+
+    // After four cancels in a row the connection must still be clean.
+    let rows = client
+        .query("SELECT 99 AS n", &[])
+        .await
+        .expect("connection must be usable after timeouts on every path");
+    let data: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    let n: i32 = data[0].get(0).expect("must read fresh result");
+    assert_eq!(n, 99);
+
+    client
+        .execute("DROP PROCEDURE dbo.slow_proc_185", &[])
+        .await
+        .expect("cleanup must succeed");
+    client.close().await.expect("Failed to close");
+}
+
 /// Test that short timeout interrupts long-running query.
 #[tokio::test]
 #[ignore = "Requires SQL Server"]
