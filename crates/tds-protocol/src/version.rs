@@ -105,6 +105,15 @@ impl TdsVersion {
         self.is_tds_8() || self.0 >= Self::V7_4.0
     }
 
+    /// Check if this version supports federated authentication (FEDAUTH).
+    ///
+    /// The FEDAUTH feature extension was introduced with the LOGIN7
+    /// FeatureExt block in TDS 7.4.
+    #[must_use]
+    pub const fn supports_fed_auth(self) -> bool {
+        self.is_tds_8() || self.0 >= Self::V7_4.0
+    }
+
     /// Check if this version supports column encryption (Always Encrypted).
     ///
     /// Column encryption was introduced in SQL Server 2016 (still TDS 7.4).
