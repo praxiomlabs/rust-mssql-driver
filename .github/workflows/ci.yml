@@ -58,6 +58,14 @@ jobs:
         run: cargo nextest run ${{ matrix.features }}
       - name: Run doctests
         run: cargo test --doc ${{ matrix.features }}
+      - name: Build & test Windows-only features
+        # sspi-auth, filestream, and windows-certstore never compile on the
+        # Linux --all-features leg, so without this step they bit-rot
+        # silently (the #148 class: a dep bump broke sspi-auth and no CI
+        # job noticed). This runs on stable; MSRV compatibility of these
+        # features is tracked separately in #148.
+        if: matrix.os == 'windows-latest'
+        run: cargo nextest run -p mssql-client -p mssql-auth --features mssql-client/sspi-auth,mssql-client/filestream,mssql-auth/windows-certstore
 
   lint:
     name: Lint
@@ -168,8 +176,14 @@ jobs:
       - name: Setup Miri
         run: cargo +nightly miri setup
       - name: Run Miri on tds-protocol
-        # Only tds-protocol is tested under Miri. The only other unsafe code
-        # is in mssql-auth/windows_certstore.rs (Windows FFI, not Miri-testable).
+        # Only tds-protocol is tested under Miri — a deliberate scope, not
+        # an oversight: it is the crate that parses untrusted bytes. The
+        # only other unsafe code in the workspace is Windows FFI
+        # (mssql-auth/windows_certstore.rs, mssql-client/filestream.rs),
+        # which Miri cannot execute. mssql-types and mssql-codec contain
+        # zero unsafe code, and their suites lean on proptest and tokio
+        # duplex I/O, both of which Miri handles poorly for little
+        # detection value.
         run: cargo +nightly miri test -p tds-protocol
 
   fuzz-smoke:
