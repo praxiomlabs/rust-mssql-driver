@@ -558,13 +558,21 @@ fn decode_decimal(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, Typ
     for byte in mantissa_bytes.iter_mut().take(remaining.min(16)) {
         *byte = buf.get_u8();
     }
+    // Consume any excess bytes so the frame stays aligned (shouldn't happen
+    // with valid data; matches the column_parser decoder).
+    for _ in 16..remaining {
+        buf.get_u8();
+    }
 
     let mantissa = u128::from_le_bytes(mantissa_bytes);
     let scale = type_info.scale.unwrap_or(0) as u32;
 
     // rust_decimal holds 96-bit mantissas with scale <= 28; SQL Server
-    // NUMERIC goes to 38 digits, so wire values (legitimate or hostile) can
-    // exceed both limits. Fall back to f64 rather than panic.
+    // NUMERIC goes to 38 digits, so legitimate wire values can exceed it.
+    // That must be an error, not a silent fall back to f64 (~15-16
+    // significant digits): a lossy value read, written back, or compared
+    // downstream corrupts data. This matches the column_parser decoder —
+    // the two policies diverged after #157 (issue #188).
     let decimal = i128::try_from(mantissa)
         .ok()
         .and_then(|m| Decimal::try_from_i128_with_scale(m, scale).ok());
@@ -575,12 +583,11 @@ fn decode_decimal(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, Typ
             }
             Ok(SqlValue::Decimal(decimal))
         }
-        None => {
-            let divisor = 10f64.powi(scale as i32);
-            let value = (mantissa as f64) / divisor;
-            let value = if sign == 0 { -value } else { value };
-            Ok(SqlValue::Double(value))
-        }
+        None => Err(TypeError::InvalidDecimal(format!(
+            "NUMERIC value (mantissa {mantissa}, scale {scale}) exceeds \
+             rust_decimal's 96-bit/scale-28 range; CAST the column to a \
+             narrower NUMERIC, FLOAT, or VARCHAR in the query"
+        ))),
     }
 }
 
@@ -1256,6 +1263,48 @@ mod tests {
             let d = Decimal::new(i64::MIN + 1, 0);
             let result = roundtrip_decimal(d, 38, 0);
             assert_eq!(result, d, "round-trip of large negative must be exact");
+        }
+
+        /// Issue #188: a NUMERIC beyond rust_decimal's range must be a hard
+        /// error, matching the column_parser policy from #157 — not a silent
+        /// fall back to f64 (~15-16 significant digits of a 38-digit value).
+        #[test]
+        fn test_decimal_out_of_range_errors_instead_of_f64() {
+            // 16 mantissa bytes of 0xFF = u128::MAX, far past 96 bits.
+            let mut buf = BytesMut::new();
+            buf.put_u8(17); // length: sign + 16 mantissa bytes
+            buf.put_u8(1); // sign: positive
+            buf.extend_from_slice(&[0xFF; 16]);
+
+            let mut bytes = buf.freeze();
+            let type_info = TypeInfo::decimal(38, 0);
+            match decode_value(&mut bytes, &type_info) {
+                Err(TypeError::InvalidDecimal(_)) => {}
+                other => panic!("expected InvalidDecimal error, got {other:?}"),
+            }
+        }
+
+        /// Issue #188: mantissa bytes beyond the 16 we can hold must still be
+        /// consumed, or every following column in the row misparses.
+        #[test]
+        fn test_decimal_oversized_mantissa_keeps_frame_aligned() {
+            let mut buf = BytesMut::new();
+            buf.put_u8(18); // length: sign + 17 mantissa bytes (one excess)
+            buf.put_u8(1); // sign: positive
+            buf.put_u8(42); // mantissa = 42
+            buf.extend_from_slice(&[0u8; 16]); // 15 in-range zeros + 1 excess
+            buf.put_u8(0xAB); // sentinel: the next value in the frame
+
+            let mut bytes = buf.freeze();
+            let type_info = TypeInfo::decimal(38, 0);
+            let value = decode_value(&mut bytes, &type_info).unwrap();
+            assert_eq!(value, SqlValue::Decimal(Decimal::new(42, 0)));
+            assert_eq!(
+                bytes.remaining(),
+                1,
+                "excess mantissa bytes must be consumed, leaving the sentinel"
+            );
+            assert_eq!(bytes.get_u8(), 0xAB);
         }
     }
 
