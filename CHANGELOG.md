@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - *(client)* cancel on timeout via ATTENTION; enforce command_timeout
 - *(client)* [**breaking**] error on conversion/decode failures instead of substituting NULL or lossy values
+- *(client)* [**breaking**] complete identifier escaping in change-tracking SQL builders
+- *(protocol)* classify UnexpectedEof as terminal, not transient
 - *(client)* encode bulk-insert DATETIMEOFFSET as UTC; drop panic from gate test
 - *(auth)* reject FEDAUTH credentials at connect time until #155 lands
 - *(types)* encode/decode DATETIMEOFFSET wire value as UTC, not local time
