@@ -254,16 +254,23 @@ jobs:
       # break this job while every lockfile-honoring build stays green:
       # time 0.3.48 (published 2026-06-12) conflicts with picky-asn1 0.10.1
       # (E0119) and broke the mssql-auth check exactly that way. Hence the
-      # split below: mssql-auth is checked with default features only
-      # (default = [], skipping the fragile sspi/picky/time optional tree),
-      # every other crate with all features. Revisit the split when upstream
-      # resolves the conflict.
+      # split below: crates whose optional features pull the fragile
+      # sspi/picky/time or azure/time dep trees are checked WITHOUT those
+      # features; every other crate with all features. Revisit the split when
+      # upstream resolves the conflict.
+      #
+      # The azure-identity exclusions on mssql-client / mssql-driver-pool are
+      # LOSSLESS for semver purposes: that feature gates no public items in
+      # either crate (it only forwards to mssql-auth, whose azure surface is
+      # outside its default-features leg anyway). If a future feature DOES
+      # gate public client/pool API, add it to the `features` lists below or
+      # it will not be semver-checked.
       #
       # KNOWN BLIND SPOT regardless of configuration: return-type changes
       # pass undetected (reproduced in #202 on cargo-semver-checks 0.42), so
       # commit-message breaking markers and Release-PR verification
       # (CLAUDE.md) remain the primary guards.
-      - name: Semver check (all crates except mssql-auth, all features)
+      - name: Semver check (all features, crates without fragile dep trees)
         uses: obi1kenobi/cargo-semver-checks-action@v2
         with:
           # Use git tag as baseline to avoid workspace dependency issues.
@@ -271,12 +278,37 @@ jobs:
           baseline-rev: ${{ steps.latest_tag.outputs.tag }}
           # Exclude mssql-testing: testing utilities have relaxed API stability
           # requirements and are not published to crates.io (publish = false).
-          exclude: mssql-testing,mssql-auth
+          exclude: mssql-testing,mssql-auth,mssql-client,mssql-driver-pool
           # Pinned for reproducibility — the action otherwise floats on
           # latest stable (ignoring rust-toolchain.toml). Bump deliberately.
           rust-toolchain: "1.92.0"
           feature-group: all-features
+      - name: Semver check (mssql-client, all features except azure-identity)
+        # Run even when an earlier leg fails — a red leg must not mask the
+        # findings of the others (bitten on PR #210, where the aborted
+        # all-features leg hid the mssql-auth report).
+        if: ${{ !cancelled() }}
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          baseline-rev: ${{ steps.latest_tag.outputs.tag }}
+          package: mssql-client
+          rust-toolchain: "1.92.0"
+          # Defaults (chrono, uuid, decimal, encoding, tls, derive) plus every
+          # optional feature except azure-identity (azure/time tree) and
+          # fuzzing (internal hooks, not public API).
+          feature-group: default-features
+          features: json,otel,zeroize,always-encrypted,integrated-auth,sspi-auth,filestream
+      - name: Semver check (mssql-driver-pool, all features except azure-identity)
+        if: ${{ !cancelled() }}
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          baseline-rev: ${{ steps.latest_tag.outputs.tag }}
+          package: mssql-driver-pool
+          rust-toolchain: "1.92.0"
+          feature-group: default-features
+          features: otel,integrated-auth,sspi-auth,filestream
       - name: Semver check (mssql-auth, default features)
+        if: ${{ !cancelled() }}
         uses: obi1kenobi/cargo-semver-checks-action@v2
         with:
           baseline-rev: ${{ steps.latest_tag.outputs.tag }}
