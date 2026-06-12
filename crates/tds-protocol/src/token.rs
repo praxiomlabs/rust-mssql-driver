@@ -1896,13 +1896,28 @@ impl EnvChange {
         }
 
         let length = src.get_u16_le() as usize;
+        if length == 0 {
+            // The frame must at least contain the type byte; reading it from
+            // outside a zero-length frame would consume the next token.
+            return Err(ProtocolError::UnexpectedEof);
+        }
         if src.remaining() < length {
             return Err(ProtocolError::IncompletePacket {
                 expected: length,
                 actual: src.remaining(),
             });
         }
-        let remaining_before = src.remaining();
+
+        // Frame-strict decoding (issue #145): the value decoders below only
+        // bounds-check against the *buffer*, so on an under-declared frame
+        // they could read past the declared length into the next token's
+        // bytes. Slice exactly the declared frame and decode from that:
+        // over-read attempts now hit frame end and take the lenient
+        // empty-value fallbacks (preserving the #140 hostile-input
+        // behavior), and the outer buffer always advances by exactly
+        // `length`.
+        let mut frame = src.copy_to_bytes(length);
+        let src = &mut frame;
 
         let env_type_byte = src.get_u8();
         let env_type = EnvChangeType::from_u8(env_type_byte)
@@ -1966,17 +1981,10 @@ impl EnvChange {
             }
         };
 
-        // The declared `length` frames the whole ENVCHANGE data. Value
-        // decoders may legitimately consume less than that — e.g. the
-        // Routing decoder reads only the NewValue, leaving the spec-mandated
-        // zero-length OldValue (two bytes) behind. Skip to the frame
-        // boundary so the leftover bytes are not misparsed as the next
-        // token. (Decoders that tolerantly read *past* an under-declared
-        // length are left as-is — see the transaction/collation branch.)
-        let consumed = remaining_before - src.remaining();
-        if consumed < length {
-            src.advance(length - consumed);
-        }
+        // No frame-boundary fixup needed: the whole declared frame was
+        // consumed from the outer buffer up front, so decoders that
+        // under-consume (e.g. Routing's implicit zero-length OldValue) just
+        // leave bytes behind in the dropped sub-frame.
 
         Ok(Self {
             env_type,
@@ -2784,6 +2792,47 @@ mod tests {
         let mut buf: &[u8] = &data;
         let env = EnvChange::decode(&mut buf).unwrap();
         assert_eq!(env.env_type, EnvChangeType::BeginTransaction);
+    }
+
+    /// Issue #145: an under-declared frame must not let the value decoders
+    /// read past the declared length into the next token's bytes.
+    #[test]
+    fn hostile_env_change_under_declared_cannot_steal_following_bytes() {
+        // length=1 covers only the type byte; the bytes after the frame are
+        // shaped exactly like the transaction-descriptor payload the old
+        // buffer-bounded decoder would have consumed (new_len=8, descriptor,
+        // old_len=0).
+        let mut data = BytesMut::new();
+        data.put_u16_le(1); // declared frame: type byte only
+        data.put_u8(0x08); // BeginTransaction
+        let following: &[u8] = &[0x08, 1, 2, 3, 4, 5, 6, 7, 8, 0x00];
+        data.extend_from_slice(following);
+
+        let mut buf: &[u8] = &data;
+        let env = EnvChange::decode(&mut buf).unwrap();
+        assert_eq!(env.env_type, EnvChangeType::BeginTransaction);
+        match &env.new_value {
+            EnvChangeValue::Binary(b) => {
+                assert!(
+                    b.is_empty(),
+                    "under-declared frame yields the lenient empty value"
+                );
+            }
+            other => panic!("expected empty Binary value, got {other:?}"),
+        }
+        assert_eq!(
+            buf, following,
+            "bytes beyond the declared frame belong to the next token"
+        );
+    }
+
+    /// Issue #145: a zero-length frame cannot supply a type byte; reading
+    /// one from beyond the frame would consume the next token.
+    #[test]
+    fn hostile_env_change_zero_length_frame_errors() {
+        let data = [0x00, 0x00, 0xFD];
+        let mut buf: &[u8] = &data;
+        assert!(EnvChange::decode(&mut buf).is_err());
     }
 
     #[test]
