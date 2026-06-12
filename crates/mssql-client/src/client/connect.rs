@@ -27,6 +27,16 @@ use crate::statement_cache::StatementCache;
 
 use super::{Client, ConnectionHandle};
 
+/// Federated authentication parameters for a single LOGIN7 attempt.
+///
+/// `echo` mirrors the server's PRELOGIN FEDAUTHREQUIRED response, as required
+/// for the `fFedAuthEcho` bit (MS-TDS §2.2.6.4).
+#[derive(Clone, Copy)]
+struct FedAuthLogin<'a> {
+    token: &'a str,
+    echo: bool,
+}
+
 impl Client<Disconnected> {
     /// Connect to SQL Server.
     ///
@@ -44,30 +54,13 @@ impl Client<Disconnected> {
     /// # }
     /// ```
     pub async fn connect(config: Config) -> Result<Client<Ready>> {
-        // FEDAUTH-based credentials (Azure AD / Entra and client certificate)
-        // are not yet wired into the login sequence: providers can acquire
-        // tokens, but LOGIN7 carries no FEDAUTH feature extension, so the
-        // server would receive an empty-credential login and reject it with
-        // an opaque error 18456. Fail fast with an actionable error instead.
-        // Full FEDAUTH support is tracked in issue #155.
-        match &config.credentials {
-            mssql_auth::Credentials::SqlServer { .. } => {}
-            #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
-            mssql_auth::Credentials::Integrated => {}
-            // Every other credential type (Azure access token, managed
-            // identity, service principal, client certificate) is
-            // FEDAUTH-based and rejected here.
-            _ => {
-                return Err(Error::Config(
-                    "Azure AD / Entra and client certificate (FEDAUTH) authentication \
-                     are not yet supported: the LOGIN7 FEDAUTH feature extension is not \
-                     implemented (tracked in \
-                     https://github.com/praxiomlabs/rust-mssql-driver/issues/155). \
-                     Use SQL Server or integrated authentication."
-                        .into(),
-                ));
-            }
-        }
+        Self::validate_credential_support(&config)?;
+
+        // Azure AD / Entra credentials use the FEDAUTH SecurityToken workflow
+        // (MS-TDS §2.2.6.4): the access token is acquired client-side before
+        // any TDS traffic and sent in the LOGIN7 FEDAUTH feature extension.
+        // Acquired once here so retries and Azure gateway redirects reuse it.
+        let fed_auth_token = Self::resolve_fed_auth_token(&config).await?;
 
         let retry = config.retry.clone();
         let max_redirects = config.redirect.max_redirects;
@@ -105,7 +98,7 @@ impl Client<Disconnected> {
                         break Err(Error::TooManyRedirects { max: max_redirects });
                     }
 
-                    match Self::try_connect(&current_config).await {
+                    match Self::try_connect(&current_config, fed_auth_token.as_deref()).await {
                         Ok(client) => break Ok(client),
                         Err(Error::Routing { host, port }) => {
                             if !follow_redirects {
@@ -154,7 +147,111 @@ impl Client<Disconnected> {
         }
     }
 
-    async fn try_connect(config: &Config) -> Result<Client<Ready>> {
+    /// Validate that the configured credentials can complete a login.
+    ///
+    /// Fails fast with an actionable error instead of sending a login the
+    /// server would reject with an opaque error 18456 (or worse, leaking a
+    /// bearer token over plaintext).
+    fn validate_credential_support(config: &Config) -> Result<()> {
+        match &config.credentials {
+            mssql_auth::Credentials::SqlServer { .. } => Ok(()),
+            #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
+            mssql_auth::Credentials::Integrated => Ok(()),
+            creds if creds.is_azure_ad() => {
+                // A FEDAUTH login carries a bearer token; sending it over a
+                // plaintext connection would hand the token to any on-path
+                // observer. Azure SQL always requires TLS anyway.
+                #[cfg(not(feature = "tls"))]
+                {
+                    return Err(Error::Config(
+                        "Azure AD / Entra (FEDAUTH) authentication requires TLS: \
+                         enable the 'tls' feature."
+                            .into(),
+                    ));
+                }
+                #[cfg(feature = "tls")]
+                {
+                    if config.no_tls {
+                        return Err(Error::Config(
+                            "Azure AD / Entra (FEDAUTH) authentication cannot be combined \
+                             with Encrypt=no_tls: the access token would be sent in \
+                             plaintext. Use Encrypt=mandatory or Encrypt=strict."
+                                .into(),
+                        ));
+                    }
+                    if matches!(&config.credentials,
+                        mssql_auth::Credentials::AzureAccessToken { token } if token.is_empty())
+                    {
+                        return Err(Error::Config(
+                            "Azure AD access token is empty (the FEDAUTH token length \
+                             must not be zero)"
+                                .into(),
+                        ));
+                    }
+                    if !config.strict_mode && !config.tds_version.supports_fed_auth() {
+                        return Err(Error::Config(format!(
+                            "Azure AD / Entra (FEDAUTH) authentication requires TDS 7.4 \
+                             or later (configured: {})",
+                            config.tds_version
+                        )));
+                    }
+                    Ok(())
+                }
+            }
+            // Remaining credential types (client certificate) cannot complete
+            // a login yet: certificate-acquired tokens are not wired into the
+            // login sequence. Tracked in issue #155.
+            _ => Err(Error::Config(
+                "client certificate (FEDAUTH) authentication is not yet supported \
+                 (tracked in https://github.com/praxiomlabs/rust-mssql-driver/issues/155). \
+                 Use SQL Server, integrated, or Azure AD / Entra authentication."
+                    .into(),
+            )),
+        }
+    }
+
+    /// Resolve the federated authentication access token, if these
+    /// credentials use FEDAUTH.
+    ///
+    /// Pre-acquired tokens are passed through; managed identity and service
+    /// principal credentials acquire a token from Entra ID (network I/O).
+    /// Returns `None` for non-FEDAUTH credentials.
+    async fn resolve_fed_auth_token(config: &Config) -> Result<Option<String>> {
+        match &config.credentials {
+            mssql_auth::Credentials::AzureAccessToken { token } => Ok(Some(token.to_string())),
+            #[cfg(feature = "azure-identity")]
+            mssql_auth::Credentials::AzureManagedIdentity { client_id } => {
+                let auth = match client_id {
+                    Some(id) => {
+                        mssql_auth::ManagedIdentityAuth::user_assigned_client_id(id.to_string())?
+                    }
+                    None => mssql_auth::ManagedIdentityAuth::system_assigned()?,
+                };
+                tracing::debug!("acquiring Azure SQL access token via managed identity");
+                Ok(Some(auth.get_token().await?))
+            }
+            #[cfg(feature = "azure-identity")]
+            mssql_auth::Credentials::AzureServicePrincipal {
+                tenant_id,
+                client_id,
+                client_secret,
+            } => {
+                let auth = mssql_auth::ServicePrincipalAuth::new(
+                    tenant_id.as_ref(),
+                    client_id.to_string(),
+                    client_secret.to_string(),
+                )?;
+                tracing::debug!(
+                    client_id = %client_id,
+                    "acquiring Azure SQL access token via service principal"
+                );
+                Ok(Some(auth.get_token().await?))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    async fn try_connect(config: &Config, fed_auth_token: Option<&str>) -> Result<Client<Ready>> {
         // If a named instance is specified, resolve the TCP port via SQL Browser
         let port = if let Some(ref instance) = config.instance {
             let resolved = crate::browser::resolve_instance(
@@ -213,15 +310,19 @@ impl Client<Disconnected> {
 
             // Step 2: Handle TDS 8.0 strict mode (TLS before any TDS traffic)
             if tls_mode.is_tls_first() {
-                return Self::connect_tds_8(config, tcp_stream).await;
+                return Self::connect_tds_8(config, tcp_stream, fed_auth_token).await;
             }
 
             // Step 3: TDS 7.x flow - PreLogin first, then TLS, then Login7
-            Self::connect_tds_7x(config, tcp_stream).await
+            Self::connect_tds_7x(config, tcp_stream, fed_auth_token).await
         }
 
         #[cfg(not(feature = "tls"))]
         {
+            // FEDAUTH credentials were rejected by validate_credential_support
+            // (no TLS feature means no way to protect the bearer token).
+            let _ = fed_auth_token;
+
             // When TLS feature is disabled, only no_tls connections are supported
             if config.strict_mode {
                 return Err(Error::Config(
@@ -335,7 +436,11 @@ impl Client<Disconnected> {
     ///
     /// Flow: TCP -> TLS -> PreLogin (encrypted) -> Login7 (encrypted)
     #[cfg(feature = "tls")]
-    async fn connect_tds_8(config: &Config, tcp_stream: TcpStream) -> Result<Client<Ready>> {
+    async fn connect_tds_8(
+        config: &Config,
+        tcp_stream: TcpStream,
+        fed_auth_token: Option<&str>,
+    ) -> Result<Client<Ready>> {
         tracing::debug!("using TDS 8.0 strict mode (TLS first)");
 
         // Build TLS configuration from the user's `config.tls` plus the
@@ -364,7 +469,7 @@ impl Client<Disconnected> {
         // Send PreLogin (encrypted in strict mode)
         let prelogin = Self::build_prelogin(config, EncryptionLevel::Required);
         Self::send_prelogin(&mut connection, &prelogin).await?;
-        let _prelogin_response = Self::receive_prelogin(&mut connection).await?;
+        let prelogin_response = Self::receive_prelogin(&mut connection).await?;
 
         // Create SSPI negotiator if integrated auth
         #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
@@ -378,7 +483,11 @@ impl Client<Disconnected> {
         let sspi_token: Option<Vec<u8>> = None;
 
         // Send Login7
-        let login = Self::build_login7(config, sspi_token);
+        let fed_auth = fed_auth_token.map(|token| FedAuthLogin {
+            token,
+            echo: prelogin_response.fed_auth_required,
+        });
+        let login = Self::build_login7(config, sspi_token, fed_auth);
         Self::send_login7(&mut connection, &login).await?;
 
         // Process login response (with timeout to prevent hangs during redirect)
@@ -430,7 +539,11 @@ impl Client<Disconnected> {
     /// upgrading to TLS. We use low-level I/O for this initial exchange
     /// since the Connection struct splits the stream immediately.
     #[cfg(feature = "tls")]
-    async fn connect_tds_7x(config: &Config, mut tcp_stream: TcpStream) -> Result<Client<Ready>> {
+    async fn connect_tds_7x(
+        config: &Config,
+        mut tcp_stream: TcpStream,
+        fed_auth_token: Option<&str>,
+    ) -> Result<Client<Ready>> {
         use bytes::BufMut;
         use tds_protocol::packet::{PACKET_HEADER_SIZE, PacketHeader, PacketStatus};
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -536,6 +649,12 @@ impl Client<Disconnected> {
         let server_encryption = prelogin_response.encryption;
         tracing::debug!(encryption = ?server_encryption, "server encryption level");
 
+        // FEDAUTH: echo the server's FEDAUTHREQUIRED response (fFedAuthEcho).
+        let fed_auth = fed_auth_token.map(|token| FedAuthLogin {
+            token,
+            echo: prelogin_response.fed_auth_required,
+        });
+
         // Determine negotiated encryption level (follows TDS 7.x rules)
         // - NotSupported + NotSupported = NotSupported (no TLS at all)
         // - Off + Off = Off (TLS for login only, then plain)
@@ -609,7 +728,7 @@ impl Client<Disconnected> {
                 let sspi_token: Option<Vec<u8>> = None;
 
                 // Build and send Login7 directly through TLS
-                let login = Self::build_login7(config, sspi_token);
+                let login = Self::build_login7(config, sspi_token, fed_auth);
                 let login_payload = login.encode();
 
                 // Create TDS packet manually for Login7
@@ -715,7 +834,7 @@ impl Client<Disconnected> {
                 let sspi_token: Option<Vec<u8>> = None;
 
                 // Send Login7
-                let login = Self::build_login7(config, sspi_token);
+                let login = Self::build_login7(config, sspi_token, fed_auth);
                 Self::send_login7(&mut connection, &login).await?;
 
                 // Process login response (with timeout)
@@ -780,8 +899,10 @@ impl Client<Disconnected> {
             #[cfg(not(any(feature = "integrated-auth", feature = "sspi-auth")))]
             let sspi_token: Option<Vec<u8>> = None;
 
-            // Build and send Login7
-            let login = Self::build_login7(config, sspi_token);
+            // Build and send Login7. `fed_auth` is provably None here: a
+            // plaintext connection requires Encrypt=no_tls, which
+            // validate_credential_support rejects for FEDAUTH credentials.
+            let login = Self::build_login7(config, sspi_token, fed_auth);
             Self::send_login7(&mut connection, &login).await?;
 
             // Process login response (with timeout)
@@ -912,8 +1033,9 @@ impl Client<Disconnected> {
         #[cfg(not(any(feature = "integrated-auth", feature = "sspi-auth")))]
         let sspi_token: Option<Vec<u8>> = None;
 
-        // Build and send Login7
-        let login = Self::build_login7(config, sspi_token);
+        // Build and send Login7 (FEDAUTH credentials were rejected by
+        // validate_credential_support: no TLS feature, no token protection).
+        let login = Self::build_login7(config, sspi_token, None);
         Self::send_login7(&mut connection, &login).await?;
 
         // Process login response (with timeout)
@@ -978,6 +1100,12 @@ impl Client<Disconnected> {
             prelogin = prelogin.with_instance(instance);
         }
 
+        // Advertise federated authentication so the server's response carries
+        // the FEDAUTHREQUIRED value we must echo in LOGIN7 (fFedAuthEcho).
+        if config.credentials.is_azure_ad() {
+            prelogin = prelogin.with_fed_auth_required(true);
+        }
+
         prelogin
     }
 
@@ -1003,7 +1131,16 @@ impl Client<Disconnected> {
     ///
     /// When `sspi_token` is provided (integrated auth), the Login7 packet is
     /// built with the integrated security flag and the initial SSPI blob.
-    fn build_login7(config: &Config, sspi_token: Option<Vec<u8>>) -> Login7 {
+    ///
+    /// When `fed_auth` is provided (Azure AD / Entra), the packet carries the
+    /// FEDAUTH feature extension (SecurityToken workflow) and no username or
+    /// password — per MS-TDS §2.2.6.4, `fIntSecurity` must be 0 and the
+    /// credential fields stay empty.
+    fn build_login7(
+        config: &Config,
+        sspi_token: Option<Vec<u8>>,
+        fed_auth: Option<FedAuthLogin<'_>>,
+    ) -> Login7 {
         // Use the configured TDS version (strict_mode overrides to V8_0)
         let version = if config.strict_mode {
             tds_protocol::version::TdsVersion::V8_0
@@ -1036,6 +1173,17 @@ impl Client<Disconnected> {
         if let Some(token) = sspi_token {
             // Integrated auth: set SSPI data and integrated security flag
             login = login.with_integrated_auth(token);
+        } else if let Some(fed) = fed_auth {
+            // Azure AD / Entra: FEDAUTH feature extension, SecurityToken
+            // workflow. Username/password stay empty.
+            login = login.with_feature(tds_protocol::login7::FeatureExtension {
+                feature_id: tds_protocol::login7::FeatureId::FedAuth,
+                data: mssql_auth::azure_ad::build_security_token_feature_data(fed.token, fed.echo),
+            });
+            tracing::debug!(
+                fed_auth_echo = fed.echo,
+                "Login7: adding FEDAUTH feature extension (SecurityToken workflow)"
+            );
         } else if let mssql_auth::Credentials::SqlServer { username, password } =
             &config.credentials
         {
@@ -1246,6 +1394,15 @@ impl Client<Disconnected> {
                             "server info message"
                         );
                     }
+                    Token::FeatureExtAck(ack) => {
+                        for feature in &ack.features {
+                            tracing::debug!(
+                                feature_id = feature.feature_id,
+                                data_len = feature.data.len(),
+                                "server acknowledged feature extension"
+                            );
+                        }
+                    }
                     Token::Done(done) => {
                         if done.status.error {
                             return Err(Error::Protocol("login failed".to_string()));
@@ -1404,5 +1561,126 @@ mod tls_config_tests {
 
         let non_strict = connection_tls_config(&config, false);
         assert!(!non_strict.strict_mode);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod fed_auth_login_tests {
+    use super::*;
+    use tds_protocol::prelogin::EncryptionLevel;
+
+    fn azure_config(token: &str) -> Config {
+        Config::new().credentials(mssql_auth::Credentials::azure_token(token.to_string()))
+    }
+
+    /// Wire-exact assembly of the FEDAUTH feature extension inside the
+    /// encoded LOGIN7, located through the ibExtension pointer indirection
+    /// (MS-TDS §2.2.6.4): FeatureId 0x02, DWORD-LE data length, options byte
+    /// `(SecurityToken << 1) | echo`, DWORD-LE token byte length, UTF-16LE
+    /// token, 0xFF terminator. Username/password must stay empty and
+    /// fIntSecurity clear.
+    #[test]
+    fn login7_fed_auth_feature_block_wire_exact() {
+        let config = azure_config("AB");
+        let login = Client::<Disconnected>::build_login7(
+            &config,
+            None,
+            Some(FedAuthLogin {
+                token: "AB",
+                echo: true,
+            }),
+        );
+
+        assert!(
+            !login.option_flags2.integrated_security,
+            "fIntSecurity MUST be 0 when FEDAUTH is present"
+        );
+        assert!(
+            login.username.is_empty() && login.password.is_empty(),
+            "FEDAUTH logins must not carry username/password"
+        );
+
+        let encoded = login.encode();
+
+        // OptionFlags3 (byte 27) must have fExtension (0x10) set.
+        assert_eq!(encoded[27] & 0x10, 0x10, "fExtension bit must be set");
+
+        // ibExtension/cbExtension are the 6th (offset, length) pair in the
+        // offset table starting at byte 36. The u32 it points to holds the
+        // absolute offset of the FeatureExt block.
+        const EXTENSION_SLOT: usize = 36 + 5 * 4;
+        let ib_extension =
+            u16::from_le_bytes([encoded[EXTENSION_SLOT], encoded[EXTENSION_SLOT + 1]]) as usize;
+        let feature_off =
+            u32::from_le_bytes(encoded[ib_extension..ib_extension + 4].try_into().unwrap())
+                as usize;
+
+        assert_eq!(
+            encoded[feature_off], 0x02,
+            "FeatureId must be FEDAUTH (0x02)"
+        );
+        let data_len = u32::from_le_bytes(
+            encoded[feature_off + 1..feature_off + 5]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        // options(1) + token length DWORD(4) + "AB" as UTF-16LE(4)
+        assert_eq!(data_len, 9, "FeatureDataLen must cover options + token");
+
+        let data = &encoded[feature_off + 5..feature_off + 5 + data_len];
+        assert_eq!(
+            data,
+            &[0x03, 0x04, 0x00, 0x00, 0x00, 0x41, 0x00, 0x42, 0x00],
+            "options must be (SecurityToken << 1) | echo, then DWORD-LE \
+             token byte length, then UTF-16LE token"
+        );
+        assert_eq!(
+            encoded[feature_off + 5 + data_len],
+            0xFF,
+            "FeatureExt terminator must follow"
+        );
+    }
+
+    /// The echo bit mirrors the server's PRELOGIN FEDAUTHREQUIRED response;
+    /// when the server sent 0x00 the options byte must be 0x02 (echo clear).
+    #[test]
+    fn login7_fed_auth_echo_clear() {
+        let config = azure_config("AB");
+        let login = Client::<Disconnected>::build_login7(
+            &config,
+            None,
+            Some(FedAuthLogin {
+                token: "AB",
+                echo: false,
+            }),
+        );
+        let encoded = login.encode();
+
+        const EXTENSION_SLOT: usize = 36 + 5 * 4;
+        let ib_extension =
+            u16::from_le_bytes([encoded[EXTENSION_SLOT], encoded[EXTENSION_SLOT + 1]]) as usize;
+        let feature_off =
+            u32::from_le_bytes(encoded[ib_extension..ib_extension + 4].try_into().unwrap())
+                as usize;
+        assert_eq!(encoded[feature_off], 0x02);
+        assert_eq!(
+            encoded[feature_off + 5],
+            0x02,
+            "options byte must have fFedAuthEcho clear"
+        );
+    }
+
+    /// PRELOGIN must advertise FEDAUTHREQUIRED for Azure AD credentials and
+    /// must not for SQL authentication.
+    #[test]
+    fn prelogin_advertises_fed_auth_for_azure_credentials() {
+        let azure = azure_config("tok");
+        let prelogin = Client::<Disconnected>::build_prelogin(&azure, EncryptionLevel::On);
+        assert!(prelogin.fed_auth_required);
+
+        let sql = Config::new().credentials(mssql_auth::Credentials::sql_server("u", "p"));
+        let prelogin = Client::<Disconnected>::build_prelogin(&sql, EncryptionLevel::On);
+        assert!(!prelogin.fed_auth_required);
     }
 }
