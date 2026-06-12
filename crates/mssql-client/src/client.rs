@@ -45,6 +45,11 @@ use crate::statement_cache::StatementCache;
 use crate::stream::{MultiResultStream, QueryStream};
 use crate::transaction::SavePoint;
 
+/// How long to wait for the server to acknowledge an Attention packet after
+/// a command timeout. SqlClient waits 5 seconds before dooming the
+/// connection; we match it.
+const ATTENTION_ACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Run a network future under an optional command deadline.
 ///
 /// On timeout this sends an Attention packet via `canceller` and then awaits
@@ -53,7 +58,13 @@ use crate::transaction::SavePoint;
 /// [`Error::CommandTimeout`]. This is the cancel-safe alternative to dropping
 /// the future (e.g. via `tokio::time::timeout`), which would leave unconsumed
 /// TDS data in the connection buffer and desync the next request.
-async fn run_with_deadline<F, T>(
+///
+/// The drain itself is bounded by [`ATTENTION_ACK_TIMEOUT`] — a hung server
+/// that never acknowledges the attention must not turn the timeout into an
+/// infinite wait. When the bound expires the connection is abandoned
+/// mid-response: `in_flight` stays set, so the pool discards the connection
+/// at check-in instead of reusing it.
+pub(crate) async fn run_with_deadline<F, T>(
     fut: F,
     deadline: Option<std::time::Duration>,
     canceller: crate::cancel::CancelHandle,
@@ -71,8 +82,16 @@ where
         () = tokio::time::sleep(d) => {
             // Signal cancellation, then let the in-flight read consume the
             // server's attention acknowledgement so the connection stays usable.
-            let _ = canceller.cancel().await;
-            let _ = fut.await;
+            let drain = async {
+                let _ = canceller.cancel().await;
+                let _ = (&mut fut).await;
+            };
+            if tokio::time::timeout(ATTENTION_ACK_TIMEOUT, drain).await.is_err() {
+                tracing::warn!(
+                    timeout = ?ATTENTION_ACK_TIMEOUT,
+                    "server did not acknowledge attention; abandoning the connection as dirty"
+                );
+            }
             Err(Error::CommandTimeout)
         }
     }
@@ -141,9 +160,33 @@ impl<S: ConnectionState> Client<S> {
     ///
     /// Returns `None` when `command_timeout` is zero, which means "no limit"
     /// (matching ADO.NET's `SqlCommand.CommandTimeout = 0`).
-    fn command_deadline(&self) -> Option<std::time::Duration> {
+    pub(crate) fn command_deadline(&self) -> Option<std::time::Duration> {
         let t = self.config.command_timeout;
         if t.is_zero() { None } else { Some(t) }
+    }
+
+    /// Build a cancel handle for the current connection, regardless of
+    /// connection state. The public, documented surface is
+    /// [`Client::<Ready>::cancel_handle`]; both state-specific methods
+    /// delegate here.
+    pub(crate) fn connection_cancel_handle(&self) -> crate::cancel::CancelHandle {
+        let connection = self
+            .connection
+            .as_ref()
+            .expect("connection should be present");
+        match connection {
+            #[cfg(feature = "tls")]
+            ConnectionHandle::Tls(conn) => {
+                crate::cancel::CancelHandle::from_tls(conn.cancel_handle())
+            }
+            #[cfg(feature = "tls")]
+            ConnectionHandle::TlsPrelogin(conn) => {
+                crate::cancel::CancelHandle::from_tls_prelogin(conn.cancel_handle())
+            }
+            ConnectionHandle::Plain(conn) => {
+                crate::cancel::CancelHandle::from_plain(conn.cancel_handle())
+            }
+        }
     }
 
     /// Process transaction-related EnvChange tokens.
@@ -332,8 +375,17 @@ impl<S: ConnectionState> Client<S> {
             rpc = rpc.param(param);
         }
 
-        self.send_rpc(&rpc).await?;
-        self.read_procedure_result().await
+        let deadline = self.command_deadline();
+        let canceller = self.connection_cancel_handle();
+        run_with_deadline(
+            async {
+                self.send_rpc(&rpc).await?;
+                self.read_procedure_result().await
+            },
+            deadline,
+            canceller,
+        )
+        .await
     }
 
     /// Start a bulk insert operation for the specified table.
@@ -638,16 +690,28 @@ impl<S: ConnectionState> Client<S> {
             "executing statement with named parameters"
         );
 
-        if params.is_empty() {
-            self.send_sql_batch(sql).await?;
-        } else {
-            let rpc_params =
-                Self::convert_named_params(params, self.send_unicode(), self.server_collation())?;
-            let rpc = RpcRequest::execute_sql(sql, rpc_params);
-            self.send_rpc(&rpc).await?;
-        }
+        let deadline = self.command_deadline();
+        let canceller = self.connection_cancel_handle();
+        run_with_deadline(
+            async {
+                if params.is_empty() {
+                    self.send_sql_batch(sql).await?;
+                } else {
+                    let rpc_params = Self::convert_named_params(
+                        params,
+                        self.send_unicode(),
+                        self.server_collation(),
+                    )?;
+                    let rpc = RpcRequest::execute_sql(sql, rpc_params);
+                    self.send_rpc(&rpc).await?;
+                }
 
-        self.read_execute_result().await
+                self.read_execute_result().await
+            },
+            deadline,
+            canceller,
+        )
+        .await
     }
 
     /// Whether string parameters are sent as NVARCHAR (Unicode).
@@ -878,19 +942,28 @@ impl Client<Ready> {
             "executing multi-result query"
         );
 
-        if params.is_empty() {
-            // Simple batch without parameters - use SQL batch
-            self.send_sql_batch(sql).await?;
-        } else {
-            // Parameterized query - use sp_executesql via RPC
-            let rpc_params =
-                Self::convert_params(params, self.send_unicode(), self.server_collation())?;
-            let rpc = RpcRequest::execute_sql(sql, rpc_params);
-            self.send_rpc(&rpc).await?;
-        }
+        let deadline = self.command_deadline();
+        let canceller = self.connection_cancel_handle();
+        let result_sets = run_with_deadline(
+            async {
+                if params.is_empty() {
+                    // Simple batch without parameters - use SQL batch
+                    self.send_sql_batch(sql).await?;
+                } else {
+                    // Parameterized query - use sp_executesql via RPC
+                    let rpc_params =
+                        Self::convert_params(params, self.send_unicode(), self.server_collation())?;
+                    let rpc = RpcRequest::execute_sql(sql, rpc_params);
+                    self.send_rpc(&rpc).await?;
+                }
 
-        // Read all result sets
-        let result_sets = self.read_multi_result_response().await?;
+                // Read all result sets
+                self.read_multi_result_response().await
+            },
+            deadline,
+            canceller,
+        )
+        .await?;
         Ok(MultiResultStream::new(result_sets))
     }
 
@@ -1247,23 +1320,7 @@ impl Client<Ready> {
     /// ```
     #[must_use]
     pub fn cancel_handle(&self) -> crate::cancel::CancelHandle {
-        let connection = self
-            .connection
-            .as_ref()
-            .expect("connection should be present");
-        match connection {
-            #[cfg(feature = "tls")]
-            ConnectionHandle::Tls(conn) => {
-                crate::cancel::CancelHandle::from_tls(conn.cancel_handle())
-            }
-            #[cfg(feature = "tls")]
-            ConnectionHandle::TlsPrelogin(conn) => {
-                crate::cancel::CancelHandle::from_tls_prelogin(conn.cancel_handle())
-            }
-            ConnectionHandle::Plain(conn) => {
-                crate::cancel::CancelHandle::from_plain(conn.cancel_handle())
-            }
-        }
+        self.connection_cancel_handle()
     }
 }
 
@@ -1733,23 +1790,7 @@ impl Client<InTransaction> {
     /// See [`Client<Ready>::cancel_handle`] for usage examples.
     #[must_use]
     pub fn cancel_handle(&self) -> crate::cancel::CancelHandle {
-        let connection = self
-            .connection
-            .as_ref()
-            .expect("connection should be present");
-        match connection {
-            #[cfg(feature = "tls")]
-            ConnectionHandle::Tls(conn) => {
-                crate::cancel::CancelHandle::from_tls(conn.cancel_handle())
-            }
-            #[cfg(feature = "tls")]
-            ConnectionHandle::TlsPrelogin(conn) => {
-                crate::cancel::CancelHandle::from_tls_prelogin(conn.cancel_handle())
-            }
-            ConnectionHandle::Plain(conn) => {
-                crate::cancel::CancelHandle::from_plain(conn.cancel_handle())
-            }
-        }
+        self.connection_cancel_handle()
     }
 }
 

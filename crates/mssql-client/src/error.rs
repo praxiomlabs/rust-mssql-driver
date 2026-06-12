@@ -134,6 +134,12 @@ pub enum Error {
     },
 
     /// Command execution timeout occurred.
+    ///
+    /// The driver cancels the command via an Attention packet and drains the
+    /// server's acknowledgement, so the connection normally stays usable. If
+    /// the server never acknowledges within a bounded wait (5 s, SqlClient
+    /// parity), the connection is left mid-response and is discarded by the
+    /// pool instead of being reused.
     #[error("command timed out")]
     CommandTimeout,
 
