@@ -249,6 +249,21 @@ Releases are fully automated by [release-plz](https://release-plz.dev) (`release
 
 Rules for agents: **never run `cargo publish`, never create version tags, never hand-edit the workspace version** — those all belong to release-plz. Never cancel the publish job mid-run. Merging a Release PR requires explicit human approval. See RELEASING.md for recovery procedures.
 
+**Verify the Release PR before it is merged** (both failure modes have happened):
+
+- **Version**: check the proposed bump against the commits since the last
+  release. Pre-1.0, any breaking change requires a minor bump; release-plz
+  under-bumps when the breaking marker is missing from commits (see Commit
+  Standards) — the v0.13.2-for-breaking-main incident was caught only by this
+  check. To correct a wrong bump, do NOT hand-edit the version: land a marker
+  commit with the proper `type!:` subject / `BREAKING CHANGE:` footer.
+  release-plz attributes commits to crates **by changed file paths**, so an
+  empty commit has no effect — the marker must touch the affected crate
+  (PR #201 used a genuine doc improvement).
+- **Changelog completeness**: release-plz has dropped commits from generated
+  CHANGELOG entries before (#184, v0.13.0). Diff the entries against
+  `git log` since the last tag.
+
 `just doc-consistency` (also a CI gate) verifies MSRV references agree across files, CHANGELOG matches the workspace version, deny.toml/audit.toml ignore lists stay in sync, and first-party dependency snippets in README/docs match the workspace version.
 
 ### CI/CD workflows
@@ -295,6 +310,16 @@ Key differences for migrators:
 ## Commit Standards
 
 - Use conventional commits (feat, fix, refactor, docs, test)
+- **Breaking changes MUST carry the conventional marker**: `!` after the type
+  (`fix(types)!:`) or a `BREAKING CHANGE:` footer. A `BREAKING:` line in the
+  commit body is **ignored** by release-plz — and the `cargo-semver-checks`
+  backstop runs with default features, so breaking changes in feature-gated
+  API (chrono/uuid/decimal codecs, Always Encrypted, FILESTREAM) are invisible
+  to it (#202). Version correctness rests on the commit message. Precedent:
+  the v0.13.2 wrong bump, corrected by PR #201 before release.
+- Run `cargo fmt --all` **before** committing, not after the CI mirror flags
+  it — fmt-check is the first gate in `just ci-all`, and a failure there
+  costs a full gauntlet cycle plus a commit amend.
 - No AI branding in commit messages
 - Logical, incremental commits
 
@@ -351,3 +376,5 @@ When making changes here, remember:
    - The ignored-only suite needs a local SQL Server 2022 container (`just sql-server-start`). `ci-all` and unit tests will NOT catch live-only failures (e.g. bulk temporal, decimal high-scale).
    - **Never open a PR stacked on another feature branch.** CI only triggers on PRs based on `main` (see convention 5), so a stacked PR gets zero CI until it is retargeted to `main`.
    - **Branch protection requires up-to-date-with-`main`.** Merge each green PR before opening the next to minimize the `update-branch` + CI-re-run churn that comes from keeping many PRs in flight at once.
+   - **The Semver Check CI job is advisory** (`continue-on-error: true`), but `gh pr checks --watch` still exits 1 when it fails — a red advisory check is not a blocked PR. Before concluding a PR is stuck, check the required checks / `mergeable` state (`gh api .../pulls/N -q .mergeable_state`). The job's known blind spots are tracked in #202.
+   - The tests excluded from the pre-push command (`azure_sql`, `azure_identity_auth`, `cert_auth`) need a **live Azure SQL environment**, not the local container. One exists for #155 work (credentials live outside the repo, e.g. a local gitignored `.tmp/azure.env`); run that suite when touching authentication or Azure-path code.
