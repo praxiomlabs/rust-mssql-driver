@@ -366,15 +366,16 @@ When making changes here, remember:
 
 7. **Use issue/PR templates.** They ask the right questions. If you're opening an issue or PR, fill out the template completely — it helps the human reviewer and it helps future AI sessions parse the intent.
 
-8. **Run the full local CI mirror before every push; never trust a subset.** `cargo check` and unit tests do not catch the `-D warnings`-class failures CI rejects. This repo's gate is reproduced by `just ci-all` (fmt + clippy `--all-features --all-targets -D warnings` + nextest all-features + `cargo doc -D warnings` + examples). `ci-all` does NOT compose two gates CI enforces, so the real pre-push command is:
+8. **Run the full local CI mirror before every push; never trust a subset.** `cargo check` and unit tests do not catch the `-D warnings`-class failures CI rejects. This repo's gate is reproduced by `just ci-all` (fmt + clippy `--all-features --all-targets -D warnings` + nextest all-features + `cargo doc -D warnings` + examples). `ci-all` does NOT compose three gates CI enforces (spell-check, feature-flag validation, and the live suite), so the real pre-push command is:
 
    ```bash
-   just ci-all && just typos && \
+   just ci-all && just typos && just check-feature-flags && \
      MSSQL_HOST=localhost MSSQL_PORT=1433 MSSQL_USER=sa MSSQL_PASSWORD='YourStrong@Passw0rd' \
        cargo nextest run --all-features --run-ignored ignored-only --no-fail-fast \
        -E 'not (binary(azure_sql) or test(azure_identity_auth) or test(cert_auth))'
    ```
 
+   - `just check-feature-flags` runs CI's Feature Flag Validation job (`cargo xtask check-features` — cargo-hack `--each-feature` under `-D warnings`). `ci-all` only builds `--all-features`, so it misses the `-D warnings`-class failures (unused imports, dead code) that surface only in `--no-default-features` or single-feature builds — e.g. an item imported at module scope but used only behind a `cfg(feature = "…")` path. Needs cargo-hack (`just setup-tools`). This gate's absence let the v0.15.1 LOGIN7 fix reach CI red once (an import left used only in gated paths).
    - `just typos` runs the same bare `typos` (whole-tree, `typos.toml`-aware) the CI Hygiene job runs. It needs the tool installed at an MSRV-1.88-compatible version: `cargo install typos-cli --version 1.42.3 --locked` (newer requires rustc 1.91). The recipe still prints a WARN and passes if typos is absent, so confirm it is actually installed — a silent skip is how a spell-check failure reaches CI.
    - The ignored-only suite needs a local SQL Server 2022 container (`just sql-server-start`). `ci-all` and unit tests will NOT catch live-only failures (e.g. bulk temporal, decimal high-scale).
    - **Never open a PR stacked on another feature branch.** CI only triggers on PRs based on `main` (see convention 5), so a stacked PR gets zero CI until it is retargeted to `main`.
