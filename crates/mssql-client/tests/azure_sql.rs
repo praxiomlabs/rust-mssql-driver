@@ -617,3 +617,35 @@ async fn test_azure_ad_connection_string_service_principal() {
 
     client.close().await.expect("Close failed");
 }
+
+/// End-to-end FEDAUTH login with a system-assigned managed identity.
+///
+/// Unlike the service-principal tests, this can only pass when run on Azure
+/// compute (VM/container) whose identity has been granted a contained DB user:
+/// the token is acquired from the local IMDS endpoint, which does not exist
+/// outside Azure. Run it from inside the target compute with `--ignored`.
+#[cfg(feature = "azure-identity")]
+#[tokio::test]
+#[ignore = "Requires running on Azure compute with a managed identity granted DB access"]
+async fn test_azure_ad_managed_identity_login() {
+    use mssql_client::Client;
+
+    let (host, database) = get_azure_host_db().expect("AZURE_SQL_HOST/DATABASE required");
+
+    // client_id = None selects the system-assigned identity.
+    let config = Config::new()
+        .host(host)
+        .database(database)
+        .credentials(mssql_client::Credentials::AzureManagedIdentity { client_id: None });
+
+    let mut client = Client::connect(config).await.expect("FEDAUTH login failed");
+
+    let (principal, auth_type) = current_principal(&mut client).await;
+    println!("managed identity login: principal={principal}, auth_type={auth_type}");
+    assert_eq!(
+        auth_type, "EXTERNAL",
+        "managed identity must authenticate as an EXTERNAL (Entra) principal"
+    );
+
+    client.close().await.expect("Close failed");
+}
