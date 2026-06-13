@@ -596,36 +596,14 @@ check-feature-flags:
     #!/usr/bin/env bash
     set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Feature Flag Isolation Check ══════{{reset}}\n\n'
-
-    printf '{{cyan}}[INFO]{{reset}} Testing mssql-client features...\n'
-    {{cargo}} check -p mssql-client --no-default-features
-    {{cargo}} check -p mssql-client --features chrono
-    {{cargo}} check -p mssql-client --features uuid
-    {{cargo}} check -p mssql-client --features decimal
-    {{cargo}} check -p mssql-client --features json
-    {{cargo}} check -p mssql-client --features otel
-    {{cargo}} check -p mssql-client --features zeroize
-    {{cargo}} check -p mssql-client --features always-encrypted
-    {{cargo}} check -p mssql-client --features encoding
-
-    printf '{{cyan}}[INFO]{{reset}} Testing mssql-auth features...\n'
-    {{cargo}} check -p mssql-auth --no-default-features
-    {{cargo}} check -p mssql-auth --features azure-identity
-    if [[ "{{platform}}" == "linux" ]]; then
-        {{cargo}} check -p mssql-auth --features integrated-auth
-    fi
-    {{cargo}} check -p mssql-auth --features zeroize
-    {{cargo}} check -p mssql-auth --features always-encrypted
-    {{cargo}} check -p mssql-auth --features azure-keyvault
-
-    printf '{{cyan}}[INFO]{{reset}} Testing tds-protocol features...\n'
-    # Note: tds-protocol requires std OR alloc (heap allocation needed)
-    # Pure no_std without alloc is not supported - see compile_error in lib.rs
-    {{cargo}} check -p tds-protocol --no-default-features --features alloc
-    {{cargo}} check -p tds-protocol --features encoding
-    {{cargo}} check -p tds-protocol --features alloc
-
-    printf '{{green}}[OK]{{reset}}   All feature flags validated\n'
+    # Delegate to the exact xtask CI's "Feature Flag Validation" job runs
+    # (cargo-hack --each-feature), under -D warnings. Calling the xtask rather
+    # than a hand-listed cargo-check loop keeps this from drifting out of sync
+    # with CI, and -D warnings is what catches the unused-import / dead-code
+    # class of failures that only surfaces in --no-default-features or
+    # single-feature builds. Requires cargo-hack (`just setup-tools`).
+    export RUSTFLAGS="-D warnings"
+    {{cargo}} xtask check-features
 
 [group('test')]
 [doc("Test zeroize feature (security-critical memory wiping)")]
