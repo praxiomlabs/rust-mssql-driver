@@ -11,7 +11,7 @@ use mssql_codec::connection::Connection;
 #[cfg(feature = "tls")]
 use mssql_tls::{TlsConfig, TlsConnector, TlsNegotiationMode};
 use tds_protocol::login7::Login7;
-use tds_protocol::packet::MAX_PACKET_SIZE;
+use tds_protocol::packet::DEFAULT_PACKET_SIZE;
 use tds_protocol::packet::PacketType;
 use tds_protocol::prelogin::{EncryptionLevel, PreLogin};
 use tds_protocol::token::{EnvChange, EnvChangeType, Token, TokenParser};
@@ -731,8 +731,12 @@ impl Client<Disconnected> {
                 let login = Self::build_login7(config, sspi_token, fed_auth);
                 let login_payload = login.encode();
 
-                // Create TDS packet manually for Login7
-                let max_packet = MAX_PACKET_SIZE;
+                // Create TDS packet manually for Login7. LOGIN7 is sent before
+                // packet-size negotiation completes, so it MUST be split at the
+                // 4096-byte TDS default — large FEDAUTH tokens (managed identity,
+                // AAD tokens with many claims) push LOGIN7 over 4096 and the
+                // server resets a single oversized packet.
+                let max_packet = DEFAULT_PACKET_SIZE;
                 let max_payload = max_packet - PACKET_HEADER_SIZE;
                 let chunks: Vec<_> = login_payload.chunks(max_payload).collect();
                 let total_chunks = chunks.len();
@@ -1252,7 +1256,10 @@ impl Client<Disconnected> {
         T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     {
         let payload = prelogin.encode();
-        let max_packet = MAX_PACKET_SIZE;
+        // PRELOGIN is tiny and never approaches the packet limit; keep the
+        // pre-fix behavior here (fully-qualified so the import stays lean for
+        // no-default-features builds, matching the SSPI send site below).
+        let max_packet = tds_protocol::packet::MAX_PACKET_SIZE;
 
         connection
             .send_message(PacketType::PreLogin, payload, max_packet)
@@ -1280,7 +1287,11 @@ impl Client<Disconnected> {
         T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     {
         let payload = login.encode();
-        let max_packet = MAX_PACKET_SIZE;
+        // LOGIN7 precedes packet-size negotiation, so it must be split at the
+        // 4096-byte TDS default, not MAX_PACKET_SIZE: a large FEDAUTH token
+        // makes LOGIN7 exceed 4096 and a single oversized packet is reset by
+        // the server (a managed-identity token is ~1900 chars → ~4100 bytes).
+        let max_packet = DEFAULT_PACKET_SIZE;
 
         connection
             .send_message(PacketType::Tds7Login, payload, max_packet)
@@ -1682,5 +1693,76 @@ mod fed_auth_login_tests {
         let sql = Config::new().credentials(mssql_auth::Credentials::sql_server("u", "p"));
         let prelogin = Client::<Disconnected>::build_prelogin(&sql, EncryptionLevel::On);
         assert!(!prelogin.fed_auth_required);
+    }
+
+    /// Regression: a LOGIN7 carrying a large FEDAUTH token exceeds the 4096-byte
+    /// TDS default packet size and MUST be split across multiple packets, each
+    /// within 4096 bytes. Before the fix, `send_login7` passed MAX_PACKET_SIZE
+    /// (65535) to `send_message` and emitted a single oversized packet, which
+    /// Azure SQL reset — a managed-identity token (~1900 chars → ~4100-byte
+    /// LOGIN7) tripped this every time, while smaller service-principal tokens
+    /// stayed under 4096 and masked the bug. Verified live against Azure SQL.
+    #[tokio::test]
+    async fn login7_large_fed_auth_token_is_split_at_default_packet_size() {
+        use tds_protocol::packet::PACKET_HEADER_SIZE;
+        use tokio::io::AsyncReadExt;
+
+        // ~2000-char token -> LOGIN7 comfortably over the 4096 default.
+        let token = "A".repeat(2000);
+        let config = azure_config(&token);
+        let login = Client::<Disconnected>::build_login7(
+            &config,
+            None,
+            Some(FedAuthLogin {
+                token: &token,
+                echo: true,
+            }),
+        );
+        let encoded = login.encode();
+        assert!(
+            encoded.len() > DEFAULT_PACKET_SIZE,
+            "precondition: LOGIN7 ({}) must exceed the default packet size to exercise splitting",
+            encoded.len()
+        );
+
+        // Capture exactly what send_login7 writes to the transport.
+        let (client_io, mut server_io) = tokio::io::duplex(64 * 1024);
+        let mut connection = Connection::new(client_io);
+        Client::<Disconnected>::send_login7(&mut connection, &login)
+            .await
+            .unwrap();
+        drop(connection); // close the write half so read_to_end observes EOF
+        let mut raw = Vec::new();
+        server_io.read_to_end(&mut raw).await.unwrap();
+
+        // Walk the TDS packets: 8-byte header, status at [1] (EOM = 0x01),
+        // total length (incl. header) at [2..4] big-endian.
+        let mut offset = 0;
+        let mut packets = 0;
+        let mut reassembled = Vec::new();
+        let mut saw_eom = false;
+        while offset < raw.len() {
+            let status = raw[offset + 1];
+            let len = u16::from_be_bytes([raw[offset + 2], raw[offset + 3]]) as usize;
+            assert!(
+                len <= DEFAULT_PACKET_SIZE,
+                "packet {packets} length {len} exceeds the 4096-byte default"
+            );
+            assert!(!saw_eom, "no packet may follow the END_OF_MESSAGE packet");
+            saw_eom = status & 0x01 == 0x01;
+            reassembled.extend_from_slice(&raw[offset + PACKET_HEADER_SIZE..offset + len]);
+            offset += len;
+            packets += 1;
+        }
+        assert!(
+            packets >= 2,
+            "an oversized LOGIN7 must span multiple packets, got {packets}"
+        );
+        assert!(saw_eom, "the final packet must carry END_OF_MESSAGE");
+        assert_eq!(
+            reassembled,
+            encoded.as_ref(),
+            "reassembled packet payloads must equal the LOGIN7 encoding"
+        );
     }
 }
