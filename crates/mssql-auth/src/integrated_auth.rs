@@ -42,7 +42,7 @@ use libgssapi::{
     context::{ClientCtx, CtxFlags},
     credential::{Cred, CredUsage},
     name::Name,
-    oid::{GSS_MECH_KRB5, GSS_NT_HOSTBASED_SERVICE, OidSet},
+    oid::{GSS_MECH_KRB5, GSS_NT_KRB5_PRINCIPAL, OidSet},
 };
 
 use crate::error::AuthError;
@@ -117,8 +117,14 @@ impl IntegratedAuth {
     }
 
     /// Create a GSSAPI Name from the stored SPN.
+    ///
+    /// The SPN is a Kerberos principal in `MSSQLSvc/host:port` form, so it
+    /// must be imported with the krb5 principal name-type. Importing it as
+    /// `GSS_NT_HOSTBASED_SERVICE` (the `service@host` form) makes GSSAPI treat
+    /// the whole `MSSQLSvc/host:port` as the service and append the local
+    /// hostname, yielding a principal the KDC cannot resolve.
     fn create_service_name(&self) -> Result<Name, AuthError> {
-        Name::new(self.spn.as_bytes(), Some(GSS_NT_HOSTBASED_SERVICE))
+        Name::new(self.spn.as_bytes(), Some(GSS_NT_KRB5_PRINCIPAL))
             .map_err(|e| AuthError::Sspi(format!("Failed to create service name: {e}")))
     }
 
@@ -298,5 +304,26 @@ mod tests {
     fn test_is_complete_initially_false() {
         let auth = IntegratedAuth::new("test.example.com", 1433);
         assert!(!auth.is_complete());
+    }
+
+    /// `create_service_name()` must build a GSSAPI `Name` for the SPN the
+    /// default constructor produces. This exercises the name-construction path
+    /// in CI without a KDC.
+    ///
+    /// Note: the GSSAPI *name-type* (krb5 principal vs host-based service)
+    /// cannot be distinguished here — `gss_import_name` accepts the bytes
+    /// under either OID and only the KDC rejects a wrongly-typed principal
+    /// when a ticket is requested. The name-type is therefore proven by the
+    /// `kerberos_live` end-to-end test; this guard catches a regression that
+    /// breaks name construction outright.
+    #[test]
+    fn test_create_service_name_succeeds() {
+        let auth = IntegratedAuth::new("localhost", 1433);
+        let name = auth.create_service_name();
+        assert!(
+            name.is_ok(),
+            "create_service_name() must build a GSSAPI Name for the default SPN: {:?}",
+            name.err()
+        );
     }
 }

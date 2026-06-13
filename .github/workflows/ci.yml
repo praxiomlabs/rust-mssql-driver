@@ -381,12 +381,13 @@ jobs:
         # to invoke ran zero of them while the SQL Server container idled.
         # Run ONLY the ignored set here (non-ignored tests are covered by the
         # Test matrix). Tests that need infrastructure CI lacks (Azure SQL,
-        # Azure identity, client certificates) are excluded explicitly; they
-        # still fail loudly when run locally without configuration.
+        # Azure identity, client certificates, a Kerberos KDC) are excluded
+        # explicitly; they still fail loudly when run locally without
+        # configuration.
         run: >-
           cargo nextest run --all-features --run-ignored ignored-only
           --no-fail-fast
-          -E 'not (binary(azure_sql) or test(azure_identity_auth) or test(cert_auth))'
+          -E 'not (binary(azure_sql) or test(azure_identity_auth) or test(cert_auth) or binary(kerberos_live))'
         env:
           MSSQL_HOST: localhost
           MSSQL_PORT: 1433
