@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.15.1...v0.16.0) - 2026-06-14
+
+### Added
+
+- *(encryption)* precision-aware decimal parameters for Always Encrypted
+- *(encryption)* Always Encrypted write/read for decimal and money
+- *(encryption)* Always Encrypted write/read for uuid and date
+- *(encryption)* typed NULL parameters for encrypted columns
+- *(encryption)* Always Encrypted write/read for fixed-width numeric types
+- *(encryption)* encrypt parameters end-to-end (AE write path 3a.4)
+- *(encryption)* [**breaking**] encode Always Encrypted RPC parameters (AE write path 3a.3)
+- *(encryption)* [**breaking**] parse sp_describe_parameter_encryption (AE write path 3a.2)
+- *(encryption)* Always Encrypted parameter normalization (int/nvarchar/varbinary)
+
+### Fixed
+
+- *(auth)* import Kerberos SPN with the krb5 principal name-type
+
+### Other
+
+- *(encryption)* cover randomized Always Encrypted parameter round-trip
+- *(browser)* cover the SQL Browser UDP resolve path
+- cover previously-untested units (uuid decode, json, derive, zeroize)
+- add type-state compile-fail tests for the Client API
+- matrix integration tests across SQL Server 2017/2019/2022
+- replace vacuous and silent-green tests with real assertions
+- *(auth)* assert credential Debug actually omits the client secret
+- correct Always Encrypted write-path claims (README, ARCHITECTURE, interop fixture)
+
 ## [0.15.1](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.15.0...v0.15.1) - 2026-06-13
 
 ### Fixed
