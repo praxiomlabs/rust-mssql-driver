@@ -42,7 +42,7 @@
 //! Declare each `OUTPUT` parameter with the matching typed setter —
 //! [`ProcedureBuilder::output_int`], `output_bigint`, `output_bit`,
 //! `output_float`, `output_nvarchar` (length; `0` = MAX), `output_decimal`
-//! (precision, scale) — or `output_raw` for an explicit `TypeInfo`. After
+//! (precision, scale). After
 //! [`ProcedureBuilder::execute`], read values with
 //! [`ProcedureResult::get_output`] and the return code with
 //! [`ProcedureResult::get_return_value`].
@@ -194,28 +194,6 @@ impl<'a, S: ConnectionState> ProcedureBuilder<'a, S> {
     pub fn output_decimal(&mut self, name: &str, precision: u8, scale: u8) -> &mut Self {
         self.params
             .push(RpcParam::null(name, RpcTypeInfo::decimal(precision, scale)).as_output());
-        self
-    }
-
-    /// Add a named output parameter with a raw `TypeInfo` for uncommon types.
-    ///
-    /// This is an escape hatch for types not covered by the typed output methods.
-    ///
-    /// # Example
-    ///
-    /// ```rust,no_run
-    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
-    /// use tds_protocol::rpc::TypeInfo;
-    ///
-    /// client.procedure("dbo.GetGuid")?
-    ///     .output_raw("@id", TypeInfo::uniqueidentifier())
-    ///     .execute().await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn output_raw(&mut self, name: &str, type_info: RpcTypeInfo) -> &mut Self {
-        self.params
-            .push(RpcParam::null(name, type_info).as_output());
         self
     }
 
