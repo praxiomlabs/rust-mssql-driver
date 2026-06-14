@@ -472,18 +472,6 @@ async fn test_call_nonexistent_procedure() {
     client.close().await.unwrap();
 }
 
-#[test]
-fn test_procedure_name_validation() {
-    // This doesn't need SQL Server — it's just validation
-    // We can't call client.procedure() without a connection, but we can
-    // test that validate_qualified_identifier works for procedure names.
-    // The validation is tested in validation.rs, but let's verify the
-    // error surfaces through the public API.
-
-    // Invalid names should be caught at compile time (before any network call)
-    // This is tested via the validation module's unit tests.
-}
-
 #[tokio::test]
 #[ignore = "Requires SQL Server"]
 async fn test_call_procedure_schema_qualified() {
