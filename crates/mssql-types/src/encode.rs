@@ -474,6 +474,21 @@ pub fn encode_datetimeoffset(
 mod tests {
     use super::*;
 
+    /// JSON values are sent on the wire as NVARCHAR — the serialized JSON
+    /// string encoded as UTF-16LE. This encode path had no asserting test.
+    #[cfg(feature = "json")]
+    #[test]
+    fn test_json_encodes_as_nvarchar() {
+        let value = serde_json::json!({"name": "Ada", "id": 42});
+
+        let mut got = BytesMut::new();
+        SqlValue::Json(value.clone()).encode(&mut got).unwrap();
+
+        let mut want = BytesMut::new();
+        encode_utf16_string(&value.to_string(), &mut want);
+        assert_eq!(got, want);
+    }
+
     /// Issue #152 regression: the DATETIMEOFFSET wire date/time portion is
     /// the UTC instant per MS-TDS §2.2.5.5.1.9. 12:00 at +02:00 must encode
     /// a 10:00 time portion. The previous encoder wrote the local wall-clock,
