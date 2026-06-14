@@ -39,7 +39,7 @@ Refer to `ARCHITECTURE.md` (v1.9.0) for complete details. Critical decisions:
 | DBA Access | Cannot see plaintext | Can see plaintext |
 | Threat Model | Protects FROM server | Protects ON server |
 
-Always Encrypted is fully implemented via the `always-encrypted` feature with production-ready key providers:
+Always Encrypted **decryption (the read path)** is fully implemented via the `always-encrypted` feature with production-ready key providers. The encrypt-before-send **write path is not yet implemented** — only `NULL` can be written to encrypted columns (see the `mssql-client::encryption` module docs and LIMITATIONS.md). The key providers:
 1. **`InMemoryKeyStore`** - For development/testing
 2. **`AzureKeyVaultProvider`** - For Azure Key Vault (`azure-identity` feature)
 3. **`WindowsCertStoreProvider`** - For Windows Certificate Store (`windows-certstore` feature, Windows only)
@@ -291,8 +291,8 @@ tracing-opentelemetry = "0.33"
 ## Testing Strategy
 
 1. **Unit tests** - Protocol encoding/decoding, type conversions
-2. **Integration tests** - Against SQL Server (Docker)
-3. **Compatibility tests** - TDS 7.4, 8.0; SQL Server 2017-2022
+2. **Integration tests** - Against SQL Server 2022 in CI (Docker), on every change
+3. **Compatibility tests** - TDS 7.3–8.0. **Only SQL Server 2022 is CI-verified**; 2008–2019 are validated manually by the maintainer (not in CI). Multi-version CI for 2017/2019 is tracked in #85.
 4. **Fuzzing** - Protocol parser with cargo-fuzz
 
 ## Migration Guide (from Tiberius)
