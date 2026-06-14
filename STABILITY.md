@@ -26,6 +26,33 @@ After 1.0.0 is released:
 - Deprecated APIs will remain functional for at least one minor release
 - Security fixes may be backported to supported versions
 
+### Road to 1.0
+
+We are deliberately staying in the `0.x` series until the criteria below hold.
+Pre-1.0, a breaking change is a minor bump (see above) — this is the correct,
+expressive way to evolve an API that is still settling, and a premature 1.0 we
+then break would be worse than honest `0.x`. 1.0 is the *end* of a deliberate
+API-stabilisation process, not a milestone to rush.
+
+Criteria for 1.0:
+
+1. **All public dependencies are themselves ≥1.0.** Per the
+   [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/necessities.html)
+   (C-STABLE), a crate cannot be stable while a type from a pre-1.0 dependency
+   appears in its public API. This is currently the hard blocker (tracked under
+   the `1.0-blocker` label).
+2. **The public API surface is frozen and future-proofed** — error enums
+   `#[non_exhaustive]` (done), public structs with private fields or
+   `#[non_exhaustive]`, sealed extension traits (e.g. the SQL↔Rust type-mapping
+   traits) so methods can be added without a breaking change, `#[must_use]` on
+   builders and futures.
+3. **A published support pledge** — once 1.0 ships we commit to maintaining the
+   1.0 line and a minimum interval before any 2.0, paired with the existing
+   rolling MSRV policy. We will not declare 1.0 until we can make and honour
+   such a pledge.
+
+Progress toward these is tracked in the **Road to 1.0** milestone.
+
 ### Security Support
 
 The latest released minor version receives security fixes. Pre-1.0, older minor
