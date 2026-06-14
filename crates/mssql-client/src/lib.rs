@@ -117,7 +117,7 @@ pub use mssql_types::{DecimalParamInfo, FromSql, SqlTyped, SqlValue, ToSql, Type
 #[cfg(feature = "decimal")]
 pub use mssql_types::{Money, Numeric, SmallMoney, numeric};
 pub use procedure::ProcedureBuilder;
-pub use query::{Query, in_params};
+pub use query::in_params;
 pub use row::{Column, Row};
 pub use state::{
     Connected, ConnectionState, Disconnected, InTransaction, ProtocolState, Ready, Streaming,
