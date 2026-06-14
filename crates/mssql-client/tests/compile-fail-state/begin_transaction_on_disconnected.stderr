@@ -1,0 +1,8 @@
+error[E0599]: no method named `begin_transaction` found for struct `Client<mssql_client::Disconnected>` in the current scope
+ --> tests/compile-fail-state/begin_transaction_on_disconnected.rs:6:20
+  |
+6 |     let _ = client.begin_transaction();
+  |                    ^^^^^^^^^^^^^^^^^ method not found in `Client<Disconnected>`
+  |
+  = note: the method was found for
+          - `Client<mssql_client::Ready>`

@@ -1,0 +1,8 @@
+error[E0599]: no method named `commit` found for struct `Client<mssql_client::Ready>` in the current scope
+ --> tests/compile-fail-state/commit_on_ready.rs:6:20
+  |
+6 |     let _ = client.commit();
+  |                    ^^^^^^ method not found in `Client<Ready>`
+  |
+  = note: the method was found for
+          - `Client<InTransaction>`
