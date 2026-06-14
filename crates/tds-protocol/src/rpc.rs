@@ -26,6 +26,7 @@
 use bytes::{BufMut, Bytes, BytesMut};
 
 use crate::codec::write_utf16_string;
+use crate::crypto::EncryptionTypeWire;
 use crate::prelude::*;
 use crate::token::Collation;
 
@@ -515,6 +516,47 @@ impl TypeInfo {
     }
 }
 
+/// Always Encrypted cipher metadata, written after an encrypted parameter's
+/// ciphertext value (MS-TDS 2.2.6.6 `CryptoMetadata`).
+///
+/// It tells the server how to validate and route the encrypted value: the
+/// plaintext column type (`BaseTypeInfo`), the AEAD algorithm and encryption
+/// mode, which column encryption key, and the normalization rule version.
+#[derive(Debug, Clone)]
+pub struct EncryptedParamMetadata {
+    /// Type info of the plaintext column (the `BaseTypeInfo`).
+    pub base_type_info: TypeInfo,
+    /// Encryption algorithm ID (2 = AEAD_AES_256_CBC_HMAC_SHA256).
+    pub algorithm_id: u8,
+    /// Deterministic or randomized encryption.
+    pub encryption_type: EncryptionTypeWire,
+    /// Database ID of the column encryption key.
+    pub database_id: u32,
+    /// Column encryption key ID.
+    pub cek_id: u32,
+    /// Column encryption key version.
+    pub cek_version: u32,
+    /// Column encryption key metadata version.
+    pub cek_md_version: u64,
+    /// Normalization rule version applied to the plaintext.
+    pub normalization_rule_version: u8,
+}
+
+impl EncryptedParamMetadata {
+    /// Encode the cipher-metadata trailer to the buffer, in the order the
+    /// server expects it after the ciphertext value.
+    pub fn encode(&self, buf: &mut BytesMut) {
+        self.base_type_info.encode(buf);
+        buf.put_u8(self.algorithm_id);
+        buf.put_u8(self.encryption_type.to_u8());
+        buf.put_u32_le(self.database_id);
+        buf.put_u32_le(self.cek_id);
+        buf.put_u32_le(self.cek_version);
+        buf.put_u64_le(self.cek_md_version);
+        buf.put_u8(self.normalization_rule_version);
+    }
+}
+
 /// An RPC parameter.
 #[derive(Debug, Clone)]
 pub struct RpcParam {
@@ -526,6 +568,9 @@ pub struct RpcParam {
     pub type_info: TypeInfo,
     /// Parameter value (raw bytes).
     pub value: Option<Bytes>,
+    /// Always Encrypted cipher metadata, written after the value when the
+    /// parameter is encrypted. `None` for ordinary parameters.
+    pub crypto_metadata: Option<EncryptedParamMetadata>,
 }
 
 impl RpcParam {
@@ -536,6 +581,7 @@ impl RpcParam {
             flags: ParamFlags::default(),
             type_info,
             value: Some(value),
+            crypto_metadata: None,
         }
     }
 
@@ -546,6 +592,30 @@ impl RpcParam {
             flags: ParamFlags::default(),
             type_info,
             value: None,
+            crypto_metadata: None,
+        }
+    }
+
+    /// Create an Always Encrypted parameter.
+    ///
+    /// `ciphertext` is the AEAD-encrypted, normalized value; `metadata` is the
+    /// cipher info the server needs to validate and route it. On the wire the
+    /// value is carried as `BIGVARBINARY(max)` with the `fEncrypted` status bit
+    /// set and the [`EncryptedParamMetadata`] trailer after the value.
+    pub fn encrypted(
+        name: impl Into<String>,
+        ciphertext: Bytes,
+        metadata: EncryptedParamMetadata,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            flags: ParamFlags {
+                encrypted: true,
+                ..ParamFlags::default()
+            },
+            type_info: TypeInfo::varbinary_max(),
+            value: Some(ciphertext),
+            crypto_metadata: Some(metadata),
         }
     }
 
@@ -730,6 +800,11 @@ impl RpcParam {
                     buf.put_u8(0); // Zero-length for NULL
                 }
             }
+        }
+
+        // Always Encrypted: the CryptoMetadata trailer follows the value.
+        if let Some(ref metadata) = self.crypto_metadata {
+            metadata.encode(buf);
         }
     }
 }
@@ -1029,6 +1104,77 @@ impl RpcRequest {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    /// The encrypted-RPC-param wire format must match `Microsoft.Data.SqlClient`
+    /// byte-for-byte. Goldens were captured from a live deterministic Always
+    /// Encrypted INSERT (`.tmp/ae-wire-encrypted-param.md`): one INT, one
+    /// NVARCHAR(50), and one VARBINARY(50) parameter, all bound to a single CEK
+    /// (db_id=6, cek_id=2, cek_version=1, md_version=0x0000b469002f7223). The
+    /// ciphertext is sliced out of each golden and fed back through the encoder,
+    /// so a match proves the full framing (fEncrypted status, BIGVARBINARY(max)
+    /// PLP value, and the CryptoMetadata trailer) reproduces the real client.
+    #[test]
+    fn encrypted_param_encode_matches_captured_dotnet_wire() {
+        fn unhex(s: &str) -> Vec<u8> {
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+                .collect()
+        }
+
+        // @s carries the encrypted column's BIN2 collation in its BaseTypeInfo.
+        let mut nvarchar_50 = TypeInfo::nvarchar(50);
+        nvarchar_50.collation = Some([0x09, 0x04, 0xd0, 0x00, 0x34]);
+
+        let cases = [
+            (
+                "@i",
+                TypeInfo::int(),
+                "024000690008a5ffff41000000000000004100000001ed7b8c6030870d92358f12acb0d0c69c00bc3aa3ba578ecb0ea5f514b5045912a2b1ae52ed834f6bac49520956e4a574c30d573590fb3785556c8fe42f87c5b4000000002604020106000000020000000100000023722f0069b4000001",
+            ),
+            (
+                "@s",
+                nvarchar_50,
+                "024000730008a5ffff4100000000000000410000000150c0a7dec4d4241c7a4a617007d32d97e7131f8c57a5ad212487891170f12ecb9957fce16389f4728d1c3c65813beeea085ae3fd516d29f84298df3e97f0d05d00000000e764000904d00034020106000000020000000100000023722f0069b4000001",
+            ),
+            (
+                "@b",
+                TypeInfo::varbinary(50),
+                "024000620008a5ffff41000000000000004100000001d17165aa6df0155be6b78c6712d3b03870ea394cfed10956cf07fbfa204c4b82cddfa5e2f4fc03335f579e2767657e3067cd9da7d62a07427106b91f747b97da00000000a53200020106000000020000000100000023722f0069b4000001",
+            ),
+        ];
+
+        for (name, base_type_info, golden_hex) in cases {
+            let golden = unhex(golden_hex);
+            // Slice the ciphertext out of the golden: B_VARCHAR name
+            // (1 + 2*chars) + status(1) + A5FFFF(3) + PLP total(8) + chunk(4).
+            let cipher_off = 1 + name.encode_utf16().count() * 2 + 1 + 3 + 8 + 4;
+            let cipher = Bytes::copy_from_slice(&golden[cipher_off..cipher_off + 65]);
+
+            let param = RpcParam::encrypted(
+                name,
+                cipher,
+                EncryptedParamMetadata {
+                    base_type_info,
+                    algorithm_id: 2,
+                    encryption_type: EncryptionTypeWire::Deterministic,
+                    database_id: 6,
+                    cek_id: 2,
+                    cek_version: 1,
+                    cek_md_version: 0x0000_b469_002f_7223,
+                    normalization_rule_version: 1,
+                },
+            );
+
+            let mut buf = BytesMut::new();
+            param.encode(&mut buf);
+            assert_eq!(
+                buf.to_vec(),
+                golden,
+                "encrypted {name} param must match the captured Microsoft.Data.SqlClient bytes"
+            );
+        }
+    }
 
     #[test]
     fn test_proc_id_values() {

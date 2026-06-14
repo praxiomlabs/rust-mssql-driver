@@ -310,6 +310,7 @@ impl<S: ConnectionState> Client<S> {
             flags: tds_protocol::rpc::ParamFlags::default(),
             type_info,
             value: Some(buf.freeze()),
+            crypto_metadata: None,
         })
     }
 
