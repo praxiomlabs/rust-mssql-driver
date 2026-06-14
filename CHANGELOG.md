@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.16.0...v0.16.1) - 2026-06-14
+
+### Fixed
+
+- *(types)* reject numeric() values exceeding the declared precision
+
+### Other
+
+- *(client)* assert behaviour in three connection-string edge cases
+- clarify Always Encrypted decimal binding; refresh stale markers
+
 ## [0.16.0](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.15.1...v0.16.0) - 2026-06-14
 
 ### Added
