@@ -288,6 +288,27 @@ fn denormalize_decrypted(plaintext: Vec<u8>, base_col: &ColumnData) -> Result<Sq
         TypeId::BigVarBinary | TypeId::BigBinary | TypeId::VarBinary | TypeId::Binary => {
             Ok(SqlValue::Binary(bytes::Bytes::from(plaintext)))
         }
+        // UNIQUEIDENTIFIER: 16 bytes in SQL Server's mixed-endian order; swap
+        // the first three groups back to the RFC layout.
+        #[cfg(feature = "uuid")]
+        TypeId::Guid => {
+            let b = decrypted_array::<16>(&plaintext, "uniqueidentifier")?;
+            Ok(SqlValue::Uuid(uuid::Uuid::from_bytes([
+                b[3], b[2], b[1], b[0], b[5], b[4], b[7], b[6], b[8], b[9], b[10], b[11], b[12],
+                b[13], b[14], b[15],
+            ])))
+        }
+        // DATE: 3-byte little-endian days since 0001-01-01 (CE day 1).
+        #[cfg(feature = "chrono")]
+        TypeId::Date => {
+            let b = decrypted_array::<3>(&plaintext, "date")?;
+            let days = u32::from(b[0]) | (u32::from(b[1]) << 8) | (u32::from(b[2]) << 16);
+            chrono::NaiveDate::from_num_days_from_ce_opt(days as i32 + 1)
+                .map(SqlValue::Date)
+                .ok_or_else(|| {
+                    Error::Encryption(format!("decrypted DATE day count {days} is out of range"))
+                })
+        }
         other => Err(Error::Encryption(format!(
             "Always Encrypted read is not yet implemented for base type {other:?}"
         ))),

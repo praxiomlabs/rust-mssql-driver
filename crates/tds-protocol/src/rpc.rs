@@ -350,6 +350,18 @@ impl TypeInfo {
         }
     }
 
+    /// Create type info for UNIQUEIDENTIFIER.
+    pub fn uuid() -> Self {
+        Self {
+            type_id: 0x24, // GUIDTYPE
+            max_length: Some(16),
+            precision: None,
+            scale: None,
+            collation: None,
+            tvp_type_name: None,
+        }
+    }
+
     /// Create type info for DATE.
     pub fn date() -> Self {
         Self {

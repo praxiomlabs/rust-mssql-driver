@@ -170,6 +170,8 @@ fn null_param_type_info(sql_type: &str) -> Option<tds_protocol::rpc::TypeInfo> {
         "FLOAT" => TypeInfo::float(),
         "NVARCHAR" => TypeInfo::nvarchar(1),
         "VARBINARY" => TypeInfo::varbinary(1),
+        "UNIQUEIDENTIFIER" => TypeInfo::uuid(),
+        "DATE" => TypeInfo::date(),
         _ => return None,
     })
 }
