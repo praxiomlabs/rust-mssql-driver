@@ -931,6 +931,100 @@ mod live_server {
         );
     }
 
+    /// Write→read round-trip for the fixed-width numeric types: bigint,
+    /// smallint, tinyint, bit, real, and float. Each is encrypted on INSERT and
+    /// decrypted back on SELECT, exercising both the 8-byte integer
+    /// normalization and the 4/8-byte IEEE float forms through the live server.
+    #[tokio::test]
+    #[ignore = "Requires SQL Server with Always Encrypted"]
+    async fn test_numeric_parameter_encryption_round_trip() {
+        let admin_cfg = match admin_config() {
+            Some(c) => c,
+            None => return,
+        };
+        let mut admin = Client::connect(admin_cfg).await.expect("admin connect");
+
+        let (rsa_key, pem) = fresh_rsa_keypair();
+        let cek = fresh_cek();
+
+        let enc = "ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = [{CEK}], \
+                   ENCRYPTION_TYPE = DETERMINISTIC, ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256')";
+        let ddl = format!(
+            "CREATE TABLE [{{TABLE}}] ( \
+             Id INT NOT NULL PRIMARY KEY, \
+             EncBig BIGINT {enc} NULL, \
+             EncSmall SMALLINT {enc} NULL, \
+             EncTiny TINYINT {enc} NULL, \
+             EncBit BIT {enc} NULL, \
+             EncReal REAL {enc} NULL, \
+             EncFloat FLOAT {enc} NULL )"
+        );
+        let fx = setup(&mut admin, &cek, &rsa_key, &ddl).await;
+        drop(admin);
+
+        let mut client = Client::connect(encrypted_config(&pem).expect("cfg"))
+            .await
+            .expect("ae connect");
+
+        let big = 0x0102_0304_0506_0708_i64;
+        let insert = format!(
+            "INSERT INTO [{}] (Id, EncBig, EncSmall, EncTiny, EncBit, EncReal, EncFloat) \
+             VALUES (@p1, @p2, @p3, @p4, @p5, @p6, @p7)",
+            fx.table_name
+        );
+        let inserted = client
+            .execute(
+                &insert,
+                &[&1i32, &big, &258i16, &200u8, &true, &3.5f32, &3.5f64],
+            )
+            .await;
+
+        let round_trip: Result<(i64, i16, u8, bool, f32, f64), String> = if inserted.is_ok() {
+            let select = format!(
+                "SELECT EncBig, EncSmall, EncTiny, EncBit, EncReal, EncFloat FROM [{}] WHERE Id = @p1",
+                fx.table_name
+            );
+            async {
+                let rows = client
+                    .query(&select, &[&1i32])
+                    .await
+                    .map_err(|e| format!("select: {e}"))?;
+                let mut found = None;
+                for r in rows {
+                    let r = r.map_err(|e| format!("row: {e}"))?;
+                    found = Some((
+                        r.get::<i64>(0).map_err(|e| format!("EncBig: {e}"))?,
+                        r.get::<i16>(1).map_err(|e| format!("EncSmall: {e}"))?,
+                        r.get::<u8>(2).map_err(|e| format!("EncTiny: {e}"))?,
+                        r.get::<bool>(3).map_err(|e| format!("EncBit: {e}"))?,
+                        r.get::<f32>(4).map_err(|e| format!("EncReal: {e}"))?,
+                        r.get::<f64>(5).map_err(|e| format!("EncFloat: {e}"))?,
+                    ));
+                }
+                found.ok_or_else(|| "no row returned".to_string())
+            }
+            .await
+        } else {
+            Err("insert failed".to_string())
+        };
+
+        let mut admin = Client::connect(admin_config().expect("cfg"))
+            .await
+            .expect("admin reconnect");
+        teardown(&mut admin, &fx).await;
+
+        let inserted = inserted.expect("encrypted numeric INSERT should succeed");
+        assert_eq!(inserted, 1, "one row inserted");
+        let (g_big, g_small, g_tiny, g_bit, g_real, g_float) =
+            round_trip.expect("decrypt round-trip");
+        assert_eq!(g_big, big, "BIGINT round-trips");
+        assert_eq!(g_small, 258, "SMALLINT round-trips");
+        assert_eq!(g_tiny, 200, "TINYINT round-trips");
+        assert!(g_bit, "BIT round-trips");
+        assert_eq!(g_real, 3.5, "REAL round-trips");
+        assert_eq!(g_float, 3.5, "FLOAT round-trips");
+    }
+
     /// Validate the Always Encrypted metadata path end-to-end against a live
     /// server. A row with NULL in the encrypted column is the only value we
     /// can populate without parameter encryption (any non-NULL plaintext

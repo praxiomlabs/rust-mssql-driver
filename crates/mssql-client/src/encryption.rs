@@ -658,8 +658,17 @@ fn describe_type_error(col: &str, idx: usize, expected: &str, got: Option<&SqlVa
 #[cfg(feature = "always-encrypted")]
 pub fn normalize_for_encryption(value: &SqlValue) -> Result<Vec<u8>, EncryptionError> {
     match value {
-        // Signed integer types normalize to 8-byte little-endian (sign-extended).
+        // All integer types AND bit normalize to 8-byte little-endian (the value
+        // widened to i64). Validated against .NET: tinyint/smallint are 8 bytes,
+        // not their native 1/2 — a spec-reading would get this wrong.
+        SqlValue::Bool(v) => Ok(i64::from(*v).to_le_bytes().to_vec()),
+        SqlValue::TinyInt(v) => Ok(i64::from(*v).to_le_bytes().to_vec()),
+        SqlValue::SmallInt(v) => Ok(i64::from(*v).to_le_bytes().to_vec()),
         SqlValue::Int(v) => Ok(i64::from(*v).to_le_bytes().to_vec()),
+        SqlValue::BigInt(v) => Ok(v.to_le_bytes().to_vec()),
+        // REAL/FLOAT: the IEEE-754 bits, little-endian (4 and 8 bytes).
+        SqlValue::Float(v) => Ok(v.to_le_bytes().to_vec()),
+        SqlValue::Double(v) => Ok(v.to_le_bytes().to_vec()),
         // NVARCHAR: UTF-16LE code units, no length prefix.
         SqlValue::String(s) => Ok(s.encode_utf16().flat_map(u16::to_le_bytes).collect()),
         // VARBINARY: the raw bytes, no length prefix.
@@ -723,10 +732,71 @@ mod tests {
         }
     }
 
+    /// `normalize_for_encryption` rejects values it has no normalization for
+    /// rather than silently producing wrong bytes. NULL is never normalized
+    /// (it is handled as a NULL parameter upstream), so it exercises the
+    /// catch-all rejection arm and stays unsupported as more types are added.
     #[cfg(feature = "always-encrypted")]
     #[test]
-    fn ae_normalization_rejects_unsupported_type() {
-        assert!(normalize_for_encryption(&SqlValue::Bool(true)).is_err());
+    fn ae_normalization_rejects_unnormalizable_value() {
+        assert!(normalize_for_encryption(&SqlValue::Null).is_err());
+    }
+
+    /// Numeric-scalar normalization, validated byte-for-byte against
+    /// Microsoft.Data.SqlClient (same method as [`ae_normalization_matches_dotnet`],
+    /// captured with a fresh CEK). This is the interop guarantee: a value the
+    /// driver encrypts is the value .NET would encrypt. Notable: every integer
+    /// width and bit normalize to 8 bytes, real to 4, float to 8.
+    #[cfg(feature = "always-encrypted")]
+    #[test]
+    fn ae_normalization_matches_dotnet_numeric() {
+        fn unhex(s: &str) -> Vec<u8> {
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+                .collect()
+        }
+
+        let cek = unhex("9590E42A8A6C8F13B5D09B8D5A128EF8B3A4A10301C7AF24AFC62ED0E02342F7");
+        let enc = AeadEncryptor::new(&cek).unwrap();
+
+        for (value, reference) in [
+            (
+                SqlValue::BigInt(0x0102030405060708),
+                "01E765FC4696660028BFD48FCAEAED81E0EB423CFF433CA97F1B2FF02F70744E7265C2AE73CAA562FFA98AF98CB1D3EF6A4649B3640359E1DB7D170C80E639DA68",
+            ),
+            (
+                SqlValue::SmallInt(258),
+                "012545AB817E1AEBDCEE1C00AEBFF3A013CAD20E0377BEFDD9186C263F8D1A909C313A753996F1B5E4A4AE17E901F6F781DCA707544766995D339601CA414063A0",
+            ),
+            (
+                SqlValue::TinyInt(200),
+                "01A97C33480277D16FFAEDA9068173D4173378542F2887EBCD31CDEEEB116BD59D48F9D459BDDCABAE469E891B4F82AA3D283440CA1B5E9FFC150F9D0AE54EC21E",
+            ),
+            (
+                SqlValue::Bool(true),
+                "01DDE18564051D630EE026331BCCAFC8F4122CC3919F81459F37D9C0E0C64A5317FCA08660FE5FC855917B97B72013F25B85ADD14ADDD7D5ED022EB1297FF29A7E",
+            ),
+            (
+                SqlValue::Float(3.5),
+                "017A452760E7BA7AA6A716F6707F55D9C3A81683C04A6B561B13AC1D8A848E93E239BB922EE3EE628B6D0081A590BB11747CC25D216240FB10171A0FA3B99A2DB3",
+            ),
+            (
+                SqlValue::Double(3.5),
+                "0171611557351FBC4561EBF0B9C98E0DC38AD2BD3E2C1D1E82F185D7E67D0425E506D11DD67BA3EB38F34FB01A8FCEF7E4B9A7256944334A521526613CFF6C8C5F",
+            ),
+        ] {
+            let norm = normalize_for_encryption(&value).unwrap();
+            let cipher = enc
+                .encrypt(&norm, mssql_auth::EncryptionType::Deterministic)
+                .unwrap();
+            assert_eq!(
+                cipher,
+                unhex(reference),
+                "ciphertext for {} must match Microsoft.Data.SqlClient",
+                value.type_name()
+            );
+        }
     }
 
     #[test]
