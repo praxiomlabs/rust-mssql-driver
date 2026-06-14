@@ -220,24 +220,29 @@ within range, to `FLOAT` if approximate semantics are acceptable, or to
 
 ### Always Encrypted Parameter Encryption (Write Path)
 
-**Status:** Read path fully supported; write path supports `NULL` only
+**Status:** Read path fully supported; parameter (write) encryption supported
+for `int`, `nvarchar`, and `varbinary`
 
 Transparent decryption of encrypted columns works end-to-end: login-time
 feature negotiation, `ColMetaData` / `CekTable` / `CryptoMetadata` parsing,
 async CEK resolution through key store providers, and AEAD_AES_256_CBC_HMAC_SHA256
-decryption in the row hot path. Writing `NULL` into a nullable encrypted
-column also works.
+decryption in the row hot path.
 
-What is not yet implemented is the *encrypt-before-send* logic for
-non-`NULL` parameters bound to encrypted columns. Sending plaintext will
-be rejected by SQL Server with *"Operand type clash: varchar is
-incompatible with varchar(n) encrypted with (…)."*
+Parameter (write) encryption is implemented for `int`, `nvarchar`, and
+`varbinary`. With `Column Encryption Setting=Enabled`, a parameterized query or
+`execute` automatically describes its parameters
+(`sp_describe_parameter_encryption`), encrypts those bound to encrypted columns
+client-side, and sends them as encrypted RPC parameters. Both deterministic and
+randomized encryption are supported.
 
-**Workaround:** Pre-encrypt values out-of-band (e.g., via .NET SqlClient
-or `sqlcmd` with Always Encrypted enabled) and insert the resulting
-ciphertext as a `VARBINARY` parameter bound to the base column type.
-Reads are unaffected — queries with `Column Encryption Setting=Enabled`
-decrypt transparently.
+Not yet implemented:
+- Parameter encryption for other column types (e.g. `bigint`, `decimal`,
+  `datetime2`, `uniqueidentifier`): these return a clear "not yet implemented"
+  error rather than sending plaintext.
+- Secure enclave operations.
+- Caching of `sp_describe_parameter_encryption`: each parameterized statement
+  currently incurs one extra describe round-trip when Always Encrypted is
+  enabled (matching the uncached behaviour of other clients).
 
 See the [`mssql-client` `encryption` module docs](https://docs.rs/mssql-client/latest/mssql_client/encryption/) for
 the full rationale.
