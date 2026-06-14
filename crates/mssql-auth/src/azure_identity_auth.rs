@@ -364,10 +364,24 @@ mod tests {
 
     #[test]
     fn test_debug_redacts_credentials() {
-        // Just verify Debug impl doesn't panic and doesn't expose secrets
         if let Ok(auth) = ManagedIdentityAuth::system_assigned() {
             let debug = format!("{auth:?}");
             assert!(debug.contains("ManagedIdentityAuth"));
         }
+
+        // The client secret must never appear in the Debug output.
+        let secret = "client-secret-must-not-appear-in-debug";
+        let auth = ServicePrincipalAuth::new(
+            "00000000-0000-0000-0000-000000000000",
+            "11111111-1111-1111-1111-111111111111",
+            secret,
+        )
+        .expect("constructing a service principal credential should not fail offline");
+        let debug = format!("{auth:?}");
+        assert!(
+            !debug.contains(secret),
+            "Debug output must not expose the client secret"
+        );
+        assert!(debug.contains("[REDACTED]"));
     }
 }
