@@ -779,11 +779,12 @@ mod live_server {
         assert_eq!(p1.cek_ordinal, 0);
     }
 
-    /// Full Always Encrypted write→read round-trip: the driver encrypts INT,
-    /// NVARCHAR, and VARBINARY parameters on INSERT, then decrypts them back on
-    /// SELECT. Also confirms the stored value is real ciphertext (opaque to a
-    /// connection without Always Encrypted) — proving the encryption happens
-    /// client-side, not on the server.
+    /// Full Always Encrypted write→read round-trip: the driver encrypts
+    /// deterministic INT, NVARCHAR, and VARBINARY parameters plus a randomized
+    /// NVARCHAR parameter on INSERT, then decrypts them all back on SELECT. Also
+    /// confirms the stored value is real ciphertext (opaque to a connection
+    /// without Always Encrypted), proving the encryption happens client-side,
+    /// not on the server.
     #[tokio::test]
     #[ignore = "Requires SQL Server with Always Encrypted"]
     async fn test_parameter_encryption_round_trip() {
@@ -813,6 +814,10 @@ mod live_server {
              EncData VARBINARY(50) ENCRYPTED WITH ( \
              COLUMN_ENCRYPTION_KEY = [{CEK}], \
              ENCRYPTION_TYPE = DETERMINISTIC, \
+             ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256' ) NULL, \
+             EncRand NVARCHAR(50) ENCRYPTED WITH ( \
+             COLUMN_ENCRYPTION_KEY = [{CEK}], \
+             ENCRYPTION_TYPE = RANDOMIZED, \
              ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256' ) NULL )",
         )
         .await;
@@ -824,18 +829,23 @@ mod live_server {
 
         let blob: Vec<u8> = vec![0xDE, 0xAD, 0xBE, 0xEF];
         let insert = format!(
-            "INSERT INTO [{}] (Id, EncInt, EncName, EncData) VALUES (@p1, @p2, @p3, @p4)",
+            "INSERT INTO [{}] (Id, EncInt, EncName, EncData, EncRand) \
+             VALUES (@p1, @p2, @p3, @p4, @p5)",
             fx.table_name
         );
-        // The driver encrypts @p2/@p3/@p4 client-side; @p1 (Id) stays plaintext.
+        // The driver encrypts @p2/@p3/@p4 (deterministic) and @p5 (randomized)
+        // client-side; @p1 (Id) stays plaintext.
         let inserted = client
-            .execute(&insert, &[&1i32, &42i32, &"Ada Lovelace", &blob])
+            .execute(
+                &insert,
+                &[&1i32, &42i32, &"Ada Lovelace", &blob, &"randomized secret"],
+            )
             .await;
 
         // Read the encrypted columns back; the driver decrypts transparently.
-        let round_trip: Result<(i32, String, Vec<u8>), String> = if inserted.is_ok() {
+        let round_trip: Result<(i32, String, Vec<u8>, String), String> = if inserted.is_ok() {
             let select = format!(
-                "SELECT EncInt, EncName, EncData FROM [{}] WHERE Id = @p1",
+                "SELECT EncInt, EncName, EncData, EncRand FROM [{}] WHERE Id = @p1",
                 fx.table_name
             );
             async {
@@ -850,6 +860,7 @@ mod live_server {
                         r.get::<i32>(0).map_err(|e| format!("EncInt: {e}"))?,
                         r.get::<String>(1).map_err(|e| format!("EncName: {e}"))?,
                         r.get::<Vec<u8>>(2).map_err(|e| format!("EncData: {e}"))?,
+                        r.get::<String>(3).map_err(|e| format!("EncRand: {e}"))?,
                     ));
                 }
                 found.ok_or_else(|| "no row returned".to_string())
@@ -889,16 +900,23 @@ mod live_server {
         let inserted = inserted.expect("encrypted INSERT should succeed");
         assert_eq!(inserted, 1, "exactly one row inserted");
 
-        let (got_int, got_name, got_data) = round_trip.expect("decrypt round-trip");
-        assert_eq!(got_int, 42, "INT decrypts to the inserted value");
+        let (got_int, got_name, got_data, got_rand) = round_trip.expect("decrypt round-trip");
+        assert_eq!(
+            got_int, 42,
+            "deterministic INT decrypts to the inserted value"
+        );
         assert_eq!(
             got_name, "Ada Lovelace",
-            "NVARCHAR decrypts to the inserted value"
+            "deterministic NVARCHAR decrypts to the inserted value"
         );
         assert_eq!(
             got_data,
             vec![0xDE, 0xAD, 0xBE, 0xEF],
-            "VARBINARY decrypts to the inserted value"
+            "deterministic VARBINARY decrypts to the inserted value"
+        );
+        assert_eq!(
+            got_rand, "randomized secret",
+            "randomized NVARCHAR decrypts to the inserted value"
         );
 
         let ciphertext = opaque.expect("read raw ciphertext");
