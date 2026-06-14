@@ -868,7 +868,7 @@ alongside the response-streaming work.
 
 **Status:** Implemented
 
-**Decision:** Always Encrypted client-side decryption (the read path) is fully implemented with production-ready key providers. The encrypt-before-send write path is not yet implemented (only `NULL` can be written to encrypted columns); see LIMITATIONS.md.
+**Decision:** Always Encrypted client-side decryption (the read path) is fully implemented with production-ready key providers. The encrypt-before-send write path is implemented for the common scalar types — parameters are described via `sp_describe_parameter_encryption` and encrypted client-side; the remaining temporal and fixed-width types are pending (#234). See LIMITATIONS.md.
 
 **Implemented (v0.2.0):**
 - AEAD_AES_256_CBC_HMAC_SHA256 encryption/decryption

@@ -14,7 +14,7 @@ An async Microsoft SQL Server driver for Rust.
 - **Type-state connections** — invalid operations are compile errors
 - **Pure-Rust TLS** — rustls; no OpenSSL, no system dependencies
 - **Beyond queries** — transactions and savepoints, stored procedures with OUTPUT
-  params, table-valued parameters, bulk insert, Always Encrypted (read),
+  params, table-valued parameters, bulk insert, Always Encrypted (read + write),
   OpenTelemetry
 
 ## Installation
@@ -214,7 +214,8 @@ Known gaps, so you don't have to discover them yourself:
 
 - Kerberos/GSSAPI and FILESTREAM are implemented but not yet validated against
   live infrastructure.
-- Always Encrypted writes support `NULL` only; reads are fully transparent.
+- Always Encrypted reads are fully transparent; writes cover the common scalar
+  types (some temporal and fixed-width types are pending — see LIMITATIONS.md).
 - Rows decode lazily, but the response is buffered in memory — true streaming
   from the socket is planned.
 - Parameterized queries run via `sp_executesql` (the server still reuses
