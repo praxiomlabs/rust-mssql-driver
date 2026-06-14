@@ -75,6 +75,8 @@ use tds_protocol::crypto::{CekTable, CekTableEntry, CryptoMetadata, EncryptionTy
 #[cfg(feature = "always-encrypted")]
 use mssql_auth::{AeadEncryptor, CekCache, CekCacheKey, EncryptionError};
 #[cfg(feature = "always-encrypted")]
+use mssql_types::SqlValue;
+#[cfg(feature = "always-encrypted")]
 use std::sync::Arc;
 
 /// Configuration for Always Encrypted feature.
@@ -433,10 +435,88 @@ impl ParameterCryptoInfo {
     }
 }
 
+/// Normalize a parameter value to the plaintext byte form Always Encrypted
+/// encrypts — SQL Server's "normalized" form for the value's type. The result
+/// is the plaintext input to [`EncryptionContext::encrypt_value`].
+///
+/// Normalization is type-specific and is **not** the regular TDS wire encoding:
+/// e.g. INT normalizes to 8 little-endian bytes (not 4), and strings/binaries
+/// carry no length prefix. These layouts are validated byte-for-byte against
+/// Microsoft.Data.SqlClient (see the `ae_normalization` tests). Only the types
+/// supported so far are handled; others return `UnsupportedOperation`.
+#[cfg(feature = "always-encrypted")]
+pub fn normalize_for_encryption(value: &SqlValue) -> Result<Vec<u8>, EncryptionError> {
+    match value {
+        // Signed integer types normalize to 8-byte little-endian (sign-extended).
+        SqlValue::Int(v) => Ok(i64::from(*v).to_le_bytes().to_vec()),
+        // NVARCHAR: UTF-16LE code units, no length prefix.
+        SqlValue::String(s) => Ok(s.encode_utf16().flat_map(u16::to_le_bytes).collect()),
+        // VARBINARY: the raw bytes, no length prefix.
+        SqlValue::Binary(b) => Ok(b.to_vec()),
+        other => Err(EncryptionError::UnsupportedOperation(format!(
+            "Always Encrypted parameter encryption is not yet implemented for {}",
+            other.type_name()
+        ))),
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    /// Reference ciphertexts captured from a live deterministic Always Encrypted
+    /// INSERT via Microsoft.Data.SqlClient 5.2.2. Encrypting our normalization
+    /// with the same CEK must reproduce them byte-for-byte — proving the
+    /// normalized layout matches the real .NET client (notably INT -> 8 LE bytes,
+    /// which is the layout a naive implementation would get wrong).
+    #[cfg(feature = "always-encrypted")]
+    #[test]
+    fn ae_normalization_matches_dotnet() {
+        use bytes::Bytes;
+
+        fn unhex(s: &str) -> Vec<u8> {
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+                .collect()
+        }
+
+        let cek = unhex("B59D9F2C96784C232D53AB273D257DC79B7D2355BB82B1EC7054CE25E25F7B44");
+        let enc = AeadEncryptor::new(&cek).unwrap();
+
+        for (value, reference) in [
+            (
+                SqlValue::Int(42),
+                "01102FC5DEC5D3E463A8F4BDF512AA74E6AB953BA9A2F3F9A98CD18446B007DE5A6E2A1D1EB775035EA189CA5160A935CE093CAA9BB7E9233BB333AADEE86FDE1D",
+            ),
+            (
+                SqlValue::String("Ada".to_string()),
+                "01BFAC40E6DA541ACEFAD8ECF5598DB77B0C5349CFACBC3C9221C01B6037E593B78E8F398F620F837BD6A4A2B644125C4188DF278B94479B2218466D91107FE417",
+            ),
+            (
+                SqlValue::Binary(Bytes::from_static(&[0x01, 0x02, 0x03])),
+                "01ADE71457495F00FC9A16456F1B1EECB901D88DE97887025C189B1C4432E02071AB7594C48518CA5621E90165FAE337475B4CF3A3D00EF2D862FB0473713DF1E1",
+            ),
+        ] {
+            let norm = normalize_for_encryption(&value).unwrap();
+            let cipher = enc
+                .encrypt(&norm, mssql_auth::EncryptionType::Deterministic)
+                .unwrap();
+            assert_eq!(
+                cipher,
+                unhex(reference),
+                "ciphertext for {} must match Microsoft.Data.SqlClient",
+                value.type_name()
+            );
+        }
+    }
+
+    #[cfg(feature = "always-encrypted")]
+    #[test]
+    fn ae_normalization_rejects_unsupported_type() {
+        assert!(normalize_for_encryption(&SqlValue::Bool(true)).is_err());
+    }
 
     #[test]
     fn test_encryption_config_defaults() {
