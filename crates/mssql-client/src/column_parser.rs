@@ -227,16 +227,46 @@ fn decrypt_column(
 #[cfg(feature = "always-encrypted")]
 fn denormalize_decrypted(plaintext: Vec<u8>, base_col: &ColumnData) -> Result<SqlValue> {
     match base_col.type_id {
-        // INT normalizes to 8-byte little-endian (sign-extended).
-        TypeId::IntN | TypeId::Int4 => {
-            let bytes: [u8; 8] = plaintext.as_slice().try_into().map_err(|_| {
-                Error::Encryption(format!(
-                    "decrypted INT has {} bytes, expected 8",
-                    plaintext.len()
-                ))
-            })?;
-            Ok(SqlValue::Int(i64::from_le_bytes(bytes) as i32))
+        // Integer family and bit normalize to 8-byte little-endian (every width,
+        // tinyint/smallint included). The base type's width picks the variant.
+        TypeId::Bit
+        | TypeId::BitN
+        | TypeId::Int1
+        | TypeId::Int2
+        | TypeId::Int4
+        | TypeId::Int8
+        | TypeId::IntN => {
+            let v = i64::from_le_bytes(decrypted_array::<8>(&plaintext, "integer")?);
+            Ok(match base_col.type_id {
+                TypeId::Bit | TypeId::BitN => SqlValue::Bool(v != 0),
+                TypeId::Int1 => SqlValue::TinyInt(v as u8),
+                TypeId::Int2 => SqlValue::SmallInt(v as i16),
+                TypeId::Int8 => SqlValue::BigInt(v),
+                // IntN carries the width in max_length; default to INT.
+                TypeId::IntN => match base_col.type_info.max_length {
+                    Some(1) => SqlValue::TinyInt(v as u8),
+                    Some(2) => SqlValue::SmallInt(v as i16),
+                    Some(8) => SqlValue::BigInt(v),
+                    _ => SqlValue::Int(v as i32),
+                },
+                _ => SqlValue::Int(v as i32),
+            })
         }
+        // REAL/FLOAT normalize to their IEEE-754 bits, little-endian.
+        TypeId::Float4 => Ok(SqlValue::Float(f32::from_le_bytes(decrypted_array::<4>(
+            &plaintext, "REAL",
+        )?))),
+        TypeId::Float8 => Ok(SqlValue::Double(f64::from_le_bytes(decrypted_array::<8>(
+            &plaintext, "FLOAT",
+        )?))),
+        TypeId::FloatN => match base_col.type_info.max_length {
+            Some(4) => Ok(SqlValue::Float(f32::from_le_bytes(decrypted_array::<4>(
+                &plaintext, "REAL",
+            )?))),
+            _ => Ok(SqlValue::Double(f64::from_le_bytes(decrypted_array::<8>(
+                &plaintext, "FLOAT",
+            )?))),
+        },
         // NVARCHAR/NCHAR normalize to UTF-16LE code units, no length prefix.
         TypeId::NVarChar | TypeId::NChar => {
             if plaintext.len() % 2 != 0 {
@@ -262,6 +292,18 @@ fn denormalize_decrypted(plaintext: Vec<u8>, base_col: &ColumnData) -> Result<Sq
             "Always Encrypted read is not yet implemented for base type {other:?}"
         ))),
     }
+}
+
+/// Convert decrypted plaintext into a fixed-size array, erroring on a length
+/// mismatch rather than panicking.
+#[cfg(feature = "always-encrypted")]
+fn decrypted_array<const N: usize>(plaintext: &[u8], what: &str) -> Result<[u8; N]> {
+    plaintext.try_into().map_err(|_| {
+        Error::Encryption(format!(
+            "decrypted {what} has {} bytes, expected {N}",
+            plaintext.len()
+        ))
+    })
 }
 
 /// Parse money value from buffer and convert to appropriate type.
