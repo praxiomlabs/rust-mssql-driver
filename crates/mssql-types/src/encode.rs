@@ -177,13 +177,6 @@ pub fn encode_utf16_string(s: &str, buf: &mut BytesMut) {
     }
 }
 
-/// Encode a string as UTF-16LE without length prefix (for fixed-length fields).
-pub fn encode_utf16_string_no_len(s: &str, buf: &mut BytesMut) {
-    for code_unit in s.encode_utf16() {
-        buf.put_u16_le(code_unit);
-    }
-}
-
 /// Encode a UUID in SQL Server's mixed-endian format.
 ///
 /// SQL Server stores UUIDs in a unique byte order:

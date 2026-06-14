@@ -87,6 +87,26 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-features --all-targets -- -D warnings
 
+  public-api:
+    name: Public API
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # cargo-public-api extracts the surface from rustdoc JSON, which only
+      # nightly emits. Pinned for reproducibility — bump in lockstep with
+      # scripts/check-public-api.sh and a regenerated baseline.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-12-09
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: ./.github/actions/setup-linux-deps
+      - name: Install cargo-public-api
+        run: cargo install cargo-public-api --version 0.52.0 --locked
+      - name: Check public-API snapshots
+        run: scripts/check-public-api.sh
+
   deny:
     name: Dependency Audit
     runs-on: ubuntu-latest

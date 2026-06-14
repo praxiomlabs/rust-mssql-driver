@@ -1341,6 +1341,15 @@ doc-consistency:
     fi
     ./scripts/check-doc-consistency.sh
 
+# Verify the committed public-API snapshots match the current surface
+# (the same gate CI runs). Needs the pinned nightly + cargo-public-api.
+public-api:
+    ./scripts/check-public-api.sh
+
+# Regenerate the committed public-API snapshots after an intended API change.
+public-api-update:
+    ./scripts/check-public-api.sh update
+
 [group('release')]
 [confirm("⚠️ This will YANK all crates at the current workspace version. This is for SECURITY INCIDENTS only. Continue?")]
 [doc("Yank all crates at current version (SECURITY INCIDENTS ONLY)")]

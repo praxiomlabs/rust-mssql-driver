@@ -1,0 +1,898 @@
+pub mod mssql_codec
+pub mod mssql_codec::connection
+pub struct mssql_codec::connection::CancelHandle<T> where T: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite
+impl<T> mssql_codec::connection::CancelHandle<T> where T: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub async fn mssql_codec::connection::CancelHandle<T>::cancel(&self) -> core::result::Result<(), mssql_codec::error::CodecError>
+pub fn mssql_codec::connection::CancelHandle<T>::is_cancelling(&self) -> bool
+pub async fn mssql_codec::connection::CancelHandle<T>::wait_cancelled(&self)
+impl<T> core::clone::Clone for mssql_codec::connection::CancelHandle<T> where T: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite
+pub fn mssql_codec::connection::CancelHandle<T>::clone(&self) -> Self
+impl<T> core::fmt::Debug for mssql_codec::connection::CancelHandle<T> where T: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub fn mssql_codec::connection::CancelHandle<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T> core::marker::Freeze for mssql_codec::connection::CancelHandle<T>
+impl<T> core::marker::Send for mssql_codec::connection::CancelHandle<T> where T: core::marker::Send
+impl<T> core::marker::Sync for mssql_codec::connection::CancelHandle<T> where T: core::marker::Send
+impl<T> core::marker::Unpin for mssql_codec::connection::CancelHandle<T>
+impl<T> !core::panic::unwind_safe::RefUnwindSafe for mssql_codec::connection::CancelHandle<T>
+impl<T> !core::panic::unwind_safe::UnwindSafe for mssql_codec::connection::CancelHandle<T>
+impl<T, U> core::convert::Into<U> for mssql_codec::connection::CancelHandle<T> where U: core::convert::From<T>
+pub fn mssql_codec::connection::CancelHandle<T>::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::connection::CancelHandle<T> where U: core::convert::Into<T>
+pub type mssql_codec::connection::CancelHandle<T>::Error = core::convert::Infallible
+pub fn mssql_codec::connection::CancelHandle<T>::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::connection::CancelHandle<T> where U: core::convert::TryFrom<T>
+pub type mssql_codec::connection::CancelHandle<T>::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::connection::CancelHandle<T>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_codec::connection::CancelHandle<T> where T: core::clone::Clone
+pub type mssql_codec::connection::CancelHandle<T>::Owned = T
+pub fn mssql_codec::connection::CancelHandle<T>::clone_into(&self, &mut T)
+pub fn mssql_codec::connection::CancelHandle<T>::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_codec::connection::CancelHandle<T> where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::connection::CancelHandle<T>::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::connection::CancelHandle<T> where T: ?core::marker::Sized
+pub fn mssql_codec::connection::CancelHandle<T>::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::connection::CancelHandle<T> where T: ?core::marker::Sized
+pub fn mssql_codec::connection::CancelHandle<T>::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_codec::connection::CancelHandle<T> where T: core::clone::Clone
+pub unsafe fn mssql_codec::connection::CancelHandle<T>::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_codec::connection::CancelHandle<T>
+pub fn mssql_codec::connection::CancelHandle<T>::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_codec::connection::CancelHandle<T>
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::connection::CancelHandle<T>
+pub struct mssql_codec::connection::Connection<T> where T: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite
+impl<T> mssql_codec::connection::Connection<T> where T: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite
+pub fn mssql_codec::connection::Connection<T>::cancel_handle(&self) -> mssql_codec::connection::CancelHandle<T>
+pub async fn mssql_codec::connection::Connection<T>::flush(&mut self) -> core::result::Result<(), mssql_codec::error::CodecError>
+pub fn mssql_codec::connection::Connection<T>::is_cancelling(&self) -> bool
+pub fn mssql_codec::connection::Connection<T>::new(T) -> Self
+pub fn mssql_codec::connection::Connection<T>::read_codec(&self) -> &mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::connection::Connection<T>::read_codec_mut(&mut self) -> &mut mssql_codec::packet_codec::TdsCodec
+pub async fn mssql_codec::connection::Connection<T>::read_message(&mut self) -> core::result::Result<core::option::Option<mssql_codec::message::Message>, mssql_codec::error::CodecError>
+pub async fn mssql_codec::connection::Connection<T>::read_packet(&mut self) -> core::result::Result<core::option::Option<mssql_codec::packet_codec::Packet>, mssql_codec::error::CodecError>
+pub async fn mssql_codec::connection::Connection<T>::send_message(&mut self, tds_protocol::packet::PacketType, bytes::bytes::Bytes, usize) -> core::result::Result<(), mssql_codec::error::CodecError>
+pub async fn mssql_codec::connection::Connection<T>::send_message_with_reset(&mut self, tds_protocol::packet::PacketType, bytes::bytes::Bytes, usize, bool) -> core::result::Result<(), mssql_codec::error::CodecError>
+pub async fn mssql_codec::connection::Connection<T>::send_packet(&mut self, mssql_codec::packet_codec::Packet) -> core::result::Result<(), mssql_codec::error::CodecError>
+pub fn mssql_codec::connection::Connection<T>::set_max_message_size(&mut self, usize)
+pub fn mssql_codec::connection::Connection<T>::with_codecs(T, mssql_codec::packet_codec::TdsCodec, mssql_codec::packet_codec::TdsCodec) -> Self
+impl<T> core::fmt::Debug for mssql_codec::connection::Connection<T> where T: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite + core::fmt::Debug
+pub fn mssql_codec::connection::Connection<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T> core::marker::Freeze for mssql_codec::connection::Connection<T>
+impl<T> core::marker::Send for mssql_codec::connection::Connection<T> where T: core::marker::Send
+impl<T> core::marker::Sync for mssql_codec::connection::Connection<T> where T: core::marker::Sync + core::marker::Send
+impl<T> core::marker::Unpin for mssql_codec::connection::Connection<T>
+impl<T> !core::panic::unwind_safe::RefUnwindSafe for mssql_codec::connection::Connection<T>
+impl<T> !core::panic::unwind_safe::UnwindSafe for mssql_codec::connection::Connection<T>
+impl<T, U> core::convert::Into<U> for mssql_codec::connection::Connection<T> where U: core::convert::From<T>
+pub fn mssql_codec::connection::Connection<T>::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::connection::Connection<T> where U: core::convert::Into<T>
+pub type mssql_codec::connection::Connection<T>::Error = core::convert::Infallible
+pub fn mssql_codec::connection::Connection<T>::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::connection::Connection<T> where U: core::convert::TryFrom<T>
+pub type mssql_codec::connection::Connection<T>::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::connection::Connection<T>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_codec::connection::Connection<T> where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::connection::Connection<T>::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::connection::Connection<T> where T: ?core::marker::Sized
+pub fn mssql_codec::connection::Connection<T>::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::connection::Connection<T> where T: ?core::marker::Sized
+pub fn mssql_codec::connection::Connection<T>::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_codec::connection::Connection<T>
+pub fn mssql_codec::connection::Connection<T>::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_codec::connection::Connection<T>
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::connection::Connection<T>
+pub mod mssql_codec::error
+#[non_exhaustive] pub enum mssql_codec::error::CodecError
+pub mssql_codec::error::CodecError::Cancelled
+pub mssql_codec::error::CodecError::ConnectionClosed
+pub mssql_codec::error::CodecError::Decoding(alloc::string::String)
+pub mssql_codec::error::CodecError::Encoding(alloc::string::String)
+pub mssql_codec::error::CodecError::IncompletePacket
+pub mssql_codec::error::CodecError::IncompletePacket::needed: usize
+pub mssql_codec::error::CodecError::InvalidHeader
+pub mssql_codec::error::CodecError::Io(std::io::error::Error)
+pub mssql_codec::error::CodecError::MessageTooLarge
+pub mssql_codec::error::CodecError::MessageTooLarge::limit: usize
+pub mssql_codec::error::CodecError::MessageTooLarge::size: usize
+pub mssql_codec::error::CodecError::PacketTooLarge
+pub mssql_codec::error::CodecError::PacketTooLarge::max: usize
+pub mssql_codec::error::CodecError::PacketTooLarge::size: usize
+pub mssql_codec::error::CodecError::Protocol(tds_protocol::error::ProtocolError)
+impl mssql_codec::error::CodecError
+pub fn mssql_codec::error::CodecError::is_terminal(&self) -> bool
+pub fn mssql_codec::error::CodecError::is_transient(&self) -> bool
+impl core::convert::From<std::io::error::Error> for mssql_codec::error::CodecError
+pub fn mssql_codec::error::CodecError::from(std::io::error::Error) -> Self
+impl core::convert::From<tds_protocol::error::ProtocolError> for mssql_codec::error::CodecError
+pub fn mssql_codec::error::CodecError::from(tds_protocol::error::ProtocolError) -> Self
+impl core::error::Error for mssql_codec::error::CodecError
+pub fn mssql_codec::error::CodecError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for mssql_codec::error::CodecError
+pub fn mssql_codec::error::CodecError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for mssql_codec::error::CodecError
+pub fn mssql_codec::error::CodecError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_codec::error::CodecError
+impl core::marker::Send for mssql_codec::error::CodecError
+impl core::marker::Sync for mssql_codec::error::CodecError
+impl core::marker::Unpin for mssql_codec::error::CodecError
+impl !core::panic::unwind_safe::RefUnwindSafe for mssql_codec::error::CodecError
+impl !core::panic::unwind_safe::UnwindSafe for mssql_codec::error::CodecError
+impl<T, U> core::convert::Into<U> for mssql_codec::error::CodecError where U: core::convert::From<T>
+pub fn mssql_codec::error::CodecError::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::error::CodecError where U: core::convert::Into<T>
+pub type mssql_codec::error::CodecError::Error = core::convert::Infallible
+pub fn mssql_codec::error::CodecError::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::error::CodecError where U: core::convert::TryFrom<T>
+pub type mssql_codec::error::CodecError::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::error::CodecError::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::string::ToString for mssql_codec::error::CodecError where T: core::fmt::Display + ?core::marker::Sized
+pub fn mssql_codec::error::CodecError::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for mssql_codec::error::CodecError where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::error::CodecError::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::error::CodecError where T: ?core::marker::Sized
+pub fn mssql_codec::error::CodecError::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::error::CodecError where T: ?core::marker::Sized
+pub fn mssql_codec::error::CodecError::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_codec::error::CodecError
+pub fn mssql_codec::error::CodecError::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_codec::error::CodecError
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::error::CodecError
+pub mod mssql_codec::framed
+pub struct mssql_codec::framed::PacketReader<T>
+impl<T> mssql_codec::framed::PacketReader<T> where T: tokio::io::async_read::AsyncRead
+pub fn mssql_codec::framed::PacketReader<T>::codec(&self) -> &mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::framed::PacketReader<T>::codec_mut(&mut self) -> &mut mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::framed::PacketReader<T>::get_mut(&mut self) -> &mut T
+pub fn mssql_codec::framed::PacketReader<T>::get_ref(&self) -> &T
+pub fn mssql_codec::framed::PacketReader<T>::new(T) -> Self
+pub fn mssql_codec::framed::PacketReader<T>::read_buffer(&self) -> &bytes::bytes_mut::BytesMut
+pub fn mssql_codec::framed::PacketReader<T>::read_buffer_mut(&mut self) -> &mut bytes::bytes_mut::BytesMut
+pub fn mssql_codec::framed::PacketReader<T>::with_codec(T, mssql_codec::packet_codec::TdsCodec) -> Self
+impl<'__pin, T> core::marker::Unpin for mssql_codec::framed::PacketReader<T> where pin_project_lite::__private::PinnedFieldsOf<__Origin<'__pin, T>>: core::marker::Unpin
+impl<T> core::fmt::Debug for mssql_codec::framed::PacketReader<T> where T: core::fmt::Debug
+pub fn mssql_codec::framed::PacketReader<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T> futures_core::stream::Stream for mssql_codec::framed::PacketReader<T> where T: tokio::io::async_read::AsyncRead + core::marker::Unpin
+pub type mssql_codec::framed::PacketReader<T>::Item = core::result::Result<mssql_codec::packet_codec::Packet, mssql_codec::error::CodecError>
+pub fn mssql_codec::framed::PacketReader<T>::poll_next(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<Self::Item>>
+impl<T> core::marker::Freeze for mssql_codec::framed::PacketReader<T> where T: core::marker::Freeze
+impl<T> core::marker::Send for mssql_codec::framed::PacketReader<T> where T: core::marker::Send
+impl<T> core::marker::Sync for mssql_codec::framed::PacketReader<T> where T: core::marker::Sync
+impl<T> core::panic::unwind_safe::RefUnwindSafe for mssql_codec::framed::PacketReader<T> where T: core::panic::unwind_safe::RefUnwindSafe
+impl<T> core::panic::unwind_safe::UnwindSafe for mssql_codec::framed::PacketReader<T> where T: core::panic::unwind_safe::UnwindSafe
+impl<S, T, E> futures_core::stream::TryStream for mssql_codec::framed::PacketReader<T> where S: futures_core::stream::Stream<Item = core::result::Result<T, E>> + ?core::marker::Sized
+pub type mssql_codec::framed::PacketReader<T>::Error = E
+pub type mssql_codec::framed::PacketReader<T>::Ok = T
+pub fn mssql_codec::framed::PacketReader<T>::try_poll_next(core::pin::Pin<&mut S>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<core::result::Result<<S as futures_core::stream::TryStream>::Ok, <S as futures_core::stream::TryStream>::Error>>>
+impl<S> futures_util::stream::try_stream::TryStreamExt for mssql_codec::framed::PacketReader<T> where S: futures_core::stream::TryStream + ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for mssql_codec::framed::PacketReader<T> where U: core::convert::From<T>
+pub fn mssql_codec::framed::PacketReader<T>::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::framed::PacketReader<T> where U: core::convert::Into<T>
+pub type mssql_codec::framed::PacketReader<T>::Error = core::convert::Infallible
+pub fn mssql_codec::framed::PacketReader<T>::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::framed::PacketReader<T> where U: core::convert::TryFrom<T>
+pub type mssql_codec::framed::PacketReader<T>::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::framed::PacketReader<T>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_codec::framed::PacketReader<T> where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::framed::PacketReader<T>::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::framed::PacketReader<T> where T: ?core::marker::Sized
+pub fn mssql_codec::framed::PacketReader<T>::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::framed::PacketReader<T> where T: ?core::marker::Sized
+pub fn mssql_codec::framed::PacketReader<T>::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_codec::framed::PacketReader<T>
+pub fn mssql_codec::framed::PacketReader<T>::from(T) -> T
+impl<T> futures_util::stream::stream::StreamExt for mssql_codec::framed::PacketReader<T> where T: futures_core::stream::Stream + ?core::marker::Sized
+impl<T> tracing::instrument::Instrument for mssql_codec::framed::PacketReader<T>
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::framed::PacketReader<T>
+pub struct mssql_codec::framed::PacketStream<T>
+impl<T> mssql_codec::framed::PacketStream<T> where T: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite
+pub fn mssql_codec::framed::PacketStream<T>::codec(&self) -> &mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::framed::PacketStream<T>::codec_mut(&mut self) -> &mut mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::framed::PacketStream<T>::get_mut(&mut self) -> &mut T
+pub fn mssql_codec::framed::PacketStream<T>::get_ref(&self) -> &T
+pub fn mssql_codec::framed::PacketStream<T>::into_inner(self) -> T
+pub fn mssql_codec::framed::PacketStream<T>::new(T) -> Self
+pub fn mssql_codec::framed::PacketStream<T>::read_buffer(&self) -> &bytes::bytes_mut::BytesMut
+pub fn mssql_codec::framed::PacketStream<T>::read_buffer_mut(&mut self) -> &mut bytes::bytes_mut::BytesMut
+pub fn mssql_codec::framed::PacketStream<T>::with_codec(T, mssql_codec::packet_codec::TdsCodec) -> Self
+impl<'__pin, T> core::marker::Unpin for mssql_codec::framed::PacketStream<T> where pin_project_lite::__private::PinnedFieldsOf<__Origin<'__pin, T>>: core::marker::Unpin
+impl<T> core::fmt::Debug for mssql_codec::framed::PacketStream<T> where T: core::fmt::Debug
+pub fn mssql_codec::framed::PacketStream<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T> futures_core::stream::Stream for mssql_codec::framed::PacketStream<T> where T: tokio::io::async_read::AsyncRead + core::marker::Unpin
+pub type mssql_codec::framed::PacketStream<T>::Item = core::result::Result<mssql_codec::packet_codec::Packet, mssql_codec::error::CodecError>
+pub fn mssql_codec::framed::PacketStream<T>::poll_next(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<Self::Item>>
+impl<T> futures_sink::Sink<mssql_codec::packet_codec::Packet> for mssql_codec::framed::PacketStream<T> where T: tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub type mssql_codec::framed::PacketStream<T>::Error = mssql_codec::error::CodecError
+pub fn mssql_codec::framed::PacketStream<T>::poll_close(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketStream<T>::poll_flush(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketStream<T>::poll_ready(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketStream<T>::start_send(core::pin::Pin<&mut Self>, mssql_codec::packet_codec::Packet) -> core::result::Result<(), Self::Error>
+impl<T> core::marker::Freeze for mssql_codec::framed::PacketStream<T> where T: core::marker::Freeze
+impl<T> core::marker::Send for mssql_codec::framed::PacketStream<T> where T: core::marker::Send
+impl<T> core::marker::Sync for mssql_codec::framed::PacketStream<T> where T: core::marker::Sync
+impl<T> core::panic::unwind_safe::RefUnwindSafe for mssql_codec::framed::PacketStream<T> where T: core::panic::unwind_safe::RefUnwindSafe
+impl<T> core::panic::unwind_safe::UnwindSafe for mssql_codec::framed::PacketStream<T> where T: core::panic::unwind_safe::UnwindSafe
+impl<S, T, E> futures_core::stream::TryStream for mssql_codec::framed::PacketStream<T> where S: futures_core::stream::Stream<Item = core::result::Result<T, E>> + ?core::marker::Sized
+pub type mssql_codec::framed::PacketStream<T>::Error = E
+pub type mssql_codec::framed::PacketStream<T>::Ok = T
+pub fn mssql_codec::framed::PacketStream<T>::try_poll_next(core::pin::Pin<&mut S>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<core::result::Result<<S as futures_core::stream::TryStream>::Ok, <S as futures_core::stream::TryStream>::Error>>>
+impl<S> futures_util::stream::try_stream::TryStreamExt for mssql_codec::framed::PacketStream<T> where S: futures_core::stream::TryStream + ?core::marker::Sized
+impl<T, Item> futures_util::sink::SinkExt<Item> for mssql_codec::framed::PacketStream<T> where T: futures_sink::Sink<Item> + ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for mssql_codec::framed::PacketStream<T> where U: core::convert::From<T>
+pub fn mssql_codec::framed::PacketStream<T>::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::framed::PacketStream<T> where U: core::convert::Into<T>
+pub type mssql_codec::framed::PacketStream<T>::Error = core::convert::Infallible
+pub fn mssql_codec::framed::PacketStream<T>::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::framed::PacketStream<T> where U: core::convert::TryFrom<T>
+pub type mssql_codec::framed::PacketStream<T>::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::framed::PacketStream<T>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_codec::framed::PacketStream<T> where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::framed::PacketStream<T>::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::framed::PacketStream<T> where T: ?core::marker::Sized
+pub fn mssql_codec::framed::PacketStream<T>::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::framed::PacketStream<T> where T: ?core::marker::Sized
+pub fn mssql_codec::framed::PacketStream<T>::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_codec::framed::PacketStream<T>
+pub fn mssql_codec::framed::PacketStream<T>::from(T) -> T
+impl<T> futures_util::stream::stream::StreamExt for mssql_codec::framed::PacketStream<T> where T: futures_core::stream::Stream + ?core::marker::Sized
+impl<T> tracing::instrument::Instrument for mssql_codec::framed::PacketStream<T>
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::framed::PacketStream<T>
+pub struct mssql_codec::framed::PacketWriter<T>
+impl<T> mssql_codec::framed::PacketWriter<T> where T: tokio::io::async_write::AsyncWrite
+pub fn mssql_codec::framed::PacketWriter<T>::codec(&self) -> &mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::framed::PacketWriter<T>::codec_mut(&mut self) -> &mut mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::framed::PacketWriter<T>::get_mut(&mut self) -> &mut T
+pub fn mssql_codec::framed::PacketWriter<T>::get_ref(&self) -> &T
+pub fn mssql_codec::framed::PacketWriter<T>::new(T) -> Self
+pub fn mssql_codec::framed::PacketWriter<T>::with_codec(T, mssql_codec::packet_codec::TdsCodec) -> Self
+impl<'__pin, T> core::marker::Unpin for mssql_codec::framed::PacketWriter<T> where pin_project_lite::__private::PinnedFieldsOf<__Origin<'__pin, T>>: core::marker::Unpin
+impl<T> core::fmt::Debug for mssql_codec::framed::PacketWriter<T> where T: core::fmt::Debug
+pub fn mssql_codec::framed::PacketWriter<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T> futures_sink::Sink<mssql_codec::packet_codec::Packet> for mssql_codec::framed::PacketWriter<T> where T: tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub type mssql_codec::framed::PacketWriter<T>::Error = mssql_codec::error::CodecError
+pub fn mssql_codec::framed::PacketWriter<T>::poll_close(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketWriter<T>::poll_flush(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketWriter<T>::poll_ready(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketWriter<T>::start_send(core::pin::Pin<&mut Self>, mssql_codec::packet_codec::Packet) -> core::result::Result<(), Self::Error>
+impl<T> core::marker::Freeze for mssql_codec::framed::PacketWriter<T> where T: core::marker::Freeze
+impl<T> core::marker::Send for mssql_codec::framed::PacketWriter<T> where T: core::marker::Send
+impl<T> core::marker::Sync for mssql_codec::framed::PacketWriter<T> where T: core::marker::Sync
+impl<T> core::panic::unwind_safe::RefUnwindSafe for mssql_codec::framed::PacketWriter<T> where T: core::panic::unwind_safe::RefUnwindSafe
+impl<T> core::panic::unwind_safe::UnwindSafe for mssql_codec::framed::PacketWriter<T> where T: core::panic::unwind_safe::UnwindSafe
+impl<T, Item> futures_util::sink::SinkExt<Item> for mssql_codec::framed::PacketWriter<T> where T: futures_sink::Sink<Item> + ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for mssql_codec::framed::PacketWriter<T> where U: core::convert::From<T>
+pub fn mssql_codec::framed::PacketWriter<T>::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::framed::PacketWriter<T> where U: core::convert::Into<T>
+pub type mssql_codec::framed::PacketWriter<T>::Error = core::convert::Infallible
+pub fn mssql_codec::framed::PacketWriter<T>::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::framed::PacketWriter<T> where U: core::convert::TryFrom<T>
+pub type mssql_codec::framed::PacketWriter<T>::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::framed::PacketWriter<T>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_codec::framed::PacketWriter<T> where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::framed::PacketWriter<T>::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::framed::PacketWriter<T> where T: ?core::marker::Sized
+pub fn mssql_codec::framed::PacketWriter<T>::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::framed::PacketWriter<T> where T: ?core::marker::Sized
+pub fn mssql_codec::framed::PacketWriter<T>::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_codec::framed::PacketWriter<T>
+pub fn mssql_codec::framed::PacketWriter<T>::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_codec::framed::PacketWriter<T>
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::framed::PacketWriter<T>
+pub mod mssql_codec::message
+pub struct mssql_codec::message::Message
+pub mssql_codec::message::Message::packet_type: tds_protocol::packet::PacketType
+pub mssql_codec::message::Message::payload: bytes::bytes::Bytes
+impl mssql_codec::message::Message
+pub fn mssql_codec::message::Message::from_packet(mssql_codec::packet_codec::Packet) -> Self
+pub fn mssql_codec::message::Message::is_empty(&self) -> bool
+pub fn mssql_codec::message::Message::len(&self) -> usize
+impl core::clone::Clone for mssql_codec::message::Message
+pub fn mssql_codec::message::Message::clone(&self) -> mssql_codec::message::Message
+impl core::fmt::Debug for mssql_codec::message::Message
+pub fn mssql_codec::message::Message::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl !core::marker::Freeze for mssql_codec::message::Message
+impl core::marker::Send for mssql_codec::message::Message
+impl core::marker::Sync for mssql_codec::message::Message
+impl core::marker::Unpin for mssql_codec::message::Message
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_codec::message::Message
+impl core::panic::unwind_safe::UnwindSafe for mssql_codec::message::Message
+impl<T, U> core::convert::Into<U> for mssql_codec::message::Message where U: core::convert::From<T>
+pub fn mssql_codec::message::Message::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::message::Message where U: core::convert::Into<T>
+pub type mssql_codec::message::Message::Error = core::convert::Infallible
+pub fn mssql_codec::message::Message::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::message::Message where U: core::convert::TryFrom<T>
+pub type mssql_codec::message::Message::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::message::Message::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_codec::message::Message where T: core::clone::Clone
+pub type mssql_codec::message::Message::Owned = T
+pub fn mssql_codec::message::Message::clone_into(&self, &mut T)
+pub fn mssql_codec::message::Message::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_codec::message::Message where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::message::Message::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::message::Message where T: ?core::marker::Sized
+pub fn mssql_codec::message::Message::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::message::Message where T: ?core::marker::Sized
+pub fn mssql_codec::message::Message::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_codec::message::Message where T: core::clone::Clone
+pub unsafe fn mssql_codec::message::Message::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_codec::message::Message
+pub fn mssql_codec::message::Message::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_codec::message::Message
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::message::Message
+pub struct mssql_codec::message::MessageAssembler
+impl mssql_codec::message::MessageAssembler
+pub fn mssql_codec::message::MessageAssembler::buffer_len(&self) -> usize
+pub fn mssql_codec::message::MessageAssembler::clear(&mut self)
+pub fn mssql_codec::message::MessageAssembler::has_partial(&self) -> bool
+pub fn mssql_codec::message::MessageAssembler::new() -> Self
+pub fn mssql_codec::message::MessageAssembler::packet_count(&self) -> usize
+pub fn mssql_codec::message::MessageAssembler::push(&mut self, mssql_codec::packet_codec::Packet) -> core::option::Option<mssql_codec::message::Message>
+pub fn mssql_codec::message::MessageAssembler::with_capacity(usize) -> Self
+impl core::default::Default for mssql_codec::message::MessageAssembler
+pub fn mssql_codec::message::MessageAssembler::default() -> Self
+impl core::fmt::Debug for mssql_codec::message::MessageAssembler
+pub fn mssql_codec::message::MessageAssembler::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_codec::message::MessageAssembler
+impl core::marker::Send for mssql_codec::message::MessageAssembler
+impl core::marker::Sync for mssql_codec::message::MessageAssembler
+impl core::marker::Unpin for mssql_codec::message::MessageAssembler
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_codec::message::MessageAssembler
+impl core::panic::unwind_safe::UnwindSafe for mssql_codec::message::MessageAssembler
+impl<T, U> core::convert::Into<U> for mssql_codec::message::MessageAssembler where U: core::convert::From<T>
+pub fn mssql_codec::message::MessageAssembler::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::message::MessageAssembler where U: core::convert::Into<T>
+pub type mssql_codec::message::MessageAssembler::Error = core::convert::Infallible
+pub fn mssql_codec::message::MessageAssembler::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::message::MessageAssembler where U: core::convert::TryFrom<T>
+pub type mssql_codec::message::MessageAssembler::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::message::MessageAssembler::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_codec::message::MessageAssembler where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::message::MessageAssembler::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::message::MessageAssembler where T: ?core::marker::Sized
+pub fn mssql_codec::message::MessageAssembler::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::message::MessageAssembler where T: ?core::marker::Sized
+pub fn mssql_codec::message::MessageAssembler::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_codec::message::MessageAssembler
+pub fn mssql_codec::message::MessageAssembler::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_codec::message::MessageAssembler
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::message::MessageAssembler
+pub mod mssql_codec::packet_codec
+pub struct mssql_codec::packet_codec::Packet
+pub mssql_codec::packet_codec::Packet::header: tds_protocol::packet::PacketHeader
+pub mssql_codec::packet_codec::Packet::payload: bytes::bytes_mut::BytesMut
+impl mssql_codec::packet_codec::Packet
+pub fn mssql_codec::packet_codec::Packet::is_end_of_message(&self) -> bool
+pub fn mssql_codec::packet_codec::Packet::new(tds_protocol::packet::PacketHeader, bytes::bytes_mut::BytesMut) -> Self
+pub fn mssql_codec::packet_codec::Packet::total_size(&self) -> usize
+impl core::clone::Clone for mssql_codec::packet_codec::Packet
+pub fn mssql_codec::packet_codec::Packet::clone(&self) -> mssql_codec::packet_codec::Packet
+impl core::fmt::Debug for mssql_codec::packet_codec::Packet
+pub fn mssql_codec::packet_codec::Packet::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl tokio_util::codec::encoder::Encoder<mssql_codec::packet_codec::Packet> for mssql_codec::packet_codec::TdsCodec
+pub type mssql_codec::packet_codec::TdsCodec::Error = mssql_codec::error::CodecError
+pub fn mssql_codec::packet_codec::TdsCodec::encode(&mut self, mssql_codec::packet_codec::Packet, &mut bytes::bytes_mut::BytesMut) -> core::result::Result<(), Self::Error>
+impl<T> futures_sink::Sink<mssql_codec::packet_codec::Packet> for mssql_codec::framed::PacketStream<T> where T: tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub type mssql_codec::framed::PacketStream<T>::Error = mssql_codec::error::CodecError
+pub fn mssql_codec::framed::PacketStream<T>::poll_close(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketStream<T>::poll_flush(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketStream<T>::poll_ready(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketStream<T>::start_send(core::pin::Pin<&mut Self>, mssql_codec::packet_codec::Packet) -> core::result::Result<(), Self::Error>
+impl<T> futures_sink::Sink<mssql_codec::packet_codec::Packet> for mssql_codec::framed::PacketWriter<T> where T: tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub type mssql_codec::framed::PacketWriter<T>::Error = mssql_codec::error::CodecError
+pub fn mssql_codec::framed::PacketWriter<T>::poll_close(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketWriter<T>::poll_flush(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketWriter<T>::poll_ready(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketWriter<T>::start_send(core::pin::Pin<&mut Self>, mssql_codec::packet_codec::Packet) -> core::result::Result<(), Self::Error>
+impl core::marker::Freeze for mssql_codec::packet_codec::Packet
+impl core::marker::Send for mssql_codec::packet_codec::Packet
+impl core::marker::Sync for mssql_codec::packet_codec::Packet
+impl core::marker::Unpin for mssql_codec::packet_codec::Packet
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_codec::packet_codec::Packet
+impl core::panic::unwind_safe::UnwindSafe for mssql_codec::packet_codec::Packet
+impl<T, U> core::convert::Into<U> for mssql_codec::packet_codec::Packet where U: core::convert::From<T>
+pub fn mssql_codec::packet_codec::Packet::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::packet_codec::Packet where U: core::convert::Into<T>
+pub type mssql_codec::packet_codec::Packet::Error = core::convert::Infallible
+pub fn mssql_codec::packet_codec::Packet::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::packet_codec::Packet where U: core::convert::TryFrom<T>
+pub type mssql_codec::packet_codec::Packet::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::packet_codec::Packet::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_codec::packet_codec::Packet where T: core::clone::Clone
+pub type mssql_codec::packet_codec::Packet::Owned = T
+pub fn mssql_codec::packet_codec::Packet::clone_into(&self, &mut T)
+pub fn mssql_codec::packet_codec::Packet::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_codec::packet_codec::Packet where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::packet_codec::Packet::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::packet_codec::Packet where T: ?core::marker::Sized
+pub fn mssql_codec::packet_codec::Packet::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::packet_codec::Packet where T: ?core::marker::Sized
+pub fn mssql_codec::packet_codec::Packet::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_codec::packet_codec::Packet where T: core::clone::Clone
+pub unsafe fn mssql_codec::packet_codec::Packet::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_codec::packet_codec::Packet
+pub fn mssql_codec::packet_codec::Packet::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_codec::packet_codec::Packet
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::packet_codec::Packet
+pub struct mssql_codec::packet_codec::TdsCodec
+impl mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::packet_codec::TdsCodec::new() -> Self
+pub fn mssql_codec::packet_codec::TdsCodec::reset_packet_id(&mut self)
+pub fn mssql_codec::packet_codec::TdsCodec::with_max_packet_size(self, usize) -> Self
+impl core::default::Default for mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::packet_codec::TdsCodec::default() -> Self
+impl tokio_util::codec::decoder::Decoder for mssql_codec::packet_codec::TdsCodec
+pub type mssql_codec::packet_codec::TdsCodec::Error = mssql_codec::error::CodecError
+pub type mssql_codec::packet_codec::TdsCodec::Item = mssql_codec::packet_codec::Packet
+pub fn mssql_codec::packet_codec::TdsCodec::decode(&mut self, &mut bytes::bytes_mut::BytesMut) -> core::result::Result<core::option::Option<Self::Item>, Self::Error>
+impl tokio_util::codec::encoder::Encoder<mssql_codec::packet_codec::Packet> for mssql_codec::packet_codec::TdsCodec
+pub type mssql_codec::packet_codec::TdsCodec::Error = mssql_codec::error::CodecError
+pub fn mssql_codec::packet_codec::TdsCodec::encode(&mut self, mssql_codec::packet_codec::Packet, &mut bytes::bytes_mut::BytesMut) -> core::result::Result<(), Self::Error>
+impl core::marker::Freeze for mssql_codec::packet_codec::TdsCodec
+impl core::marker::Send for mssql_codec::packet_codec::TdsCodec
+impl core::marker::Sync for mssql_codec::packet_codec::TdsCodec
+impl core::marker::Unpin for mssql_codec::packet_codec::TdsCodec
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_codec::packet_codec::TdsCodec
+impl core::panic::unwind_safe::UnwindSafe for mssql_codec::packet_codec::TdsCodec
+impl<T, U> core::convert::Into<U> for mssql_codec::packet_codec::TdsCodec where U: core::convert::From<T>
+pub fn mssql_codec::packet_codec::TdsCodec::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::packet_codec::TdsCodec where U: core::convert::Into<T>
+pub type mssql_codec::packet_codec::TdsCodec::Error = core::convert::Infallible
+pub fn mssql_codec::packet_codec::TdsCodec::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::packet_codec::TdsCodec where U: core::convert::TryFrom<T>
+pub type mssql_codec::packet_codec::TdsCodec::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::packet_codec::TdsCodec::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_codec::packet_codec::TdsCodec where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::packet_codec::TdsCodec::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::packet_codec::TdsCodec where T: ?core::marker::Sized
+pub fn mssql_codec::packet_codec::TdsCodec::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::packet_codec::TdsCodec where T: ?core::marker::Sized
+pub fn mssql_codec::packet_codec::TdsCodec::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::packet_codec::TdsCodec::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_codec::packet_codec::TdsCodec
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::packet_codec::TdsCodec
+#[non_exhaustive] pub enum mssql_codec::CodecError
+pub mssql_codec::CodecError::Cancelled
+pub mssql_codec::CodecError::ConnectionClosed
+pub mssql_codec::CodecError::Decoding(alloc::string::String)
+pub mssql_codec::CodecError::Encoding(alloc::string::String)
+pub mssql_codec::CodecError::IncompletePacket
+pub mssql_codec::CodecError::IncompletePacket::needed: usize
+pub mssql_codec::CodecError::InvalidHeader
+pub mssql_codec::CodecError::Io(std::io::error::Error)
+pub mssql_codec::CodecError::MessageTooLarge
+pub mssql_codec::CodecError::MessageTooLarge::limit: usize
+pub mssql_codec::CodecError::MessageTooLarge::size: usize
+pub mssql_codec::CodecError::PacketTooLarge
+pub mssql_codec::CodecError::PacketTooLarge::max: usize
+pub mssql_codec::CodecError::PacketTooLarge::size: usize
+pub mssql_codec::CodecError::Protocol(tds_protocol::error::ProtocolError)
+impl mssql_codec::error::CodecError
+pub fn mssql_codec::error::CodecError::is_terminal(&self) -> bool
+pub fn mssql_codec::error::CodecError::is_transient(&self) -> bool
+impl core::convert::From<std::io::error::Error> for mssql_codec::error::CodecError
+pub fn mssql_codec::error::CodecError::from(std::io::error::Error) -> Self
+impl core::convert::From<tds_protocol::error::ProtocolError> for mssql_codec::error::CodecError
+pub fn mssql_codec::error::CodecError::from(tds_protocol::error::ProtocolError) -> Self
+impl core::error::Error for mssql_codec::error::CodecError
+pub fn mssql_codec::error::CodecError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for mssql_codec::error::CodecError
+pub fn mssql_codec::error::CodecError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for mssql_codec::error::CodecError
+pub fn mssql_codec::error::CodecError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_codec::error::CodecError
+impl core::marker::Send for mssql_codec::error::CodecError
+impl core::marker::Sync for mssql_codec::error::CodecError
+impl core::marker::Unpin for mssql_codec::error::CodecError
+impl !core::panic::unwind_safe::RefUnwindSafe for mssql_codec::error::CodecError
+impl !core::panic::unwind_safe::UnwindSafe for mssql_codec::error::CodecError
+impl<T, U> core::convert::Into<U> for mssql_codec::error::CodecError where U: core::convert::From<T>
+pub fn mssql_codec::error::CodecError::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::error::CodecError where U: core::convert::Into<T>
+pub type mssql_codec::error::CodecError::Error = core::convert::Infallible
+pub fn mssql_codec::error::CodecError::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::error::CodecError where U: core::convert::TryFrom<T>
+pub type mssql_codec::error::CodecError::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::error::CodecError::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::string::ToString for mssql_codec::error::CodecError where T: core::fmt::Display + ?core::marker::Sized
+pub fn mssql_codec::error::CodecError::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for mssql_codec::error::CodecError where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::error::CodecError::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::error::CodecError where T: ?core::marker::Sized
+pub fn mssql_codec::error::CodecError::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::error::CodecError where T: ?core::marker::Sized
+pub fn mssql_codec::error::CodecError::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_codec::error::CodecError
+pub fn mssql_codec::error::CodecError::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_codec::error::CodecError
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::error::CodecError
+pub struct mssql_codec::CancelHandle<T> where T: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite
+impl<T> mssql_codec::connection::CancelHandle<T> where T: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub async fn mssql_codec::connection::CancelHandle<T>::cancel(&self) -> core::result::Result<(), mssql_codec::error::CodecError>
+pub fn mssql_codec::connection::CancelHandle<T>::is_cancelling(&self) -> bool
+pub async fn mssql_codec::connection::CancelHandle<T>::wait_cancelled(&self)
+impl<T> core::clone::Clone for mssql_codec::connection::CancelHandle<T> where T: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite
+pub fn mssql_codec::connection::CancelHandle<T>::clone(&self) -> Self
+impl<T> core::fmt::Debug for mssql_codec::connection::CancelHandle<T> where T: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub fn mssql_codec::connection::CancelHandle<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T> core::marker::Freeze for mssql_codec::connection::CancelHandle<T>
+impl<T> core::marker::Send for mssql_codec::connection::CancelHandle<T> where T: core::marker::Send
+impl<T> core::marker::Sync for mssql_codec::connection::CancelHandle<T> where T: core::marker::Send
+impl<T> core::marker::Unpin for mssql_codec::connection::CancelHandle<T>
+impl<T> !core::panic::unwind_safe::RefUnwindSafe for mssql_codec::connection::CancelHandle<T>
+impl<T> !core::panic::unwind_safe::UnwindSafe for mssql_codec::connection::CancelHandle<T>
+impl<T, U> core::convert::Into<U> for mssql_codec::connection::CancelHandle<T> where U: core::convert::From<T>
+pub fn mssql_codec::connection::CancelHandle<T>::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::connection::CancelHandle<T> where U: core::convert::Into<T>
+pub type mssql_codec::connection::CancelHandle<T>::Error = core::convert::Infallible
+pub fn mssql_codec::connection::CancelHandle<T>::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::connection::CancelHandle<T> where U: core::convert::TryFrom<T>
+pub type mssql_codec::connection::CancelHandle<T>::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::connection::CancelHandle<T>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_codec::connection::CancelHandle<T> where T: core::clone::Clone
+pub type mssql_codec::connection::CancelHandle<T>::Owned = T
+pub fn mssql_codec::connection::CancelHandle<T>::clone_into(&self, &mut T)
+pub fn mssql_codec::connection::CancelHandle<T>::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_codec::connection::CancelHandle<T> where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::connection::CancelHandle<T>::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::connection::CancelHandle<T> where T: ?core::marker::Sized
+pub fn mssql_codec::connection::CancelHandle<T>::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::connection::CancelHandle<T> where T: ?core::marker::Sized
+pub fn mssql_codec::connection::CancelHandle<T>::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_codec::connection::CancelHandle<T> where T: core::clone::Clone
+pub unsafe fn mssql_codec::connection::CancelHandle<T>::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_codec::connection::CancelHandle<T>
+pub fn mssql_codec::connection::CancelHandle<T>::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_codec::connection::CancelHandle<T>
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::connection::CancelHandle<T>
+pub struct mssql_codec::Connection<T> where T: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite
+impl<T> mssql_codec::connection::Connection<T> where T: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite
+pub fn mssql_codec::connection::Connection<T>::cancel_handle(&self) -> mssql_codec::connection::CancelHandle<T>
+pub async fn mssql_codec::connection::Connection<T>::flush(&mut self) -> core::result::Result<(), mssql_codec::error::CodecError>
+pub fn mssql_codec::connection::Connection<T>::is_cancelling(&self) -> bool
+pub fn mssql_codec::connection::Connection<T>::new(T) -> Self
+pub fn mssql_codec::connection::Connection<T>::read_codec(&self) -> &mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::connection::Connection<T>::read_codec_mut(&mut self) -> &mut mssql_codec::packet_codec::TdsCodec
+pub async fn mssql_codec::connection::Connection<T>::read_message(&mut self) -> core::result::Result<core::option::Option<mssql_codec::message::Message>, mssql_codec::error::CodecError>
+pub async fn mssql_codec::connection::Connection<T>::read_packet(&mut self) -> core::result::Result<core::option::Option<mssql_codec::packet_codec::Packet>, mssql_codec::error::CodecError>
+pub async fn mssql_codec::connection::Connection<T>::send_message(&mut self, tds_protocol::packet::PacketType, bytes::bytes::Bytes, usize) -> core::result::Result<(), mssql_codec::error::CodecError>
+pub async fn mssql_codec::connection::Connection<T>::send_message_with_reset(&mut self, tds_protocol::packet::PacketType, bytes::bytes::Bytes, usize, bool) -> core::result::Result<(), mssql_codec::error::CodecError>
+pub async fn mssql_codec::connection::Connection<T>::send_packet(&mut self, mssql_codec::packet_codec::Packet) -> core::result::Result<(), mssql_codec::error::CodecError>
+pub fn mssql_codec::connection::Connection<T>::set_max_message_size(&mut self, usize)
+pub fn mssql_codec::connection::Connection<T>::with_codecs(T, mssql_codec::packet_codec::TdsCodec, mssql_codec::packet_codec::TdsCodec) -> Self
+impl<T> core::fmt::Debug for mssql_codec::connection::Connection<T> where T: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite + core::fmt::Debug
+pub fn mssql_codec::connection::Connection<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T> core::marker::Freeze for mssql_codec::connection::Connection<T>
+impl<T> core::marker::Send for mssql_codec::connection::Connection<T> where T: core::marker::Send
+impl<T> core::marker::Sync for mssql_codec::connection::Connection<T> where T: core::marker::Sync + core::marker::Send
+impl<T> core::marker::Unpin for mssql_codec::connection::Connection<T>
+impl<T> !core::panic::unwind_safe::RefUnwindSafe for mssql_codec::connection::Connection<T>
+impl<T> !core::panic::unwind_safe::UnwindSafe for mssql_codec::connection::Connection<T>
+impl<T, U> core::convert::Into<U> for mssql_codec::connection::Connection<T> where U: core::convert::From<T>
+pub fn mssql_codec::connection::Connection<T>::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::connection::Connection<T> where U: core::convert::Into<T>
+pub type mssql_codec::connection::Connection<T>::Error = core::convert::Infallible
+pub fn mssql_codec::connection::Connection<T>::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::connection::Connection<T> where U: core::convert::TryFrom<T>
+pub type mssql_codec::connection::Connection<T>::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::connection::Connection<T>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_codec::connection::Connection<T> where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::connection::Connection<T>::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::connection::Connection<T> where T: ?core::marker::Sized
+pub fn mssql_codec::connection::Connection<T>::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::connection::Connection<T> where T: ?core::marker::Sized
+pub fn mssql_codec::connection::Connection<T>::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_codec::connection::Connection<T>
+pub fn mssql_codec::connection::Connection<T>::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_codec::connection::Connection<T>
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::connection::Connection<T>
+pub struct mssql_codec::Message
+pub mssql_codec::Message::packet_type: tds_protocol::packet::PacketType
+pub mssql_codec::Message::payload: bytes::bytes::Bytes
+impl mssql_codec::message::Message
+pub fn mssql_codec::message::Message::from_packet(mssql_codec::packet_codec::Packet) -> Self
+pub fn mssql_codec::message::Message::is_empty(&self) -> bool
+pub fn mssql_codec::message::Message::len(&self) -> usize
+impl core::clone::Clone for mssql_codec::message::Message
+pub fn mssql_codec::message::Message::clone(&self) -> mssql_codec::message::Message
+impl core::fmt::Debug for mssql_codec::message::Message
+pub fn mssql_codec::message::Message::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl !core::marker::Freeze for mssql_codec::message::Message
+impl core::marker::Send for mssql_codec::message::Message
+impl core::marker::Sync for mssql_codec::message::Message
+impl core::marker::Unpin for mssql_codec::message::Message
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_codec::message::Message
+impl core::panic::unwind_safe::UnwindSafe for mssql_codec::message::Message
+impl<T, U> core::convert::Into<U> for mssql_codec::message::Message where U: core::convert::From<T>
+pub fn mssql_codec::message::Message::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::message::Message where U: core::convert::Into<T>
+pub type mssql_codec::message::Message::Error = core::convert::Infallible
+pub fn mssql_codec::message::Message::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::message::Message where U: core::convert::TryFrom<T>
+pub type mssql_codec::message::Message::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::message::Message::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_codec::message::Message where T: core::clone::Clone
+pub type mssql_codec::message::Message::Owned = T
+pub fn mssql_codec::message::Message::clone_into(&self, &mut T)
+pub fn mssql_codec::message::Message::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_codec::message::Message where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::message::Message::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::message::Message where T: ?core::marker::Sized
+pub fn mssql_codec::message::Message::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::message::Message where T: ?core::marker::Sized
+pub fn mssql_codec::message::Message::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_codec::message::Message where T: core::clone::Clone
+pub unsafe fn mssql_codec::message::Message::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_codec::message::Message
+pub fn mssql_codec::message::Message::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_codec::message::Message
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::message::Message
+pub struct mssql_codec::MessageAssembler
+impl mssql_codec::message::MessageAssembler
+pub fn mssql_codec::message::MessageAssembler::buffer_len(&self) -> usize
+pub fn mssql_codec::message::MessageAssembler::clear(&mut self)
+pub fn mssql_codec::message::MessageAssembler::has_partial(&self) -> bool
+pub fn mssql_codec::message::MessageAssembler::new() -> Self
+pub fn mssql_codec::message::MessageAssembler::packet_count(&self) -> usize
+pub fn mssql_codec::message::MessageAssembler::push(&mut self, mssql_codec::packet_codec::Packet) -> core::option::Option<mssql_codec::message::Message>
+pub fn mssql_codec::message::MessageAssembler::with_capacity(usize) -> Self
+impl core::default::Default for mssql_codec::message::MessageAssembler
+pub fn mssql_codec::message::MessageAssembler::default() -> Self
+impl core::fmt::Debug for mssql_codec::message::MessageAssembler
+pub fn mssql_codec::message::MessageAssembler::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_codec::message::MessageAssembler
+impl core::marker::Send for mssql_codec::message::MessageAssembler
+impl core::marker::Sync for mssql_codec::message::MessageAssembler
+impl core::marker::Unpin for mssql_codec::message::MessageAssembler
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_codec::message::MessageAssembler
+impl core::panic::unwind_safe::UnwindSafe for mssql_codec::message::MessageAssembler
+impl<T, U> core::convert::Into<U> for mssql_codec::message::MessageAssembler where U: core::convert::From<T>
+pub fn mssql_codec::message::MessageAssembler::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::message::MessageAssembler where U: core::convert::Into<T>
+pub type mssql_codec::message::MessageAssembler::Error = core::convert::Infallible
+pub fn mssql_codec::message::MessageAssembler::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::message::MessageAssembler where U: core::convert::TryFrom<T>
+pub type mssql_codec::message::MessageAssembler::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::message::MessageAssembler::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_codec::message::MessageAssembler where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::message::MessageAssembler::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::message::MessageAssembler where T: ?core::marker::Sized
+pub fn mssql_codec::message::MessageAssembler::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::message::MessageAssembler where T: ?core::marker::Sized
+pub fn mssql_codec::message::MessageAssembler::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_codec::message::MessageAssembler
+pub fn mssql_codec::message::MessageAssembler::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_codec::message::MessageAssembler
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::message::MessageAssembler
+pub struct mssql_codec::Packet
+pub mssql_codec::Packet::header: tds_protocol::packet::PacketHeader
+pub mssql_codec::Packet::payload: bytes::bytes_mut::BytesMut
+impl mssql_codec::packet_codec::Packet
+pub fn mssql_codec::packet_codec::Packet::is_end_of_message(&self) -> bool
+pub fn mssql_codec::packet_codec::Packet::new(tds_protocol::packet::PacketHeader, bytes::bytes_mut::BytesMut) -> Self
+pub fn mssql_codec::packet_codec::Packet::total_size(&self) -> usize
+impl core::clone::Clone for mssql_codec::packet_codec::Packet
+pub fn mssql_codec::packet_codec::Packet::clone(&self) -> mssql_codec::packet_codec::Packet
+impl core::fmt::Debug for mssql_codec::packet_codec::Packet
+pub fn mssql_codec::packet_codec::Packet::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl tokio_util::codec::encoder::Encoder<mssql_codec::packet_codec::Packet> for mssql_codec::packet_codec::TdsCodec
+pub type mssql_codec::packet_codec::TdsCodec::Error = mssql_codec::error::CodecError
+pub fn mssql_codec::packet_codec::TdsCodec::encode(&mut self, mssql_codec::packet_codec::Packet, &mut bytes::bytes_mut::BytesMut) -> core::result::Result<(), Self::Error>
+impl<T> futures_sink::Sink<mssql_codec::packet_codec::Packet> for mssql_codec::framed::PacketStream<T> where T: tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub type mssql_codec::framed::PacketStream<T>::Error = mssql_codec::error::CodecError
+pub fn mssql_codec::framed::PacketStream<T>::poll_close(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketStream<T>::poll_flush(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketStream<T>::poll_ready(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketStream<T>::start_send(core::pin::Pin<&mut Self>, mssql_codec::packet_codec::Packet) -> core::result::Result<(), Self::Error>
+impl<T> futures_sink::Sink<mssql_codec::packet_codec::Packet> for mssql_codec::framed::PacketWriter<T> where T: tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub type mssql_codec::framed::PacketWriter<T>::Error = mssql_codec::error::CodecError
+pub fn mssql_codec::framed::PacketWriter<T>::poll_close(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketWriter<T>::poll_flush(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketWriter<T>::poll_ready(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketWriter<T>::start_send(core::pin::Pin<&mut Self>, mssql_codec::packet_codec::Packet) -> core::result::Result<(), Self::Error>
+impl core::marker::Freeze for mssql_codec::packet_codec::Packet
+impl core::marker::Send for mssql_codec::packet_codec::Packet
+impl core::marker::Sync for mssql_codec::packet_codec::Packet
+impl core::marker::Unpin for mssql_codec::packet_codec::Packet
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_codec::packet_codec::Packet
+impl core::panic::unwind_safe::UnwindSafe for mssql_codec::packet_codec::Packet
+impl<T, U> core::convert::Into<U> for mssql_codec::packet_codec::Packet where U: core::convert::From<T>
+pub fn mssql_codec::packet_codec::Packet::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::packet_codec::Packet where U: core::convert::Into<T>
+pub type mssql_codec::packet_codec::Packet::Error = core::convert::Infallible
+pub fn mssql_codec::packet_codec::Packet::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::packet_codec::Packet where U: core::convert::TryFrom<T>
+pub type mssql_codec::packet_codec::Packet::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::packet_codec::Packet::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_codec::packet_codec::Packet where T: core::clone::Clone
+pub type mssql_codec::packet_codec::Packet::Owned = T
+pub fn mssql_codec::packet_codec::Packet::clone_into(&self, &mut T)
+pub fn mssql_codec::packet_codec::Packet::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_codec::packet_codec::Packet where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::packet_codec::Packet::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::packet_codec::Packet where T: ?core::marker::Sized
+pub fn mssql_codec::packet_codec::Packet::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::packet_codec::Packet where T: ?core::marker::Sized
+pub fn mssql_codec::packet_codec::Packet::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_codec::packet_codec::Packet where T: core::clone::Clone
+pub unsafe fn mssql_codec::packet_codec::Packet::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_codec::packet_codec::Packet
+pub fn mssql_codec::packet_codec::Packet::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_codec::packet_codec::Packet
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::packet_codec::Packet
+pub struct mssql_codec::PacketReader<T>
+impl<T> mssql_codec::framed::PacketReader<T> where T: tokio::io::async_read::AsyncRead
+pub fn mssql_codec::framed::PacketReader<T>::codec(&self) -> &mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::framed::PacketReader<T>::codec_mut(&mut self) -> &mut mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::framed::PacketReader<T>::get_mut(&mut self) -> &mut T
+pub fn mssql_codec::framed::PacketReader<T>::get_ref(&self) -> &T
+pub fn mssql_codec::framed::PacketReader<T>::new(T) -> Self
+pub fn mssql_codec::framed::PacketReader<T>::read_buffer(&self) -> &bytes::bytes_mut::BytesMut
+pub fn mssql_codec::framed::PacketReader<T>::read_buffer_mut(&mut self) -> &mut bytes::bytes_mut::BytesMut
+pub fn mssql_codec::framed::PacketReader<T>::with_codec(T, mssql_codec::packet_codec::TdsCodec) -> Self
+impl<'__pin, T> core::marker::Unpin for mssql_codec::framed::PacketReader<T> where pin_project_lite::__private::PinnedFieldsOf<__Origin<'__pin, T>>: core::marker::Unpin
+impl<T> core::fmt::Debug for mssql_codec::framed::PacketReader<T> where T: core::fmt::Debug
+pub fn mssql_codec::framed::PacketReader<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T> futures_core::stream::Stream for mssql_codec::framed::PacketReader<T> where T: tokio::io::async_read::AsyncRead + core::marker::Unpin
+pub type mssql_codec::framed::PacketReader<T>::Item = core::result::Result<mssql_codec::packet_codec::Packet, mssql_codec::error::CodecError>
+pub fn mssql_codec::framed::PacketReader<T>::poll_next(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<Self::Item>>
+impl<T> core::marker::Freeze for mssql_codec::framed::PacketReader<T> where T: core::marker::Freeze
+impl<T> core::marker::Send for mssql_codec::framed::PacketReader<T> where T: core::marker::Send
+impl<T> core::marker::Sync for mssql_codec::framed::PacketReader<T> where T: core::marker::Sync
+impl<T> core::panic::unwind_safe::RefUnwindSafe for mssql_codec::framed::PacketReader<T> where T: core::panic::unwind_safe::RefUnwindSafe
+impl<T> core::panic::unwind_safe::UnwindSafe for mssql_codec::framed::PacketReader<T> where T: core::panic::unwind_safe::UnwindSafe
+impl<S, T, E> futures_core::stream::TryStream for mssql_codec::framed::PacketReader<T> where S: futures_core::stream::Stream<Item = core::result::Result<T, E>> + ?core::marker::Sized
+pub type mssql_codec::framed::PacketReader<T>::Error = E
+pub type mssql_codec::framed::PacketReader<T>::Ok = T
+pub fn mssql_codec::framed::PacketReader<T>::try_poll_next(core::pin::Pin<&mut S>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<core::result::Result<<S as futures_core::stream::TryStream>::Ok, <S as futures_core::stream::TryStream>::Error>>>
+impl<S> futures_util::stream::try_stream::TryStreamExt for mssql_codec::framed::PacketReader<T> where S: futures_core::stream::TryStream + ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for mssql_codec::framed::PacketReader<T> where U: core::convert::From<T>
+pub fn mssql_codec::framed::PacketReader<T>::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::framed::PacketReader<T> where U: core::convert::Into<T>
+pub type mssql_codec::framed::PacketReader<T>::Error = core::convert::Infallible
+pub fn mssql_codec::framed::PacketReader<T>::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::framed::PacketReader<T> where U: core::convert::TryFrom<T>
+pub type mssql_codec::framed::PacketReader<T>::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::framed::PacketReader<T>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_codec::framed::PacketReader<T> where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::framed::PacketReader<T>::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::framed::PacketReader<T> where T: ?core::marker::Sized
+pub fn mssql_codec::framed::PacketReader<T>::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::framed::PacketReader<T> where T: ?core::marker::Sized
+pub fn mssql_codec::framed::PacketReader<T>::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_codec::framed::PacketReader<T>
+pub fn mssql_codec::framed::PacketReader<T>::from(T) -> T
+impl<T> futures_util::stream::stream::StreamExt for mssql_codec::framed::PacketReader<T> where T: futures_core::stream::Stream + ?core::marker::Sized
+impl<T> tracing::instrument::Instrument for mssql_codec::framed::PacketReader<T>
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::framed::PacketReader<T>
+pub struct mssql_codec::PacketStream<T>
+impl<T> mssql_codec::framed::PacketStream<T> where T: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite
+pub fn mssql_codec::framed::PacketStream<T>::codec(&self) -> &mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::framed::PacketStream<T>::codec_mut(&mut self) -> &mut mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::framed::PacketStream<T>::get_mut(&mut self) -> &mut T
+pub fn mssql_codec::framed::PacketStream<T>::get_ref(&self) -> &T
+pub fn mssql_codec::framed::PacketStream<T>::into_inner(self) -> T
+pub fn mssql_codec::framed::PacketStream<T>::new(T) -> Self
+pub fn mssql_codec::framed::PacketStream<T>::read_buffer(&self) -> &bytes::bytes_mut::BytesMut
+pub fn mssql_codec::framed::PacketStream<T>::read_buffer_mut(&mut self) -> &mut bytes::bytes_mut::BytesMut
+pub fn mssql_codec::framed::PacketStream<T>::with_codec(T, mssql_codec::packet_codec::TdsCodec) -> Self
+impl<'__pin, T> core::marker::Unpin for mssql_codec::framed::PacketStream<T> where pin_project_lite::__private::PinnedFieldsOf<__Origin<'__pin, T>>: core::marker::Unpin
+impl<T> core::fmt::Debug for mssql_codec::framed::PacketStream<T> where T: core::fmt::Debug
+pub fn mssql_codec::framed::PacketStream<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T> futures_core::stream::Stream for mssql_codec::framed::PacketStream<T> where T: tokio::io::async_read::AsyncRead + core::marker::Unpin
+pub type mssql_codec::framed::PacketStream<T>::Item = core::result::Result<mssql_codec::packet_codec::Packet, mssql_codec::error::CodecError>
+pub fn mssql_codec::framed::PacketStream<T>::poll_next(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<Self::Item>>
+impl<T> futures_sink::Sink<mssql_codec::packet_codec::Packet> for mssql_codec::framed::PacketStream<T> where T: tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub type mssql_codec::framed::PacketStream<T>::Error = mssql_codec::error::CodecError
+pub fn mssql_codec::framed::PacketStream<T>::poll_close(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketStream<T>::poll_flush(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketStream<T>::poll_ready(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketStream<T>::start_send(core::pin::Pin<&mut Self>, mssql_codec::packet_codec::Packet) -> core::result::Result<(), Self::Error>
+impl<T> core::marker::Freeze for mssql_codec::framed::PacketStream<T> where T: core::marker::Freeze
+impl<T> core::marker::Send for mssql_codec::framed::PacketStream<T> where T: core::marker::Send
+impl<T> core::marker::Sync for mssql_codec::framed::PacketStream<T> where T: core::marker::Sync
+impl<T> core::panic::unwind_safe::RefUnwindSafe for mssql_codec::framed::PacketStream<T> where T: core::panic::unwind_safe::RefUnwindSafe
+impl<T> core::panic::unwind_safe::UnwindSafe for mssql_codec::framed::PacketStream<T> where T: core::panic::unwind_safe::UnwindSafe
+impl<S, T, E> futures_core::stream::TryStream for mssql_codec::framed::PacketStream<T> where S: futures_core::stream::Stream<Item = core::result::Result<T, E>> + ?core::marker::Sized
+pub type mssql_codec::framed::PacketStream<T>::Error = E
+pub type mssql_codec::framed::PacketStream<T>::Ok = T
+pub fn mssql_codec::framed::PacketStream<T>::try_poll_next(core::pin::Pin<&mut S>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<core::result::Result<<S as futures_core::stream::TryStream>::Ok, <S as futures_core::stream::TryStream>::Error>>>
+impl<S> futures_util::stream::try_stream::TryStreamExt for mssql_codec::framed::PacketStream<T> where S: futures_core::stream::TryStream + ?core::marker::Sized
+impl<T, Item> futures_util::sink::SinkExt<Item> for mssql_codec::framed::PacketStream<T> where T: futures_sink::Sink<Item> + ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for mssql_codec::framed::PacketStream<T> where U: core::convert::From<T>
+pub fn mssql_codec::framed::PacketStream<T>::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::framed::PacketStream<T> where U: core::convert::Into<T>
+pub type mssql_codec::framed::PacketStream<T>::Error = core::convert::Infallible
+pub fn mssql_codec::framed::PacketStream<T>::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::framed::PacketStream<T> where U: core::convert::TryFrom<T>
+pub type mssql_codec::framed::PacketStream<T>::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::framed::PacketStream<T>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_codec::framed::PacketStream<T> where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::framed::PacketStream<T>::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::framed::PacketStream<T> where T: ?core::marker::Sized
+pub fn mssql_codec::framed::PacketStream<T>::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::framed::PacketStream<T> where T: ?core::marker::Sized
+pub fn mssql_codec::framed::PacketStream<T>::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_codec::framed::PacketStream<T>
+pub fn mssql_codec::framed::PacketStream<T>::from(T) -> T
+impl<T> futures_util::stream::stream::StreamExt for mssql_codec::framed::PacketStream<T> where T: futures_core::stream::Stream + ?core::marker::Sized
+impl<T> tracing::instrument::Instrument for mssql_codec::framed::PacketStream<T>
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::framed::PacketStream<T>
+pub struct mssql_codec::PacketWriter<T>
+impl<T> mssql_codec::framed::PacketWriter<T> where T: tokio::io::async_write::AsyncWrite
+pub fn mssql_codec::framed::PacketWriter<T>::codec(&self) -> &mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::framed::PacketWriter<T>::codec_mut(&mut self) -> &mut mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::framed::PacketWriter<T>::get_mut(&mut self) -> &mut T
+pub fn mssql_codec::framed::PacketWriter<T>::get_ref(&self) -> &T
+pub fn mssql_codec::framed::PacketWriter<T>::new(T) -> Self
+pub fn mssql_codec::framed::PacketWriter<T>::with_codec(T, mssql_codec::packet_codec::TdsCodec) -> Self
+impl<'__pin, T> core::marker::Unpin for mssql_codec::framed::PacketWriter<T> where pin_project_lite::__private::PinnedFieldsOf<__Origin<'__pin, T>>: core::marker::Unpin
+impl<T> core::fmt::Debug for mssql_codec::framed::PacketWriter<T> where T: core::fmt::Debug
+pub fn mssql_codec::framed::PacketWriter<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T> futures_sink::Sink<mssql_codec::packet_codec::Packet> for mssql_codec::framed::PacketWriter<T> where T: tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub type mssql_codec::framed::PacketWriter<T>::Error = mssql_codec::error::CodecError
+pub fn mssql_codec::framed::PacketWriter<T>::poll_close(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketWriter<T>::poll_flush(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketWriter<T>::poll_ready(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+pub fn mssql_codec::framed::PacketWriter<T>::start_send(core::pin::Pin<&mut Self>, mssql_codec::packet_codec::Packet) -> core::result::Result<(), Self::Error>
+impl<T> core::marker::Freeze for mssql_codec::framed::PacketWriter<T> where T: core::marker::Freeze
+impl<T> core::marker::Send for mssql_codec::framed::PacketWriter<T> where T: core::marker::Send
+impl<T> core::marker::Sync for mssql_codec::framed::PacketWriter<T> where T: core::marker::Sync
+impl<T> core::panic::unwind_safe::RefUnwindSafe for mssql_codec::framed::PacketWriter<T> where T: core::panic::unwind_safe::RefUnwindSafe
+impl<T> core::panic::unwind_safe::UnwindSafe for mssql_codec::framed::PacketWriter<T> where T: core::panic::unwind_safe::UnwindSafe
+impl<T, Item> futures_util::sink::SinkExt<Item> for mssql_codec::framed::PacketWriter<T> where T: futures_sink::Sink<Item> + ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for mssql_codec::framed::PacketWriter<T> where U: core::convert::From<T>
+pub fn mssql_codec::framed::PacketWriter<T>::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::framed::PacketWriter<T> where U: core::convert::Into<T>
+pub type mssql_codec::framed::PacketWriter<T>::Error = core::convert::Infallible
+pub fn mssql_codec::framed::PacketWriter<T>::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::framed::PacketWriter<T> where U: core::convert::TryFrom<T>
+pub type mssql_codec::framed::PacketWriter<T>::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::framed::PacketWriter<T>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_codec::framed::PacketWriter<T> where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::framed::PacketWriter<T>::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::framed::PacketWriter<T> where T: ?core::marker::Sized
+pub fn mssql_codec::framed::PacketWriter<T>::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::framed::PacketWriter<T> where T: ?core::marker::Sized
+pub fn mssql_codec::framed::PacketWriter<T>::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_codec::framed::PacketWriter<T>
+pub fn mssql_codec::framed::PacketWriter<T>::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_codec::framed::PacketWriter<T>
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::framed::PacketWriter<T>
+pub struct mssql_codec::TdsCodec
+impl mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::packet_codec::TdsCodec::new() -> Self
+pub fn mssql_codec::packet_codec::TdsCodec::reset_packet_id(&mut self)
+pub fn mssql_codec::packet_codec::TdsCodec::with_max_packet_size(self, usize) -> Self
+impl core::default::Default for mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::packet_codec::TdsCodec::default() -> Self
+impl tokio_util::codec::decoder::Decoder for mssql_codec::packet_codec::TdsCodec
+pub type mssql_codec::packet_codec::TdsCodec::Error = mssql_codec::error::CodecError
+pub type mssql_codec::packet_codec::TdsCodec::Item = mssql_codec::packet_codec::Packet
+pub fn mssql_codec::packet_codec::TdsCodec::decode(&mut self, &mut bytes::bytes_mut::BytesMut) -> core::result::Result<core::option::Option<Self::Item>, Self::Error>
+impl tokio_util::codec::encoder::Encoder<mssql_codec::packet_codec::Packet> for mssql_codec::packet_codec::TdsCodec
+pub type mssql_codec::packet_codec::TdsCodec::Error = mssql_codec::error::CodecError
+pub fn mssql_codec::packet_codec::TdsCodec::encode(&mut self, mssql_codec::packet_codec::Packet, &mut bytes::bytes_mut::BytesMut) -> core::result::Result<(), Self::Error>
+impl core::marker::Freeze for mssql_codec::packet_codec::TdsCodec
+impl core::marker::Send for mssql_codec::packet_codec::TdsCodec
+impl core::marker::Sync for mssql_codec::packet_codec::TdsCodec
+impl core::marker::Unpin for mssql_codec::packet_codec::TdsCodec
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_codec::packet_codec::TdsCodec
+impl core::panic::unwind_safe::UnwindSafe for mssql_codec::packet_codec::TdsCodec
+impl<T, U> core::convert::Into<U> for mssql_codec::packet_codec::TdsCodec where U: core::convert::From<T>
+pub fn mssql_codec::packet_codec::TdsCodec::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_codec::packet_codec::TdsCodec where U: core::convert::Into<T>
+pub type mssql_codec::packet_codec::TdsCodec::Error = core::convert::Infallible
+pub fn mssql_codec::packet_codec::TdsCodec::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_codec::packet_codec::TdsCodec where U: core::convert::TryFrom<T>
+pub type mssql_codec::packet_codec::TdsCodec::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_codec::packet_codec::TdsCodec::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_codec::packet_codec::TdsCodec where T: 'static + ?core::marker::Sized
+pub fn mssql_codec::packet_codec::TdsCodec::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_codec::packet_codec::TdsCodec where T: ?core::marker::Sized
+pub fn mssql_codec::packet_codec::TdsCodec::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_codec::packet_codec::TdsCodec where T: ?core::marker::Sized
+pub fn mssql_codec::packet_codec::TdsCodec::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_codec::packet_codec::TdsCodec
+pub fn mssql_codec::packet_codec::TdsCodec::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_codec::packet_codec::TdsCodec
+impl<T> tracing::instrument::WithSubscriber for mssql_codec::packet_codec::TdsCodec

@@ -269,7 +269,8 @@ Rules for agents: **never run `cargo publish`, never create version tags, never 
 
 ### CI/CD workflows
 
-- `.github/workflows/ci.yml` — runs on pushes to main and PRs to main. Cross-platform matrix (Linux / macOS / Windows) plus hygiene (typos, unused deps), ADR-011 (no mod.rs), doc-consistency, AI-branding, and breaking-marker gates. Has `workflow_dispatch` for manual reruns.
+- `.github/workflows/ci.yml` — runs on pushes to main and PRs to main. Cross-platform matrix (Linux / macOS / Windows) plus hygiene (typos, unused deps), ADR-011 (no mod.rs), doc-consistency, AI-branding, breaking-marker, and Public API snapshot gates. Has `workflow_dispatch` for manual reruns.
+  - **Public API gate**: `scripts/check-public-api.sh` (also `just public-api`) diffs the committed `public-api/<crate>.txt` snapshots against the live surface, catching the type/generic/return-type changes `cargo-semver-checks` admits it can miss. After an intended API change, run `just public-api-update` and commit the regenerated snapshots. Needs cargo-public-api + the pinned `nightly-2025-12-09` (`rustup toolchain install nightly-2025-12-09 --profile minimal --component rust-docs`); the pin is reproducibility-critical (rustdoc-JSON format varies across nightlies) — bump it in lockstep with the script and a regenerated baseline.
 - `.github/workflows/benchmarks.yml` — runs on pushes/PRs to main. Performance regression detection.
 - `.github/workflows/fuzz-nightly.yml` — daily scheduled long-budget fuzzing (5 min per target, all 12 targets); crash artifacts uploaded for triage. The per-PR `fuzz-smoke` job in ci.yml stays at 15 s/target.
 - `.github/workflows/security-audit.yml` — weekly schedule + dep-file changes on pushes/PRs to main.

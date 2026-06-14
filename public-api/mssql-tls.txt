@@ -1,0 +1,610 @@
+pub mod mssql_tls
+pub use mssql_tls::CertificateDer
+pub use mssql_tls::PrivateKeyDer
+pub use mssql_tls::TlsStream
+pub mod mssql_tls::config
+#[non_exhaustive] pub enum mssql_tls::config::TlsVersion
+pub mssql_tls::config::TlsVersion::Tls12
+pub mssql_tls::config::TlsVersion::Tls13
+impl mssql_tls::config::TlsVersion
+pub fn mssql_tls::config::TlsVersion::to_rustls(&self) -> &'static rustls::versions::SupportedProtocolVersion
+impl core::clone::Clone for mssql_tls::config::TlsVersion
+pub fn mssql_tls::config::TlsVersion::clone(&self) -> mssql_tls::config::TlsVersion
+impl core::cmp::Eq for mssql_tls::config::TlsVersion
+impl core::cmp::Ord for mssql_tls::config::TlsVersion
+pub fn mssql_tls::config::TlsVersion::cmp(&self, &mssql_tls::config::TlsVersion) -> core::cmp::Ordering
+impl core::cmp::PartialEq for mssql_tls::config::TlsVersion
+pub fn mssql_tls::config::TlsVersion::eq(&self, &mssql_tls::config::TlsVersion) -> bool
+impl core::cmp::PartialOrd for mssql_tls::config::TlsVersion
+pub fn mssql_tls::config::TlsVersion::partial_cmp(&self, &mssql_tls::config::TlsVersion) -> core::option::Option<core::cmp::Ordering>
+impl core::default::Default for mssql_tls::config::TlsVersion
+pub fn mssql_tls::config::TlsVersion::default() -> mssql_tls::config::TlsVersion
+impl core::fmt::Debug for mssql_tls::config::TlsVersion
+pub fn mssql_tls::config::TlsVersion::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for mssql_tls::config::TlsVersion
+pub fn mssql_tls::config::TlsVersion::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for mssql_tls::config::TlsVersion
+impl core::marker::StructuralPartialEq for mssql_tls::config::TlsVersion
+impl core::marker::Freeze for mssql_tls::config::TlsVersion
+impl core::marker::Send for mssql_tls::config::TlsVersion
+impl core::marker::Sync for mssql_tls::config::TlsVersion
+impl core::marker::Unpin for mssql_tls::config::TlsVersion
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_tls::config::TlsVersion
+impl core::panic::unwind_safe::UnwindSafe for mssql_tls::config::TlsVersion
+impl<T, U> core::convert::Into<U> for mssql_tls::config::TlsVersion where U: core::convert::From<T>
+pub fn mssql_tls::config::TlsVersion::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_tls::config::TlsVersion where U: core::convert::Into<T>
+pub type mssql_tls::config::TlsVersion::Error = core::convert::Infallible
+pub fn mssql_tls::config::TlsVersion::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_tls::config::TlsVersion where U: core::convert::TryFrom<T>
+pub type mssql_tls::config::TlsVersion::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_tls::config::TlsVersion::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_tls::config::TlsVersion where T: core::clone::Clone
+pub type mssql_tls::config::TlsVersion::Owned = T
+pub fn mssql_tls::config::TlsVersion::clone_into(&self, &mut T)
+pub fn mssql_tls::config::TlsVersion::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_tls::config::TlsVersion where T: 'static + ?core::marker::Sized
+pub fn mssql_tls::config::TlsVersion::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_tls::config::TlsVersion where T: ?core::marker::Sized
+pub fn mssql_tls::config::TlsVersion::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_tls::config::TlsVersion where T: ?core::marker::Sized
+pub fn mssql_tls::config::TlsVersion::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_tls::config::TlsVersion where T: core::clone::Clone
+pub unsafe fn mssql_tls::config::TlsVersion::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_tls::config::TlsVersion
+pub fn mssql_tls::config::TlsVersion::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_tls::config::TlsVersion
+impl<T> tracing::instrument::WithSubscriber for mssql_tls::config::TlsVersion
+pub struct mssql_tls::config::ClientAuth
+pub mssql_tls::config::ClientAuth::certificates: alloc::vec::Vec<rustls_pki_types::CertificateDer<'static>>
+pub mssql_tls::config::ClientAuth::key: alloc::sync::Arc<rustls_pki_types::PrivateKeyDer<'static>>
+impl mssql_tls::config::ClientAuth
+pub fn mssql_tls::config::ClientAuth::new(alloc::vec::Vec<rustls_pki_types::CertificateDer<'static>>, rustls_pki_types::PrivateKeyDer<'static>) -> Self
+impl core::clone::Clone for mssql_tls::config::ClientAuth
+pub fn mssql_tls::config::ClientAuth::clone(&self) -> mssql_tls::config::ClientAuth
+impl core::fmt::Debug for mssql_tls::config::ClientAuth
+pub fn mssql_tls::config::ClientAuth::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_tls::config::ClientAuth
+impl core::marker::Send for mssql_tls::config::ClientAuth
+impl core::marker::Sync for mssql_tls::config::ClientAuth
+impl core::marker::Unpin for mssql_tls::config::ClientAuth
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_tls::config::ClientAuth
+impl core::panic::unwind_safe::UnwindSafe for mssql_tls::config::ClientAuth
+impl<T, U> core::convert::Into<U> for mssql_tls::config::ClientAuth where U: core::convert::From<T>
+pub fn mssql_tls::config::ClientAuth::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_tls::config::ClientAuth where U: core::convert::Into<T>
+pub type mssql_tls::config::ClientAuth::Error = core::convert::Infallible
+pub fn mssql_tls::config::ClientAuth::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_tls::config::ClientAuth where U: core::convert::TryFrom<T>
+pub type mssql_tls::config::ClientAuth::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_tls::config::ClientAuth::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_tls::config::ClientAuth where T: core::clone::Clone
+pub type mssql_tls::config::ClientAuth::Owned = T
+pub fn mssql_tls::config::ClientAuth::clone_into(&self, &mut T)
+pub fn mssql_tls::config::ClientAuth::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_tls::config::ClientAuth where T: 'static + ?core::marker::Sized
+pub fn mssql_tls::config::ClientAuth::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_tls::config::ClientAuth where T: ?core::marker::Sized
+pub fn mssql_tls::config::ClientAuth::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_tls::config::ClientAuth where T: ?core::marker::Sized
+pub fn mssql_tls::config::ClientAuth::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_tls::config::ClientAuth where T: core::clone::Clone
+pub unsafe fn mssql_tls::config::ClientAuth::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_tls::config::ClientAuth
+pub fn mssql_tls::config::ClientAuth::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_tls::config::ClientAuth
+impl<T> tracing::instrument::WithSubscriber for mssql_tls::config::ClientAuth
+pub struct mssql_tls::config::TlsConfig
+pub mssql_tls::config::TlsConfig::alpn_protocols: alloc::vec::Vec<alloc::vec::Vec<u8>>
+pub mssql_tls::config::TlsConfig::client_auth: core::option::Option<mssql_tls::config::ClientAuth>
+pub mssql_tls::config::TlsConfig::max_protocol_version: mssql_tls::config::TlsVersion
+pub mssql_tls::config::TlsConfig::min_protocol_version: mssql_tls::config::TlsVersion
+pub mssql_tls::config::TlsConfig::root_certificates: alloc::vec::Vec<rustls_pki_types::CertificateDer<'static>>
+pub mssql_tls::config::TlsConfig::server_name: core::option::Option<alloc::string::String>
+pub mssql_tls::config::TlsConfig::strict_mode: bool
+pub mssql_tls::config::TlsConfig::trust_server_certificate: bool
+impl mssql_tls::config::TlsConfig
+pub fn mssql_tls::config::TlsConfig::add_root_certificate(self, rustls_pki_types::CertificateDer<'static>) -> Self
+pub fn mssql_tls::config::TlsConfig::add_root_certificate_der(self, alloc::vec::Vec<u8>) -> Self
+pub fn mssql_tls::config::TlsConfig::has_client_auth(&self) -> bool
+pub fn mssql_tls::config::TlsConfig::max_protocol_version(self, mssql_tls::config::TlsVersion) -> Self
+pub fn mssql_tls::config::TlsConfig::min_protocol_version(self, mssql_tls::config::TlsVersion) -> Self
+pub fn mssql_tls::config::TlsConfig::new() -> Self
+pub fn mssql_tls::config::TlsConfig::strict_mode(self, bool) -> Self
+pub fn mssql_tls::config::TlsConfig::trust_server_certificate(self, bool) -> Self
+pub fn mssql_tls::config::TlsConfig::with_alpn_protocols(self, alloc::vec::Vec<alloc::vec::Vec<u8>>) -> Self
+pub fn mssql_tls::config::TlsConfig::with_client_auth(self, alloc::vec::Vec<rustls_pki_types::CertificateDer<'static>>, rustls_pki_types::PrivateKeyDer<'static>) -> Self
+pub fn mssql_tls::config::TlsConfig::with_client_auth_der(self, alloc::vec::Vec<alloc::vec::Vec<u8>>, alloc::vec::Vec<u8>) -> Self
+pub fn mssql_tls::config::TlsConfig::with_root_certificates(self, alloc::vec::Vec<rustls_pki_types::CertificateDer<'static>>) -> Self
+pub fn mssql_tls::config::TlsConfig::with_server_name(self, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for mssql_tls::config::TlsConfig
+pub fn mssql_tls::config::TlsConfig::clone(&self) -> mssql_tls::config::TlsConfig
+impl core::default::Default for mssql_tls::config::TlsConfig
+pub fn mssql_tls::config::TlsConfig::default() -> Self
+impl core::fmt::Debug for mssql_tls::config::TlsConfig
+pub fn mssql_tls::config::TlsConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_tls::config::TlsConfig
+impl core::marker::Send for mssql_tls::config::TlsConfig
+impl core::marker::Sync for mssql_tls::config::TlsConfig
+impl core::marker::Unpin for mssql_tls::config::TlsConfig
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_tls::config::TlsConfig
+impl core::panic::unwind_safe::UnwindSafe for mssql_tls::config::TlsConfig
+impl<T, U> core::convert::Into<U> for mssql_tls::config::TlsConfig where U: core::convert::From<T>
+pub fn mssql_tls::config::TlsConfig::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_tls::config::TlsConfig where U: core::convert::Into<T>
+pub type mssql_tls::config::TlsConfig::Error = core::convert::Infallible
+pub fn mssql_tls::config::TlsConfig::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_tls::config::TlsConfig where U: core::convert::TryFrom<T>
+pub type mssql_tls::config::TlsConfig::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_tls::config::TlsConfig::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_tls::config::TlsConfig where T: core::clone::Clone
+pub type mssql_tls::config::TlsConfig::Owned = T
+pub fn mssql_tls::config::TlsConfig::clone_into(&self, &mut T)
+pub fn mssql_tls::config::TlsConfig::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_tls::config::TlsConfig where T: 'static + ?core::marker::Sized
+pub fn mssql_tls::config::TlsConfig::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_tls::config::TlsConfig where T: ?core::marker::Sized
+pub fn mssql_tls::config::TlsConfig::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_tls::config::TlsConfig where T: ?core::marker::Sized
+pub fn mssql_tls::config::TlsConfig::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_tls::config::TlsConfig where T: core::clone::Clone
+pub unsafe fn mssql_tls::config::TlsConfig::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_tls::config::TlsConfig
+pub fn mssql_tls::config::TlsConfig::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_tls::config::TlsConfig
+impl<T> tracing::instrument::WithSubscriber for mssql_tls::config::TlsConfig
+pub mod mssql_tls::connector
+pub struct mssql_tls::connector::TlsConnector
+impl mssql_tls::connector::TlsConnector
+pub fn mssql_tls::connector::TlsConnector::config(&self) -> &mssql_tls::config::TlsConfig
+pub async fn mssql_tls::connector::TlsConnector::connect<S>(&self, S, &str) -> core::result::Result<tokio_rustls::client::TlsStream<S>, mssql_tls::error::TlsError> where S: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub async fn mssql_tls::connector::TlsConnector::connect_with_prelogin<S>(&self, S, &str) -> core::result::Result<tokio_rustls::client::TlsStream<mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>>, mssql_tls::error::TlsError> where S: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub fn mssql_tls::connector::TlsConnector::is_strict_mode(&self) -> bool
+pub fn mssql_tls::connector::TlsConnector::new(mssql_tls::config::TlsConfig) -> core::result::Result<Self, mssql_tls::error::TlsError>
+impl core::fmt::Debug for mssql_tls::connector::TlsConnector
+pub fn mssql_tls::connector::TlsConnector::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_tls::connector::TlsConnector
+impl core::marker::Send for mssql_tls::connector::TlsConnector
+impl core::marker::Sync for mssql_tls::connector::TlsConnector
+impl core::marker::Unpin for mssql_tls::connector::TlsConnector
+impl !core::panic::unwind_safe::RefUnwindSafe for mssql_tls::connector::TlsConnector
+impl !core::panic::unwind_safe::UnwindSafe for mssql_tls::connector::TlsConnector
+impl<T, U> core::convert::Into<U> for mssql_tls::connector::TlsConnector where U: core::convert::From<T>
+pub fn mssql_tls::connector::TlsConnector::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_tls::connector::TlsConnector where U: core::convert::Into<T>
+pub type mssql_tls::connector::TlsConnector::Error = core::convert::Infallible
+pub fn mssql_tls::connector::TlsConnector::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_tls::connector::TlsConnector where U: core::convert::TryFrom<T>
+pub type mssql_tls::connector::TlsConnector::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_tls::connector::TlsConnector::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_tls::connector::TlsConnector where T: 'static + ?core::marker::Sized
+pub fn mssql_tls::connector::TlsConnector::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_tls::connector::TlsConnector where T: ?core::marker::Sized
+pub fn mssql_tls::connector::TlsConnector::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_tls::connector::TlsConnector where T: ?core::marker::Sized
+pub fn mssql_tls::connector::TlsConnector::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_tls::connector::TlsConnector
+pub fn mssql_tls::connector::TlsConnector::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_tls::connector::TlsConnector
+impl<T> tracing::instrument::WithSubscriber for mssql_tls::connector::TlsConnector
+pub fn mssql_tls::connector::default_tls_config() -> core::result::Result<rustls::client::client_conn::ClientConfig, mssql_tls::error::TlsError>
+pub mod mssql_tls::error
+#[non_exhaustive] pub enum mssql_tls::error::TlsError
+pub mssql_tls::error::TlsError::CertificateValidation(alloc::string::String)
+pub mssql_tls::error::TlsError::Configuration(alloc::string::String)
+pub mssql_tls::error::TlsError::ConnectionClosed
+pub mssql_tls::error::TlsError::EncryptionNotSupported
+pub mssql_tls::error::TlsError::EncryptionRequired
+pub mssql_tls::error::TlsError::HandshakeFailed(alloc::string::String)
+pub mssql_tls::error::TlsError::HostnameVerification
+pub mssql_tls::error::TlsError::HostnameVerification::actual: alloc::string::String
+pub mssql_tls::error::TlsError::HostnameVerification::expected: alloc::string::String
+pub mssql_tls::error::TlsError::InvalidCertificate(alloc::string::String)
+pub mssql_tls::error::TlsError::InvalidPrivateKey(alloc::string::String)
+pub mssql_tls::error::TlsError::Io(std::io::error::Error)
+pub mssql_tls::error::TlsError::Rustls(rustls::error::Error)
+pub mssql_tls::error::TlsError::StrictModeRequired
+impl mssql_tls::error::TlsError
+pub fn mssql_tls::error::TlsError::is_terminal(&self) -> bool
+pub fn mssql_tls::error::TlsError::is_transient(&self) -> bool
+impl core::convert::From<rustls::error::Error> for mssql_tls::error::TlsError
+pub fn mssql_tls::error::TlsError::from(rustls::error::Error) -> Self
+impl core::convert::From<std::io::error::Error> for mssql_tls::error::TlsError
+pub fn mssql_tls::error::TlsError::from(std::io::error::Error) -> Self
+impl core::error::Error for mssql_tls::error::TlsError
+pub fn mssql_tls::error::TlsError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for mssql_tls::error::TlsError
+pub fn mssql_tls::error::TlsError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for mssql_tls::error::TlsError
+pub fn mssql_tls::error::TlsError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_tls::error::TlsError
+impl core::marker::Send for mssql_tls::error::TlsError
+impl core::marker::Sync for mssql_tls::error::TlsError
+impl core::marker::Unpin for mssql_tls::error::TlsError
+impl !core::panic::unwind_safe::RefUnwindSafe for mssql_tls::error::TlsError
+impl !core::panic::unwind_safe::UnwindSafe for mssql_tls::error::TlsError
+impl<T, U> core::convert::Into<U> for mssql_tls::error::TlsError where U: core::convert::From<T>
+pub fn mssql_tls::error::TlsError::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_tls::error::TlsError where U: core::convert::Into<T>
+pub type mssql_tls::error::TlsError::Error = core::convert::Infallible
+pub fn mssql_tls::error::TlsError::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_tls::error::TlsError where U: core::convert::TryFrom<T>
+pub type mssql_tls::error::TlsError::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_tls::error::TlsError::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::string::ToString for mssql_tls::error::TlsError where T: core::fmt::Display + ?core::marker::Sized
+pub fn mssql_tls::error::TlsError::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for mssql_tls::error::TlsError where T: 'static + ?core::marker::Sized
+pub fn mssql_tls::error::TlsError::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_tls::error::TlsError where T: ?core::marker::Sized
+pub fn mssql_tls::error::TlsError::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_tls::error::TlsError where T: ?core::marker::Sized
+pub fn mssql_tls::error::TlsError::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_tls::error::TlsError
+pub fn mssql_tls::error::TlsError::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_tls::error::TlsError
+impl<T> tracing::instrument::WithSubscriber for mssql_tls::error::TlsError
+pub mod mssql_tls::prelogin_wrapper
+pub struct mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>
+impl<S> mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::get_mut(&mut self) -> &mut S
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::get_ref(&self) -> &S
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::handshake_complete(&mut self)
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::into_inner(self) -> S
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::new(S) -> Self
+impl<S: tokio::io::async_read::AsyncRead + core::marker::Unpin> tokio::io::async_read::AsyncRead for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::poll_read(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>, &mut tokio::io::read_buf::ReadBuf<'_>) -> core::task::poll::Poll<std::io::error::Result<()>>
+impl<S: tokio::io::async_write::AsyncWrite + core::marker::Unpin> tokio::io::async_write::AsyncWrite for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::poll_flush(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<std::io::error::Result<()>>
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::poll_shutdown(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<std::io::error::Result<()>>
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::poll_write(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>, &[u8]) -> core::task::poll::Poll<std::io::error::Result<usize>>
+impl<S> core::marker::Freeze for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where S: core::marker::Freeze
+impl<S> core::marker::Send for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where S: core::marker::Send
+impl<S> core::marker::Sync for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where S: core::marker::Sync
+impl<S> core::marker::Unpin for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where S: core::marker::Unpin
+impl<S> core::panic::unwind_safe::RefUnwindSafe for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where S: core::panic::unwind_safe::RefUnwindSafe
+impl<S> core::panic::unwind_safe::UnwindSafe for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where S: core::panic::unwind_safe::UnwindSafe
+impl<R> tokio::io::util::async_read_ext::AsyncReadExt for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where R: tokio::io::async_read::AsyncRead + ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where U: core::convert::From<T>
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where U: core::convert::Into<T>
+pub type mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::Error = core::convert::Infallible
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where U: core::convert::TryFrom<T>
+pub type mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where T: 'static + ?core::marker::Sized
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where T: ?core::marker::Sized
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where T: ?core::marker::Sized
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>
+impl<T> tracing::instrument::WithSubscriber for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>
+impl<W> tokio::io::util::async_write_ext::AsyncWriteExt for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where W: tokio::io::async_write::AsyncWrite + ?core::marker::Sized
+#[non_exhaustive] pub enum mssql_tls::TlsError
+pub mssql_tls::TlsError::CertificateValidation(alloc::string::String)
+pub mssql_tls::TlsError::Configuration(alloc::string::String)
+pub mssql_tls::TlsError::ConnectionClosed
+pub mssql_tls::TlsError::EncryptionNotSupported
+pub mssql_tls::TlsError::EncryptionRequired
+pub mssql_tls::TlsError::HandshakeFailed(alloc::string::String)
+pub mssql_tls::TlsError::HostnameVerification
+pub mssql_tls::TlsError::HostnameVerification::actual: alloc::string::String
+pub mssql_tls::TlsError::HostnameVerification::expected: alloc::string::String
+pub mssql_tls::TlsError::InvalidCertificate(alloc::string::String)
+pub mssql_tls::TlsError::InvalidPrivateKey(alloc::string::String)
+pub mssql_tls::TlsError::Io(std::io::error::Error)
+pub mssql_tls::TlsError::Rustls(rustls::error::Error)
+pub mssql_tls::TlsError::StrictModeRequired
+impl mssql_tls::error::TlsError
+pub fn mssql_tls::error::TlsError::is_terminal(&self) -> bool
+pub fn mssql_tls::error::TlsError::is_transient(&self) -> bool
+impl core::convert::From<rustls::error::Error> for mssql_tls::error::TlsError
+pub fn mssql_tls::error::TlsError::from(rustls::error::Error) -> Self
+impl core::convert::From<std::io::error::Error> for mssql_tls::error::TlsError
+pub fn mssql_tls::error::TlsError::from(std::io::error::Error) -> Self
+impl core::error::Error for mssql_tls::error::TlsError
+pub fn mssql_tls::error::TlsError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for mssql_tls::error::TlsError
+pub fn mssql_tls::error::TlsError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for mssql_tls::error::TlsError
+pub fn mssql_tls::error::TlsError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_tls::error::TlsError
+impl core::marker::Send for mssql_tls::error::TlsError
+impl core::marker::Sync for mssql_tls::error::TlsError
+impl core::marker::Unpin for mssql_tls::error::TlsError
+impl !core::panic::unwind_safe::RefUnwindSafe for mssql_tls::error::TlsError
+impl !core::panic::unwind_safe::UnwindSafe for mssql_tls::error::TlsError
+impl<T, U> core::convert::Into<U> for mssql_tls::error::TlsError where U: core::convert::From<T>
+pub fn mssql_tls::error::TlsError::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_tls::error::TlsError where U: core::convert::Into<T>
+pub type mssql_tls::error::TlsError::Error = core::convert::Infallible
+pub fn mssql_tls::error::TlsError::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_tls::error::TlsError where U: core::convert::TryFrom<T>
+pub type mssql_tls::error::TlsError::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_tls::error::TlsError::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::string::ToString for mssql_tls::error::TlsError where T: core::fmt::Display + ?core::marker::Sized
+pub fn mssql_tls::error::TlsError::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for mssql_tls::error::TlsError where T: 'static + ?core::marker::Sized
+pub fn mssql_tls::error::TlsError::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_tls::error::TlsError where T: ?core::marker::Sized
+pub fn mssql_tls::error::TlsError::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_tls::error::TlsError where T: ?core::marker::Sized
+pub fn mssql_tls::error::TlsError::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_tls::error::TlsError
+pub fn mssql_tls::error::TlsError::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_tls::error::TlsError
+impl<T> tracing::instrument::WithSubscriber for mssql_tls::error::TlsError
+#[non_exhaustive] pub enum mssql_tls::TlsNegotiationMode
+pub mssql_tls::TlsNegotiationMode::PostPreLogin
+pub mssql_tls::TlsNegotiationMode::Strict
+impl mssql_tls::TlsNegotiationMode
+pub fn mssql_tls::TlsNegotiationMode::from_encrypt_mode(bool) -> Self
+pub fn mssql_tls::TlsNegotiationMode::is_tls_first(&self) -> bool
+pub fn mssql_tls::TlsNegotiationMode::prelogin_encrypted(&self) -> bool
+impl core::clone::Clone for mssql_tls::TlsNegotiationMode
+pub fn mssql_tls::TlsNegotiationMode::clone(&self) -> mssql_tls::TlsNegotiationMode
+impl core::cmp::Eq for mssql_tls::TlsNegotiationMode
+impl core::cmp::PartialEq for mssql_tls::TlsNegotiationMode
+pub fn mssql_tls::TlsNegotiationMode::eq(&self, &mssql_tls::TlsNegotiationMode) -> bool
+impl core::fmt::Debug for mssql_tls::TlsNegotiationMode
+pub fn mssql_tls::TlsNegotiationMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for mssql_tls::TlsNegotiationMode
+pub fn mssql_tls::TlsNegotiationMode::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for mssql_tls::TlsNegotiationMode
+impl core::marker::StructuralPartialEq for mssql_tls::TlsNegotiationMode
+impl core::marker::Freeze for mssql_tls::TlsNegotiationMode
+impl core::marker::Send for mssql_tls::TlsNegotiationMode
+impl core::marker::Sync for mssql_tls::TlsNegotiationMode
+impl core::marker::Unpin for mssql_tls::TlsNegotiationMode
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_tls::TlsNegotiationMode
+impl core::panic::unwind_safe::UnwindSafe for mssql_tls::TlsNegotiationMode
+impl<T, U> core::convert::Into<U> for mssql_tls::TlsNegotiationMode where U: core::convert::From<T>
+pub fn mssql_tls::TlsNegotiationMode::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_tls::TlsNegotiationMode where U: core::convert::Into<T>
+pub type mssql_tls::TlsNegotiationMode::Error = core::convert::Infallible
+pub fn mssql_tls::TlsNegotiationMode::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_tls::TlsNegotiationMode where U: core::convert::TryFrom<T>
+pub type mssql_tls::TlsNegotiationMode::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_tls::TlsNegotiationMode::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_tls::TlsNegotiationMode where T: core::clone::Clone
+pub type mssql_tls::TlsNegotiationMode::Owned = T
+pub fn mssql_tls::TlsNegotiationMode::clone_into(&self, &mut T)
+pub fn mssql_tls::TlsNegotiationMode::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_tls::TlsNegotiationMode where T: 'static + ?core::marker::Sized
+pub fn mssql_tls::TlsNegotiationMode::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_tls::TlsNegotiationMode where T: ?core::marker::Sized
+pub fn mssql_tls::TlsNegotiationMode::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_tls::TlsNegotiationMode where T: ?core::marker::Sized
+pub fn mssql_tls::TlsNegotiationMode::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_tls::TlsNegotiationMode where T: core::clone::Clone
+pub unsafe fn mssql_tls::TlsNegotiationMode::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_tls::TlsNegotiationMode
+pub fn mssql_tls::TlsNegotiationMode::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_tls::TlsNegotiationMode
+impl<T> tracing::instrument::WithSubscriber for mssql_tls::TlsNegotiationMode
+#[non_exhaustive] pub enum mssql_tls::TlsVersion
+pub mssql_tls::TlsVersion::Tls12
+pub mssql_tls::TlsVersion::Tls13
+impl mssql_tls::config::TlsVersion
+pub fn mssql_tls::config::TlsVersion::to_rustls(&self) -> &'static rustls::versions::SupportedProtocolVersion
+impl core::clone::Clone for mssql_tls::config::TlsVersion
+pub fn mssql_tls::config::TlsVersion::clone(&self) -> mssql_tls::config::TlsVersion
+impl core::cmp::Eq for mssql_tls::config::TlsVersion
+impl core::cmp::Ord for mssql_tls::config::TlsVersion
+pub fn mssql_tls::config::TlsVersion::cmp(&self, &mssql_tls::config::TlsVersion) -> core::cmp::Ordering
+impl core::cmp::PartialEq for mssql_tls::config::TlsVersion
+pub fn mssql_tls::config::TlsVersion::eq(&self, &mssql_tls::config::TlsVersion) -> bool
+impl core::cmp::PartialOrd for mssql_tls::config::TlsVersion
+pub fn mssql_tls::config::TlsVersion::partial_cmp(&self, &mssql_tls::config::TlsVersion) -> core::option::Option<core::cmp::Ordering>
+impl core::default::Default for mssql_tls::config::TlsVersion
+pub fn mssql_tls::config::TlsVersion::default() -> mssql_tls::config::TlsVersion
+impl core::fmt::Debug for mssql_tls::config::TlsVersion
+pub fn mssql_tls::config::TlsVersion::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for mssql_tls::config::TlsVersion
+pub fn mssql_tls::config::TlsVersion::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for mssql_tls::config::TlsVersion
+impl core::marker::StructuralPartialEq for mssql_tls::config::TlsVersion
+impl core::marker::Freeze for mssql_tls::config::TlsVersion
+impl core::marker::Send for mssql_tls::config::TlsVersion
+impl core::marker::Sync for mssql_tls::config::TlsVersion
+impl core::marker::Unpin for mssql_tls::config::TlsVersion
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_tls::config::TlsVersion
+impl core::panic::unwind_safe::UnwindSafe for mssql_tls::config::TlsVersion
+impl<T, U> core::convert::Into<U> for mssql_tls::config::TlsVersion where U: core::convert::From<T>
+pub fn mssql_tls::config::TlsVersion::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_tls::config::TlsVersion where U: core::convert::Into<T>
+pub type mssql_tls::config::TlsVersion::Error = core::convert::Infallible
+pub fn mssql_tls::config::TlsVersion::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_tls::config::TlsVersion where U: core::convert::TryFrom<T>
+pub type mssql_tls::config::TlsVersion::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_tls::config::TlsVersion::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_tls::config::TlsVersion where T: core::clone::Clone
+pub type mssql_tls::config::TlsVersion::Owned = T
+pub fn mssql_tls::config::TlsVersion::clone_into(&self, &mut T)
+pub fn mssql_tls::config::TlsVersion::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_tls::config::TlsVersion where T: 'static + ?core::marker::Sized
+pub fn mssql_tls::config::TlsVersion::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_tls::config::TlsVersion where T: ?core::marker::Sized
+pub fn mssql_tls::config::TlsVersion::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_tls::config::TlsVersion where T: ?core::marker::Sized
+pub fn mssql_tls::config::TlsVersion::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_tls::config::TlsVersion where T: core::clone::Clone
+pub unsafe fn mssql_tls::config::TlsVersion::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_tls::config::TlsVersion
+pub fn mssql_tls::config::TlsVersion::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_tls::config::TlsVersion
+impl<T> tracing::instrument::WithSubscriber for mssql_tls::config::TlsVersion
+pub struct mssql_tls::ClientAuth
+pub mssql_tls::ClientAuth::certificates: alloc::vec::Vec<rustls_pki_types::CertificateDer<'static>>
+pub mssql_tls::ClientAuth::key: alloc::sync::Arc<rustls_pki_types::PrivateKeyDer<'static>>
+impl mssql_tls::config::ClientAuth
+pub fn mssql_tls::config::ClientAuth::new(alloc::vec::Vec<rustls_pki_types::CertificateDer<'static>>, rustls_pki_types::PrivateKeyDer<'static>) -> Self
+impl core::clone::Clone for mssql_tls::config::ClientAuth
+pub fn mssql_tls::config::ClientAuth::clone(&self) -> mssql_tls::config::ClientAuth
+impl core::fmt::Debug for mssql_tls::config::ClientAuth
+pub fn mssql_tls::config::ClientAuth::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_tls::config::ClientAuth
+impl core::marker::Send for mssql_tls::config::ClientAuth
+impl core::marker::Sync for mssql_tls::config::ClientAuth
+impl core::marker::Unpin for mssql_tls::config::ClientAuth
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_tls::config::ClientAuth
+impl core::panic::unwind_safe::UnwindSafe for mssql_tls::config::ClientAuth
+impl<T, U> core::convert::Into<U> for mssql_tls::config::ClientAuth where U: core::convert::From<T>
+pub fn mssql_tls::config::ClientAuth::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_tls::config::ClientAuth where U: core::convert::Into<T>
+pub type mssql_tls::config::ClientAuth::Error = core::convert::Infallible
+pub fn mssql_tls::config::ClientAuth::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_tls::config::ClientAuth where U: core::convert::TryFrom<T>
+pub type mssql_tls::config::ClientAuth::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_tls::config::ClientAuth::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_tls::config::ClientAuth where T: core::clone::Clone
+pub type mssql_tls::config::ClientAuth::Owned = T
+pub fn mssql_tls::config::ClientAuth::clone_into(&self, &mut T)
+pub fn mssql_tls::config::ClientAuth::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_tls::config::ClientAuth where T: 'static + ?core::marker::Sized
+pub fn mssql_tls::config::ClientAuth::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_tls::config::ClientAuth where T: ?core::marker::Sized
+pub fn mssql_tls::config::ClientAuth::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_tls::config::ClientAuth where T: ?core::marker::Sized
+pub fn mssql_tls::config::ClientAuth::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_tls::config::ClientAuth where T: core::clone::Clone
+pub unsafe fn mssql_tls::config::ClientAuth::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_tls::config::ClientAuth
+pub fn mssql_tls::config::ClientAuth::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_tls::config::ClientAuth
+impl<T> tracing::instrument::WithSubscriber for mssql_tls::config::ClientAuth
+pub struct mssql_tls::TlsConfig
+pub mssql_tls::TlsConfig::alpn_protocols: alloc::vec::Vec<alloc::vec::Vec<u8>>
+pub mssql_tls::TlsConfig::client_auth: core::option::Option<mssql_tls::config::ClientAuth>
+pub mssql_tls::TlsConfig::max_protocol_version: mssql_tls::config::TlsVersion
+pub mssql_tls::TlsConfig::min_protocol_version: mssql_tls::config::TlsVersion
+pub mssql_tls::TlsConfig::root_certificates: alloc::vec::Vec<rustls_pki_types::CertificateDer<'static>>
+pub mssql_tls::TlsConfig::server_name: core::option::Option<alloc::string::String>
+pub mssql_tls::TlsConfig::strict_mode: bool
+pub mssql_tls::TlsConfig::trust_server_certificate: bool
+impl mssql_tls::config::TlsConfig
+pub fn mssql_tls::config::TlsConfig::add_root_certificate(self, rustls_pki_types::CertificateDer<'static>) -> Self
+pub fn mssql_tls::config::TlsConfig::add_root_certificate_der(self, alloc::vec::Vec<u8>) -> Self
+pub fn mssql_tls::config::TlsConfig::has_client_auth(&self) -> bool
+pub fn mssql_tls::config::TlsConfig::max_protocol_version(self, mssql_tls::config::TlsVersion) -> Self
+pub fn mssql_tls::config::TlsConfig::min_protocol_version(self, mssql_tls::config::TlsVersion) -> Self
+pub fn mssql_tls::config::TlsConfig::new() -> Self
+pub fn mssql_tls::config::TlsConfig::strict_mode(self, bool) -> Self
+pub fn mssql_tls::config::TlsConfig::trust_server_certificate(self, bool) -> Self
+pub fn mssql_tls::config::TlsConfig::with_alpn_protocols(self, alloc::vec::Vec<alloc::vec::Vec<u8>>) -> Self
+pub fn mssql_tls::config::TlsConfig::with_client_auth(self, alloc::vec::Vec<rustls_pki_types::CertificateDer<'static>>, rustls_pki_types::PrivateKeyDer<'static>) -> Self
+pub fn mssql_tls::config::TlsConfig::with_client_auth_der(self, alloc::vec::Vec<alloc::vec::Vec<u8>>, alloc::vec::Vec<u8>) -> Self
+pub fn mssql_tls::config::TlsConfig::with_root_certificates(self, alloc::vec::Vec<rustls_pki_types::CertificateDer<'static>>) -> Self
+pub fn mssql_tls::config::TlsConfig::with_server_name(self, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for mssql_tls::config::TlsConfig
+pub fn mssql_tls::config::TlsConfig::clone(&self) -> mssql_tls::config::TlsConfig
+impl core::default::Default for mssql_tls::config::TlsConfig
+pub fn mssql_tls::config::TlsConfig::default() -> Self
+impl core::fmt::Debug for mssql_tls::config::TlsConfig
+pub fn mssql_tls::config::TlsConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_tls::config::TlsConfig
+impl core::marker::Send for mssql_tls::config::TlsConfig
+impl core::marker::Sync for mssql_tls::config::TlsConfig
+impl core::marker::Unpin for mssql_tls::config::TlsConfig
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_tls::config::TlsConfig
+impl core::panic::unwind_safe::UnwindSafe for mssql_tls::config::TlsConfig
+impl<T, U> core::convert::Into<U> for mssql_tls::config::TlsConfig where U: core::convert::From<T>
+pub fn mssql_tls::config::TlsConfig::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_tls::config::TlsConfig where U: core::convert::Into<T>
+pub type mssql_tls::config::TlsConfig::Error = core::convert::Infallible
+pub fn mssql_tls::config::TlsConfig::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_tls::config::TlsConfig where U: core::convert::TryFrom<T>
+pub type mssql_tls::config::TlsConfig::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_tls::config::TlsConfig::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_tls::config::TlsConfig where T: core::clone::Clone
+pub type mssql_tls::config::TlsConfig::Owned = T
+pub fn mssql_tls::config::TlsConfig::clone_into(&self, &mut T)
+pub fn mssql_tls::config::TlsConfig::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_tls::config::TlsConfig where T: 'static + ?core::marker::Sized
+pub fn mssql_tls::config::TlsConfig::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_tls::config::TlsConfig where T: ?core::marker::Sized
+pub fn mssql_tls::config::TlsConfig::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_tls::config::TlsConfig where T: ?core::marker::Sized
+pub fn mssql_tls::config::TlsConfig::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_tls::config::TlsConfig where T: core::clone::Clone
+pub unsafe fn mssql_tls::config::TlsConfig::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_tls::config::TlsConfig
+pub fn mssql_tls::config::TlsConfig::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_tls::config::TlsConfig
+impl<T> tracing::instrument::WithSubscriber for mssql_tls::config::TlsConfig
+pub struct mssql_tls::TlsConnector
+impl mssql_tls::connector::TlsConnector
+pub fn mssql_tls::connector::TlsConnector::config(&self) -> &mssql_tls::config::TlsConfig
+pub async fn mssql_tls::connector::TlsConnector::connect<S>(&self, S, &str) -> core::result::Result<tokio_rustls::client::TlsStream<S>, mssql_tls::error::TlsError> where S: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub async fn mssql_tls::connector::TlsConnector::connect_with_prelogin<S>(&self, S, &str) -> core::result::Result<tokio_rustls::client::TlsStream<mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>>, mssql_tls::error::TlsError> where S: tokio::io::async_read::AsyncRead + tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub fn mssql_tls::connector::TlsConnector::is_strict_mode(&self) -> bool
+pub fn mssql_tls::connector::TlsConnector::new(mssql_tls::config::TlsConfig) -> core::result::Result<Self, mssql_tls::error::TlsError>
+impl core::fmt::Debug for mssql_tls::connector::TlsConnector
+pub fn mssql_tls::connector::TlsConnector::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_tls::connector::TlsConnector
+impl core::marker::Send for mssql_tls::connector::TlsConnector
+impl core::marker::Sync for mssql_tls::connector::TlsConnector
+impl core::marker::Unpin for mssql_tls::connector::TlsConnector
+impl !core::panic::unwind_safe::RefUnwindSafe for mssql_tls::connector::TlsConnector
+impl !core::panic::unwind_safe::UnwindSafe for mssql_tls::connector::TlsConnector
+impl<T, U> core::convert::Into<U> for mssql_tls::connector::TlsConnector where U: core::convert::From<T>
+pub fn mssql_tls::connector::TlsConnector::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_tls::connector::TlsConnector where U: core::convert::Into<T>
+pub type mssql_tls::connector::TlsConnector::Error = core::convert::Infallible
+pub fn mssql_tls::connector::TlsConnector::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_tls::connector::TlsConnector where U: core::convert::TryFrom<T>
+pub type mssql_tls::connector::TlsConnector::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_tls::connector::TlsConnector::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_tls::connector::TlsConnector where T: 'static + ?core::marker::Sized
+pub fn mssql_tls::connector::TlsConnector::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_tls::connector::TlsConnector where T: ?core::marker::Sized
+pub fn mssql_tls::connector::TlsConnector::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_tls::connector::TlsConnector where T: ?core::marker::Sized
+pub fn mssql_tls::connector::TlsConnector::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_tls::connector::TlsConnector
+pub fn mssql_tls::connector::TlsConnector::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_tls::connector::TlsConnector
+impl<T> tracing::instrument::WithSubscriber for mssql_tls::connector::TlsConnector
+pub struct mssql_tls::TlsPreloginWrapper<S>
+impl<S> mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::get_mut(&mut self) -> &mut S
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::get_ref(&self) -> &S
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::handshake_complete(&mut self)
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::into_inner(self) -> S
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::new(S) -> Self
+impl<S: tokio::io::async_read::AsyncRead + core::marker::Unpin> tokio::io::async_read::AsyncRead for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::poll_read(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>, &mut tokio::io::read_buf::ReadBuf<'_>) -> core::task::poll::Poll<std::io::error::Result<()>>
+impl<S: tokio::io::async_write::AsyncWrite + core::marker::Unpin> tokio::io::async_write::AsyncWrite for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::poll_flush(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<std::io::error::Result<()>>
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::poll_shutdown(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<std::io::error::Result<()>>
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::poll_write(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>, &[u8]) -> core::task::poll::Poll<std::io::error::Result<usize>>
+impl<S> core::marker::Freeze for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where S: core::marker::Freeze
+impl<S> core::marker::Send for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where S: core::marker::Send
+impl<S> core::marker::Sync for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where S: core::marker::Sync
+impl<S> core::marker::Unpin for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where S: core::marker::Unpin
+impl<S> core::panic::unwind_safe::RefUnwindSafe for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where S: core::panic::unwind_safe::RefUnwindSafe
+impl<S> core::panic::unwind_safe::UnwindSafe for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where S: core::panic::unwind_safe::UnwindSafe
+impl<R> tokio::io::util::async_read_ext::AsyncReadExt for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where R: tokio::io::async_read::AsyncRead + ?core::marker::Sized
+impl<T, U> core::convert::Into<U> for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where U: core::convert::From<T>
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where U: core::convert::Into<T>
+pub type mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::Error = core::convert::Infallible
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where U: core::convert::TryFrom<T>
+pub type mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where T: 'static + ?core::marker::Sized
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where T: ?core::marker::Sized
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where T: ?core::marker::Sized
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>
+pub fn mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>
+impl<T> tracing::instrument::WithSubscriber for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S>
+impl<W> tokio::io::util::async_write_ext::AsyncWriteExt for mssql_tls::prelogin_wrapper::TlsPreloginWrapper<S> where W: tokio::io::async_write::AsyncWrite + ?core::marker::Sized
+pub fn mssql_tls::default_tls_config() -> core::result::Result<rustls::client::client_conn::ClientConfig, mssql_tls::error::TlsError>

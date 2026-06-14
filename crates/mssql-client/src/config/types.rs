@@ -11,6 +11,7 @@ use std::time::Duration;
 /// Set via `ApplicationIntent=ReadOnly` in connection strings, or
 /// programmatically via [`Config::application_intent`](super::Config::application_intent).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum ApplicationIntent {
     /// Read-write workload (default). Routes to the primary replica.
     #[default]
