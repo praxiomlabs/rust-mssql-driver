@@ -1098,6 +1098,91 @@ mod live_server {
         assert_eq!(g_date, date_val, "DATE round-trips");
     }
 
+    /// Write→read round-trip for MONEY and SMALLMONEY: each is encrypted on
+    /// INSERT and decrypted back on SELECT as a scale-4 decimal. (DECIMAL value
+    /// encryption is implemented and byte-exact-validated, but binding a decimal
+    /// parameter to an encrypted column also needs its precision/scale to match
+    /// the column — a typed-parameter follow-up — so it is not round-tripped
+    /// here yet.)
+    #[cfg(feature = "decimal")]
+    #[tokio::test]
+    #[ignore = "Requires SQL Server with Always Encrypted"]
+    async fn test_money_parameter_encryption_round_trip() {
+        let admin_cfg = match admin_config() {
+            Some(c) => c,
+            None => return,
+        };
+        let mut admin = Client::connect(admin_cfg).await.expect("admin connect");
+        let (rsa_key, pem) = fresh_rsa_keypair();
+        let cek = fresh_cek();
+        let enc = "ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = [{CEK}], \
+                   ENCRYPTION_TYPE = DETERMINISTIC, ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256')";
+        let ddl = format!(
+            "CREATE TABLE [{{TABLE}}] ( Id INT NOT NULL PRIMARY KEY, \
+             EncMoney MONEY {enc} NULL, \
+             EncSmallMoney SMALLMONEY {enc} NULL )"
+        );
+        let fx = setup(&mut admin, &cek, &rsa_key, &ddl).await;
+        drop(admin);
+        let mut client = Client::connect(encrypted_config(&pem).expect("cfg"))
+            .await
+            .expect("ae connect");
+
+        let money = rust_decimal::Decimal::new(123_400, 4); // 12.3400
+        let sql = format!(
+            "INSERT INTO [{}] (Id, EncMoney, EncSmallMoney) VALUES (@p1, @p2, @p3)",
+            fx.table_name
+        );
+        let inserted = client
+            .execute(
+                &sql,
+                &[
+                    &1i32,
+                    &mssql_client::Money(money),
+                    &mssql_client::SmallMoney(money),
+                ],
+            )
+            .await;
+
+        let read: Result<(rust_decimal::Decimal, rust_decimal::Decimal), String> =
+            if inserted.is_ok() {
+                let select = format!(
+                    "SELECT EncMoney, EncSmallMoney FROM [{}] WHERE Id = @p1",
+                    fx.table_name
+                );
+                async {
+                    let rows = client
+                        .query(&select, &[&1i32])
+                        .await
+                        .map_err(|e| format!("select: {e}"))?;
+                    let mut found = None;
+                    for r in rows {
+                        let r = r.map_err(|e| format!("row: {e}"))?;
+                        found = Some((
+                            r.get::<rust_decimal::Decimal>(0)
+                                .map_err(|e| format!("EncMoney: {e}"))?,
+                            r.get::<rust_decimal::Decimal>(1)
+                                .map_err(|e| format!("EncSmallMoney: {e}"))?,
+                        ));
+                    }
+                    found.ok_or_else(|| "no row".to_string())
+                }
+                .await
+            } else {
+                Err("insert failed".to_string())
+            };
+
+        let mut admin = Client::connect(admin_config().expect("cfg"))
+            .await
+            .expect("admin reconnect");
+        teardown(&mut admin, &fx).await;
+
+        assert_eq!(inserted.expect("money insert"), 1, "one row inserted");
+        let (g_money, g_smallmoney) = read.expect("read back");
+        assert_eq!(g_money, money, "MONEY round-trips");
+        assert_eq!(g_smallmoney, money, "SMALLMONEY round-trips");
+    }
+
     /// Typed NULL (`null::<T>()`) into encrypted columns of several types: the
     /// typed NULL carries its SQL type, so the server accepts it against the
     /// target column (an untyped `Option::None` would be declared `nvarchar(1)`

@@ -691,11 +691,48 @@ pub fn normalize_for_encryption(value: &SqlValue) -> Result<Vec<u8>, EncryptionE
             let days = (d.num_days_from_ce() - 1) as u32;
             Ok(days.to_le_bytes()[..3].to_vec())
         }
+        // DECIMAL/NUMERIC: 1 sign byte (0 negative, 1 positive) + 16-byte
+        // little-endian unscaled magnitude. Uses the value's own scale.
+        #[cfg(feature = "decimal")]
+        SqlValue::Decimal(d) => {
+            let mut out = Vec::with_capacity(17);
+            out.push(u8::from(!d.is_sign_negative()));
+            out.extend_from_slice(&d.mantissa().unsigned_abs().to_le_bytes());
+            Ok(out)
+        }
+        // MONEY and SMALLMONEY both normalize to the 8-byte MONEY form: the
+        // value scaled by 10_000 as an i64, high 32 bits then low 32 bits.
+        #[cfg(feature = "decimal")]
+        SqlValue::Money(d) | SqlValue::SmallMoney(d) => {
+            let cents = money_cents(d)?;
+            let mut out = ((cents >> 32) as i32).to_le_bytes().to_vec();
+            out.extend_from_slice(&(cents as u32).to_le_bytes());
+            Ok(out)
+        }
         other => Err(EncryptionError::UnsupportedOperation(format!(
             "Always Encrypted parameter encryption is not yet implemented for {}",
             other.type_name()
         ))),
     }
+}
+
+/// The MONEY fixed-point value (`value * 10_000`) as an `i64`, rounding excess
+/// precision toward zero. Used by both MONEY and SMALLMONEY normalization.
+#[cfg(all(feature = "always-encrypted", feature = "decimal"))]
+fn money_cents(value: &rust_decimal::Decimal) -> Result<i64, EncryptionError> {
+    let mantissa = value.mantissa();
+    let scale = value.scale();
+    let cents: i128 = if scale <= 4 {
+        mantissa
+            .checked_mul(10_i128.pow(4 - scale))
+            .ok_or_else(|| {
+                EncryptionError::UnsupportedOperation("MONEY value out of range".into())
+            })?
+    } else {
+        mantissa / 10_i128.pow(scale - 4)
+    };
+    i64::try_from(cents)
+        .map_err(|_| EncryptionError::UnsupportedOperation("MONEY value out of range".into()))
 }
 
 #[cfg(test)]
@@ -843,6 +880,52 @@ mod tests {
             (
                 SqlValue::Date(chrono::NaiveDate::from_ymd_opt(2024, 3, 15).unwrap()),
                 "0188B4F75A1F4BDA53C9CDDC1918C09CB57F68E13F5560F1F1D7168FE70707337B1156A97915B244F3C03D3E7352882A599511BD243471FD03683F371CF44E4B76",
+            ),
+        ] {
+            let norm = normalize_for_encryption(&value).unwrap();
+            let cipher = enc
+                .encrypt(&norm, mssql_auth::EncryptionType::Deterministic)
+                .unwrap();
+            assert_eq!(
+                cipher,
+                unhex(reference),
+                "ciphertext for {} must match Microsoft.Data.SqlClient",
+                value.type_name()
+            );
+        }
+    }
+
+    /// DECIMAL and MONEY/SMALLMONEY normalization, validated byte-for-byte
+    /// against Microsoft.Data.SqlClient: decimal is a sign byte plus a 16-byte
+    /// little-endian unscaled magnitude; money and smallmoney both use the
+    /// 8-byte MONEY form (value × 10_000, high then low 32 bits).
+    #[cfg(all(feature = "always-encrypted", feature = "decimal"))]
+    #[test]
+    fn ae_normalization_matches_dotnet_decimal_money() {
+        fn unhex(s: &str) -> Vec<u8> {
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+                .collect()
+        }
+
+        let cek = unhex("CBFB5AE21FB517C65DA0C6E8E11969C630798E473EF5827A70398012DF1D4B9E");
+        let enc = AeadEncryptor::new(&cek).unwrap();
+        let dec = rust_decimal::Decimal::new(123_456_789, 4); // 12345.6789
+        let money = rust_decimal::Decimal::new(123_400, 4); // 12.3400
+
+        for (value, reference) in [
+            (
+                SqlValue::Decimal(dec),
+                "018FAE46024B9B406C23600E6A9C694F9A9B39B785A995689EBE19437BA7E75768011A035A5B54B5E495512EBB46AE1146130940A0D0D834D61AA89B5AD9F71FFAF6EEEAE77E4856BA2AA5E016E2950A8D",
+            ),
+            (
+                SqlValue::Money(money),
+                "01B4CE4CAD8D6B241A1555C377A0ADD4C79424DD5162F710D116594F725C1BAB015169A0C7716076EEC90E013519B961DEF427BFC32462D9E45D166C791B73F793",
+            ),
+            (
+                SqlValue::SmallMoney(money),
+                "01B4CE4CAD8D6B241A1555C377A0ADD4C79424DD5162F710D116594F725C1BAB015169A0C7716076EEC90E013519B961DEF427BFC32462D9E45D166C791B73F793",
             ),
         ] {
             let norm = normalize_for_encryption(&value).unwrap();
