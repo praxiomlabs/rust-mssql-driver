@@ -74,8 +74,6 @@ pub(crate) async fn resolve_instance(
     instance: &str,
     browser_timeout: Option<Duration>,
 ) -> Result<u16, Error> {
-    let timeout_duration = browser_timeout.unwrap_or(DEFAULT_BROWSER_TIMEOUT);
-
     // Normalize host: "." and "(local)" are ADO.NET aliases for localhost
     let resolved_host = if host == "." || host.eq_ignore_ascii_case("(local)") {
         "127.0.0.1"
@@ -91,6 +89,20 @@ pub(crate) async fn resolve_instance(
         "querying SQL Browser service at {}",
         target
     );
+
+    resolve_instance_at(&target, instance, browser_timeout).await
+}
+
+/// Query a SQL Browser service at a specific socket address and parse the
+/// response. Split out from [`resolve_instance`] (which builds the `host:1434`
+/// target) so the full UDP request/response path can be exercised against a
+/// mock responder bound to an arbitrary port.
+async fn resolve_instance_at(
+    target: &str,
+    instance: &str,
+    browser_timeout: Option<Duration>,
+) -> Result<u16, Error> {
+    let timeout_duration = browser_timeout.unwrap_or(DEFAULT_BROWSER_TIMEOUT);
 
     // Build the CLNT_UCAST_INST request: 0x04 + instance name (ASCII) + 0x00
     let mut request = Vec::with_capacity(2 + instance.len());
@@ -108,7 +120,7 @@ pub(crate) async fn resolve_instance(
 
     // Send the query
     socket
-        .send_to(&request, &target)
+        .send_to(&request, target)
         .await
         .map_err(|e| Error::BrowserResolution {
             instance: instance.to_string(),
@@ -212,6 +224,42 @@ fn parse_browser_response(data: &[u8], instance: &str) -> Result<u16, Error> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    /// Exercise the full UDP request/response path of `resolve_instance_at`
+    /// against an in-process mock SQL Browser: bind a UDP socket, reply with a
+    /// crafted SVR_RESP, and assert the parsed TCP port. The parser was unit-
+    /// tested in isolation, but the socket send/recv path had no coverage.
+    #[tokio::test]
+    async fn resolve_instance_at_parses_live_udp_response() {
+        // Mock browser service on an ephemeral loopback UDP port.
+        let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = server.local_addr().unwrap();
+
+        let responder = tokio::spawn(async move {
+            let mut buf = [0u8; 1024];
+            let (_n, peer) = server.recv_from(&mut buf).await.unwrap();
+            // The query must be a CLNT_UCAST_INST for our instance.
+            assert_eq!(buf[0], CLNT_UCAST_INST);
+
+            let payload =
+                b"ServerName;TESTSRV;InstanceName;SQLEXPRESS;IsClustered;No;Version;15.0.2000.5;tcp;1455;;";
+            let mut resp = vec![SVR_RESP];
+            resp.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+            resp.extend_from_slice(payload);
+            server.send_to(&resp, peer).await.unwrap();
+        });
+
+        let port = resolve_instance_at(
+            &server_addr.to_string(),
+            "SQLEXPRESS",
+            Some(Duration::from_secs(2)),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(port, 1455);
+        responder.await.unwrap();
+    }
 
     #[test]
     fn test_parse_browser_response_valid() {
