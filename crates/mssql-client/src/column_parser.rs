@@ -309,6 +309,31 @@ fn denormalize_decrypted(plaintext: Vec<u8>, base_col: &ColumnData) -> Result<Sq
                     Error::Encryption(format!("decrypted DATE day count {days} is out of range"))
                 })
         }
+        // DECIMAL/NUMERIC: 1 sign byte + 16-byte little-endian magnitude; the
+        // base type's scale rescales the unscaled integer.
+        #[cfg(feature = "decimal")]
+        TypeId::Decimal | TypeId::Numeric | TypeId::DecimalN | TypeId::NumericN => {
+            let b = decrypted_array::<17>(&plaintext, "decimal")?;
+            let mut mag = [0u8; 16];
+            mag.copy_from_slice(&b[1..17]);
+            let magnitude = u128::from_le_bytes(mag) as i128;
+            let signed = if b[0] == 0 { -magnitude } else { magnitude };
+            let scale = u32::from(base_col.type_info.scale.unwrap_or(0));
+            rust_decimal::Decimal::try_from_i128_with_scale(signed, scale)
+                .map(SqlValue::Decimal)
+                .map_err(|e| Error::Encryption(format!("decrypted DECIMAL out of range: {e}")))
+        }
+        // MONEY/SMALLMONEY both normalize to the 8-byte MONEY form.
+        #[cfg(feature = "decimal")]
+        TypeId::Money | TypeId::Money4 | TypeId::MoneyN => {
+            if plaintext.len() != 8 {
+                return Err(Error::Encryption(format!(
+                    "decrypted MONEY has {} bytes, expected 8",
+                    plaintext.len()
+                )));
+            }
+            parse_money_value(&mut plaintext.as_slice(), 8)
+        }
         other => Err(Error::Encryption(format!(
             "Always Encrypted read is not yet implemented for base type {other:?}"
         ))),
