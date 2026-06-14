@@ -526,40 +526,41 @@ test-stress:
     printf '{{green}}[OK]{{reset}}   Stress tests passed\n'
 
 [group('test')]
-[doc("Run version compatibility tests against SQL Server 2017/2019/2022")]
+[doc("Run the full ignored suite against SQL Server 2017/2019/2022; fails loudly if a version is unreachable")]
 test-all-versions:
     #!/usr/bin/env bash
     set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Testing SQL Server Version Compatibility ══════{{reset}}\n\n'
 
-    # SQL Server 2022 (default port 1433)
-    printf '{{cyan}}[INFO]{{reset}} Testing SQL Server 2022 (port 1433)...\n'
-    if MSSQL_HOST={{mssql_host}} MSSQL_PORT=1433 MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
-        {{cargo}} test -p mssql-client --test version_compatibility -- --ignored 2>/dev/null; then
-        printf '{{green}}[OK]{{reset}}   SQL Server 2022 passed\n'
-    else
-        printf '{{yellow}}[SKIP]{{reset}} SQL Server 2022 not available\n'
-    fi
+    # Mirrors CI's integration matrix: the full ignored suite against each
+    # version. Fails loudly when a version is unreachable — no silent skips.
+    # Start the containers first with: just sql-server-all
+    failed=0
+    for entry in "2022:1433" "2019:1434" "2017:1435"; do
+        version="${entry%%:*}"
+        port="${entry##*:}"
+        # SQL Server 2017 predates UTF-8 collations (2019+); exclude that test
+        # on the 2017 leg only (it runs with full assertions on 2019/2022).
+        extra=""
+        if [ "$version" = "2017" ]; then
+            extra=" and not test(test_utf8_varchar_decoding)"
+        fi
+        printf '{{cyan}}[INFO]{{reset}} Testing SQL Server %s (port %s)...\n' "$version" "$port"
+        if MSSQL_HOST={{mssql_host}} MSSQL_PORT="$port" MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
+            {{cargo}} nextest run --all-features --run-ignored ignored-only --no-fail-fast \
+            -E "not (binary(azure_sql) or test(azure_identity_auth) or test(cert_auth) or binary(kerberos_live))${extra}"; then
+            printf '{{green}}[OK]{{reset}}   SQL Server %s passed\n' "$version"
+        else
+            printf '{{red}}[FAIL]{{reset}} SQL Server %s (port %s) unreachable or tests failed\n' "$version" "$port"
+            failed=1
+        fi
+    done
 
-    # SQL Server 2019 (port 1434)
-    printf '{{cyan}}[INFO]{{reset}} Testing SQL Server 2019 (port 1434)...\n'
-    if MSSQL_HOST={{mssql_host}} MSSQL_PORT=1434 MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
-        {{cargo}} test -p mssql-client --test version_compatibility -- --ignored 2>/dev/null; then
-        printf '{{green}}[OK]{{reset}}   SQL Server 2019 passed\n'
-    else
-        printf '{{yellow}}[SKIP]{{reset}} SQL Server 2019 not available\n'
+    if [ "$failed" -ne 0 ]; then
+        printf '\n{{red}}[FAIL]{{reset}} one or more SQL Server versions failed; start them with: just sql-server-all\n'
+        exit 1
     fi
-
-    # SQL Server 2017 (port 1435)
-    printf '{{cyan}}[INFO]{{reset}} Testing SQL Server 2017 (port 1435)...\n'
-    if MSSQL_HOST={{mssql_host}} MSSQL_PORT=1435 MSSQL_USER={{mssql_user}} MSSQL_PASSWORD='{{mssql_password}}' \
-        {{cargo}} test -p mssql-client --test version_compatibility -- --ignored 2>/dev/null; then
-        printf '{{green}}[OK]{{reset}}   SQL Server 2017 passed\n'
-    else
-        printf '{{yellow}}[SKIP]{{reset}} SQL Server 2017 not available\n'
-    fi
-
-    printf '{{green}}[OK]{{reset}}   Version compatibility testing complete\n'
+    printf '\n{{green}}[OK]{{reset}}   All SQL Server versions passed\n'
 
 [group('test')]
 [doc("Run pool integration tests")]

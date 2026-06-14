@@ -239,10 +239,9 @@ We take backwards compatibility seriously and will work to resolve issues prompt
 | Azure SQL Managed Instance | Full |
 
 **How each version is validated:** "Full"/"Supported"/"Legacy" describe protocol
-capability, not test cadence. Only **SQL Server 2022 is CI-verified** — the
-integration suite runs against it on every change. SQL Server 2017/2019 are
-validated locally against Docker but not yet in CI
-([#85](https://github.com/praxiomlabs/rust-mssql-driver/issues/85)). SQL Server
-2008–2016 and Azure SQL are validated manually against real servers, not in CI.
+capability, not test cadence. **SQL Server 2017, 2019, and 2022 are CI-verified**
+— the integration suite runs the full ignored test suite against all three on
+every change. SQL Server 2008–2016 and Azure SQL are validated manually against
+real servers, not in CI.
 
 SQL Server compatibility is considered part of our stability guarantee. Dropping support for a SQL Server version requires a major version bump (post-1.0).

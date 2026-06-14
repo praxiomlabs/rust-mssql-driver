@@ -292,7 +292,7 @@ tracing-opentelemetry = "0.33"
 
 1. **Unit tests** - Protocol encoding/decoding, type conversions
 2. **Integration tests** - Against SQL Server 2022 in CI (Docker), on every change
-3. **Compatibility tests** - TDS 7.3–8.0. **Only SQL Server 2022 is CI-verified**; 2008–2019 are validated manually by the maintainer (not in CI). Multi-version CI for 2017/2019 is tracked in #85.
+3. **Compatibility tests** - TDS 7.3–8.0. **SQL Server 2017/2019/2022 are CI-verified** (the integration job runs the full ignored suite against all three every change); 2008–2016 are validated manually by the maintainer (not in CI).
 4. **Fuzzing** - Protocol parser with cargo-fuzz
 
 ## Migration Guide (from Tiberius)

@@ -1988,12 +1988,11 @@ gaps and planned work toward 1.0 are tracked in [LIMITATIONS.md](LIMITATIONS.md)
 | Azure SQL Managed Instance | Yes | All authentication methods |
 
 **How each version is validated:** the **Supported** column reflects protocol
-capability, not test cadence. Only **SQL Server 2022 is CI-verified** — the
-integration suite runs against it on every change. SQL Server 2017/2019 are
-validated locally against Docker but not yet in CI ([#85](https://github.com/praxiomlabs/rust-mssql-driver/issues/85)).
-SQL Server 2008–2016 and Azure SQL are validated manually against real servers,
-not in CI. SQL Server 2025 is forward-looking — protocol-compatible but not yet
-validated.
+capability, not test cadence. **SQL Server 2017, 2019, and 2022 are CI-verified**
+— the integration suite runs the full ignored test suite against all three on
+every change. SQL Server 2008–2016 and Azure SQL are validated manually against
+real servers, not in CI. SQL Server 2025 is forward-looking — protocol-compatible
+but not yet validated.
 
 ### 8.3 Feature Flag Matrix
 
