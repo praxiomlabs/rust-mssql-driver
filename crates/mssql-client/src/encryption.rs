@@ -673,6 +673,24 @@ pub fn normalize_for_encryption(value: &SqlValue) -> Result<Vec<u8>, EncryptionE
         SqlValue::String(s) => Ok(s.encode_utf16().flat_map(u16::to_le_bytes).collect()),
         // VARBINARY: the raw bytes, no length prefix.
         SqlValue::Binary(b) => Ok(b.to_vec()),
+        // UNIQUEIDENTIFIER: SQL Server's 16-byte mixed-endian GUID order (first
+        // three groups byte-reversed from the RFC layout, last 8 as-is).
+        #[cfg(feature = "uuid")]
+        SqlValue::Uuid(u) => {
+            let b = u.as_bytes();
+            Ok(vec![
+                b[3], b[2], b[1], b[0], b[5], b[4], b[7], b[6], b[8], b[9], b[10], b[11], b[12],
+                b[13], b[14], b[15],
+            ])
+        }
+        // DATE: 3-byte little-endian count of days since 0001-01-01.
+        // `num_days_from_ce` counts from day 1, so subtract 1.
+        #[cfg(feature = "chrono")]
+        SqlValue::Date(d) => {
+            use chrono::Datelike;
+            let days = (d.num_days_from_ce() - 1) as u32;
+            Ok(days.to_le_bytes()[..3].to_vec())
+        }
         other => Err(EncryptionError::UnsupportedOperation(format!(
             "Always Encrypted parameter encryption is not yet implemented for {}",
             other.type_name()
@@ -784,6 +802,47 @@ mod tests {
             (
                 SqlValue::Double(3.5),
                 "0171611557351FBC4561EBF0B9C98E0DC38AD2BD3E2C1D1E82F185D7E67D0425E506D11DD67BA3EB38F34FB01A8FCEF7E4B9A7256944334A521526613CFF6C8C5F",
+            ),
+        ] {
+            let norm = normalize_for_encryption(&value).unwrap();
+            let cipher = enc
+                .encrypt(&norm, mssql_auth::EncryptionType::Deterministic)
+                .unwrap();
+            assert_eq!(
+                cipher,
+                unhex(reference),
+                "ciphertext for {} must match Microsoft.Data.SqlClient",
+                value.type_name()
+            );
+        }
+    }
+
+    /// UUID and DATE normalization, validated byte-for-byte against
+    /// Microsoft.Data.SqlClient: uuid uses SQL Server's mixed-endian GUID byte
+    /// order, date is a 3-byte little-endian day count since 0001-01-01.
+    #[cfg(all(feature = "always-encrypted", feature = "uuid", feature = "chrono"))]
+    #[test]
+    fn ae_normalization_matches_dotnet_uuid_date() {
+        fn unhex(s: &str) -> Vec<u8> {
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+                .collect()
+        }
+
+        let cek = unhex("9590E42A8A6C8F13B5D09B8D5A128EF8B3A4A10301C7AF24AFC62ED0E02342F7");
+        let enc = AeadEncryptor::new(&cek).unwrap();
+
+        for (value, reference) in [
+            (
+                SqlValue::Uuid(
+                    uuid::Uuid::parse_str("01020304-0506-0708-090a-0b0c0d0e0f10").unwrap(),
+                ),
+                "01F58635AA18692D68BDF551ECDD7AC3A56682D3F91F111F8D8F36D5425C405A8F6AB3ED3C3666444478476BD65FF40DC83F6831F502826AFEEC3116F71A7A2020CCD254F4BA28FCDC0F96BA2E5264AE9E",
+            ),
+            (
+                SqlValue::Date(chrono::NaiveDate::from_ymd_opt(2024, 3, 15).unwrap()),
+                "0188B4F75A1F4BDA53C9CDDC1918C09CB57F68E13F5560F1F1D7168FE70707337B1156A97915B244F3C03D3E7352882A599511BD243471FD03683F371CF44E4B76",
             ),
         ] {
             let norm = normalize_for_encryption(&value).unwrap();

@@ -165,6 +165,14 @@ impl SqlTyped for String {
 impl SqlTyped for Vec<u8> {
     const SQL_TYPE: &'static str = "VARBINARY";
 }
+#[cfg(feature = "uuid")]
+impl SqlTyped for uuid::Uuid {
+    const SQL_TYPE: &'static str = "UNIQUEIDENTIFIER";
+}
+#[cfg(feature = "chrono")]
+impl SqlTyped for chrono::NaiveDate {
+    const SQL_TYPE: &'static str = "DATE";
+}
 
 /// A typed NULL parameter, created with [`null`].
 ///

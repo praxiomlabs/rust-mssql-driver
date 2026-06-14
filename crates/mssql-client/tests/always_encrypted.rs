@@ -1025,6 +1025,79 @@ mod live_server {
         assert_eq!(g_float, 3.5, "FLOAT round-trips");
     }
 
+    /// Write→read round-trip for UNIQUEIDENTIFIER and DATE: each is encrypted on
+    /// INSERT and decrypted back on SELECT, exercising the mixed-endian GUID
+    /// byte order and the 3-byte day-count date form through the live server.
+    #[cfg(all(feature = "uuid", feature = "chrono"))]
+    #[tokio::test]
+    #[ignore = "Requires SQL Server with Always Encrypted"]
+    async fn test_uuid_date_parameter_encryption_round_trip() {
+        let admin_cfg = match admin_config() {
+            Some(c) => c,
+            None => return,
+        };
+        let mut admin = Client::connect(admin_cfg).await.expect("admin connect");
+        let (rsa_key, pem) = fresh_rsa_keypair();
+        let cek = fresh_cek();
+        let enc = "ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = [{CEK}], \
+                   ENCRYPTION_TYPE = DETERMINISTIC, ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256')";
+        let ddl = format!(
+            "CREATE TABLE [{{TABLE}}] ( Id INT NOT NULL PRIMARY KEY, \
+             EncUuid UNIQUEIDENTIFIER {enc} NULL, \
+             EncDate DATE {enc} NULL )"
+        );
+        let fx = setup(&mut admin, &cek, &rsa_key, &ddl).await;
+        drop(admin);
+        let mut client = Client::connect(encrypted_config(&pem).expect("cfg"))
+            .await
+            .expect("ae connect");
+
+        let uuid_val = uuid::Uuid::parse_str("01020304-0506-0708-090a-0b0c0d0e0f10").unwrap();
+        let date_val = chrono::NaiveDate::from_ymd_opt(2024, 3, 15).unwrap();
+        let sql = format!(
+            "INSERT INTO [{}] (Id, EncUuid, EncDate) VALUES (@p1, @p2, @p3)",
+            fx.table_name
+        );
+        let inserted = client.execute(&sql, &[&1i32, &uuid_val, &date_val]).await;
+
+        let read: Result<(uuid::Uuid, chrono::NaiveDate), String> = if inserted.is_ok() {
+            let select = format!(
+                "SELECT EncUuid, EncDate FROM [{}] WHERE Id = @p1",
+                fx.table_name
+            );
+            async {
+                let rows = client
+                    .query(&select, &[&1i32])
+                    .await
+                    .map_err(|e| format!("select: {e}"))?;
+                let mut found = None;
+                for r in rows {
+                    let r = r.map_err(|e| format!("row: {e}"))?;
+                    found = Some((
+                        r.get::<uuid::Uuid>(0)
+                            .map_err(|e| format!("EncUuid: {e}"))?,
+                        r.get::<chrono::NaiveDate>(1)
+                            .map_err(|e| format!("EncDate: {e}"))?,
+                    ));
+                }
+                found.ok_or_else(|| "no row".to_string())
+            }
+            .await
+        } else {
+            Err("insert failed".to_string())
+        };
+
+        let mut admin = Client::connect(admin_config().expect("cfg"))
+            .await
+            .expect("admin reconnect");
+        teardown(&mut admin, &fx).await;
+
+        assert_eq!(inserted.expect("uuid/date insert"), 1, "one row inserted");
+        let (g_uuid, g_date) = read.expect("read back");
+        assert_eq!(g_uuid, uuid_val, "UNIQUEIDENTIFIER round-trips");
+        assert_eq!(g_date, date_val, "DATE round-trips");
+    }
+
     /// Typed NULL (`null::<T>()`) into encrypted columns of several types: the
     /// typed NULL carries its SQL type, so the server accepts it against the
     /// target column (an untyped `Option::None` would be declared `nvarchar(1)`
