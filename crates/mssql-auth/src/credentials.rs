@@ -520,6 +520,23 @@ mod tests {
         }
 
         #[test]
+        fn test_secret_string_zeroize_clears_value() {
+            let mut secret = SecretString::new("super-secret");
+            secret.zeroize();
+            // `zeroize()` is what `ZeroizeOnDrop` runs on drop; it must scrub
+            // the secret. Reading the buffer after the value is dropped would
+            // be UB, so this asserts the scrubbing operation directly.
+            assert!(secret.expose_secret().is_empty());
+        }
+
+        #[test]
+        fn test_secret_string_is_zeroize_on_drop() {
+            // Compile-time guarantee that `SecretString` is scrubbed on drop.
+            fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
+            assert_zeroize_on_drop::<SecretString>();
+        }
+
+        #[test]
         fn test_secret_string_from_string() {
             let secret: SecretString = String::from("password").into();
             assert_eq!(secret.expose_secret(), "password");

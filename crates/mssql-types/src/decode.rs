@@ -1085,6 +1085,29 @@ mod tests {
         assert_eq!(result, SqlValue::Int(42));
     }
 
+    /// The mixed-endian GUID encoding must round-trip: encode then decode
+    /// returns the original UUID. A UUID with all-distinct bytes catches an
+    /// asymmetric swap. `decode_guid` previously had no unit coverage — only
+    /// live round-trips exercised it.
+    #[cfg(feature = "uuid")]
+    #[test]
+    fn test_guid_encode_decode_roundtrip() {
+        use crate::encode::encode_uuid;
+        use bytes::BufMut;
+
+        let original = uuid::Uuid::parse_str("00112233-4455-6677-8899-aabbccddeeff").unwrap();
+        let mut encoded = bytes::BytesMut::new();
+        encode_uuid(original, &mut encoded);
+        assert_eq!(encoded.len(), 16);
+
+        // `decode_guid` expects a length-prefixed buffer (1-byte length = 16).
+        let mut framed = bytes::BytesMut::new();
+        framed.put_u8(16);
+        framed.put_slice(&encoded);
+        let decoded = decode_guid(&mut framed.freeze()).unwrap();
+        assert_eq!(decoded, SqlValue::Uuid(original));
+    }
+
     #[cfg(feature = "chrono")]
     #[test]
     fn hostile_datetime_days_overflow_is_error_not_panic() {
