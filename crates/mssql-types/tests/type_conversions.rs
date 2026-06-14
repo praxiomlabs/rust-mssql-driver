@@ -433,19 +433,24 @@ mod error_cases {
     }
 
     #[test]
-    fn test_int_to_string() {
-        // This should work as a string representation
+    fn test_int_to_string_fails() {
+        // `String::from_sql` accepts only `String`/`Xml` values; an integer is
+        // a type mismatch, not an implicit string coercion.
         let int_val = SqlValue::Int(42);
-        let _result: Result<String, _> = String::from_sql(&int_val);
-        // May succeed or fail depending on implementation
-        // Document expected behavior here
+        let result: Result<String, _> = String::from_sql(&int_val);
+        assert!(
+            result.is_err(),
+            "Int -> String must be a TypeMismatch, not a coercion"
+        );
     }
 
     #[test]
     fn test_binary_to_string_fails() {
         let bin_val = SqlValue::Binary(Bytes::from_static(&[0xFF, 0xFE]));
-        let _result: Result<String, _> = String::from_sql(&bin_val);
-        // Binary to string should fail (or return hex?)
-        // Document expected behavior
+        let result: Result<String, _> = String::from_sql(&bin_val);
+        assert!(
+            result.is_err(),
+            "Binary -> String must fail (no implicit hex/UTF-8 coercion)"
+        );
     }
 }

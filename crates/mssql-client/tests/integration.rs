@@ -102,14 +102,16 @@ async fn test_connection_to_nonexistent_database() {
     );
 
     let config = Config::from_connection_string(&conn_str).expect("Config should parse");
-    let result = Client::connect(config).await;
 
-    // Should either fail or connect to master (depending on server config)
-    // Either way, the connection attempt should not panic
-    if let Err(e) = result {
-        // Expected: database doesn't exist error
-        println!("Expected error: {e:?}");
-    }
+    // Connecting with a nonexistent default database must fail at login with
+    // SQL Server error 4060 ("Cannot open database ... requested by the login").
+    let err = Client::connect(config)
+        .await
+        .expect_err("connecting to a nonexistent database must fail at login");
+    assert!(
+        err.is_server_error(4060),
+        "expected SQL Server error 4060 (cannot open database), got: {err:?}"
+    );
 }
 
 // =============================================================================
@@ -1627,30 +1629,36 @@ async fn test_connection_with_encryption_false() {
 
 #[tokio::test]
 #[ignore = "Requires SQL Server 2022+ with TDS 8.0 support"]
-async fn test_tds_8_strict_mode() {
-    // TDS 8.0 strict mode - TLS handshake before any TDS traffic
-    // This requires SQL Server 2022+ configured for strict encryption
-    let config = get_config_with_encrypt("strict").expect("SQL Server config required");
+async fn test_tds_8_strict_mode_rejects_untrusted_certificate() {
+    // TDS 8.0 strict mode does the TLS handshake before any TDS traffic and,
+    // unlike Encrypt=true, forbids TrustServerCertificate: the server cert MUST
+    // validate against a trusted root. The test/CI container presents a
+    // self-signed cert that is in no trust store, so a strict connection must be
+    // rejected with a TLS certificate-validation error — proving the strict path
+    // performs real validation rather than silently downgrading. (A *successful*
+    // strict handshake is covered at the wire level by the TDS 8.0 ALPN test in
+    // mssql-testing's mock_fidelity suite.)
+    let host = std::env::var("MSSQL_HOST").expect("SQL Server config required");
+    let port = std::env::var("MSSQL_PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(1433);
+    let user = std::env::var("MSSQL_USER").unwrap_or_else(|_| "sa".into());
+    let password = std::env::var("MSSQL_PASSWORD").unwrap_or_else(|_| "MyStrongPassw0rd".into());
 
-    // Note: This test may fail if SQL Server is not configured for TDS 8.0
-    // TDS 8.0 requires server-side configuration changes
-    match Client::connect(config).await {
-        Ok(client) => {
-            // If connection succeeds, TDS 8.0 is working
-            let mut client = client;
-            let rows = client
-                .query("SELECT 'TDS 8.0' AS protocol_mode", &[])
-                .await
-                .expect("Query failed in TDS 8.0 mode");
-            assert_eq!(rows.len(), 1);
-            client.close().await.expect("Failed to close");
-        }
-        Err(e) => {
-            // Expected if server doesn't support TDS 8.0 strict mode
-            // The connection may fail with "strict encryption mode required"
-            println!("TDS 8.0 strict mode not available: {e:?}");
-        }
-    }
+    // Encrypt=strict WITHOUT TrustServerCertificate forces real cert validation.
+    let conn_str = format!(
+        "Server={host},{port};Database=master;User Id={user};Password={password};Encrypt=strict"
+    );
+    let config = Config::from_connection_string(&conn_str).expect("config parses");
+
+    let err = Client::connect(config)
+        .await
+        .expect_err("strict mode must reject the untrusted self-signed server certificate");
+    assert!(
+        err.is_tls_error(),
+        "strict mode against an untrusted cert must fail with a TLS error, got: {err:?}"
+    );
 }
 
 #[tokio::test]

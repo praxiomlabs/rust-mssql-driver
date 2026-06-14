@@ -7,8 +7,9 @@
 //! port and counting how many TCP connections each listener receives when
 //! the client connects to `localhost`.
 //!
-//! These run in normal CI; no live SQL Server required. They self-skip when
-//! `localhost` does not resolve dual-stack or IPv6 loopback is unavailable.
+//! These run in normal CI; no live SQL Server required. They require a
+//! dual-stack loopback (`127.0.0.1` + `[::1]`) and fail loudly if the
+//! environment lacks one, rather than passing silently.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -50,10 +51,10 @@ fn localhost_config(port: u16, multi_subnet: bool) -> Config {
 /// address (the race), not walk them sequentially.
 #[tokio::test]
 async fn test_multi_subnet_failover_races_all_resolved_addresses() {
-    let Some((v4, v6)) = dual_stack_mocks().await else {
-        eprintln!("skipping: localhost is not dual-stack in this environment");
-        return;
-    };
+    let (v4, v6) = dual_stack_mocks().await.expect(
+        "this test requires a dual-stack loopback (127.0.0.1 + [::1]); the \
+         environment does not provide one",
+    );
 
     let client = Client::connect(localhost_config(v4.port(), true))
         .await
@@ -87,10 +88,10 @@ async fn test_multi_subnet_failover_races_all_resolved_addresses() {
 /// no speculative connections to the other stack.
 #[tokio::test]
 async fn test_sequential_connect_uses_single_address() {
-    let Some((v4, v6)) = dual_stack_mocks().await else {
-        eprintln!("skipping: localhost is not dual-stack in this environment");
-        return;
-    };
+    let (v4, v6) = dual_stack_mocks().await.expect(
+        "this test requires a dual-stack loopback (127.0.0.1 + [::1]); the \
+         environment does not provide one",
+    );
 
     let client = Client::connect(localhost_config(v4.port(), false))
         .await

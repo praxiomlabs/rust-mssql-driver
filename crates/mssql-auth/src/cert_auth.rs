@@ -374,13 +374,6 @@ mod tests {
         assert!(!is_base64(&[0x00, 0x01, 0x02, 0x03])); // Binary data
     }
 
-    #[test]
-    fn test_debug_redacts_credentials() {
-        // We can't easily create a CertificateAuth without valid creds,
-        // but we can verify the Debug implementation is defined
-        // and would redact credentials
-    }
-
     #[tokio::test]
     #[ignore = "Requires Azure Service Principal with certificate"]
     async fn test_certificate_auth() {
