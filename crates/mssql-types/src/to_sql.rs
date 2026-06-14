@@ -128,6 +128,76 @@ impl ToSql for Vec<u8> {
     }
 }
 
+/// Associates a Rust type with its SQL type name so a typed NULL can be
+/// declared without a value (see [`null`]).
+///
+/// `SQL_TYPE` must match what [`ToSql::sql_type`] returns for a value of the
+/// same type.
+pub trait SqlTyped {
+    /// The SQL type name for this Rust type.
+    const SQL_TYPE: &'static str;
+}
+
+impl SqlTyped for bool {
+    const SQL_TYPE: &'static str = "BIT";
+}
+impl SqlTyped for u8 {
+    const SQL_TYPE: &'static str = "TINYINT";
+}
+impl SqlTyped for i16 {
+    const SQL_TYPE: &'static str = "SMALLINT";
+}
+impl SqlTyped for i32 {
+    const SQL_TYPE: &'static str = "INT";
+}
+impl SqlTyped for i64 {
+    const SQL_TYPE: &'static str = "BIGINT";
+}
+impl SqlTyped for f32 {
+    const SQL_TYPE: &'static str = "REAL";
+}
+impl SqlTyped for f64 {
+    const SQL_TYPE: &'static str = "FLOAT";
+}
+impl SqlTyped for String {
+    const SQL_TYPE: &'static str = "NVARCHAR";
+}
+impl SqlTyped for Vec<u8> {
+    const SQL_TYPE: &'static str = "VARBINARY";
+}
+
+/// A typed NULL parameter, created with [`null`].
+///
+/// Unlike `Option::<T>::None`, which produces an untyped NULL declared as
+/// `nvarchar(1)`, this carries its SQL type. That matters for Always Encrypted
+/// columns, whose strict typing rejects an untyped NULL bound to, for example,
+/// an `int` or `varbinary` column.
+#[derive(Debug, Clone, Copy)]
+pub struct TypedNull {
+    sql_type: &'static str,
+}
+
+impl ToSql for TypedNull {
+    fn to_sql(&self) -> Result<SqlValue, TypeError> {
+        Ok(SqlValue::Null)
+    }
+
+    fn sql_type(&self) -> &'static str {
+        self.sql_type
+    }
+}
+
+/// Create a typed NULL parameter for SQL type `T`, e.g. `null::<i32>()`.
+///
+/// Use this in place of `Option::<T>::None` when binding NULL to a strongly
+/// typed column — required for an Always Encrypted column of a non-string type.
+#[must_use]
+pub fn null<T: SqlTyped>() -> TypedNull {
+    TypedNull {
+        sql_type: T::SQL_TYPE,
+    }
+}
+
 impl<T: ToSql> ToSql for Option<T> {
     fn to_sql(&self) -> Result<SqlValue, TypeError> {
         match self {
@@ -287,6 +357,17 @@ mod tests {
         let value: i32 = 42;
         assert_eq!(value.to_sql().unwrap(), SqlValue::Int(42));
         assert_eq!(value.sql_type(), "INT");
+    }
+
+    #[test]
+    fn test_typed_null_carries_type() {
+        // A typed NULL is a NULL value that still reports its SQL type, and that
+        // type matches what a value of the same Rust type reports.
+        assert_eq!(null::<i32>().to_sql().unwrap(), SqlValue::Null);
+        assert_eq!(null::<i32>().sql_type(), 42i32.sql_type());
+        assert_eq!(null::<i64>().sql_type(), "BIGINT");
+        assert_eq!(null::<Vec<u8>>().sql_type(), "VARBINARY");
+        assert_eq!(null::<String>().sql_type(), "NVARCHAR");
     }
 
     #[test]

@@ -154,6 +154,26 @@ enum ConnectionHandle {
     Plain(Connection<TcpStream>),
 }
 
+/// The parameter `TypeInfo` to declare a typed NULL ([`crate::null`]) with, from
+/// its [`crate::ToSql::sql_type`] name. Returns `None` for an untyped NULL
+/// (`Option::None`, type `"NULL"`), which falls back to the default param type.
+#[cfg(feature = "always-encrypted")]
+fn null_param_type_info(sql_type: &str) -> Option<tds_protocol::rpc::TypeInfo> {
+    use tds_protocol::rpc::TypeInfo;
+    Some(match sql_type {
+        "BIT" => TypeInfo::bit(),
+        "TINYINT" => TypeInfo::tinyint(),
+        "SMALLINT" => TypeInfo::smallint(),
+        "INT" => TypeInfo::int(),
+        "BIGINT" => TypeInfo::bigint(),
+        "REAL" => TypeInfo::real(),
+        "FLOAT" => TypeInfo::float(),
+        "NVARCHAR" => TypeInfo::nvarchar(1),
+        "VARBINARY" => TypeInfo::varbinary(1),
+        _ => return None,
+    })
+}
+
 // Private helper methods available to all connection states
 impl<S: ConnectionState> Client<S> {
     /// The default per-command deadline from `command_timeout`.
@@ -468,12 +488,14 @@ impl<S: ConnectionState> Client<S> {
         for (i, p) in params.iter().enumerate() {
             let name = format!("@p{}", i + 1);
             let value = p.to_sql()?;
-            plaintext.push(Self::sql_value_to_rpc_param(
-                &name,
-                &value,
-                send_unicode,
-                collation.as_ref(),
-            )?);
+            // A typed NULL (e.g. `null::<i32>()`) is declared by its SQL type so
+            // describe accepts it against the target encrypted column; an untyped
+            // NULL falls back to the default in `sql_value_to_rpc_param`.
+            let rpc_param = match (&value, null_param_type_info(p.sql_type())) {
+                (mssql_types::SqlValue::Null, Some(type_info)) => RpcParam::null(&name, type_info),
+                _ => Self::sql_value_to_rpc_param(&name, &value, send_unicode, collation.as_ref())?,
+            };
+            plaintext.push(rpc_param);
             values.push(value);
         }
 
@@ -503,10 +525,6 @@ impl<S: ConnectionState> Client<S> {
                     param.name, crypto.cek_ordinal
                 ))
             })?;
-            let normalized = crate::encryption::normalize_for_encryption(&value)?;
-            let ciphertext = ctx
-                .encrypt_value(&normalized, entry, crypto.encryption_type)
-                .await?;
             let metadata = tds_protocol::rpc::EncryptedParamMetadata {
                 base_type_info: param.type_info.clone(),
                 algorithm_id: crypto.algorithm_id,
@@ -517,6 +535,17 @@ impl<S: ConnectionState> Client<S> {
                 cek_md_version: entry.cek_md_version,
                 normalization_rule_version: crypto.normalization_rule_version,
             };
+            // A NULL value bound to an encrypted column is sent as an encrypted
+            // NULL (the server rejects a plaintext parameter for an encrypted
+            // column); there is nothing to encrypt.
+            if matches!(value, mssql_types::SqlValue::Null) {
+                final_params.push(RpcParam::encrypted_null(param.name, metadata));
+                continue;
+            }
+            let normalized = crate::encryption::normalize_for_encryption(&value)?;
+            let ciphertext = ctx
+                .encrypt_value(&normalized, entry, crypto.encryption_type)
+                .await?;
             final_params.push(RpcParam::encrypted(
                 param.name,
                 bytes::Bytes::from(ciphertext),

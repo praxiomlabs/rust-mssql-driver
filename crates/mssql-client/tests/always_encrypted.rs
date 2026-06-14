@@ -1025,6 +1025,105 @@ mod live_server {
         assert_eq!(g_float, 3.5, "FLOAT round-trips");
     }
 
+    /// Typed NULL (`null::<T>()`) into encrypted columns of several types: the
+    /// typed NULL carries its SQL type, so the server accepts it against the
+    /// target column (an untyped `Option::None` would be declared `nvarchar(1)`
+    /// and rejected against, e.g., the `int` or `varbinary` columns). Each
+    /// column reads back as NULL.
+    #[tokio::test]
+    #[ignore = "Requires SQL Server with Always Encrypted"]
+    async fn test_typed_null_encrypted_param_round_trip() {
+        use mssql_client::null;
+
+        let admin_cfg = match admin_config() {
+            Some(c) => c,
+            None => return,
+        };
+        let mut admin = Client::connect(admin_cfg).await.expect("admin connect");
+        let (rsa_key, pem) = fresh_rsa_keypair();
+        let cek = fresh_cek();
+        let enc = "ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = [{CEK}], \
+                   ENCRYPTION_TYPE = DETERMINISTIC, ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256')";
+        let ddl = format!(
+            "CREATE TABLE [{{TABLE}}] ( Id INT NOT NULL PRIMARY KEY, \
+             EncInt INT {enc} NULL, \
+             EncBig BIGINT {enc} NULL, \
+             EncData VARBINARY(50) {enc} NULL, \
+             EncName NVARCHAR(50) COLLATE Latin1_General_BIN2 {enc} NULL )"
+        );
+        let fx = setup(&mut admin, &cek, &rsa_key, &ddl).await;
+        drop(admin);
+        let mut client = Client::connect(encrypted_config(&pem).expect("cfg"))
+            .await
+            .expect("ae connect");
+
+        let sql = format!(
+            "INSERT INTO [{}] (Id, EncInt, EncBig, EncData, EncName) \
+             VALUES (@p1, @p2, @p3, @p4, @p5)",
+            fx.table_name
+        );
+        let inserted = client
+            .execute(
+                &sql,
+                &[
+                    &1i32,
+                    &null::<i32>(),
+                    &null::<i64>(),
+                    &null::<Vec<u8>>(),
+                    &null::<String>(),
+                ],
+            )
+            .await;
+
+        // Each flag is whether that column read back as NULL.
+        let read: Result<(bool, bool, bool, bool), String> = if inserted.is_ok() {
+            let select = format!(
+                "SELECT EncInt, EncBig, EncData, EncName FROM [{}] WHERE Id = @p1",
+                fx.table_name
+            );
+            async {
+                let rows = client
+                    .query(&select, &[&1i32])
+                    .await
+                    .map_err(|e| format!("select: {e}"))?;
+                let mut found = None;
+                for r in rows {
+                    let r = r.map_err(|e| format!("row: {e}"))?;
+                    found = Some((
+                        r.try_get::<i32>(0)
+                            .map_err(|e| format!("EncInt: {e}"))?
+                            .is_none(),
+                        r.try_get::<i64>(1)
+                            .map_err(|e| format!("EncBig: {e}"))?
+                            .is_none(),
+                        r.try_get::<Vec<u8>>(2)
+                            .map_err(|e| format!("EncData: {e}"))?
+                            .is_none(),
+                        r.try_get::<String>(3)
+                            .map_err(|e| format!("EncName: {e}"))?
+                            .is_none(),
+                    ));
+                }
+                found.ok_or_else(|| "no row".to_string())
+            }
+            .await
+        } else {
+            Err("insert failed".to_string())
+        };
+
+        let mut admin = Client::connect(admin_config().expect("cfg"))
+            .await
+            .expect("admin reconnect");
+        teardown(&mut admin, &fx).await;
+
+        assert_eq!(inserted.expect("typed-NULL insert"), 1, "one row inserted");
+        let (i, b, d, n) = read.expect("read back");
+        assert!(i, "encrypted INT NULL round-trips");
+        assert!(b, "encrypted BIGINT NULL round-trips");
+        assert!(d, "encrypted VARBINARY NULL round-trips");
+        assert!(n, "encrypted NVARCHAR NULL round-trips");
+    }
+
     /// Validate the Always Encrypted metadata path end-to-end against a live
     /// server. A row with NULL in the encrypted column is the only value we
     /// can populate without parameter encryption (any non-NULL plaintext
