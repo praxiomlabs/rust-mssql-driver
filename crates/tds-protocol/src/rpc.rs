@@ -619,6 +619,24 @@ impl RpcParam {
         }
     }
 
+    /// Create a NULL Always Encrypted parameter.
+    ///
+    /// The server rejects a plaintext parameter bound to an encrypted column,
+    /// even for NULL, so a NULL value is still sent encrypted: `BIGVARBINARY(max)`
+    /// with the `fEncrypted` status bit, a NULL value, and the cipher metadata.
+    pub fn encrypted_null(name: impl Into<String>, metadata: EncryptedParamMetadata) -> Self {
+        Self {
+            name: name.into(),
+            flags: ParamFlags {
+                encrypted: true,
+                ..ParamFlags::default()
+            },
+            type_info: TypeInfo::varbinary_max(),
+            value: None,
+            crypto_metadata: Some(metadata),
+        }
+    }
+
     /// Create an INT parameter.
     pub fn int(name: impl Into<String>, value: i32) -> Self {
         let mut buf = BytesMut::with_capacity(4);
