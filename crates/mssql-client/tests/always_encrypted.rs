@@ -1098,12 +1098,77 @@ mod live_server {
         assert_eq!(g_date, date_val, "DATE round-trips");
     }
 
+    /// Write→read round-trip for a DECIMAL column: a `numeric(value, precision,
+    /// scale)` parameter declares `decimal(p, s)` so describe matches the
+    /// encrypted column exactly, then the value is encrypted on INSERT and
+    /// decrypted back on SELECT.
+    #[cfg(feature = "decimal")]
+    #[tokio::test]
+    #[ignore = "Requires SQL Server with Always Encrypted"]
+    async fn test_decimal_parameter_encryption_round_trip() {
+        let admin_cfg = match admin_config() {
+            Some(c) => c,
+            None => return,
+        };
+        let mut admin = Client::connect(admin_cfg).await.expect("admin connect");
+        let (rsa_key, pem) = fresh_rsa_keypair();
+        let cek = fresh_cek();
+        let enc = "ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = [{CEK}], \
+                   ENCRYPTION_TYPE = DETERMINISTIC, ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256')";
+        let ddl = format!(
+            "CREATE TABLE [{{TABLE}}] ( Id INT NOT NULL PRIMARY KEY, \
+             EncDecimal DECIMAL(18,4) {enc} NULL )"
+        );
+        let fx = setup(&mut admin, &cek, &rsa_key, &ddl).await;
+        drop(admin);
+        let mut client = Client::connect(encrypted_config(&pem).expect("cfg"))
+            .await
+            .expect("ae connect");
+
+        // Scale 2 input declared as decimal(18,4): exercises the rescale in
+        // `numeric` (a value normalized at the wrong scale would decrypt wrong).
+        let value = rust_decimal::Decimal::new(1_234_567, 2); // 12345.67
+        let sql = format!(
+            "INSERT INTO [{}] (Id, EncDecimal) VALUES (@p1, @p2)",
+            fx.table_name
+        );
+        let inserted = client
+            .execute(&sql, &[&1i32, &mssql_client::numeric(value, 18, 4)])
+            .await;
+
+        let read: Result<rust_decimal::Decimal, String> = if inserted.is_ok() {
+            let select = format!("SELECT EncDecimal FROM [{}] WHERE Id = @p1", fx.table_name);
+            async {
+                let rows = client
+                    .query(&select, &[&1i32])
+                    .await
+                    .map_err(|e| format!("select: {e}"))?;
+                let mut found = None;
+                for r in rows {
+                    let r = r.map_err(|e| format!("row: {e}"))?;
+                    found = Some(
+                        r.get::<rust_decimal::Decimal>(0)
+                            .map_err(|e| format!("EncDecimal: {e}"))?,
+                    );
+                }
+                found.ok_or_else(|| "no row".to_string())
+            }
+            .await
+        } else {
+            Err("insert failed".to_string())
+        };
+
+        let mut admin = Client::connect(admin_config().expect("cfg"))
+            .await
+            .expect("admin reconnect");
+        teardown(&mut admin, &fx).await;
+
+        assert_eq!(inserted.expect("decimal insert"), 1, "one row inserted");
+        assert_eq!(read.expect("read back"), value, "DECIMAL round-trips");
+    }
+
     /// Write→read round-trip for MONEY and SMALLMONEY: each is encrypted on
-    /// INSERT and decrypted back on SELECT as a scale-4 decimal. (DECIMAL value
-    /// encryption is implemented and byte-exact-validated, but binding a decimal
-    /// parameter to an encrypted column also needs its precision/scale to match
-    /// the column — a typed-parameter follow-up — so it is not round-tripped
-    /// here yet.)
+    /// INSERT and decrypted back on SELECT as a scale-4 decimal.
     #[cfg(feature = "decimal")]
     #[tokio::test]
     #[ignore = "Requires SQL Server with Always Encrypted"]

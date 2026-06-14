@@ -58,12 +58,16 @@
 //!
 //! Reads are transparent across `query`, `call_procedure`, the procedure
 //! builder, and multi-result queries. Parameter (write) encryption is wired
-//! into parameterized `query`/`execute` for `int`, `nvarchar`, and `varbinary`
-//! parameters: with `Column Encryption Setting=Enabled` the driver describes
-//! the parameters (`sp_describe_parameter_encryption`), encrypts those bound to
-//! encrypted columns client-side, and sends them as encrypted RPC parameters
-//! (deterministic and randomized). Other parameter types are not yet supported
-//! and return an error rather than sending plaintext.
+//! into parameterized `query`/`execute` for the common scalar types — `int`,
+//! `tinyint`, `smallint`, `bigint`, `bit`, `real`, `float`, `nvarchar`,
+//! `varbinary`, `uniqueidentifier`, `date`, `money`, `smallmoney`, `decimal`
+//! (via `numeric(value, precision, scale)`), and typed `NULL` (via
+//! `null::<T>()`): with `Column Encryption Setting=Enabled` the
+//! driver describes the parameters (`sp_describe_parameter_encryption`),
+//! encrypts those bound to encrypted columns client-side, and sends them as
+//! encrypted RPC parameters (deterministic and randomized). The remaining
+//! temporal and fixed-width types are not yet supported and return an error
+//! rather than sending plaintext.
 //!
 //! ## Security Model
 //!

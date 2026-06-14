@@ -495,7 +495,22 @@ impl<S: ConnectionState> Client<S> {
             // NULL falls back to the default in `sql_value_to_rpc_param`.
             let rpc_param = match (&value, null_param_type_info(p.sql_type())) {
                 (mssql_types::SqlValue::Null, Some(type_info)) => RpcParam::null(&name, type_info),
-                _ => Self::sql_value_to_rpc_param(&name, &value, send_unicode, collation.as_ref())?,
+                _ => {
+                    let mut param = Self::sql_value_to_rpc_param(
+                        &name,
+                        &value,
+                        send_unicode,
+                        collation.as_ref(),
+                    )?;
+                    // `numeric(v, p, s)` declares an explicit `decimal(p, s)` so
+                    // describe matches an encrypted decimal column exactly — the
+                    // value alone conveys scale but not precision.
+                    if let Some(d) = p.decimal_param_info() {
+                        param.type_info =
+                            tds_protocol::rpc::TypeInfo::decimal(d.precision, d.scale);
+                    }
+                    param
+                }
             };
             plaintext.push(rpc_param);
             values.push(value);
