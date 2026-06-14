@@ -1,7 +1,7 @@
 # Architectural Reference: Rust MS SQL Driver
 
 **Version:** 1.9.0
-**Status:** Design Complete
+**Status:** Implemented and maintained (tracks the released `0.x` crates)
 **Target Protocol:** MS-TDS 7.3 – 8.0 (SQL Server 2008 – 2025)
 **Toolchain Standard:** Rust 2024 Edition (v1.85+, released February 20, 2025)
 **MSRV Policy:** Rust 1.88.0 (6-month rolling window aligned with Tokio's policy)
