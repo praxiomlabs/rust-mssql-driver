@@ -46,7 +46,9 @@ pub use decode::{Collation, TdsDecode, TypeInfo, decode_utf16_string, decode_val
 pub use encode::{TdsEncode, encode_utf16_string};
 pub use error::TypeError;
 pub use from_sql::FromSql;
-pub use to_sql::{SqlTyped, ToSql, TypedNull, null};
+pub use to_sql::{DecimalParamInfo, SqlTyped, ToSql, TypedNull, null};
+#[cfg(feature = "decimal")]
+pub use to_sql::{Numeric, numeric};
 pub use tvp::{TvpColumnDef, TvpColumnType, TvpData, TvpError};
 #[cfg(feature = "chrono")]
 pub use value::SmallDateTime;

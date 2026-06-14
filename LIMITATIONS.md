@@ -221,24 +221,28 @@ within range, to `FLOAT` if approximate semantics are acceptable, or to
 ### Always Encrypted Parameter Encryption (Write Path)
 
 **Status:** Read path fully supported; parameter (write) encryption supported
-for `int`, `nvarchar`, and `varbinary`
+for the common scalar types (see below)
 
 Transparent decryption of encrypted columns works end-to-end: login-time
 feature negotiation, `ColMetaData` / `CekTable` / `CryptoMetadata` parsing,
 async CEK resolution through key store providers, and AEAD_AES_256_CBC_HMAC_SHA256
 decryption in the row hot path.
 
-Parameter (write) encryption is implemented for `int`, `nvarchar`, and
-`varbinary`. With `Column Encryption Setting=Enabled`, a parameterized query or
-`execute` automatically describes its parameters
+Parameter (write) encryption is implemented for `int`, `tinyint`, `smallint`,
+`bigint`, `bit`, `real`, `float`, `nvarchar`, `varbinary`, `uniqueidentifier`,
+`date`, `money`, `smallmoney`, `decimal` (via `numeric(value, precision, scale)`),
+and typed `NULL` (via `null::<T>()`). With `Column Encryption Setting=Enabled`, a
+parameterized query or `execute` automatically describes its parameters
 (`sp_describe_parameter_encryption`), encrypts those bound to encrypted columns
 client-side, and sends them as encrypted RPC parameters. Both deterministic and
 randomized encryption are supported.
 
 Not yet implemented:
-- Parameter encryption for other column types (e.g. `bigint`, `decimal`,
-  `datetime2`, `uniqueidentifier`): these return a clear "not yet implemented"
-  error rather than sending plaintext.
+- Parameter encryption for `datetime`, `datetime2`, `time`, `datetimeoffset`,
+  `char`, `nchar`, and `binary`: these require a typed-parameter API (the
+  declared precision/scale/width must match the encrypted column exactly) and
+  return a clear "not yet implemented" error rather than sending plaintext.
+  Tracked in [#234](https://github.com/praxiomlabs/rust-mssql-driver/issues/234).
 - Secure enclave operations.
 - Caching of `sp_describe_parameter_encryption`: each parameterized statement
   currently incurs one extra describe round-trip when Always Encrypted is

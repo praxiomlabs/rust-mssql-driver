@@ -16,6 +16,24 @@ pub trait ToSql {
 
     /// Get the SQL type name for this value.
     fn sql_type(&self) -> &'static str;
+
+    /// Explicit decimal precision and scale, when the value alone cannot convey
+    /// it. `None` for every type except [`Numeric`] (created with [`numeric`]),
+    /// which uses it to declare `decimal(precision, scale)` for an Always
+    /// Encrypted column whose declared precision must match exactly.
+    fn decimal_param_info(&self) -> Option<DecimalParamInfo> {
+        None
+    }
+}
+
+/// Explicit precision and scale for a `decimal`/`numeric` parameter (see
+/// [`numeric`]).
+#[derive(Debug, Clone, Copy)]
+pub struct DecimalParamInfo {
+    /// Total number of significant digits (1–38).
+    pub precision: u8,
+    /// Number of digits to the right of the decimal point.
+    pub scale: u8,
 }
 
 impl ToSql for bool {
@@ -220,6 +238,10 @@ impl<T: ToSql> ToSql for Option<T> {
             None => "NULL",
         }
     }
+
+    fn decimal_param_info(&self) -> Option<DecimalParamInfo> {
+        self.as_ref().and_then(ToSql::decimal_param_info)
+    }
 }
 
 impl<T: ToSql + ?Sized> ToSql for &T {
@@ -229,6 +251,10 @@ impl<T: ToSql + ?Sized> ToSql for &T {
 
     fn sql_type(&self) -> &'static str {
         (*self).sql_type()
+    }
+
+    fn decimal_param_info(&self) -> Option<DecimalParamInfo> {
+        (*self).decimal_param_info()
     }
 }
 
@@ -251,6 +277,55 @@ impl ToSql for rust_decimal::Decimal {
 
     fn sql_type(&self) -> &'static str {
         "DECIMAL"
+    }
+}
+
+/// A `decimal`/`numeric` parameter with explicit precision and scale.
+///
+/// A plain [`rust_decimal::Decimal`] carries scale but not precision, so it
+/// cannot be matched against an Always Encrypted `decimal` column, whose
+/// declared `decimal(precision, scale)` must match the column exactly.
+/// Construct one with [`numeric`].
+#[cfg(feature = "decimal")]
+#[derive(Debug, Clone, Copy)]
+pub struct Numeric {
+    value: rust_decimal::Decimal,
+    precision: u8,
+    scale: u8,
+}
+
+/// Create a `decimal`/`numeric` parameter with explicit precision and scale.
+///
+/// Required when binding to an Always Encrypted `decimal` column, whose declared
+/// `decimal(precision, scale)` must match the column exactly. The value is
+/// rescaled to `scale`.
+#[cfg(feature = "decimal")]
+#[must_use]
+pub fn numeric(value: rust_decimal::Decimal, precision: u8, scale: u8) -> Numeric {
+    Numeric {
+        value,
+        precision,
+        scale,
+    }
+}
+
+#[cfg(feature = "decimal")]
+impl ToSql for Numeric {
+    fn to_sql(&self) -> Result<SqlValue, TypeError> {
+        let mut value = self.value;
+        value.rescale(u32::from(self.scale));
+        Ok(SqlValue::Decimal(value))
+    }
+
+    fn sql_type(&self) -> &'static str {
+        "DECIMAL"
+    }
+
+    fn decimal_param_info(&self) -> Option<DecimalParamInfo> {
+        Some(DecimalParamInfo {
+            precision: self.precision,
+            scale: self.scale,
+        })
     }
 }
 

@@ -113,9 +113,9 @@ pub use tds_protocol::version::TdsVersion;
 pub use mssql_auth::{SecretString, SecureCredentials};
 #[cfg(feature = "chrono")]
 pub use mssql_types::SmallDateTime;
-pub use mssql_types::{FromSql, SqlTyped, SqlValue, ToSql, TypedNull, null};
+pub use mssql_types::{DecimalParamInfo, FromSql, SqlTyped, SqlValue, ToSql, TypedNull, null};
 #[cfg(feature = "decimal")]
-pub use mssql_types::{Money, SmallMoney};
+pub use mssql_types::{Money, Numeric, SmallMoney, numeric};
 pub use procedure::ProcedureBuilder;
 pub use query::{Query, in_params};
 pub use row::{Column, Row};
