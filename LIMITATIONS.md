@@ -237,6 +237,13 @@ parameterized query or `execute` automatically describes its parameters
 client-side, and sends them as encrypted RPC parameters. Both deterministic and
 randomized encryption are supported.
 
+Bind a `decimal` parameter to an encrypted column with `numeric(value, precision,
+scale)`, not a plain `Decimal`. An encrypted `decimal` column requires the declared
+precision and scale to match exactly; a plain `Decimal` carries no precision, so it
+is rejected with `Operand type clash` (Msg 206). `numeric` also rejects, client-side,
+a value whose significant digits exceed the declared precision (the server cannot
+range-check an encrypted value).
+
 Not yet implemented:
 - Parameter encryption for `datetime`, `datetime2`, `time`, `datetimeoffset`,
   `char`, `nchar`, and `binary`: these require a typed-parameter API (the
@@ -396,4 +403,4 @@ If you need a feature not listed here:
 
 ---
 
-*Last updated: April 2026 (v0.10.0)*
+*Last updated: June 2026.*

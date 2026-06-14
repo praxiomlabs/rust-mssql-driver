@@ -297,8 +297,14 @@ pub struct Numeric {
 /// Create a `decimal`/`numeric` parameter with explicit precision and scale.
 ///
 /// Required when binding to an Always Encrypted `decimal` column, whose declared
-/// `decimal(precision, scale)` must match the column exactly. The value is
-/// rescaled to `scale`.
+/// `decimal(precision, scale)` must match the column exactly.
+///
+/// The value is rescaled to `scale`, which **rounds** when the value has more
+/// fractional digits than `scale` (e.g. `numeric(dec!(12.999), 18, 2)` stores
+/// `13.00`). If the rescaled value has more significant digits than `precision`,
+/// [`ToSql::to_sql`] returns an error rather than silently storing a value
+/// outside the column's domain — the server cannot range-check an encrypted
+/// value, so the client enforces it.
 #[cfg(feature = "decimal")]
 #[must_use]
 pub fn numeric(value: rust_decimal::Decimal, precision: u8, scale: u8) -> Numeric {
@@ -314,6 +320,24 @@ impl ToSql for Numeric {
     fn to_sql(&self) -> Result<SqlValue, TypeError> {
         let mut value = self.value;
         value.rescale(u32::from(self.scale));
+        // The server cannot range-check an encrypted value, so a value that
+        // exceeds the declared precision must be rejected client-side rather
+        // than silently stored out of the column's domain (matches the
+        // Always Encrypted behaviour of Microsoft.Data.SqlClient). After
+        // rescaling, the magnitude bound `|mantissa| < 10^precision` is exactly
+        // the `decimal(precision, scale)` domain.
+        let mantissa = value.mantissa().unsigned_abs();
+        let digits = if mantissa == 0 {
+            0
+        } else {
+            mantissa.ilog10() + 1
+        };
+        if digits > u32::from(self.precision) {
+            return Err(TypeError::InvalidDecimal(format!(
+                "value has {digits} significant digits, which exceeds the declared precision {}",
+                self.precision
+            )));
+        }
         Ok(SqlValue::Decimal(value))
     }
 
@@ -470,5 +494,27 @@ mod tests {
 
         let none: Option<i32> = None;
         assert_eq!(none.to_sql().unwrap(), SqlValue::Null);
+    }
+
+    #[cfg(feature = "decimal")]
+    #[test]
+    fn test_numeric_precision_validation() {
+        use rust_decimal::Decimal;
+
+        // Fits: a scale-2 value declared decimal(18,4) rescales without loss.
+        assert!(numeric(Decimal::new(1_234_567, 2), 18, 4).to_sql().is_ok());
+
+        // Exceeds declared precision: 6 significant digits into decimal(4,0).
+        assert!(
+            numeric(Decimal::new(123_456, 0), 4, 0).to_sql().is_err(),
+            "value exceeding the declared precision must error"
+        );
+
+        // Rounds (does not error) when the value scale exceeds the declared scale.
+        let rounded = numeric(Decimal::new(12_999, 3), 18, 2).to_sql().unwrap();
+        assert_eq!(rounded, SqlValue::Decimal(Decimal::new(1_300, 2)));
+
+        // Zero fits any precision.
+        assert!(numeric(Decimal::ZERO, 1, 0).to_sql().is_ok());
     }
 }

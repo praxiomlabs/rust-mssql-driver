@@ -66,8 +66,15 @@
 //! driver describes the parameters (`sp_describe_parameter_encryption`),
 //! encrypts those bound to encrypted columns client-side, and sends them as
 //! encrypted RPC parameters (deterministic and randomized). The remaining
-//! temporal and fixed-width types are not yet supported and return an error
-//! rather than sending plaintext.
+//! temporal types (`datetime`, `datetime2`, `time`, `datetimeoffset`) and the
+//! fixed-width `char`/`nchar`/`binary` types are not yet supported and return an
+//! error rather than sending plaintext.
+//!
+//! Bind a `decimal` parameter with `numeric(value, precision, scale)`, not a
+//! plain `Decimal`: an encrypted `decimal` column requires the declared
+//! precision and scale to match the column exactly, and a plain `Decimal` does
+//! not carry a precision — so it is rejected by the server with `Operand type
+//! clash` (Msg 206) at the describe step.
 //!
 //! ## Security Model
 //!
