@@ -79,6 +79,11 @@ use mssql_types::SqlValue;
 #[cfg(feature = "always-encrypted")]
 use std::sync::Arc;
 
+#[cfg(feature = "always-encrypted")]
+use crate::{Error, row::Row, stream::ResultSet};
+#[cfg(feature = "always-encrypted")]
+use tds_protocol::crypto::CekValue;
+
 /// Configuration for Always Encrypted feature.
 #[derive(Default)]
 pub struct EncryptionConfig {
@@ -401,19 +406,22 @@ impl Default for ParameterEncryptionInfo {
     }
 }
 
-/// Encryption metadata for a single parameter.
+/// Encryption directive for a single parameter, parsed from result set 2 of
+/// `sp_describe_parameter_encryption`.
 #[derive(Debug, Clone)]
 pub struct ParameterCryptoInfo {
-    /// Index into the CEK table.
+    /// 0-based index into [`ParameterEncryptionInfo::cek_table`].
+    ///
+    /// The server reports a (often 1-based) key ordinal; the parser translates
+    /// it to this positional index so `cek_table.get(cek_ordinal)` resolves the
+    /// entry directly.
     pub cek_ordinal: u16,
     /// Encryption type (deterministic or randomized).
     pub encryption_type: EncryptionTypeWire,
-    /// Algorithm ID.
+    /// Encryption algorithm ID (2 = AEAD_AES_256_CBC_HMAC_SHA256).
     pub algorithm_id: u8,
-    /// Target column ordinal in the table (for type information).
-    pub column_ordinal: u16,
-    /// Target column database ID.
-    pub database_id: u32,
+    /// Normalization rule version applied to the plaintext before encryption.
+    pub normalization_rule_version: u8,
 }
 
 impl ParameterCryptoInfo {
@@ -422,17 +430,216 @@ impl ParameterCryptoInfo {
         cek_ordinal: u16,
         encryption_type: EncryptionTypeWire,
         algorithm_id: u8,
-        column_ordinal: u16,
-        database_id: u32,
+        normalization_rule_version: u8,
     ) -> Self {
         Self {
             cek_ordinal,
             encryption_type,
             algorithm_id,
-            column_ordinal,
-            database_id,
+            normalization_rule_version,
         }
     }
+}
+
+/// Parsing of the two result sets returned by `sp_describe_parameter_encryption`.
+///
+/// Result set 1 is the CEK table (one row per CMK-wrapping of each CEK); result
+/// set 2 lists, per parameter, how the server expects it encrypted. The column
+/// layout was captured against a live server (SQL Server 2016+): the first nine
+/// RS1 columns are stable across versions; SQL Server 2019+ append two enclave
+/// columns (`is_requested_by_enclave`, `column_master_key_signature`) which this
+/// non-enclave path ignores. Columns are read positionally to match the
+/// `Microsoft.Data.SqlClient` ordinals.
+#[cfg(feature = "always-encrypted")]
+impl ParameterEncryptionInfo {
+    /// Minimum RS1 column count (SQL Server 2017 returns exactly this; 2019+
+    /// return more, with the extra columns appended after these).
+    const RS1_MIN_COLS: usize = 9;
+    /// RS2 column count, stable across supported versions.
+    const RS2_MIN_COLS: usize = 6;
+
+    /// Parse `sp_describe_parameter_encryption` output into encryption metadata.
+    ///
+    /// `result_sets` must be the `ProcedureResult::result_sets` from that RPC.
+    /// Plaintext parameters (encryption type 0) are omitted from the result.
+    pub(crate) fn from_describe_result_sets(result_sets: &mut [ResultSet]) -> Result<Self, Error> {
+        if result_sets.len() < 2 {
+            return Err(Error::Protocol(format!(
+                "sp_describe_parameter_encryption returned {} result set(s), expected 2",
+                result_sets.len()
+            )));
+        }
+
+        // --- Result set 1: CEK table ---
+        let rs1_cols = result_sets[0].columns().len();
+        if rs1_cols < Self::RS1_MIN_COLS {
+            return Err(Error::Protocol(format!(
+                "sp_describe_parameter_encryption result set 1 has {rs1_cols} columns, expected >= {}",
+                Self::RS1_MIN_COLS
+            )));
+        }
+        let rs1_rows = result_sets[0].collect_all()?;
+
+        let mut entries: Vec<CekTableEntry> = Vec::new();
+        // Server-assigned key ordinal -> positional index into `entries`.
+        let mut ordinal_to_index: HashMap<i32, u16> = HashMap::new();
+
+        for row in &rs1_rows {
+            let key_ordinal = describe_int(row, 0, "column_encryption_key_ordinal")?;
+            let value = CekValue {
+                encrypted_value: describe_varbinary(
+                    row,
+                    5,
+                    "column_encryption_key_encrypted_value",
+                )?,
+                key_store_provider_name: describe_nvarchar(
+                    row,
+                    6,
+                    "column_master_key_store_provider_name",
+                )?,
+                cmk_path: describe_nvarchar(row, 7, "column_master_key_path")?,
+                encryption_algorithm: describe_nvarchar(
+                    row,
+                    8,
+                    "column_encryption_key_encryption_algorithm_name",
+                )?,
+            };
+
+            if let Some(&idx) = ordinal_to_index.get(&key_ordinal) {
+                // Another CMK-wrapping of an already-seen CEK (key rotation).
+                entries[idx as usize].values.push(value);
+            } else {
+                let idx = u16::try_from(entries.len()).map_err(|_| {
+                    Error::Protocol(
+                        "sp_describe_parameter_encryption returned too many CEKs".into(),
+                    )
+                })?;
+                ordinal_to_index.insert(key_ordinal, idx);
+                entries.push(CekTableEntry {
+                    database_id: describe_int(row, 1, "database_id")? as u32,
+                    cek_id: describe_int(row, 2, "column_encryption_key_id")? as u32,
+                    cek_version: describe_int(row, 3, "column_encryption_key_version")? as u32,
+                    cek_md_version: describe_md_version(row, 4)?,
+                    values: vec![value],
+                });
+            }
+        }
+        let cek_table = CekTable { entries };
+
+        // --- Result set 2: per-parameter directives ---
+        let rs2_cols = result_sets[1].columns().len();
+        if rs2_cols < Self::RS2_MIN_COLS {
+            return Err(Error::Protocol(format!(
+                "sp_describe_parameter_encryption result set 2 has {rs2_cols} columns, expected >= {}",
+                Self::RS2_MIN_COLS
+            )));
+        }
+        let rs2_rows = result_sets[1].collect_all()?;
+
+        let mut parameters = HashMap::new();
+        for row in &rs2_rows {
+            let name = describe_nvarchar(row, 1, "parameter_name")?;
+            let encryption_type_byte = describe_tinyint(row, 3, "column_encryption_type")?;
+            // 0 = the server determined this parameter needs no encryption.
+            if encryption_type_byte == 0 {
+                continue;
+            }
+            let encryption_type =
+                EncryptionTypeWire::from_u8(encryption_type_byte).ok_or_else(|| {
+                    Error::Protocol(format!(
+                        "sp_describe_parameter_encryption: invalid column_encryption_type {encryption_type_byte} for {name}"
+                    ))
+                })?;
+            let algorithm_id = describe_tinyint(row, 2, "column_encryption_algorithm")?;
+            let server_ordinal = describe_int(row, 4, "column_encryption_key_ordinal")?;
+            let normalization_rule_version =
+                describe_tinyint(row, 5, "column_encryption_normalization_rule_version")?;
+
+            let cek_ordinal = *ordinal_to_index.get(&server_ordinal).ok_or_else(|| {
+                Error::Protocol(format!(
+                    "sp_describe_parameter_encryption: parameter {name} references CEK ordinal {server_ordinal} absent from the CEK table"
+                ))
+            })?;
+
+            parameters.insert(
+                name,
+                ParameterCryptoInfo {
+                    cek_ordinal,
+                    encryption_type,
+                    algorithm_id,
+                    normalization_rule_version,
+                },
+            );
+        }
+
+        Ok(Self {
+            cek_table,
+            parameters,
+        })
+    }
+}
+
+/// Read an `int` describe column, erroring if it is absent or a different type.
+#[cfg(feature = "always-encrypted")]
+fn describe_int(row: &Row, idx: usize, col: &str) -> Result<i32, Error> {
+    match row.get_raw(idx) {
+        Some(SqlValue::Int(v)) => Ok(v),
+        other => Err(describe_type_error(col, idx, "int", other.as_ref())),
+    }
+}
+
+/// Read a `tinyint` describe column.
+#[cfg(feature = "always-encrypted")]
+fn describe_tinyint(row: &Row, idx: usize, col: &str) -> Result<u8, Error> {
+    match row.get_raw(idx) {
+        Some(SqlValue::TinyInt(v)) => Ok(v),
+        other => Err(describe_type_error(col, idx, "tinyint", other.as_ref())),
+    }
+}
+
+/// Read an `nvarchar` describe column.
+#[cfg(feature = "always-encrypted")]
+fn describe_nvarchar(row: &Row, idx: usize, col: &str) -> Result<String, Error> {
+    match row.get_raw(idx) {
+        Some(SqlValue::String(v)) => Ok(v),
+        other => Err(describe_type_error(col, idx, "nvarchar", other.as_ref())),
+    }
+}
+
+/// Read a `varbinary` describe column.
+#[cfg(feature = "always-encrypted")]
+fn describe_varbinary(row: &Row, idx: usize, col: &str) -> Result<bytes::Bytes, Error> {
+    match row.get_raw(idx) {
+        Some(SqlValue::Binary(v)) => Ok(v),
+        other => Err(describe_type_error(col, idx, "varbinary", other.as_ref())),
+    }
+}
+
+/// Read the `binary(8)` metadata-version column as a little-endian `u64`.
+#[cfg(feature = "always-encrypted")]
+fn describe_md_version(row: &Row, idx: usize) -> Result<u64, Error> {
+    match row.get_raw(idx) {
+        Some(SqlValue::Binary(b)) if b.len() == 8 => {
+            let mut bytes = [0u8; 8];
+            bytes.copy_from_slice(&b[..8]);
+            Ok(u64::from_le_bytes(bytes))
+        }
+        other => Err(describe_type_error(
+            "column_encryption_key_metadata_version",
+            idx,
+            "binary(8)",
+            other.as_ref(),
+        )),
+    }
+}
+
+/// Build a uniform error for an unexpected describe-column type.
+#[cfg(feature = "always-encrypted")]
+fn describe_type_error(col: &str, idx: usize, expected: &str, got: Option<&SqlValue>) -> Error {
+    let got = got.map_or("missing", SqlValue::type_name);
+    Error::Protocol(format!(
+        "sp_describe_parameter_encryption column {col} (#{idx}): expected {expected}, got {got}"
+    ))
 }
 
 /// Normalize a parameter value to the plaintext byte form Always Encrypted
@@ -562,7 +769,7 @@ mod tests {
 
         assert!(!info.needs_encryption("@p1"));
 
-        let crypto = ParameterCryptoInfo::new(0, EncryptionTypeWire::Randomized, 2, 1, 1);
+        let crypto = ParameterCryptoInfo::new(0, EncryptionTypeWire::Randomized, 2, 1);
         info.add_parameter("@p1".to_string(), crypto);
 
         assert!(info.needs_encryption("@p1"));
@@ -570,5 +777,150 @@ mod tests {
 
         let param = info.get_parameter("@p1").unwrap();
         assert_eq!(param.encryption_type, EncryptionTypeWire::Randomized);
+    }
+
+    /// Parse synthetic `sp_describe_parameter_encryption` result sets that mirror
+    /// the live wire shape (captured in `.tmp/ae-3a2-describe-schema.md`). The
+    /// column *order* is validated separately by the live test; this exercises
+    /// the logic the live single-CEK/single-CMK case cannot: grouping multiple
+    /// CMK-wrappings under one CEK, translating the server's (1-based) key
+    /// ordinal to a positional index, little-endian `binary(8)` md-version
+    /// decode, and skipping plaintext parameters.
+    #[cfg(feature = "always-encrypted")]
+    #[test]
+    fn parse_describe_result_sets_groups_ceks_and_skips_plaintext() {
+        use crate::row::{Column, Row};
+        use crate::stream::ResultSet;
+        use bytes::Bytes;
+
+        fn rs(n_cols: usize, rows: Vec<Vec<SqlValue>>) -> ResultSet {
+            let cols: Vec<Column> = (0..n_cols)
+                .map(|i| Column::new(format!("c{i}"), i, "x"))
+                .collect();
+            let rows = rows
+                .into_iter()
+                .map(|vals| Row::from_values(cols.clone(), vals))
+                .collect();
+            ResultSet::new(cols, rows)
+        }
+
+        let mdv1 = Bytes::from_static(&[1, 0, 0, 0, 0, 0, 0, 0]); // -> 1
+        let mdv2 = Bytes::from_static(&[255, 0, 0, 0, 0, 0, 0, 0]); // -> 255
+
+        // RS1: CEK ordinal 1 wrapped by two CMKs (rotation), plus CEK ordinal 2.
+        let rs1 = rs(
+            9,
+            vec![
+                vec![
+                    SqlValue::Int(1),
+                    SqlValue::Int(7),
+                    SqlValue::Int(56),
+                    SqlValue::Int(1),
+                    SqlValue::Binary(mdv1.clone()),
+                    SqlValue::Binary(Bytes::from_static(b"env-a")),
+                    SqlValue::String("IN_MEMORY_KEY_STORE".into()),
+                    SqlValue::String("path-a".into()),
+                    SqlValue::String("RSA_OAEP".into()),
+                ],
+                vec![
+                    SqlValue::Int(1),
+                    SqlValue::Int(7),
+                    SqlValue::Int(56),
+                    SqlValue::Int(1),
+                    SqlValue::Binary(mdv1),
+                    SqlValue::Binary(Bytes::from_static(b"env-a2")),
+                    SqlValue::String("PROV_2".into()),
+                    SqlValue::String("path-a2".into()),
+                    SqlValue::String("RSA_OAEP".into()),
+                ],
+                vec![
+                    SqlValue::Int(2),
+                    SqlValue::Int(7),
+                    SqlValue::Int(57),
+                    SqlValue::Int(1),
+                    SqlValue::Binary(mdv2),
+                    SqlValue::Binary(Bytes::from_static(b"env-b")),
+                    SqlValue::String("IN_MEMORY_KEY_STORE".into()),
+                    SqlValue::String("path-b".into()),
+                    SqlValue::String("RSA_OAEP".into()),
+                ],
+            ],
+        );
+
+        // RS2: @det on CEK ordinal 1, @rand on CEK ordinal 2, @plain plaintext.
+        let rs2 = rs(
+            6,
+            vec![
+                vec![
+                    SqlValue::Int(1),
+                    SqlValue::String("@det".into()),
+                    SqlValue::TinyInt(2),
+                    SqlValue::TinyInt(1),
+                    SqlValue::Int(1),
+                    SqlValue::TinyInt(1),
+                ],
+                vec![
+                    SqlValue::Int(2),
+                    SqlValue::String("@rand".into()),
+                    SqlValue::TinyInt(2),
+                    SqlValue::TinyInt(2),
+                    SqlValue::Int(2),
+                    SqlValue::TinyInt(1),
+                ],
+                vec![
+                    SqlValue::Int(3),
+                    SqlValue::String("@plain".into()),
+                    SqlValue::TinyInt(0),
+                    SqlValue::TinyInt(0),
+                    SqlValue::Int(0),
+                    SqlValue::TinyInt(0),
+                ],
+            ],
+        );
+
+        let mut sets = vec![rs1, rs2];
+        let info = ParameterEncryptionInfo::from_describe_result_sets(&mut sets).unwrap();
+
+        assert_eq!(info.cek_table.len(), 2);
+        let e0 = info.cek_table.get(0).unwrap();
+        assert_eq!(e0.cek_id, 56);
+        assert_eq!(e0.cek_md_version, 1);
+        assert_eq!(e0.values.len(), 2, "two CMK-wrappings group under one CEK");
+        assert_eq!(e0.values[0].key_store_provider_name, "IN_MEMORY_KEY_STORE");
+        assert_eq!(e0.values[1].key_store_provider_name, "PROV_2");
+        let e1 = info.cek_table.get(1).unwrap();
+        assert_eq!(e1.cek_id, 57);
+        assert_eq!(e1.cek_md_version, 255);
+
+        let det = info.get_parameter("@det").unwrap();
+        assert_eq!(det.encryption_type, EncryptionTypeWire::Deterministic);
+        assert_eq!(det.algorithm_id, 2);
+        assert_eq!(det.normalization_rule_version, 1);
+        assert_eq!(det.cek_ordinal, 0, "server ordinal 1 -> positional index 0");
+
+        let rand = info.get_parameter("@rand").unwrap();
+        assert_eq!(rand.encryption_type, EncryptionTypeWire::Randomized);
+        assert_eq!(
+            rand.cek_ordinal, 1,
+            "server ordinal 2 -> positional index 1"
+        );
+
+        assert!(!info.needs_encryption("@plain"));
+        assert_eq!(info.parameters.len(), 2);
+    }
+
+    /// A truncated response (fewer than two result sets) must be rejected, not
+    /// silently treated as "no parameters need encryption".
+    #[cfg(feature = "always-encrypted")]
+    #[test]
+    fn parse_describe_result_sets_rejects_missing_result_set() {
+        use crate::row::{Column, Row};
+        use crate::stream::ResultSet;
+
+        let cols: Vec<Column> = (0..9)
+            .map(|i| Column::new(format!("c{i}"), i, "x"))
+            .collect();
+        let mut sets = vec![ResultSet::new(cols, Vec::<Row>::new())];
+        assert!(ParameterEncryptionInfo::from_describe_result_sets(&mut sets).is_err());
     }
 }
