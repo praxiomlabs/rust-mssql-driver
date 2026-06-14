@@ -121,6 +121,22 @@ The following APIs are considered stable and covered by semver guarantees:
 | `ToSql` trait | Stable |
 | Built-in type conversions | Stable |
 
+### Trait extensibility (sealing posture)
+
+The type-mapping and row-mapping traits — `ToSql`, `FromSql`, `SqlTyped`,
+`ToParams`, `Tvp`, `FromRow`, `KeyStoreProvider`, `AsyncAuthProvider`,
+`ConnectionLifecycle` — are intentionally **open** (user-implementable): binding
+custom Rust types, mapping rows by hand, and plugging in custom key stores are
+supported features, and every comparable driver (`tokio-postgres`, `sqlx`,
+`diesel`) leaves the equivalents open. **Do not seal them.** They evolve via
+additive default methods, not by closing the trait.
+
+Only the type-state markers (`ConnectionState` and its states) are sealed — that
+is a soundness requirement (an unsealed state set would let downstream code forge
+a `Client<FakeState>`), not an evolution lever. Extension traits with a universal
+blanket impl (e.g. `RowIteratorExt`) are already effectively closed and gain
+nothing from a `Sealed` supertrait.
+
 ## Unstable API Surface
 
 The following APIs are considered unstable and may change without a major version bump:

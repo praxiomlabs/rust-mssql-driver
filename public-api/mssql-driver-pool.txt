@@ -1,0 +1,1145 @@
+pub mod mssql_driver_pool
+pub mod mssql_driver_pool::config
+#[non_exhaustive] pub struct mssql_driver_pool::config::PoolConfig
+pub mssql_driver_pool::config::PoolConfig::connection_timeout: core::time::Duration
+pub mssql_driver_pool::config::PoolConfig::health_check_interval: core::time::Duration
+pub mssql_driver_pool::config::PoolConfig::health_check_query: alloc::sync::Arc<str>
+pub mssql_driver_pool::config::PoolConfig::idle_timeout: core::time::Duration
+pub mssql_driver_pool::config::PoolConfig::max_connections: u32
+pub mssql_driver_pool::config::PoolConfig::max_lifetime: core::time::Duration
+pub mssql_driver_pool::config::PoolConfig::min_connections: u32
+pub mssql_driver_pool::config::PoolConfig::sp_reset_connection: bool
+pub mssql_driver_pool::config::PoolConfig::test_on_checkin: bool
+pub mssql_driver_pool::config::PoolConfig::test_on_checkout: bool
+pub mssql_driver_pool::config::PoolConfig::test_while_idle: bool
+impl mssql_driver_pool::config::PoolConfig
+pub fn mssql_driver_pool::config::PoolConfig::connection_timeout(self, core::time::Duration) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::health_check_interval(self, core::time::Duration) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::health_check_query(self, impl core::convert::Into<alloc::sync::Arc<str>>) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::idle_timeout(self, core::time::Duration) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::max_connections(self, u32) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::max_lifetime(self, core::time::Duration) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::min_connections(self, u32) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::new() -> Self
+pub fn mssql_driver_pool::config::PoolConfig::sp_reset_connection(self, bool) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::test_on_checkin(self, bool) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::test_on_checkout(self, bool) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::test_while_idle(self, bool) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::validate(&self) -> core::result::Result<(), mssql_driver_pool::error::PoolError>
+impl core::clone::Clone for mssql_driver_pool::config::PoolConfig
+pub fn mssql_driver_pool::config::PoolConfig::clone(&self) -> mssql_driver_pool::config::PoolConfig
+impl core::default::Default for mssql_driver_pool::config::PoolConfig
+pub fn mssql_driver_pool::config::PoolConfig::default() -> Self
+impl core::fmt::Debug for mssql_driver_pool::config::PoolConfig
+pub fn mssql_driver_pool::config::PoolConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_driver_pool::config::PoolConfig
+impl core::marker::Send for mssql_driver_pool::config::PoolConfig
+impl core::marker::Sync for mssql_driver_pool::config::PoolConfig
+impl core::marker::Unpin for mssql_driver_pool::config::PoolConfig
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::config::PoolConfig
+impl core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::config::PoolConfig
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::config::PoolConfig where U: core::convert::From<T>
+pub fn mssql_driver_pool::config::PoolConfig::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::config::PoolConfig where U: core::convert::Into<T>
+pub type mssql_driver_pool::config::PoolConfig::Error = core::convert::Infallible
+pub fn mssql_driver_pool::config::PoolConfig::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::config::PoolConfig where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::config::PoolConfig::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::config::PoolConfig::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_driver_pool::config::PoolConfig where T: core::clone::Clone
+pub type mssql_driver_pool::config::PoolConfig::Owned = T
+pub fn mssql_driver_pool::config::PoolConfig::clone_into(&self, &mut T)
+pub fn mssql_driver_pool::config::PoolConfig::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_driver_pool::config::PoolConfig where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::config::PoolConfig::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::config::PoolConfig where T: ?core::marker::Sized
+pub fn mssql_driver_pool::config::PoolConfig::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::config::PoolConfig where T: ?core::marker::Sized
+pub fn mssql_driver_pool::config::PoolConfig::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_driver_pool::config::PoolConfig where T: core::clone::Clone
+pub unsafe fn mssql_driver_pool::config::PoolConfig::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_driver_pool::config::PoolConfig
+pub fn mssql_driver_pool::config::PoolConfig::from(T) -> T
+impl<T> dyn_clone::DynClone for mssql_driver_pool::config::PoolConfig where T: core::clone::Clone
+pub fn mssql_driver_pool::config::PoolConfig::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::config::PoolConfig
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::config::PoolConfig where T: ?core::marker::Sized
+pub fn mssql_driver_pool::config::PoolConfig::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::config::PoolConfig::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::config::PoolConfig
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::config::PoolConfig
+impl<T> typenum::type_operators::Same for mssql_driver_pool::config::PoolConfig
+pub type mssql_driver_pool::config::PoolConfig::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::config::PoolConfig where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::config::PoolConfig::vzip(self) -> V
+pub const mssql_driver_pool::config::DEFAULT_HEALTH_CHECK_QUERY: &str
+pub mod mssql_driver_pool::error
+#[non_exhaustive] pub enum mssql_driver_pool::error::PoolError
+pub mssql_driver_pool::error::PoolError::AcquisitionTimeout(core::time::Duration)
+pub mssql_driver_pool::error::PoolError::Configuration(alloc::string::String)
+pub mssql_driver_pool::error::PoolError::Connection(mssql_client::error::Error)
+pub mssql_driver_pool::error::PoolError::ConnectionCreation(alloc::string::String)
+pub mssql_driver_pool::error::PoolError::MaxConnectionsReached
+pub mssql_driver_pool::error::PoolError::MaxConnectionsReached::max: u32
+pub mssql_driver_pool::error::PoolError::PoolClosed
+pub mssql_driver_pool::error::PoolError::ResetFailed(alloc::string::String)
+pub mssql_driver_pool::error::PoolError::Timeout
+pub mssql_driver_pool::error::PoolError::Timeout::capacity: u32
+pub mssql_driver_pool::error::PoolError::Timeout::idle: u32
+pub mssql_driver_pool::error::PoolError::Timeout::in_use: u32
+pub mssql_driver_pool::error::PoolError::Timeout::waiters: u32
+pub mssql_driver_pool::error::PoolError::UnhealthyConnection(alloc::string::String)
+pub mssql_driver_pool::error::PoolError::ValidationFailed(alloc::string::String)
+impl mssql_driver_pool::error::PoolError
+pub fn mssql_driver_pool::error::PoolError::is_terminal(&self) -> bool
+pub fn mssql_driver_pool::error::PoolError::is_transient(&self) -> bool
+impl core::convert::From<mssql_client::error::Error> for mssql_driver_pool::error::PoolError
+pub fn mssql_driver_pool::error::PoolError::from(mssql_client::error::Error) -> Self
+impl core::error::Error for mssql_driver_pool::error::PoolError
+pub fn mssql_driver_pool::error::PoolError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for mssql_driver_pool::error::PoolError
+pub fn mssql_driver_pool::error::PoolError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for mssql_driver_pool::error::PoolError
+pub fn mssql_driver_pool::error::PoolError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_driver_pool::error::PoolError
+impl core::marker::Send for mssql_driver_pool::error::PoolError
+impl core::marker::Sync for mssql_driver_pool::error::PoolError
+impl core::marker::Unpin for mssql_driver_pool::error::PoolError
+impl !core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::error::PoolError
+impl !core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::error::PoolError
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::error::PoolError where U: core::convert::From<T>
+pub fn mssql_driver_pool::error::PoolError::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::error::PoolError where U: core::convert::Into<T>
+pub type mssql_driver_pool::error::PoolError::Error = core::convert::Infallible
+pub fn mssql_driver_pool::error::PoolError::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::error::PoolError where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::error::PoolError::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::error::PoolError::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::string::ToString for mssql_driver_pool::error::PoolError where T: core::fmt::Display + ?core::marker::Sized
+pub fn mssql_driver_pool::error::PoolError::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for mssql_driver_pool::error::PoolError where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::error::PoolError::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::error::PoolError where T: ?core::marker::Sized
+pub fn mssql_driver_pool::error::PoolError::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::error::PoolError where T: ?core::marker::Sized
+pub fn mssql_driver_pool::error::PoolError::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_driver_pool::error::PoolError
+pub fn mssql_driver_pool::error::PoolError::from(T) -> T
+impl<T> iri_string::format::ToStringFallible for mssql_driver_pool::error::PoolError where T: core::fmt::Display
+pub fn mssql_driver_pool::error::PoolError::try_to_string(&self) -> core::result::Result<alloc::string::String, alloc::collections::TryReserveError>
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::error::PoolError
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::error::PoolError where T: ?core::marker::Sized
+pub fn mssql_driver_pool::error::PoolError::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::error::PoolError::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::error::PoolError
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::error::PoolError
+impl<T> typenum::type_operators::Same for mssql_driver_pool::error::PoolError
+pub type mssql_driver_pool::error::PoolError::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::error::PoolError where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::error::PoolError::vzip(self) -> V
+pub mod mssql_driver_pool::lifecycle
+#[non_exhaustive] pub enum mssql_driver_pool::lifecycle::ConnectionState
+pub mssql_driver_pool::lifecycle::ConnectionState::Checking
+pub mssql_driver_pool::lifecycle::ConnectionState::Closed
+pub mssql_driver_pool::lifecycle::ConnectionState::Closing
+pub mssql_driver_pool::lifecycle::ConnectionState::Error
+pub mssql_driver_pool::lifecycle::ConnectionState::Idle
+pub mssql_driver_pool::lifecycle::ConnectionState::InUse
+pub mssql_driver_pool::lifecycle::ConnectionState::Resetting
+impl mssql_driver_pool::lifecycle::ConnectionState
+pub fn mssql_driver_pool::lifecycle::ConnectionState::is_available(&self) -> bool
+pub fn mssql_driver_pool::lifecycle::ConnectionState::is_busy(&self) -> bool
+pub fn mssql_driver_pool::lifecycle::ConnectionState::should_remove(&self) -> bool
+impl core::clone::Clone for mssql_driver_pool::lifecycle::ConnectionState
+pub fn mssql_driver_pool::lifecycle::ConnectionState::clone(&self) -> mssql_driver_pool::lifecycle::ConnectionState
+impl core::cmp::Eq for mssql_driver_pool::lifecycle::ConnectionState
+impl core::cmp::PartialEq for mssql_driver_pool::lifecycle::ConnectionState
+pub fn mssql_driver_pool::lifecycle::ConnectionState::eq(&self, &mssql_driver_pool::lifecycle::ConnectionState) -> bool
+impl core::fmt::Debug for mssql_driver_pool::lifecycle::ConnectionState
+pub fn mssql_driver_pool::lifecycle::ConnectionState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for mssql_driver_pool::lifecycle::ConnectionState
+impl core::marker::StructuralPartialEq for mssql_driver_pool::lifecycle::ConnectionState
+impl core::marker::Freeze for mssql_driver_pool::lifecycle::ConnectionState
+impl core::marker::Send for mssql_driver_pool::lifecycle::ConnectionState
+impl core::marker::Sync for mssql_driver_pool::lifecycle::ConnectionState
+impl core::marker::Unpin for mssql_driver_pool::lifecycle::ConnectionState
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::lifecycle::ConnectionState
+impl core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::lifecycle::ConnectionState
+impl<Q, K> equivalent::Equivalent<K> for mssql_driver_pool::lifecycle::ConnectionState where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::ConnectionState::equivalent(&self, &K) -> bool
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::lifecycle::ConnectionState where U: core::convert::From<T>
+pub fn mssql_driver_pool::lifecycle::ConnectionState::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::lifecycle::ConnectionState where U: core::convert::Into<T>
+pub type mssql_driver_pool::lifecycle::ConnectionState::Error = core::convert::Infallible
+pub fn mssql_driver_pool::lifecycle::ConnectionState::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::lifecycle::ConnectionState where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::lifecycle::ConnectionState::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::lifecycle::ConnectionState::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_driver_pool::lifecycle::ConnectionState where T: core::clone::Clone
+pub type mssql_driver_pool::lifecycle::ConnectionState::Owned = T
+pub fn mssql_driver_pool::lifecycle::ConnectionState::clone_into(&self, &mut T)
+pub fn mssql_driver_pool::lifecycle::ConnectionState::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_driver_pool::lifecycle::ConnectionState where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::ConnectionState::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::lifecycle::ConnectionState where T: ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::ConnectionState::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::lifecycle::ConnectionState where T: ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::ConnectionState::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_driver_pool::lifecycle::ConnectionState where T: core::clone::Clone
+pub unsafe fn mssql_driver_pool::lifecycle::ConnectionState::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_driver_pool::lifecycle::ConnectionState
+pub fn mssql_driver_pool::lifecycle::ConnectionState::from(T) -> T
+impl<T> dyn_clone::DynClone for mssql_driver_pool::lifecycle::ConnectionState where T: core::clone::Clone
+pub fn mssql_driver_pool::lifecycle::ConnectionState::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::lifecycle::ConnectionState
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::lifecycle::ConnectionState where T: ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::ConnectionState::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::lifecycle::ConnectionState::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::lifecycle::ConnectionState
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::lifecycle::ConnectionState
+impl<T> typenum::type_operators::Same for mssql_driver_pool::lifecycle::ConnectionState
+pub type mssql_driver_pool::lifecycle::ConnectionState::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::lifecycle::ConnectionState where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::lifecycle::ConnectionState::vzip(self) -> V
+#[non_exhaustive] pub struct mssql_driver_pool::lifecycle::ConnectionMetadata
+pub mssql_driver_pool::lifecycle::ConnectionMetadata::checkout_count: u64
+pub mssql_driver_pool::lifecycle::ConnectionMetadata::created_at: std::time::Instant
+pub mssql_driver_pool::lifecycle::ConnectionMetadata::id: u64
+pub mssql_driver_pool::lifecycle::ConnectionMetadata::last_checked_at: core::option::Option<std::time::Instant>
+pub mssql_driver_pool::lifecycle::ConnectionMetadata::last_used_at: std::time::Instant
+pub mssql_driver_pool::lifecycle::ConnectionMetadata::state: mssql_driver_pool::lifecycle::ConnectionState
+impl mssql_driver_pool::lifecycle::ConnectionMetadata
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::is_expired(&self, core::time::Duration) -> bool
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::is_idle_expired(&self, core::time::Duration) -> bool
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::mark_checkin(&mut self)
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::mark_checkout(&mut self)
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::mark_health_check(&mut self)
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::needs_health_check(&self, core::time::Duration) -> bool
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::new(u64) -> Self
+impl core::clone::Clone for mssql_driver_pool::lifecycle::ConnectionMetadata
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::clone(&self) -> mssql_driver_pool::lifecycle::ConnectionMetadata
+impl core::fmt::Debug for mssql_driver_pool::lifecycle::ConnectionMetadata
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_driver_pool::lifecycle::ConnectionMetadata
+impl core::marker::Send for mssql_driver_pool::lifecycle::ConnectionMetadata
+impl core::marker::Sync for mssql_driver_pool::lifecycle::ConnectionMetadata
+impl core::marker::Unpin for mssql_driver_pool::lifecycle::ConnectionMetadata
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::lifecycle::ConnectionMetadata
+impl core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::lifecycle::ConnectionMetadata
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::lifecycle::ConnectionMetadata where U: core::convert::From<T>
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::lifecycle::ConnectionMetadata where U: core::convert::Into<T>
+pub type mssql_driver_pool::lifecycle::ConnectionMetadata::Error = core::convert::Infallible
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::lifecycle::ConnectionMetadata where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::lifecycle::ConnectionMetadata::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_driver_pool::lifecycle::ConnectionMetadata where T: core::clone::Clone
+pub type mssql_driver_pool::lifecycle::ConnectionMetadata::Owned = T
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::clone_into(&self, &mut T)
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_driver_pool::lifecycle::ConnectionMetadata where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::lifecycle::ConnectionMetadata where T: ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::lifecycle::ConnectionMetadata where T: ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_driver_pool::lifecycle::ConnectionMetadata where T: core::clone::Clone
+pub unsafe fn mssql_driver_pool::lifecycle::ConnectionMetadata::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_driver_pool::lifecycle::ConnectionMetadata
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::from(T) -> T
+impl<T> dyn_clone::DynClone for mssql_driver_pool::lifecycle::ConnectionMetadata where T: core::clone::Clone
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::lifecycle::ConnectionMetadata
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::lifecycle::ConnectionMetadata where T: ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::lifecycle::ConnectionMetadata
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::lifecycle::ConnectionMetadata
+impl<T> typenum::type_operators::Same for mssql_driver_pool::lifecycle::ConnectionMetadata
+pub type mssql_driver_pool::lifecycle::ConnectionMetadata::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::lifecycle::ConnectionMetadata where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::vzip(self) -> V
+#[non_exhaustive] pub struct mssql_driver_pool::lifecycle::HealthCheckResult
+pub mssql_driver_pool::lifecycle::HealthCheckResult::error: core::option::Option<alloc::string::String>
+pub mssql_driver_pool::lifecycle::HealthCheckResult::healthy: bool
+pub mssql_driver_pool::lifecycle::HealthCheckResult::latency: core::time::Duration
+impl mssql_driver_pool::lifecycle::HealthCheckResult
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::healthy(core::time::Duration) -> Self
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::unhealthy(core::time::Duration, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for mssql_driver_pool::lifecycle::HealthCheckResult
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::clone(&self) -> mssql_driver_pool::lifecycle::HealthCheckResult
+impl core::fmt::Debug for mssql_driver_pool::lifecycle::HealthCheckResult
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_driver_pool::lifecycle::HealthCheckResult
+impl core::marker::Send for mssql_driver_pool::lifecycle::HealthCheckResult
+impl core::marker::Sync for mssql_driver_pool::lifecycle::HealthCheckResult
+impl core::marker::Unpin for mssql_driver_pool::lifecycle::HealthCheckResult
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::lifecycle::HealthCheckResult
+impl core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::lifecycle::HealthCheckResult
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::lifecycle::HealthCheckResult where U: core::convert::From<T>
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::lifecycle::HealthCheckResult where U: core::convert::Into<T>
+pub type mssql_driver_pool::lifecycle::HealthCheckResult::Error = core::convert::Infallible
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::lifecycle::HealthCheckResult where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::lifecycle::HealthCheckResult::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_driver_pool::lifecycle::HealthCheckResult where T: core::clone::Clone
+pub type mssql_driver_pool::lifecycle::HealthCheckResult::Owned = T
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::clone_into(&self, &mut T)
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_driver_pool::lifecycle::HealthCheckResult where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::lifecycle::HealthCheckResult where T: ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::lifecycle::HealthCheckResult where T: ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_driver_pool::lifecycle::HealthCheckResult where T: core::clone::Clone
+pub unsafe fn mssql_driver_pool::lifecycle::HealthCheckResult::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_driver_pool::lifecycle::HealthCheckResult
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::from(T) -> T
+impl<T> dyn_clone::DynClone for mssql_driver_pool::lifecycle::HealthCheckResult where T: core::clone::Clone
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::lifecycle::HealthCheckResult
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::lifecycle::HealthCheckResult where T: ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::lifecycle::HealthCheckResult
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::lifecycle::HealthCheckResult
+impl<T> typenum::type_operators::Same for mssql_driver_pool::lifecycle::HealthCheckResult
+pub type mssql_driver_pool::lifecycle::HealthCheckResult::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::lifecycle::HealthCheckResult where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::vzip(self) -> V
+pub trait mssql_driver_pool::lifecycle::ConnectionLifecycle: core::marker::Send + core::marker::Sync
+pub async fn mssql_driver_pool::lifecycle::ConnectionLifecycle::health_check(&self) -> core::result::Result<(), mssql_driver_pool::error::PoolError>
+pub fn mssql_driver_pool::lifecycle::ConnectionLifecycle::is_valid(&self) -> bool
+pub async fn mssql_driver_pool::lifecycle::ConnectionLifecycle::reset(&mut self) -> core::result::Result<(), mssql_driver_pool::error::PoolError>
+pub trait mssql_driver_pool::lifecycle::DynConnectionLifecycle: core::marker::Send + core::marker::Sync
+pub fn mssql_driver_pool::lifecycle::DynConnectionLifecycle::health_check<'life0, 'async_trait>(&'life0 self) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<(), mssql_driver_pool::error::PoolError>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait
+pub fn mssql_driver_pool::lifecycle::DynConnectionLifecycle::is_valid(&self) -> bool
+pub fn mssql_driver_pool::lifecycle::DynConnectionLifecycle::reset<'life0, 'async_trait>(&'life0 mut self) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<(), mssql_driver_pool::error::PoolError>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait
+pub mod mssql_driver_pool::pool
+pub struct mssql_driver_pool::pool::Pool
+impl mssql_driver_pool::pool::Pool
+pub fn mssql_driver_pool::pool::Pool::builder() -> mssql_driver_pool::pool::PoolBuilder
+pub async fn mssql_driver_pool::pool::Pool::close(&self)
+pub fn mssql_driver_pool::pool::Pool::config(&self) -> &mssql_driver_pool::config::PoolConfig
+pub async fn mssql_driver_pool::pool::Pool::get(&self) -> core::result::Result<mssql_driver_pool::pool::PooledConnection, mssql_driver_pool::error::PoolError>
+pub fn mssql_driver_pool::pool::Pool::is_closed(&self) -> bool
+pub fn mssql_driver_pool::pool::Pool::metrics(&self) -> mssql_driver_pool::pool::PoolMetrics
+pub async fn mssql_driver_pool::pool::Pool::new(mssql_driver_pool::config::PoolConfig, mssql_client::config::Config) -> core::result::Result<Self, mssql_driver_pool::error::PoolError>
+pub fn mssql_driver_pool::pool::Pool::status(&self) -> mssql_driver_pool::pool::PoolStatus
+pub fn mssql_driver_pool::pool::Pool::try_get(&self) -> core::result::Result<core::option::Option<mssql_driver_pool::pool::PooledConnection>, mssql_driver_pool::error::PoolError>
+pub fn mssql_driver_pool::pool::Pool::wait_queue_depth(&self) -> u32
+impl core::marker::Freeze for mssql_driver_pool::pool::Pool
+impl core::marker::Send for mssql_driver_pool::pool::Pool
+impl core::marker::Sync for mssql_driver_pool::pool::Pool
+impl core::marker::Unpin for mssql_driver_pool::pool::Pool
+impl !core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::pool::Pool
+impl !core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::pool::Pool
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::pool::Pool where U: core::convert::From<T>
+pub fn mssql_driver_pool::pool::Pool::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::pool::Pool where U: core::convert::Into<T>
+pub type mssql_driver_pool::pool::Pool::Error = core::convert::Infallible
+pub fn mssql_driver_pool::pool::Pool::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::pool::Pool where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::pool::Pool::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::pool::Pool::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_driver_pool::pool::Pool where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::pool::Pool::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::pool::Pool where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::Pool::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::pool::Pool where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::Pool::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_driver_pool::pool::Pool
+pub fn mssql_driver_pool::pool::Pool::from(T) -> T
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::pool::Pool
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::pool::Pool where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::Pool::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::pool::Pool::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::pool::Pool
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::pool::Pool
+impl<T> typenum::type_operators::Same for mssql_driver_pool::pool::Pool
+pub type mssql_driver_pool::pool::Pool::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::pool::Pool where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::pool::Pool::vzip(self) -> V
+pub struct mssql_driver_pool::pool::PoolBuilder
+impl mssql_driver_pool::pool::PoolBuilder
+pub async fn mssql_driver_pool::pool::PoolBuilder::build(self) -> core::result::Result<mssql_driver_pool::pool::Pool, mssql_driver_pool::error::PoolError>
+pub fn mssql_driver_pool::pool::PoolBuilder::client_config(self, mssql_client::config::Config) -> Self
+pub fn mssql_driver_pool::pool::PoolBuilder::connection_timeout(self, core::time::Duration) -> Self
+pub fn mssql_driver_pool::pool::PoolBuilder::idle_timeout(self, core::time::Duration) -> Self
+pub fn mssql_driver_pool::pool::PoolBuilder::max_connections(self, u32) -> Self
+pub fn mssql_driver_pool::pool::PoolBuilder::min_connections(self, u32) -> Self
+pub fn mssql_driver_pool::pool::PoolBuilder::new() -> Self
+pub fn mssql_driver_pool::pool::PoolBuilder::pool_config(self, mssql_driver_pool::config::PoolConfig) -> Self
+pub fn mssql_driver_pool::pool::PoolBuilder::pool_name(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn mssql_driver_pool::pool::PoolBuilder::sp_reset_connection(self, bool) -> Self
+pub fn mssql_driver_pool::pool::PoolBuilder::test_while_idle(self, bool) -> Self
+impl core::default::Default for mssql_driver_pool::pool::PoolBuilder
+pub fn mssql_driver_pool::pool::PoolBuilder::default() -> Self
+impl core::marker::Freeze for mssql_driver_pool::pool::PoolBuilder
+impl core::marker::Send for mssql_driver_pool::pool::PoolBuilder
+impl core::marker::Sync for mssql_driver_pool::pool::PoolBuilder
+impl core::marker::Unpin for mssql_driver_pool::pool::PoolBuilder
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::pool::PoolBuilder
+impl core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::pool::PoolBuilder
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::pool::PoolBuilder where U: core::convert::From<T>
+pub fn mssql_driver_pool::pool::PoolBuilder::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::pool::PoolBuilder where U: core::convert::Into<T>
+pub type mssql_driver_pool::pool::PoolBuilder::Error = core::convert::Infallible
+pub fn mssql_driver_pool::pool::PoolBuilder::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::pool::PoolBuilder where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::pool::PoolBuilder::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::pool::PoolBuilder::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_driver_pool::pool::PoolBuilder where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolBuilder::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::pool::PoolBuilder where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolBuilder::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::pool::PoolBuilder where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolBuilder::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_driver_pool::pool::PoolBuilder
+pub fn mssql_driver_pool::pool::PoolBuilder::from(T) -> T
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::pool::PoolBuilder
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::pool::PoolBuilder where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolBuilder::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::pool::PoolBuilder::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::pool::PoolBuilder
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::pool::PoolBuilder
+impl<T> typenum::type_operators::Same for mssql_driver_pool::pool::PoolBuilder
+pub type mssql_driver_pool::pool::PoolBuilder::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::pool::PoolBuilder where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::pool::PoolBuilder::vzip(self) -> V
+#[non_exhaustive] pub struct mssql_driver_pool::pool::PoolMetrics
+pub mssql_driver_pool::pool::PoolMetrics::avg_acquisition_time_us: u64
+pub mssql_driver_pool::pool::PoolMetrics::checkouts_failed: u64
+pub mssql_driver_pool::pool::PoolMetrics::checkouts_successful: u64
+pub mssql_driver_pool::pool::PoolMetrics::connections_closed: u64
+pub mssql_driver_pool::pool::PoolMetrics::connections_created: u64
+pub mssql_driver_pool::pool::PoolMetrics::connections_idle_expired: u64
+pub mssql_driver_pool::pool::PoolMetrics::connections_lifetime_expired: u64
+pub mssql_driver_pool::pool::PoolMetrics::health_checks_failed: u64
+pub mssql_driver_pool::pool::PoolMetrics::health_checks_performed: u64
+pub mssql_driver_pool::pool::PoolMetrics::idle_health_checks_failed: u64
+pub mssql_driver_pool::pool::PoolMetrics::idle_health_checks_performed: u64
+pub mssql_driver_pool::pool::PoolMetrics::peak_wait_queue_depth: u64
+pub mssql_driver_pool::pool::PoolMetrics::reaper_runs: u64
+pub mssql_driver_pool::pool::PoolMetrics::resets_failed: u64
+pub mssql_driver_pool::pool::PoolMetrics::resets_performed: u64
+pub mssql_driver_pool::pool::PoolMetrics::uptime: core::time::Duration
+impl mssql_driver_pool::pool::PoolMetrics
+pub fn mssql_driver_pool::pool::PoolMetrics::avg_acquisition_time(&self) -> core::time::Duration
+pub fn mssql_driver_pool::pool::PoolMetrics::checkout_success_rate(&self) -> f64
+pub fn mssql_driver_pool::pool::PoolMetrics::health_check_success_rate(&self) -> f64
+impl core::clone::Clone for mssql_driver_pool::pool::PoolMetrics
+pub fn mssql_driver_pool::pool::PoolMetrics::clone(&self) -> mssql_driver_pool::pool::PoolMetrics
+impl core::fmt::Debug for mssql_driver_pool::pool::PoolMetrics
+pub fn mssql_driver_pool::pool::PoolMetrics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_driver_pool::pool::PoolMetrics
+impl core::marker::Send for mssql_driver_pool::pool::PoolMetrics
+impl core::marker::Sync for mssql_driver_pool::pool::PoolMetrics
+impl core::marker::Unpin for mssql_driver_pool::pool::PoolMetrics
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::pool::PoolMetrics
+impl core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::pool::PoolMetrics
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::pool::PoolMetrics where U: core::convert::From<T>
+pub fn mssql_driver_pool::pool::PoolMetrics::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::pool::PoolMetrics where U: core::convert::Into<T>
+pub type mssql_driver_pool::pool::PoolMetrics::Error = core::convert::Infallible
+pub fn mssql_driver_pool::pool::PoolMetrics::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::pool::PoolMetrics where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::pool::PoolMetrics::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::pool::PoolMetrics::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_driver_pool::pool::PoolMetrics where T: core::clone::Clone
+pub type mssql_driver_pool::pool::PoolMetrics::Owned = T
+pub fn mssql_driver_pool::pool::PoolMetrics::clone_into(&self, &mut T)
+pub fn mssql_driver_pool::pool::PoolMetrics::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_driver_pool::pool::PoolMetrics where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolMetrics::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::pool::PoolMetrics where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolMetrics::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::pool::PoolMetrics where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolMetrics::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_driver_pool::pool::PoolMetrics where T: core::clone::Clone
+pub unsafe fn mssql_driver_pool::pool::PoolMetrics::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_driver_pool::pool::PoolMetrics
+pub fn mssql_driver_pool::pool::PoolMetrics::from(T) -> T
+impl<T> dyn_clone::DynClone for mssql_driver_pool::pool::PoolMetrics where T: core::clone::Clone
+pub fn mssql_driver_pool::pool::PoolMetrics::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::pool::PoolMetrics
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::pool::PoolMetrics where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolMetrics::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::pool::PoolMetrics::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::pool::PoolMetrics
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::pool::PoolMetrics
+impl<T> typenum::type_operators::Same for mssql_driver_pool::pool::PoolMetrics
+pub type mssql_driver_pool::pool::PoolMetrics::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::pool::PoolMetrics where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::pool::PoolMetrics::vzip(self) -> V
+#[non_exhaustive] pub struct mssql_driver_pool::pool::PoolStatus
+pub mssql_driver_pool::pool::PoolStatus::available: u32
+pub mssql_driver_pool::pool::PoolStatus::in_use: u32
+pub mssql_driver_pool::pool::PoolStatus::max: u32
+pub mssql_driver_pool::pool::PoolStatus::total: u32
+pub mssql_driver_pool::pool::PoolStatus::wait_queue_depth: u32
+impl mssql_driver_pool::pool::PoolStatus
+pub fn mssql_driver_pool::pool::PoolStatus::has_waiters(&self) -> bool
+pub fn mssql_driver_pool::pool::PoolStatus::is_at_capacity(&self) -> bool
+pub fn mssql_driver_pool::pool::PoolStatus::utilization(&self) -> f64
+impl core::clone::Clone for mssql_driver_pool::pool::PoolStatus
+pub fn mssql_driver_pool::pool::PoolStatus::clone(&self) -> mssql_driver_pool::pool::PoolStatus
+impl core::fmt::Debug for mssql_driver_pool::pool::PoolStatus
+pub fn mssql_driver_pool::pool::PoolStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for mssql_driver_pool::pool::PoolStatus
+impl core::marker::Freeze for mssql_driver_pool::pool::PoolStatus
+impl core::marker::Send for mssql_driver_pool::pool::PoolStatus
+impl core::marker::Sync for mssql_driver_pool::pool::PoolStatus
+impl core::marker::Unpin for mssql_driver_pool::pool::PoolStatus
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::pool::PoolStatus
+impl core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::pool::PoolStatus
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::pool::PoolStatus where U: core::convert::From<T>
+pub fn mssql_driver_pool::pool::PoolStatus::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::pool::PoolStatus where U: core::convert::Into<T>
+pub type mssql_driver_pool::pool::PoolStatus::Error = core::convert::Infallible
+pub fn mssql_driver_pool::pool::PoolStatus::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::pool::PoolStatus where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::pool::PoolStatus::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::pool::PoolStatus::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_driver_pool::pool::PoolStatus where T: core::clone::Clone
+pub type mssql_driver_pool::pool::PoolStatus::Owned = T
+pub fn mssql_driver_pool::pool::PoolStatus::clone_into(&self, &mut T)
+pub fn mssql_driver_pool::pool::PoolStatus::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_driver_pool::pool::PoolStatus where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolStatus::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::pool::PoolStatus where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolStatus::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::pool::PoolStatus where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolStatus::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_driver_pool::pool::PoolStatus where T: core::clone::Clone
+pub unsafe fn mssql_driver_pool::pool::PoolStatus::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_driver_pool::pool::PoolStatus
+pub fn mssql_driver_pool::pool::PoolStatus::from(T) -> T
+impl<T> dyn_clone::DynClone for mssql_driver_pool::pool::PoolStatus where T: core::clone::Clone
+pub fn mssql_driver_pool::pool::PoolStatus::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::pool::PoolStatus
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::pool::PoolStatus where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolStatus::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::pool::PoolStatus::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::pool::PoolStatus
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::pool::PoolStatus
+impl<T> typenum::type_operators::Same for mssql_driver_pool::pool::PoolStatus
+pub type mssql_driver_pool::pool::PoolStatus::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::pool::PoolStatus where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::pool::PoolStatus::vzip(self) -> V
+pub struct mssql_driver_pool::pool::PooledConnection
+impl mssql_driver_pool::pool::PooledConnection
+pub fn mssql_driver_pool::pool::PooledConnection::client(&self) -> core::option::Option<&mssql_client::client::Client<mssql_client::state::Ready>>
+pub fn mssql_driver_pool::pool::PooledConnection::client_mut(&mut self) -> core::option::Option<&mut mssql_client::client::Client<mssql_client::state::Ready>>
+pub fn mssql_driver_pool::pool::PooledConnection::detach(self) -> core::option::Option<mssql_client::client::Client<mssql_client::state::Ready>>
+pub async fn mssql_driver_pool::pool::PooledConnection::execute(&mut self, &str, &[&(dyn mssql_types::to_sql::ToSql + core::marker::Sync)]) -> core::result::Result<u64, mssql_driver_pool::error::PoolError>
+pub fn mssql_driver_pool::pool::PooledConnection::metadata(&self) -> &mssql_driver_pool::lifecycle::ConnectionMetadata
+pub async fn mssql_driver_pool::pool::PooledConnection::query<'a>(&'a mut self, &str, &[&(dyn mssql_types::to_sql::ToSql + core::marker::Sync)]) -> core::result::Result<mssql_client::stream::QueryStream<'a>, mssql_driver_pool::error::PoolError>
+impl core::ops::drop::Drop for mssql_driver_pool::pool::PooledConnection
+pub fn mssql_driver_pool::pool::PooledConnection::drop(&mut self)
+impl core::marker::Freeze for mssql_driver_pool::pool::PooledConnection
+impl core::marker::Send for mssql_driver_pool::pool::PooledConnection
+impl core::marker::Sync for mssql_driver_pool::pool::PooledConnection
+impl core::marker::Unpin for mssql_driver_pool::pool::PooledConnection
+impl !core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::pool::PooledConnection
+impl !core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::pool::PooledConnection
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::pool::PooledConnection where U: core::convert::From<T>
+pub fn mssql_driver_pool::pool::PooledConnection::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::pool::PooledConnection where U: core::convert::Into<T>
+pub type mssql_driver_pool::pool::PooledConnection::Error = core::convert::Infallible
+pub fn mssql_driver_pool::pool::PooledConnection::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::pool::PooledConnection where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::pool::PooledConnection::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::pool::PooledConnection::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_driver_pool::pool::PooledConnection where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PooledConnection::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::pool::PooledConnection where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PooledConnection::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::pool::PooledConnection where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PooledConnection::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_driver_pool::pool::PooledConnection
+pub fn mssql_driver_pool::pool::PooledConnection::from(T) -> T
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::pool::PooledConnection
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::pool::PooledConnection where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PooledConnection::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::pool::PooledConnection::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::pool::PooledConnection
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::pool::PooledConnection
+impl<T> typenum::type_operators::Same for mssql_driver_pool::pool::PooledConnection
+pub type mssql_driver_pool::pool::PooledConnection::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::pool::PooledConnection where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::pool::PooledConnection::vzip(self) -> V
+#[non_exhaustive] pub enum mssql_driver_pool::ConnectionState
+pub mssql_driver_pool::ConnectionState::Checking
+pub mssql_driver_pool::ConnectionState::Closed
+pub mssql_driver_pool::ConnectionState::Closing
+pub mssql_driver_pool::ConnectionState::Error
+pub mssql_driver_pool::ConnectionState::Idle
+pub mssql_driver_pool::ConnectionState::InUse
+pub mssql_driver_pool::ConnectionState::Resetting
+impl mssql_driver_pool::lifecycle::ConnectionState
+pub fn mssql_driver_pool::lifecycle::ConnectionState::is_available(&self) -> bool
+pub fn mssql_driver_pool::lifecycle::ConnectionState::is_busy(&self) -> bool
+pub fn mssql_driver_pool::lifecycle::ConnectionState::should_remove(&self) -> bool
+impl core::clone::Clone for mssql_driver_pool::lifecycle::ConnectionState
+pub fn mssql_driver_pool::lifecycle::ConnectionState::clone(&self) -> mssql_driver_pool::lifecycle::ConnectionState
+impl core::cmp::Eq for mssql_driver_pool::lifecycle::ConnectionState
+impl core::cmp::PartialEq for mssql_driver_pool::lifecycle::ConnectionState
+pub fn mssql_driver_pool::lifecycle::ConnectionState::eq(&self, &mssql_driver_pool::lifecycle::ConnectionState) -> bool
+impl core::fmt::Debug for mssql_driver_pool::lifecycle::ConnectionState
+pub fn mssql_driver_pool::lifecycle::ConnectionState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for mssql_driver_pool::lifecycle::ConnectionState
+impl core::marker::StructuralPartialEq for mssql_driver_pool::lifecycle::ConnectionState
+impl core::marker::Freeze for mssql_driver_pool::lifecycle::ConnectionState
+impl core::marker::Send for mssql_driver_pool::lifecycle::ConnectionState
+impl core::marker::Sync for mssql_driver_pool::lifecycle::ConnectionState
+impl core::marker::Unpin for mssql_driver_pool::lifecycle::ConnectionState
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::lifecycle::ConnectionState
+impl core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::lifecycle::ConnectionState
+impl<Q, K> equivalent::Equivalent<K> for mssql_driver_pool::lifecycle::ConnectionState where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::ConnectionState::equivalent(&self, &K) -> bool
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::lifecycle::ConnectionState where U: core::convert::From<T>
+pub fn mssql_driver_pool::lifecycle::ConnectionState::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::lifecycle::ConnectionState where U: core::convert::Into<T>
+pub type mssql_driver_pool::lifecycle::ConnectionState::Error = core::convert::Infallible
+pub fn mssql_driver_pool::lifecycle::ConnectionState::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::lifecycle::ConnectionState where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::lifecycle::ConnectionState::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::lifecycle::ConnectionState::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_driver_pool::lifecycle::ConnectionState where T: core::clone::Clone
+pub type mssql_driver_pool::lifecycle::ConnectionState::Owned = T
+pub fn mssql_driver_pool::lifecycle::ConnectionState::clone_into(&self, &mut T)
+pub fn mssql_driver_pool::lifecycle::ConnectionState::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_driver_pool::lifecycle::ConnectionState where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::ConnectionState::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::lifecycle::ConnectionState where T: ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::ConnectionState::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::lifecycle::ConnectionState where T: ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::ConnectionState::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_driver_pool::lifecycle::ConnectionState where T: core::clone::Clone
+pub unsafe fn mssql_driver_pool::lifecycle::ConnectionState::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_driver_pool::lifecycle::ConnectionState
+pub fn mssql_driver_pool::lifecycle::ConnectionState::from(T) -> T
+impl<T> dyn_clone::DynClone for mssql_driver_pool::lifecycle::ConnectionState where T: core::clone::Clone
+pub fn mssql_driver_pool::lifecycle::ConnectionState::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::lifecycle::ConnectionState
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::lifecycle::ConnectionState where T: ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::ConnectionState::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::lifecycle::ConnectionState::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::lifecycle::ConnectionState
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::lifecycle::ConnectionState
+impl<T> typenum::type_operators::Same for mssql_driver_pool::lifecycle::ConnectionState
+pub type mssql_driver_pool::lifecycle::ConnectionState::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::lifecycle::ConnectionState where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::lifecycle::ConnectionState::vzip(self) -> V
+#[non_exhaustive] pub enum mssql_driver_pool::PoolError
+pub mssql_driver_pool::PoolError::AcquisitionTimeout(core::time::Duration)
+pub mssql_driver_pool::PoolError::Configuration(alloc::string::String)
+pub mssql_driver_pool::PoolError::Connection(mssql_client::error::Error)
+pub mssql_driver_pool::PoolError::ConnectionCreation(alloc::string::String)
+pub mssql_driver_pool::PoolError::MaxConnectionsReached
+pub mssql_driver_pool::PoolError::MaxConnectionsReached::max: u32
+pub mssql_driver_pool::PoolError::PoolClosed
+pub mssql_driver_pool::PoolError::ResetFailed(alloc::string::String)
+pub mssql_driver_pool::PoolError::Timeout
+pub mssql_driver_pool::PoolError::Timeout::capacity: u32
+pub mssql_driver_pool::PoolError::Timeout::idle: u32
+pub mssql_driver_pool::PoolError::Timeout::in_use: u32
+pub mssql_driver_pool::PoolError::Timeout::waiters: u32
+pub mssql_driver_pool::PoolError::UnhealthyConnection(alloc::string::String)
+pub mssql_driver_pool::PoolError::ValidationFailed(alloc::string::String)
+impl mssql_driver_pool::error::PoolError
+pub fn mssql_driver_pool::error::PoolError::is_terminal(&self) -> bool
+pub fn mssql_driver_pool::error::PoolError::is_transient(&self) -> bool
+impl core::convert::From<mssql_client::error::Error> for mssql_driver_pool::error::PoolError
+pub fn mssql_driver_pool::error::PoolError::from(mssql_client::error::Error) -> Self
+impl core::error::Error for mssql_driver_pool::error::PoolError
+pub fn mssql_driver_pool::error::PoolError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for mssql_driver_pool::error::PoolError
+pub fn mssql_driver_pool::error::PoolError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for mssql_driver_pool::error::PoolError
+pub fn mssql_driver_pool::error::PoolError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_driver_pool::error::PoolError
+impl core::marker::Send for mssql_driver_pool::error::PoolError
+impl core::marker::Sync for mssql_driver_pool::error::PoolError
+impl core::marker::Unpin for mssql_driver_pool::error::PoolError
+impl !core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::error::PoolError
+impl !core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::error::PoolError
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::error::PoolError where U: core::convert::From<T>
+pub fn mssql_driver_pool::error::PoolError::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::error::PoolError where U: core::convert::Into<T>
+pub type mssql_driver_pool::error::PoolError::Error = core::convert::Infallible
+pub fn mssql_driver_pool::error::PoolError::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::error::PoolError where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::error::PoolError::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::error::PoolError::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::string::ToString for mssql_driver_pool::error::PoolError where T: core::fmt::Display + ?core::marker::Sized
+pub fn mssql_driver_pool::error::PoolError::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for mssql_driver_pool::error::PoolError where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::error::PoolError::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::error::PoolError where T: ?core::marker::Sized
+pub fn mssql_driver_pool::error::PoolError::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::error::PoolError where T: ?core::marker::Sized
+pub fn mssql_driver_pool::error::PoolError::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_driver_pool::error::PoolError
+pub fn mssql_driver_pool::error::PoolError::from(T) -> T
+impl<T> iri_string::format::ToStringFallible for mssql_driver_pool::error::PoolError where T: core::fmt::Display
+pub fn mssql_driver_pool::error::PoolError::try_to_string(&self) -> core::result::Result<alloc::string::String, alloc::collections::TryReserveError>
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::error::PoolError
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::error::PoolError where T: ?core::marker::Sized
+pub fn mssql_driver_pool::error::PoolError::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::error::PoolError::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::error::PoolError
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::error::PoolError
+impl<T> typenum::type_operators::Same for mssql_driver_pool::error::PoolError
+pub type mssql_driver_pool::error::PoolError::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::error::PoolError where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::error::PoolError::vzip(self) -> V
+#[non_exhaustive] pub struct mssql_driver_pool::ConnectionMetadata
+pub mssql_driver_pool::ConnectionMetadata::checkout_count: u64
+pub mssql_driver_pool::ConnectionMetadata::created_at: std::time::Instant
+pub mssql_driver_pool::ConnectionMetadata::id: u64
+pub mssql_driver_pool::ConnectionMetadata::last_checked_at: core::option::Option<std::time::Instant>
+pub mssql_driver_pool::ConnectionMetadata::last_used_at: std::time::Instant
+pub mssql_driver_pool::ConnectionMetadata::state: mssql_driver_pool::lifecycle::ConnectionState
+impl mssql_driver_pool::lifecycle::ConnectionMetadata
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::is_expired(&self, core::time::Duration) -> bool
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::is_idle_expired(&self, core::time::Duration) -> bool
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::mark_checkin(&mut self)
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::mark_checkout(&mut self)
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::mark_health_check(&mut self)
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::needs_health_check(&self, core::time::Duration) -> bool
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::new(u64) -> Self
+impl core::clone::Clone for mssql_driver_pool::lifecycle::ConnectionMetadata
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::clone(&self) -> mssql_driver_pool::lifecycle::ConnectionMetadata
+impl core::fmt::Debug for mssql_driver_pool::lifecycle::ConnectionMetadata
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_driver_pool::lifecycle::ConnectionMetadata
+impl core::marker::Send for mssql_driver_pool::lifecycle::ConnectionMetadata
+impl core::marker::Sync for mssql_driver_pool::lifecycle::ConnectionMetadata
+impl core::marker::Unpin for mssql_driver_pool::lifecycle::ConnectionMetadata
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::lifecycle::ConnectionMetadata
+impl core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::lifecycle::ConnectionMetadata
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::lifecycle::ConnectionMetadata where U: core::convert::From<T>
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::lifecycle::ConnectionMetadata where U: core::convert::Into<T>
+pub type mssql_driver_pool::lifecycle::ConnectionMetadata::Error = core::convert::Infallible
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::lifecycle::ConnectionMetadata where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::lifecycle::ConnectionMetadata::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_driver_pool::lifecycle::ConnectionMetadata where T: core::clone::Clone
+pub type mssql_driver_pool::lifecycle::ConnectionMetadata::Owned = T
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::clone_into(&self, &mut T)
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_driver_pool::lifecycle::ConnectionMetadata where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::lifecycle::ConnectionMetadata where T: ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::lifecycle::ConnectionMetadata where T: ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_driver_pool::lifecycle::ConnectionMetadata where T: core::clone::Clone
+pub unsafe fn mssql_driver_pool::lifecycle::ConnectionMetadata::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_driver_pool::lifecycle::ConnectionMetadata
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::from(T) -> T
+impl<T> dyn_clone::DynClone for mssql_driver_pool::lifecycle::ConnectionMetadata where T: core::clone::Clone
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::lifecycle::ConnectionMetadata
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::lifecycle::ConnectionMetadata where T: ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::lifecycle::ConnectionMetadata
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::lifecycle::ConnectionMetadata
+impl<T> typenum::type_operators::Same for mssql_driver_pool::lifecycle::ConnectionMetadata
+pub type mssql_driver_pool::lifecycle::ConnectionMetadata::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::lifecycle::ConnectionMetadata where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::lifecycle::ConnectionMetadata::vzip(self) -> V
+#[non_exhaustive] pub struct mssql_driver_pool::HealthCheckResult
+pub mssql_driver_pool::HealthCheckResult::error: core::option::Option<alloc::string::String>
+pub mssql_driver_pool::HealthCheckResult::healthy: bool
+pub mssql_driver_pool::HealthCheckResult::latency: core::time::Duration
+impl mssql_driver_pool::lifecycle::HealthCheckResult
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::healthy(core::time::Duration) -> Self
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::unhealthy(core::time::Duration, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for mssql_driver_pool::lifecycle::HealthCheckResult
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::clone(&self) -> mssql_driver_pool::lifecycle::HealthCheckResult
+impl core::fmt::Debug for mssql_driver_pool::lifecycle::HealthCheckResult
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_driver_pool::lifecycle::HealthCheckResult
+impl core::marker::Send for mssql_driver_pool::lifecycle::HealthCheckResult
+impl core::marker::Sync for mssql_driver_pool::lifecycle::HealthCheckResult
+impl core::marker::Unpin for mssql_driver_pool::lifecycle::HealthCheckResult
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::lifecycle::HealthCheckResult
+impl core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::lifecycle::HealthCheckResult
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::lifecycle::HealthCheckResult where U: core::convert::From<T>
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::lifecycle::HealthCheckResult where U: core::convert::Into<T>
+pub type mssql_driver_pool::lifecycle::HealthCheckResult::Error = core::convert::Infallible
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::lifecycle::HealthCheckResult where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::lifecycle::HealthCheckResult::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_driver_pool::lifecycle::HealthCheckResult where T: core::clone::Clone
+pub type mssql_driver_pool::lifecycle::HealthCheckResult::Owned = T
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::clone_into(&self, &mut T)
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_driver_pool::lifecycle::HealthCheckResult where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::lifecycle::HealthCheckResult where T: ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::lifecycle::HealthCheckResult where T: ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_driver_pool::lifecycle::HealthCheckResult where T: core::clone::Clone
+pub unsafe fn mssql_driver_pool::lifecycle::HealthCheckResult::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_driver_pool::lifecycle::HealthCheckResult
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::from(T) -> T
+impl<T> dyn_clone::DynClone for mssql_driver_pool::lifecycle::HealthCheckResult where T: core::clone::Clone
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::lifecycle::HealthCheckResult
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::lifecycle::HealthCheckResult where T: ?core::marker::Sized
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::lifecycle::HealthCheckResult
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::lifecycle::HealthCheckResult
+impl<T> typenum::type_operators::Same for mssql_driver_pool::lifecycle::HealthCheckResult
+pub type mssql_driver_pool::lifecycle::HealthCheckResult::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::lifecycle::HealthCheckResult where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::lifecycle::HealthCheckResult::vzip(self) -> V
+pub struct mssql_driver_pool::Pool
+impl mssql_driver_pool::pool::Pool
+pub fn mssql_driver_pool::pool::Pool::builder() -> mssql_driver_pool::pool::PoolBuilder
+pub async fn mssql_driver_pool::pool::Pool::close(&self)
+pub fn mssql_driver_pool::pool::Pool::config(&self) -> &mssql_driver_pool::config::PoolConfig
+pub async fn mssql_driver_pool::pool::Pool::get(&self) -> core::result::Result<mssql_driver_pool::pool::PooledConnection, mssql_driver_pool::error::PoolError>
+pub fn mssql_driver_pool::pool::Pool::is_closed(&self) -> bool
+pub fn mssql_driver_pool::pool::Pool::metrics(&self) -> mssql_driver_pool::pool::PoolMetrics
+pub async fn mssql_driver_pool::pool::Pool::new(mssql_driver_pool::config::PoolConfig, mssql_client::config::Config) -> core::result::Result<Self, mssql_driver_pool::error::PoolError>
+pub fn mssql_driver_pool::pool::Pool::status(&self) -> mssql_driver_pool::pool::PoolStatus
+pub fn mssql_driver_pool::pool::Pool::try_get(&self) -> core::result::Result<core::option::Option<mssql_driver_pool::pool::PooledConnection>, mssql_driver_pool::error::PoolError>
+pub fn mssql_driver_pool::pool::Pool::wait_queue_depth(&self) -> u32
+impl core::marker::Freeze for mssql_driver_pool::pool::Pool
+impl core::marker::Send for mssql_driver_pool::pool::Pool
+impl core::marker::Sync for mssql_driver_pool::pool::Pool
+impl core::marker::Unpin for mssql_driver_pool::pool::Pool
+impl !core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::pool::Pool
+impl !core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::pool::Pool
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::pool::Pool where U: core::convert::From<T>
+pub fn mssql_driver_pool::pool::Pool::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::pool::Pool where U: core::convert::Into<T>
+pub type mssql_driver_pool::pool::Pool::Error = core::convert::Infallible
+pub fn mssql_driver_pool::pool::Pool::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::pool::Pool where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::pool::Pool::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::pool::Pool::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_driver_pool::pool::Pool where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::pool::Pool::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::pool::Pool where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::Pool::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::pool::Pool where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::Pool::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_driver_pool::pool::Pool
+pub fn mssql_driver_pool::pool::Pool::from(T) -> T
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::pool::Pool
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::pool::Pool where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::Pool::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::pool::Pool::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::pool::Pool
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::pool::Pool
+impl<T> typenum::type_operators::Same for mssql_driver_pool::pool::Pool
+pub type mssql_driver_pool::pool::Pool::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::pool::Pool where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::pool::Pool::vzip(self) -> V
+pub struct mssql_driver_pool::PoolBuilder
+impl mssql_driver_pool::pool::PoolBuilder
+pub async fn mssql_driver_pool::pool::PoolBuilder::build(self) -> core::result::Result<mssql_driver_pool::pool::Pool, mssql_driver_pool::error::PoolError>
+pub fn mssql_driver_pool::pool::PoolBuilder::client_config(self, mssql_client::config::Config) -> Self
+pub fn mssql_driver_pool::pool::PoolBuilder::connection_timeout(self, core::time::Duration) -> Self
+pub fn mssql_driver_pool::pool::PoolBuilder::idle_timeout(self, core::time::Duration) -> Self
+pub fn mssql_driver_pool::pool::PoolBuilder::max_connections(self, u32) -> Self
+pub fn mssql_driver_pool::pool::PoolBuilder::min_connections(self, u32) -> Self
+pub fn mssql_driver_pool::pool::PoolBuilder::new() -> Self
+pub fn mssql_driver_pool::pool::PoolBuilder::pool_config(self, mssql_driver_pool::config::PoolConfig) -> Self
+pub fn mssql_driver_pool::pool::PoolBuilder::pool_name(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn mssql_driver_pool::pool::PoolBuilder::sp_reset_connection(self, bool) -> Self
+pub fn mssql_driver_pool::pool::PoolBuilder::test_while_idle(self, bool) -> Self
+impl core::default::Default for mssql_driver_pool::pool::PoolBuilder
+pub fn mssql_driver_pool::pool::PoolBuilder::default() -> Self
+impl core::marker::Freeze for mssql_driver_pool::pool::PoolBuilder
+impl core::marker::Send for mssql_driver_pool::pool::PoolBuilder
+impl core::marker::Sync for mssql_driver_pool::pool::PoolBuilder
+impl core::marker::Unpin for mssql_driver_pool::pool::PoolBuilder
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::pool::PoolBuilder
+impl core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::pool::PoolBuilder
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::pool::PoolBuilder where U: core::convert::From<T>
+pub fn mssql_driver_pool::pool::PoolBuilder::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::pool::PoolBuilder where U: core::convert::Into<T>
+pub type mssql_driver_pool::pool::PoolBuilder::Error = core::convert::Infallible
+pub fn mssql_driver_pool::pool::PoolBuilder::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::pool::PoolBuilder where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::pool::PoolBuilder::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::pool::PoolBuilder::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_driver_pool::pool::PoolBuilder where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolBuilder::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::pool::PoolBuilder where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolBuilder::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::pool::PoolBuilder where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolBuilder::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_driver_pool::pool::PoolBuilder
+pub fn mssql_driver_pool::pool::PoolBuilder::from(T) -> T
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::pool::PoolBuilder
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::pool::PoolBuilder where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolBuilder::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::pool::PoolBuilder::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::pool::PoolBuilder
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::pool::PoolBuilder
+impl<T> typenum::type_operators::Same for mssql_driver_pool::pool::PoolBuilder
+pub type mssql_driver_pool::pool::PoolBuilder::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::pool::PoolBuilder where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::pool::PoolBuilder::vzip(self) -> V
+#[non_exhaustive] pub struct mssql_driver_pool::PoolConfig
+pub mssql_driver_pool::PoolConfig::connection_timeout: core::time::Duration
+pub mssql_driver_pool::PoolConfig::health_check_interval: core::time::Duration
+pub mssql_driver_pool::PoolConfig::health_check_query: alloc::sync::Arc<str>
+pub mssql_driver_pool::PoolConfig::idle_timeout: core::time::Duration
+pub mssql_driver_pool::PoolConfig::max_connections: u32
+pub mssql_driver_pool::PoolConfig::max_lifetime: core::time::Duration
+pub mssql_driver_pool::PoolConfig::min_connections: u32
+pub mssql_driver_pool::PoolConfig::sp_reset_connection: bool
+pub mssql_driver_pool::PoolConfig::test_on_checkin: bool
+pub mssql_driver_pool::PoolConfig::test_on_checkout: bool
+pub mssql_driver_pool::PoolConfig::test_while_idle: bool
+impl mssql_driver_pool::config::PoolConfig
+pub fn mssql_driver_pool::config::PoolConfig::connection_timeout(self, core::time::Duration) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::health_check_interval(self, core::time::Duration) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::health_check_query(self, impl core::convert::Into<alloc::sync::Arc<str>>) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::idle_timeout(self, core::time::Duration) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::max_connections(self, u32) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::max_lifetime(self, core::time::Duration) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::min_connections(self, u32) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::new() -> Self
+pub fn mssql_driver_pool::config::PoolConfig::sp_reset_connection(self, bool) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::test_on_checkin(self, bool) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::test_on_checkout(self, bool) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::test_while_idle(self, bool) -> Self
+pub fn mssql_driver_pool::config::PoolConfig::validate(&self) -> core::result::Result<(), mssql_driver_pool::error::PoolError>
+impl core::clone::Clone for mssql_driver_pool::config::PoolConfig
+pub fn mssql_driver_pool::config::PoolConfig::clone(&self) -> mssql_driver_pool::config::PoolConfig
+impl core::default::Default for mssql_driver_pool::config::PoolConfig
+pub fn mssql_driver_pool::config::PoolConfig::default() -> Self
+impl core::fmt::Debug for mssql_driver_pool::config::PoolConfig
+pub fn mssql_driver_pool::config::PoolConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_driver_pool::config::PoolConfig
+impl core::marker::Send for mssql_driver_pool::config::PoolConfig
+impl core::marker::Sync for mssql_driver_pool::config::PoolConfig
+impl core::marker::Unpin for mssql_driver_pool::config::PoolConfig
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::config::PoolConfig
+impl core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::config::PoolConfig
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::config::PoolConfig where U: core::convert::From<T>
+pub fn mssql_driver_pool::config::PoolConfig::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::config::PoolConfig where U: core::convert::Into<T>
+pub type mssql_driver_pool::config::PoolConfig::Error = core::convert::Infallible
+pub fn mssql_driver_pool::config::PoolConfig::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::config::PoolConfig where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::config::PoolConfig::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::config::PoolConfig::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_driver_pool::config::PoolConfig where T: core::clone::Clone
+pub type mssql_driver_pool::config::PoolConfig::Owned = T
+pub fn mssql_driver_pool::config::PoolConfig::clone_into(&self, &mut T)
+pub fn mssql_driver_pool::config::PoolConfig::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_driver_pool::config::PoolConfig where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::config::PoolConfig::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::config::PoolConfig where T: ?core::marker::Sized
+pub fn mssql_driver_pool::config::PoolConfig::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::config::PoolConfig where T: ?core::marker::Sized
+pub fn mssql_driver_pool::config::PoolConfig::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_driver_pool::config::PoolConfig where T: core::clone::Clone
+pub unsafe fn mssql_driver_pool::config::PoolConfig::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_driver_pool::config::PoolConfig
+pub fn mssql_driver_pool::config::PoolConfig::from(T) -> T
+impl<T> dyn_clone::DynClone for mssql_driver_pool::config::PoolConfig where T: core::clone::Clone
+pub fn mssql_driver_pool::config::PoolConfig::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::config::PoolConfig
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::config::PoolConfig where T: ?core::marker::Sized
+pub fn mssql_driver_pool::config::PoolConfig::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::config::PoolConfig::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::config::PoolConfig
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::config::PoolConfig
+impl<T> typenum::type_operators::Same for mssql_driver_pool::config::PoolConfig
+pub type mssql_driver_pool::config::PoolConfig::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::config::PoolConfig where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::config::PoolConfig::vzip(self) -> V
+#[non_exhaustive] pub struct mssql_driver_pool::PoolMetrics
+pub mssql_driver_pool::PoolMetrics::avg_acquisition_time_us: u64
+pub mssql_driver_pool::PoolMetrics::checkouts_failed: u64
+pub mssql_driver_pool::PoolMetrics::checkouts_successful: u64
+pub mssql_driver_pool::PoolMetrics::connections_closed: u64
+pub mssql_driver_pool::PoolMetrics::connections_created: u64
+pub mssql_driver_pool::PoolMetrics::connections_idle_expired: u64
+pub mssql_driver_pool::PoolMetrics::connections_lifetime_expired: u64
+pub mssql_driver_pool::PoolMetrics::health_checks_failed: u64
+pub mssql_driver_pool::PoolMetrics::health_checks_performed: u64
+pub mssql_driver_pool::PoolMetrics::idle_health_checks_failed: u64
+pub mssql_driver_pool::PoolMetrics::idle_health_checks_performed: u64
+pub mssql_driver_pool::PoolMetrics::peak_wait_queue_depth: u64
+pub mssql_driver_pool::PoolMetrics::reaper_runs: u64
+pub mssql_driver_pool::PoolMetrics::resets_failed: u64
+pub mssql_driver_pool::PoolMetrics::resets_performed: u64
+pub mssql_driver_pool::PoolMetrics::uptime: core::time::Duration
+impl mssql_driver_pool::pool::PoolMetrics
+pub fn mssql_driver_pool::pool::PoolMetrics::avg_acquisition_time(&self) -> core::time::Duration
+pub fn mssql_driver_pool::pool::PoolMetrics::checkout_success_rate(&self) -> f64
+pub fn mssql_driver_pool::pool::PoolMetrics::health_check_success_rate(&self) -> f64
+impl core::clone::Clone for mssql_driver_pool::pool::PoolMetrics
+pub fn mssql_driver_pool::pool::PoolMetrics::clone(&self) -> mssql_driver_pool::pool::PoolMetrics
+impl core::fmt::Debug for mssql_driver_pool::pool::PoolMetrics
+pub fn mssql_driver_pool::pool::PoolMetrics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for mssql_driver_pool::pool::PoolMetrics
+impl core::marker::Send for mssql_driver_pool::pool::PoolMetrics
+impl core::marker::Sync for mssql_driver_pool::pool::PoolMetrics
+impl core::marker::Unpin for mssql_driver_pool::pool::PoolMetrics
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::pool::PoolMetrics
+impl core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::pool::PoolMetrics
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::pool::PoolMetrics where U: core::convert::From<T>
+pub fn mssql_driver_pool::pool::PoolMetrics::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::pool::PoolMetrics where U: core::convert::Into<T>
+pub type mssql_driver_pool::pool::PoolMetrics::Error = core::convert::Infallible
+pub fn mssql_driver_pool::pool::PoolMetrics::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::pool::PoolMetrics where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::pool::PoolMetrics::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::pool::PoolMetrics::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_driver_pool::pool::PoolMetrics where T: core::clone::Clone
+pub type mssql_driver_pool::pool::PoolMetrics::Owned = T
+pub fn mssql_driver_pool::pool::PoolMetrics::clone_into(&self, &mut T)
+pub fn mssql_driver_pool::pool::PoolMetrics::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_driver_pool::pool::PoolMetrics where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolMetrics::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::pool::PoolMetrics where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolMetrics::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::pool::PoolMetrics where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolMetrics::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_driver_pool::pool::PoolMetrics where T: core::clone::Clone
+pub unsafe fn mssql_driver_pool::pool::PoolMetrics::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_driver_pool::pool::PoolMetrics
+pub fn mssql_driver_pool::pool::PoolMetrics::from(T) -> T
+impl<T> dyn_clone::DynClone for mssql_driver_pool::pool::PoolMetrics where T: core::clone::Clone
+pub fn mssql_driver_pool::pool::PoolMetrics::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::pool::PoolMetrics
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::pool::PoolMetrics where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolMetrics::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::pool::PoolMetrics::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::pool::PoolMetrics
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::pool::PoolMetrics
+impl<T> typenum::type_operators::Same for mssql_driver_pool::pool::PoolMetrics
+pub type mssql_driver_pool::pool::PoolMetrics::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::pool::PoolMetrics where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::pool::PoolMetrics::vzip(self) -> V
+#[non_exhaustive] pub struct mssql_driver_pool::PoolStatus
+pub mssql_driver_pool::PoolStatus::available: u32
+pub mssql_driver_pool::PoolStatus::in_use: u32
+pub mssql_driver_pool::PoolStatus::max: u32
+pub mssql_driver_pool::PoolStatus::total: u32
+pub mssql_driver_pool::PoolStatus::wait_queue_depth: u32
+impl mssql_driver_pool::pool::PoolStatus
+pub fn mssql_driver_pool::pool::PoolStatus::has_waiters(&self) -> bool
+pub fn mssql_driver_pool::pool::PoolStatus::is_at_capacity(&self) -> bool
+pub fn mssql_driver_pool::pool::PoolStatus::utilization(&self) -> f64
+impl core::clone::Clone for mssql_driver_pool::pool::PoolStatus
+pub fn mssql_driver_pool::pool::PoolStatus::clone(&self) -> mssql_driver_pool::pool::PoolStatus
+impl core::fmt::Debug for mssql_driver_pool::pool::PoolStatus
+pub fn mssql_driver_pool::pool::PoolStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for mssql_driver_pool::pool::PoolStatus
+impl core::marker::Freeze for mssql_driver_pool::pool::PoolStatus
+impl core::marker::Send for mssql_driver_pool::pool::PoolStatus
+impl core::marker::Sync for mssql_driver_pool::pool::PoolStatus
+impl core::marker::Unpin for mssql_driver_pool::pool::PoolStatus
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::pool::PoolStatus
+impl core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::pool::PoolStatus
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::pool::PoolStatus where U: core::convert::From<T>
+pub fn mssql_driver_pool::pool::PoolStatus::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::pool::PoolStatus where U: core::convert::Into<T>
+pub type mssql_driver_pool::pool::PoolStatus::Error = core::convert::Infallible
+pub fn mssql_driver_pool::pool::PoolStatus::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::pool::PoolStatus where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::pool::PoolStatus::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::pool::PoolStatus::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_driver_pool::pool::PoolStatus where T: core::clone::Clone
+pub type mssql_driver_pool::pool::PoolStatus::Owned = T
+pub fn mssql_driver_pool::pool::PoolStatus::clone_into(&self, &mut T)
+pub fn mssql_driver_pool::pool::PoolStatus::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_driver_pool::pool::PoolStatus where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolStatus::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::pool::PoolStatus where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolStatus::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::pool::PoolStatus where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolStatus::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_driver_pool::pool::PoolStatus where T: core::clone::Clone
+pub unsafe fn mssql_driver_pool::pool::PoolStatus::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_driver_pool::pool::PoolStatus
+pub fn mssql_driver_pool::pool::PoolStatus::from(T) -> T
+impl<T> dyn_clone::DynClone for mssql_driver_pool::pool::PoolStatus where T: core::clone::Clone
+pub fn mssql_driver_pool::pool::PoolStatus::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::pool::PoolStatus
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::pool::PoolStatus where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PoolStatus::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::pool::PoolStatus::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::pool::PoolStatus
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::pool::PoolStatus
+impl<T> typenum::type_operators::Same for mssql_driver_pool::pool::PoolStatus
+pub type mssql_driver_pool::pool::PoolStatus::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::pool::PoolStatus where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::pool::PoolStatus::vzip(self) -> V
+pub struct mssql_driver_pool::PooledConnection
+impl mssql_driver_pool::pool::PooledConnection
+pub fn mssql_driver_pool::pool::PooledConnection::client(&self) -> core::option::Option<&mssql_client::client::Client<mssql_client::state::Ready>>
+pub fn mssql_driver_pool::pool::PooledConnection::client_mut(&mut self) -> core::option::Option<&mut mssql_client::client::Client<mssql_client::state::Ready>>
+pub fn mssql_driver_pool::pool::PooledConnection::detach(self) -> core::option::Option<mssql_client::client::Client<mssql_client::state::Ready>>
+pub async fn mssql_driver_pool::pool::PooledConnection::execute(&mut self, &str, &[&(dyn mssql_types::to_sql::ToSql + core::marker::Sync)]) -> core::result::Result<u64, mssql_driver_pool::error::PoolError>
+pub fn mssql_driver_pool::pool::PooledConnection::metadata(&self) -> &mssql_driver_pool::lifecycle::ConnectionMetadata
+pub async fn mssql_driver_pool::pool::PooledConnection::query<'a>(&'a mut self, &str, &[&(dyn mssql_types::to_sql::ToSql + core::marker::Sync)]) -> core::result::Result<mssql_client::stream::QueryStream<'a>, mssql_driver_pool::error::PoolError>
+impl core::ops::drop::Drop for mssql_driver_pool::pool::PooledConnection
+pub fn mssql_driver_pool::pool::PooledConnection::drop(&mut self)
+impl core::marker::Freeze for mssql_driver_pool::pool::PooledConnection
+impl core::marker::Send for mssql_driver_pool::pool::PooledConnection
+impl core::marker::Sync for mssql_driver_pool::pool::PooledConnection
+impl core::marker::Unpin for mssql_driver_pool::pool::PooledConnection
+impl !core::panic::unwind_safe::RefUnwindSafe for mssql_driver_pool::pool::PooledConnection
+impl !core::panic::unwind_safe::UnwindSafe for mssql_driver_pool::pool::PooledConnection
+impl<T, U> core::convert::Into<U> for mssql_driver_pool::pool::PooledConnection where U: core::convert::From<T>
+pub fn mssql_driver_pool::pool::PooledConnection::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_driver_pool::pool::PooledConnection where U: core::convert::Into<T>
+pub type mssql_driver_pool::pool::PooledConnection::Error = core::convert::Infallible
+pub fn mssql_driver_pool::pool::PooledConnection::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_driver_pool::pool::PooledConnection where U: core::convert::TryFrom<T>
+pub type mssql_driver_pool::pool::PooledConnection::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_driver_pool::pool::PooledConnection::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_driver_pool::pool::PooledConnection where T: 'static + ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PooledConnection::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_driver_pool::pool::PooledConnection where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PooledConnection::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_driver_pool::pool::PooledConnection where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PooledConnection::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_driver_pool::pool::PooledConnection
+pub fn mssql_driver_pool::pool::PooledConnection::from(T) -> T
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_driver_pool::pool::PooledConnection
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_driver_pool::pool::PooledConnection where T: ?core::marker::Sized
+pub fn mssql_driver_pool::pool::PooledConnection::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_driver_pool::pool::PooledConnection::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_driver_pool::pool::PooledConnection
+impl<T> tracing::instrument::WithSubscriber for mssql_driver_pool::pool::PooledConnection
+impl<T> typenum::type_operators::Same for mssql_driver_pool::pool::PooledConnection
+pub type mssql_driver_pool::pool::PooledConnection::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_driver_pool::pool::PooledConnection where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_driver_pool::pool::PooledConnection::vzip(self) -> V
+pub const mssql_driver_pool::DEFAULT_HEALTH_CHECK_QUERY: &str
+pub trait mssql_driver_pool::ConnectionLifecycle: core::marker::Send + core::marker::Sync
+pub async fn mssql_driver_pool::ConnectionLifecycle::health_check(&self) -> core::result::Result<(), mssql_driver_pool::error::PoolError>
+pub fn mssql_driver_pool::ConnectionLifecycle::is_valid(&self) -> bool
+pub async fn mssql_driver_pool::ConnectionLifecycle::reset(&mut self) -> core::result::Result<(), mssql_driver_pool::error::PoolError>
+pub trait mssql_driver_pool::DynConnectionLifecycle: core::marker::Send + core::marker::Sync
+pub fn mssql_driver_pool::DynConnectionLifecycle::health_check<'life0, 'async_trait>(&'life0 self) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<(), mssql_driver_pool::error::PoolError>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait
+pub fn mssql_driver_pool::DynConnectionLifecycle::is_valid(&self) -> bool
+pub fn mssql_driver_pool::DynConnectionLifecycle::reset<'life0, 'async_trait>(&'life0 mut self) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<(), mssql_driver_pool::error::PoolError>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait
