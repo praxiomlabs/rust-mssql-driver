@@ -879,7 +879,13 @@ impl RpcRequest {
     }
 
     /// Build parameter declaration string for sp_executesql.
-    fn build_param_declarations(params: &[RpcParam]) -> String {
+    /// Build the `sp_executesql` `@params` declaration string for `params`.
+    ///
+    /// An Always Encrypted parameter declares its plaintext column type (its
+    /// [`EncryptedParamMetadata::base_type_info`]), not the `BIGVARBINARY`
+    /// transport type its value is carried as, so the declaration matches what
+    /// `sp_describe_parameter_encryption` was asked about.
+    pub fn build_param_declarations(params: &[RpcParam]) -> String {
         params
             .iter()
             .map(|p| {
@@ -895,8 +901,16 @@ impl RpcRequest {
                     format!("@{}", p.name)
                 };
 
-                let type_name: String = match p.type_info.type_id {
-                    0x26 => match p.type_info.max_length {
+                // Encrypted parameters declare their plaintext type, not the
+                // BIGVARBINARY their ciphertext rides in.
+                let ti = p
+                    .crypto_metadata
+                    .as_ref()
+                    .map(|m| &m.base_type_info)
+                    .unwrap_or(&p.type_info);
+
+                let type_name: String = match ti.type_id {
+                    0x26 => match ti.max_length {
                         Some(1) => "tinyint".to_string(),
                         Some(2) => "smallint".to_string(),
                         Some(4) => "int".to_string(),
@@ -904,65 +918,65 @@ impl RpcRequest {
                         _ => "int".to_string(),
                     },
                     0x68 => "bit".to_string(),
-                    0x6D => match p.type_info.max_length {
+                    0x6D => match ti.max_length {
                         Some(4) => "real".to_string(),
                         _ => "float".to_string(),
                     },
                     0xE7 => {
-                        if p.type_info.max_length == Some(0xFFFF) {
+                        if ti.max_length == Some(0xFFFF) {
                             "nvarchar(max)".to_string()
                         } else {
-                            let len = p.type_info.max_length.unwrap_or(4000) / 2;
+                            let len = ti.max_length.unwrap_or(4000) / 2;
                             format!("nvarchar({len})")
                         }
                     }
                     0xA7 => {
-                        if p.type_info.max_length == Some(0xFFFF) {
+                        if ti.max_length == Some(0xFFFF) {
                             "varchar(max)".to_string()
                         } else {
-                            let len = p.type_info.max_length.unwrap_or(8000);
+                            let len = ti.max_length.unwrap_or(8000);
                             format!("varchar({len})")
                         }
                     }
                     0xA5 => {
-                        if p.type_info.max_length == Some(0xFFFF) {
+                        if ti.max_length == Some(0xFFFF) {
                             "varbinary(max)".to_string()
                         } else {
-                            let len = p.type_info.max_length.unwrap_or(8000);
+                            let len = ti.max_length.unwrap_or(8000);
                             format!("varbinary({len})")
                         }
                     }
                     0x24 => "uniqueidentifier".to_string(),
                     0x28 => "date".to_string(),
                     0x29 => {
-                        let scale = p.type_info.scale.unwrap_or(7);
+                        let scale = ti.scale.unwrap_or(7);
                         format!("time({scale})")
                     }
                     0x2A => {
-                        let scale = p.type_info.scale.unwrap_or(7);
+                        let scale = ti.scale.unwrap_or(7);
                         format!("datetime2({scale})")
                     }
                     0x2B => {
-                        let scale = p.type_info.scale.unwrap_or(7);
+                        let scale = ti.scale.unwrap_or(7);
                         format!("datetimeoffset({scale})")
                     }
                     0x6C => {
-                        let precision = p.type_info.precision.unwrap_or(18);
-                        let scale = p.type_info.scale.unwrap_or(0);
+                        let precision = ti.precision.unwrap_or(18);
+                        let scale = ti.scale.unwrap_or(0);
                         format!("decimal({precision}, {scale})")
                     }
-                    0x6E => match p.type_info.max_length {
+                    0x6E => match ti.max_length {
                         Some(4) => "smallmoney".to_string(),
                         _ => "money".to_string(),
                     },
-                    0x6F => match p.type_info.max_length {
+                    0x6F => match ti.max_length {
                         Some(4) => "smalldatetime".to_string(),
                         _ => "datetime".to_string(),
                     },
                     0xF3 => {
                         // TVP - Table-Valued Parameter
                         // Must be declared with the table type name and READONLY
-                        if let Some(ref tvp_name) = p.type_info.tvp_type_name {
+                        if let Some(ref tvp_name) = ti.tvp_type_name {
                             format!("{tvp_name} READONLY")
                         } else {
                             // Fallback if type name is missing (shouldn't happen)

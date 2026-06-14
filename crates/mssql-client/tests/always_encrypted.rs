@@ -460,39 +460,30 @@ mod key_store_tests {
 //
 // ## Scope note
 //
-// Populating encrypted columns with ciphertext requires the driver to send
-// encrypted RPC parameters (parameter encryption). That path is NOT yet
-// implemented — see the `encryption` module rustdoc (Limitations). A naïve
-// `INSERT ... VALUES (CONVERT(varbinary(max), 0x...))` is rejected by
-// SQL Server with "Operand type clash: varbinary is incompatible with
-// varbinary(N) encrypted with (...)" because the server strictly separates
-// plain varbinary from its encrypted-column type, even for literals.
+// Parameter (write) encryption is implemented for int/nvarchar/varbinary, so
+// `test_parameter_encryption_round_trip` populates encrypted columns through the
+// driver (encrypt on INSERT, decrypt on SELECT) and confirms the stored value is
+// opaque ciphertext to a non-AE connection.
 //
-// Until parameter encryption lands, these live tests exercise the reachable
-// slice of the pipeline end-to-end against a real server:
+// `test_always_encrypted_metadata_and_null_roundtrip` remains a focused check of
+// the metadata + NULL path: it inserts NULL into the encrypted column (a naïve
+// plaintext literal is still rejected with "Operand type clash: varbinary is
+// incompatible with varbinary(N) encrypted with (...)") and asserts:
+//   - the driver parses `CekTable` and per-column `CryptoMetadata`,
+//   - the encryptor is async-resolved via the key-store provider (the path the
+//     `from_arc` bug in `EncryptionContext` broke — see commit history),
+//   - NULL encrypted values surface as `SqlValue::Null`,
+//   - the plaintext base-type re-parse machinery is wired (via an unencrypted
+//     companion column).
 //
+// All live tests provision their own keys per the standard envelope flow:
 //   1. Generate an RSA-2048 keypair in the test.
-//   2. Wrap a random 32-byte CEK with RSA-OAEP-SHA1 (what `RSA_OAEP` means in
-//      AE metadata) and build the canonical signed envelope
-//      (`mssql_auth::cek_envelope`): `0x01 || u16le(path_len)
-//      || u16le(cipher_len) || utf16le(path) || cipher || signature`.
-//   3. `CREATE COLUMN MASTER KEY`, `CREATE COLUMN ENCRYPTION KEY`, and a
-//      table with at least one encrypted column.
-//   4. Populate rows through the only server-allowed path without parameter
-//      encryption: INSERT leaving the encrypted column NULL.
-//   5. Connect WITH `Column Encryption Setting=Enabled` + registered
-//      `InMemoryKeyStore`, SELECT the row, and assert:
-//       - the driver parses `CekTable` and per-column `CryptoMetadata`
-//       - the driver async-resolves the encryptor via the key-store provider
-//         (this is the path the `from_arc` bug in `EncryptionContext` broke —
-//          see commit history for the fix)
-//       - NULL encrypted values are surfaced as `SqlValue::Null`
-//       - the plaintext base-type re-parse machinery is wired up (verified
-//         by reading an unencrypted companion column from the same row)
-//
-// The full ciphertext round-trip through RPC parameters is tracked as a
-// separate work item and will be added here once parameter encryption is
-// implemented. See item 2.8 in .tmp/work-items.md.
+//   2. Wrap a random 32-byte CEK with RSA-OAEP-SHA1 (what `RSA_OAEP` means in AE
+//      metadata) and build the canonical signed envelope
+//      (`mssql_auth::cek_envelope`): `0x01 || u16le(path_len) || u16le(cipher_len)
+//      || utf16le(path) || cipher || signature`.
+//   3. `CREATE COLUMN MASTER KEY`, `CREATE COLUMN ENCRYPTION KEY`, and a table
+//      with at least one encrypted column.
 
 #[cfg(feature = "always-encrypted")]
 mod live_server {
@@ -514,10 +505,9 @@ mod live_server {
 
     /// Bundle everything a test needs after per-test setup completes.
     struct Fixture {
-        /// The randomly-generated CEK. Unused today — parameter encryption
-        /// (NYI) will pre-encrypt row values with it so INSERT tests can
-        /// round-trip ciphertext. Kept on the fixture so the helpers remain
-        /// wired once that feature lands.
+        /// The randomly-generated CEK. The round-trip test encrypts through the
+        /// driver's registered key store rather than reading the raw key here,
+        /// so this stays unread; retained for symmetry with `setup`.
         #[allow(dead_code)]
         cek_bytes: [u8; 32],
         /// CMK name in SQL Server (random per test to avoid collisions).
@@ -787,6 +777,140 @@ mod live_server {
         let p1 = info.get_parameter("@p1").expect("@p1 directive");
         assert_eq!(p1.encryption_type, EncryptionTypeWire::Randomized);
         assert_eq!(p1.cek_ordinal, 0);
+    }
+
+    /// Full Always Encrypted write→read round-trip: the driver encrypts INT,
+    /// NVARCHAR, and VARBINARY parameters on INSERT, then decrypts them back on
+    /// SELECT. Also confirms the stored value is real ciphertext (opaque to a
+    /// connection without Always Encrypted) — proving the encryption happens
+    /// client-side, not on the server.
+    #[tokio::test]
+    #[ignore = "Requires SQL Server with Always Encrypted"]
+    async fn test_parameter_encryption_round_trip() {
+        let admin_cfg = match admin_config() {
+            Some(c) => c,
+            None => return,
+        };
+        let mut admin = Client::connect(admin_cfg).await.expect("admin connect");
+
+        let (rsa_key, pem) = fresh_rsa_keypair();
+        let cek = fresh_cek();
+
+        let fx = setup(
+            &mut admin,
+            &cek,
+            &rsa_key,
+            "CREATE TABLE [{TABLE}] ( \
+             Id INT NOT NULL PRIMARY KEY, \
+             EncInt INT ENCRYPTED WITH ( \
+             COLUMN_ENCRYPTION_KEY = [{CEK}], \
+             ENCRYPTION_TYPE = DETERMINISTIC, \
+             ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256' ) NULL, \
+             EncName NVARCHAR(50) COLLATE Latin1_General_BIN2 ENCRYPTED WITH ( \
+             COLUMN_ENCRYPTION_KEY = [{CEK}], \
+             ENCRYPTION_TYPE = DETERMINISTIC, \
+             ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256' ) NULL, \
+             EncData VARBINARY(50) ENCRYPTED WITH ( \
+             COLUMN_ENCRYPTION_KEY = [{CEK}], \
+             ENCRYPTION_TYPE = DETERMINISTIC, \
+             ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256' ) NULL )",
+        )
+        .await;
+        drop(admin);
+
+        let mut client = Client::connect(encrypted_config(&pem).expect("cfg"))
+            .await
+            .expect("ae connect");
+
+        let blob: Vec<u8> = vec![0xDE, 0xAD, 0xBE, 0xEF];
+        let insert = format!(
+            "INSERT INTO [{}] (Id, EncInt, EncName, EncData) VALUES (@p1, @p2, @p3, @p4)",
+            fx.table_name
+        );
+        // The driver encrypts @p2/@p3/@p4 client-side; @p1 (Id) stays plaintext.
+        let inserted = client
+            .execute(&insert, &[&1i32, &42i32, &"Ada Lovelace", &blob])
+            .await;
+
+        // Read the encrypted columns back; the driver decrypts transparently.
+        let round_trip: Result<(i32, String, Vec<u8>), String> = if inserted.is_ok() {
+            let select = format!(
+                "SELECT EncInt, EncName, EncData FROM [{}] WHERE Id = @p1",
+                fx.table_name
+            );
+            async {
+                let rows = client
+                    .query(&select, &[&1i32])
+                    .await
+                    .map_err(|e| format!("select: {e}"))?;
+                let mut found = None;
+                for r in rows {
+                    let r = r.map_err(|e| format!("row: {e}"))?;
+                    found = Some((
+                        r.get::<i32>(0).map_err(|e| format!("EncInt: {e}"))?,
+                        r.get::<String>(1).map_err(|e| format!("EncName: {e}"))?,
+                        r.get::<Vec<u8>>(2).map_err(|e| format!("EncData: {e}"))?,
+                    ));
+                }
+                found.ok_or_else(|| "no row returned".to_string())
+            }
+            .await
+        } else {
+            Err("insert failed".to_string())
+        };
+
+        // A connection WITHOUT Always Encrypted sees only ciphertext.
+        let opaque: Result<Vec<u8>, String> = {
+            let mut plain = Client::connect(admin_config().expect("cfg"))
+                .await
+                .expect("plain connect");
+            let sql = format!("SELECT EncInt FROM [{}] WHERE Id = 1", fx.table_name);
+            async {
+                let rows = plain
+                    .query(&sql, &[])
+                    .await
+                    .map_err(|e| format!("plain select: {e}"))?;
+                let mut bytes = None;
+                for r in rows {
+                    let r = r.map_err(|e| format!("row: {e}"))?;
+                    bytes = Some(r.get::<Vec<u8>>(0).map_err(|e| format!("raw: {e}"))?);
+                }
+                bytes.ok_or_else(|| "no row".to_string())
+            }
+            .await
+        };
+
+        // Teardown before asserting so a failure never leaks server objects.
+        let mut admin = Client::connect(admin_config().expect("cfg"))
+            .await
+            .expect("admin reconnect");
+        teardown(&mut admin, &fx).await;
+
+        let inserted = inserted.expect("encrypted INSERT should succeed");
+        assert_eq!(inserted, 1, "exactly one row inserted");
+
+        let (got_int, got_name, got_data) = round_trip.expect("decrypt round-trip");
+        assert_eq!(got_int, 42, "INT decrypts to the inserted value");
+        assert_eq!(
+            got_name, "Ada Lovelace",
+            "NVARCHAR decrypts to the inserted value"
+        );
+        assert_eq!(
+            got_data,
+            vec![0xDE, 0xAD, 0xBE, 0xEF],
+            "VARBINARY decrypts to the inserted value"
+        );
+
+        let ciphertext = opaque.expect("read raw ciphertext");
+        assert!(
+            ciphertext.len() > 4,
+            "stored value is an AEAD blob, not a 4-byte int"
+        );
+        assert_ne!(
+            ciphertext,
+            42i32.to_le_bytes().to_vec(),
+            "stored value must not be the plaintext int"
+        );
     }
 
     /// Validate the Always Encrypted metadata path end-to-end against a live

@@ -57,9 +57,13 @@
 //!    AEAD_AES_256_CBC_HMAC_SHA256, with the HMAC verified before decryption.
 //!
 //! Reads are transparent across `query`, `call_procedure`, the procedure
-//! builder, and multi-result queries. **Limitation:** the parameter (write) path
-//! only supports `NULL`; encrypting outbound parameter values is not yet
-//! implemented.
+//! builder, and multi-result queries. Parameter (write) encryption is wired
+//! into parameterized `query`/`execute` for `int`, `nvarchar`, and `varbinary`
+//! parameters: with `Column Encryption Setting=Enabled` the driver describes
+//! the parameters (`sp_describe_parameter_encryption`), encrypts those bound to
+//! encrypted columns client-side, and sends them as encrypted RPC parameters
+//! (deterministic and randomized). Other parameter types are not yet supported
+//! and return an error rather than sending plaintext.
 //!
 //! ## Security Model
 //!

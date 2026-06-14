@@ -417,6 +417,116 @@ impl<S: ConnectionState> Client<S> {
         crate::ParameterEncryptionInfo::from_describe_result_sets(&mut result.result_sets)
     }
 
+    /// Build the `sp_executesql` request for a parameterized statement.
+    ///
+    /// When the connection has Always Encrypted enabled, parameters the server
+    /// reports as encrypted are encrypted client-side first (an extra
+    /// `sp_describe_parameter_encryption` round-trip). Otherwise this is the
+    /// plain parameter conversion.
+    pub(crate) async fn build_parameterized_rpc(
+        &mut self,
+        sql: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<RpcRequest> {
+        #[cfg(feature = "always-encrypted")]
+        if self.encryption_context.is_some() {
+            return self.build_encrypted_sql_rpc(sql, params).await;
+        }
+        let rpc_params =
+            Self::convert_params(params, self.send_unicode(), self.server_collation())?;
+        Ok(RpcRequest::execute_sql(sql, rpc_params))
+    }
+
+    /// Encrypt the Always Encrypted parameters of a statement, then build its
+    /// `sp_executesql` request.
+    ///
+    /// Asks the server which parameters are encrypted
+    /// ([`describe_parameter_encryption`](Self::describe_parameter_encryption)),
+    /// then for each one normalizes the value, resolves its column encryption
+    /// key, encrypts, and emits an encrypted RPC parameter. Parameters the
+    /// server reports as plaintext are sent unchanged.
+    #[cfg(feature = "always-encrypted")]
+    async fn build_encrypted_sql_rpc(
+        &mut self,
+        sql: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<RpcRequest> {
+        use tds_protocol::rpc::RpcParam;
+
+        let Some(ctx) = self.encryption_context.clone() else {
+            let rpc_params =
+                Self::convert_params(params, self.send_unicode(), self.server_collation())?;
+            return Ok(RpcRequest::execute_sql(sql, rpc_params));
+        };
+
+        // Resolve each parameter's value once (AE normalization needs the typed
+        // value, not the wire encoding) and build the plaintext RPC params.
+        let send_unicode = self.send_unicode();
+        let collation = self.server_collation().cloned();
+        let mut values: Vec<mssql_types::SqlValue> = Vec::with_capacity(params.len());
+        let mut plaintext: Vec<RpcParam> = Vec::with_capacity(params.len());
+        for (i, p) in params.iter().enumerate() {
+            let name = format!("@p{}", i + 1);
+            let value = p.to_sql()?;
+            plaintext.push(Self::sql_value_to_rpc_param(
+                &name,
+                &value,
+                send_unicode,
+                collation.as_ref(),
+            )?);
+            values.push(value);
+        }
+
+        if plaintext.is_empty() {
+            return Ok(RpcRequest::execute_sql(sql, plaintext));
+        }
+
+        // Ask the server which parameters need encryption.
+        let declarations = RpcRequest::build_param_declarations(&plaintext);
+        let info = self
+            .describe_parameter_encryption(sql, &declarations)
+            .await?;
+        if info.parameters.is_empty() {
+            return Ok(RpcRequest::execute_sql(sql, plaintext));
+        }
+
+        // Encrypt the flagged parameters; pass the rest through untouched.
+        let mut final_params: Vec<RpcParam> = Vec::with_capacity(plaintext.len());
+        for (value, param) in values.into_iter().zip(plaintext) {
+            let Some(crypto) = info.get_parameter(&param.name) else {
+                final_params.push(param);
+                continue;
+            };
+            let entry = info.cek_table.get(crypto.cek_ordinal).ok_or_else(|| {
+                Error::Protocol(format!(
+                    "encrypted parameter {} references missing CEK ordinal {}",
+                    param.name, crypto.cek_ordinal
+                ))
+            })?;
+            let normalized = crate::encryption::normalize_for_encryption(&value)?;
+            let ciphertext = ctx
+                .encrypt_value(&normalized, entry, crypto.encryption_type)
+                .await?;
+            let metadata = tds_protocol::rpc::EncryptedParamMetadata {
+                base_type_info: param.type_info.clone(),
+                algorithm_id: crypto.algorithm_id,
+                encryption_type: crypto.encryption_type,
+                database_id: entry.database_id,
+                cek_id: entry.cek_id,
+                cek_version: entry.cek_version,
+                cek_md_version: entry.cek_md_version,
+                normalization_rule_version: crypto.normalization_rule_version,
+            };
+            final_params.push(RpcParam::encrypted(
+                param.name,
+                bytes::Bytes::from(ciphertext),
+                metadata,
+            ));
+        }
+
+        Ok(RpcRequest::execute_sql(sql, final_params))
+    }
+
     /// Start a bulk insert operation for the specified table.
     ///
     /// Sends the `INSERT BULK` statement to the server and returns a
@@ -869,10 +979,8 @@ impl Client<Ready> {
                     // Simple query without parameters - use SQL batch
                     self.send_sql_batch(sql).await?;
                 } else {
-                    // Parameterized query - use sp_executesql via RPC
-                    let rpc_params =
-                        Self::convert_params(params, self.send_unicode(), self.server_collation())?;
-                    let rpc = RpcRequest::execute_sql(sql, rpc_params);
+                    // Parameterized query - sp_executesql (encrypts Always Encrypted params).
+                    let rpc = self.build_parameterized_rpc(sql, params).await?;
                     self.send_rpc(&rpc).await?;
                 }
 
@@ -1005,10 +1113,8 @@ impl Client<Ready> {
                     // Simple batch without parameters - use SQL batch
                     self.send_sql_batch(sql).await?;
                 } else {
-                    // Parameterized query - use sp_executesql via RPC
-                    let rpc_params =
-                        Self::convert_params(params, self.send_unicode(), self.server_collation())?;
-                    let rpc = RpcRequest::execute_sql(sql, rpc_params);
+                    // Parameterized query - sp_executesql (encrypts Always Encrypted params).
+                    let rpc = self.build_parameterized_rpc(sql, params).await?;
                     self.send_rpc(&rpc).await?;
                 }
 
@@ -1063,10 +1169,8 @@ impl Client<Ready> {
                     // Simple statement without parameters - use SQL batch
                     self.send_sql_batch(sql).await?;
                 } else {
-                    // Parameterized statement - use sp_executesql via RPC
-                    let rpc_params =
-                        Self::convert_params(params, self.send_unicode(), self.server_collation())?;
-                    let rpc = RpcRequest::execute_sql(sql, rpc_params);
+                    // Parameterized statement - sp_executesql (encrypts Always Encrypted params).
+                    let rpc = self.build_parameterized_rpc(sql, params).await?;
                     self.send_rpc(&rpc).await?;
                 }
 
@@ -1455,10 +1559,8 @@ impl Client<InTransaction> {
                     // Simple query without parameters - use SQL batch
                     self.send_sql_batch(sql).await?;
                 } else {
-                    // Parameterized query - use sp_executesql via RPC
-                    let rpc_params =
-                        Self::convert_params(params, self.send_unicode(), self.server_collation())?;
-                    let rpc = RpcRequest::execute_sql(sql, rpc_params);
+                    // Parameterized query - sp_executesql (encrypts Always Encrypted params).
+                    let rpc = self.build_parameterized_rpc(sql, params).await?;
                     self.send_rpc(&rpc).await?;
                 }
 
@@ -1543,10 +1645,8 @@ impl Client<InTransaction> {
                     // Simple statement without parameters - use SQL batch
                     self.send_sql_batch(sql).await?;
                 } else {
-                    // Parameterized statement - use sp_executesql via RPC
-                    let rpc_params =
-                        Self::convert_params(params, self.send_unicode(), self.server_collation())?;
-                    let rpc = RpcRequest::execute_sql(sql, rpc_params);
+                    // Parameterized statement - sp_executesql (encrypts Always Encrypted params).
+                    let rpc = self.build_parameterized_rpc(sql, params).await?;
                     self.send_rpc(&rpc).await?;
                 }
 

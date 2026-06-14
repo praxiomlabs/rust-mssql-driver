@@ -213,9 +213,55 @@ fn decrypt_column(
     // Decrypt and get the base column metadata
     let (plaintext, base_col) = decryptor.decrypt_column_value(ordinal, ciphertext)?;
 
-    // Re-parse the decrypted plaintext using the base column's type info
-    let mut pt_buf: &[u8] = &plaintext;
-    parse_column_value(&mut pt_buf, base_col)
+    // The decrypted plaintext is Always Encrypted's *normalized* form (see
+    // `encryption::normalize_for_encryption`), which is not the TDS wire form,
+    // so it is denormalized directly rather than run through the wire parser.
+    denormalize_decrypted(plaintext, base_col)
+}
+
+/// Denormalize Always Encrypted plaintext (the inverse of
+/// `encryption::normalize_for_encryption`) into a [`SqlValue`].
+///
+/// Only the base types the encryption path supports are handled; anything else
+/// is rejected rather than silently misparsed.
+#[cfg(feature = "always-encrypted")]
+fn denormalize_decrypted(plaintext: Vec<u8>, base_col: &ColumnData) -> Result<SqlValue> {
+    match base_col.type_id {
+        // INT normalizes to 8-byte little-endian (sign-extended).
+        TypeId::IntN | TypeId::Int4 => {
+            let bytes: [u8; 8] = plaintext.as_slice().try_into().map_err(|_| {
+                Error::Encryption(format!(
+                    "decrypted INT has {} bytes, expected 8",
+                    plaintext.len()
+                ))
+            })?;
+            Ok(SqlValue::Int(i64::from_le_bytes(bytes) as i32))
+        }
+        // NVARCHAR/NCHAR normalize to UTF-16LE code units, no length prefix.
+        TypeId::NVarChar | TypeId::NChar => {
+            if plaintext.len() % 2 != 0 {
+                return Err(Error::Encryption(format!(
+                    "decrypted NVARCHAR has an odd byte length ({})",
+                    plaintext.len()
+                )));
+            }
+            let units: Vec<u16> = plaintext
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
+            let s = String::from_utf16(&units).map_err(|_| {
+                Error::Encryption("decrypted NVARCHAR is not valid UTF-16".to_string())
+            })?;
+            Ok(SqlValue::String(s))
+        }
+        // VARBINARY/BINARY normalize to the raw bytes.
+        TypeId::BigVarBinary | TypeId::BigBinary | TypeId::VarBinary | TypeId::Binary => {
+            Ok(SqlValue::Binary(bytes::Bytes::from(plaintext)))
+        }
+        other => Err(Error::Encryption(format!(
+            "Always Encrypted read is not yet implemented for base type {other:?}"
+        ))),
+    }
 }
 
 /// Parse money value from buffer and convert to appropriate type.
