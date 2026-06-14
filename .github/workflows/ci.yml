@@ -342,19 +342,35 @@ jobs:
           verbose: true
 
   integration:
-    name: Integration Tests
+    name: Integration Tests (${{ matrix.mssql_version }})
     runs-on: ubuntu-latest
+    strategy:
+      # Run every version to completion: a failure on one must not mask the
+      # others. The aggregate gate below reports the combined result.
+      fail-fast: false
+      matrix:
+        mssql_version: ['2017-latest', '2019-latest', '2022-latest']
+        include:
+          # SQL Server 2017 predates UTF-8 collations (a 2019+ feature), so
+          # the UTF-8 round-trip test cannot run there. Exclude it from the
+          # 2017 leg only; it runs with full assertions on 2019/2022. This is
+          # explicit scoping of a version-specific test, not a silent skip.
+          - mssql_version: '2017-latest'
+            extra_exclude: ' and not test(test_utf8_varchar_decoding)'
     services:
       mssql:
-        image: mcr.microsoft.com/mssql/server:2022-latest
+        image: mcr.microsoft.com/mssql/server:${{ matrix.mssql_version }}
         env:
           ACCEPT_EULA: Y
           MSSQL_SA_PASSWORD: YourStrong@Passw0rd
           MSSQL_PID: Developer
         ports:
           - 1433:1433
+        # Version-agnostic health check: 2019/2022 ship /opt/mssql-tools18
+        # (which needs -C to trust the self-signed cert), 2017 ships the older
+        # /opt/mssql-tools. Try the new path, fall back to the old one.
         options: >-
-          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P YourStrong@Passw0rd -Q 'SELECT 1' -C"
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P YourStrong@Passw0rd -Q 'SELECT 1' -C || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P YourStrong@Passw0rd -Q 'SELECT 1'"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
@@ -387,12 +403,31 @@ jobs:
         run: >-
           cargo nextest run --all-features --run-ignored ignored-only
           --no-fail-fast
-          -E 'not (binary(azure_sql) or test(azure_identity_auth) or test(cert_auth) or binary(kerberos_live))'
+          -E 'not (binary(azure_sql) or test(azure_identity_auth) or test(cert_auth) or binary(kerberos_live))${{ matrix.extra_exclude }}'
         env:
           MSSQL_HOST: localhost
           MSSQL_PORT: 1433
           MSSQL_USER: sa
           MSSQL_PASSWORD: YourStrong@Passw0rd
+
+  # Branch protection requires a single "Integration Tests" status check, but
+  # the job above now fans out one leg per SQL Server version. This aggregate
+  # collapses the matrix back into that one required context: it passes only if
+  # every version leg passed. Without it, matrixing would rename the required
+  # check and block all PRs.
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [integration]
+    if: always()
+    steps:
+      - name: Require all SQL Server version legs to pass
+        run: |
+          if [ "${{ needs.integration.result }}" != "success" ]; then
+            echo "::error::an integration leg failed (result: ${{ needs.integration.result }})"
+            exit 1
+          fi
+          echo "All SQL Server version integration legs passed."
 
   feature-flags:
     name: Feature Flag Validation

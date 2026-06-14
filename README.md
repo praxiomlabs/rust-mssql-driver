@@ -191,12 +191,10 @@ cargo add mssql-auth --features sspi-auth
 | SQL Server 2022+ | TDS 7.4 or 8.0 strict mode |
 | Azure SQL Database / Managed Instance | Including automatic gateway redirects |
 
-**How each version is validated:** SQL Server 2022 is **CI-verified** — the
-integration suite runs against it on every change. SQL Server 2017/2019 are
-validated locally against Docker but **not yet in CI**
-([#85](https://github.com/praxiomlabs/rust-mssql-driver/issues/85)). SQL Server
-2008–2016 and Azure SQL are **validated manually** against real servers, not in
-CI.
+**How each version is validated:** SQL Server **2017, 2019, and 2022 are
+CI-verified** — the integration suite runs the full ignored test suite against
+all three on every change. SQL Server 2008–2016 and Azure SQL are **validated
+manually** against real servers, not in CI.
 
 Known quirks: SQL Server 2014 RTM reports `ProductMajorVersion` as NULL (the
 driver falls back to parsing `ProductVersion`), and legacy servers negotiating

@@ -85,7 +85,9 @@ async fn test_latin1_varchar_decoding() -> Result<(), Error> {
     Ok(())
 }
 
-/// Test UTF-8 collation (SQL Server 2019+)
+/// Test UTF-8 collation round-trip. UTF-8 collations are a SQL Server 2019+
+/// feature, so this is excluded from the 2017 leg of the CI integration matrix
+/// (see `.github/workflows/ci.yml`); it runs with full assertions on 2019/2022.
 #[tokio::test]
 #[ignore = "Requires SQL Server 2019+"]
 async fn test_utf8_varchar_decoding() -> Result<(), Error> {
