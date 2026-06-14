@@ -349,10 +349,10 @@ fn test_connection_string_with_special_characters_in_password() {
 
 #[test]
 fn test_connection_string_empty_values() {
-    // Empty database (should use default)
-    let result = Config::from_connection_string("Server=localhost;Database=;User Id=sa;Password=x");
-    // Should parse without error
-    let _ = result;
+    // An empty database value still parses; the rest of the config is unaffected.
+    let config = Config::from_connection_string("Server=localhost;Database=;User Id=sa;Password=x")
+        .expect("empty database value should parse");
+    assert_eq!(config.host, "localhost");
 }
 
 #[test]
@@ -382,22 +382,23 @@ fn test_connection_string_case_insensitivity() {
 
 #[test]
 fn test_connection_string_whitespace_handling() {
-    // Whitespace around separators
-    let result = Config::from_connection_string(
+    // Whitespace around keys and values is trimmed (ADO.NET conformance).
+    let config = Config::from_connection_string(
         "Server = localhost ; Database = test ; User Id = sa ; Password = x",
-    );
-    // Whitespace may or may not be trimmed depending on implementation
-    let _ = result;
+    )
+    .expect("whitespace-padded connection string should parse");
+    assert_eq!(config.host, "localhost");
+    assert_eq!(config.database.as_deref(), Some("test"));
 }
 
 #[test]
 fn test_connection_string_duplicate_keywords() {
-    // Last value should win for duplicate keywords
-    let result = Config::from_connection_string(
+    // Last value wins for duplicate keywords (ADO.NET conformance).
+    let config = Config::from_connection_string(
         "Server=first;Server=second;Database=test;User Id=sa;Password=x",
-    );
-    // Should parse without error
-    let _ = result;
+    )
+    .expect("duplicate keywords should parse");
+    assert_eq!(config.host, "second");
 }
 
 // =============================================================================
