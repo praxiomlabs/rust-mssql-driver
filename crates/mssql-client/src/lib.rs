@@ -34,6 +34,7 @@ pub mod error;
 pub mod filestream;
 pub mod from_row;
 pub mod instrumentation;
+pub(crate) mod plp;
 pub mod procedure;
 pub mod query;
 pub mod row;
