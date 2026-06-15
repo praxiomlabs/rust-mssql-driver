@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.17.1...v0.18.0) - 2026-06-15
+
+### Added
+
+- *(client)* [**breaking**] stream within transactions; address streaming review
+- *(streaming)* Stage 4 BLOB sub-streaming via query_stream_blob
+- *(streaming)* Stage 4 PLP chunk decoder (BLOB sub-streaming foundation)
+- *(streaming)* Stage 3 RowStream cancellation + abandoned-stream recovery
+- *(streaming)* Stage 2 incremental query_stream + RowStream
+- *(streaming)* Stage 1 incremental row source
+
+### Other
+
+- *(streaming)* Stage 6 — reflect implemented streaming across docs
+- *(streaming)* Stage 0 falsification harness for the streaming redesign
+
 ## [0.17.1](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.17.0...v0.17.1) - 2026-06-15
 
 ### Fixed
