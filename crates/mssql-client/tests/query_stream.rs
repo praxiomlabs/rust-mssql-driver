@@ -149,6 +149,99 @@ async fn query_stream_surfaces_server_error() {
     );
 }
 
+/// A large result set whose response spans many packets — used so that
+/// stopping early genuinely leaves unsent rows on the wire.
+const BIG_QUERY: &str = "\
+    WITH n AS (SELECT 1 AS i UNION ALL SELECT i + 1 FROM n WHERE i < 100000) \
+    SELECT i FROM n OPTION (MAXRECURSION 0)";
+
+/// `cancel()` mid-stream leaves the connection reusable for the next request.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn cancel_mid_stream_then_reuse() {
+    let Some(cfg) = get_test_config() else {
+        return;
+    };
+    let mut client = Client::connect(cfg).await.expect("connect");
+
+    {
+        let mut stream = client.query_stream(BIG_QUERY, &[]).await.expect("stream");
+        // Pull a few rows, then abandon the rest (100k rows still pending).
+        for _ in 0..5 {
+            stream.try_next().await.expect("row").expect("a row");
+        }
+        stream.cancel().await.expect("cancel must succeed");
+    }
+
+    // The connection must be clean: a fresh query returns the right answer.
+    let rows = client
+        .query("SELECT 7 AS v", &[])
+        .await
+        .expect("reuse after cancel")
+        .collect_all()
+        .await
+        .expect("collect");
+    assert_eq!(rows[0].get_by_name::<i32>("v").unwrap(), 7);
+}
+
+/// Dropping a stream mid-result leaves the connection in-flight; a directly
+/// reused client recovers it (Attention/drain) on the next request.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn drop_mid_stream_then_reuse() {
+    let Some(cfg) = get_test_config() else {
+        return;
+    };
+    let mut client = Client::connect(cfg).await.expect("connect");
+
+    {
+        let mut stream = client.query_stream(BIG_QUERY, &[]).await.expect("stream");
+        for _ in 0..5 {
+            stream.try_next().await.expect("row").expect("a row");
+        }
+        // Drop without cancel/drain — 100k rows still pending on the wire.
+    }
+
+    // The next request must recover the abandoned response, not read its bytes.
+    let rows = client
+        .query("SELECT 11 AS v", &[])
+        .await
+        .expect("reuse after drop")
+        .collect_all()
+        .await
+        .expect("collect");
+    assert_eq!(rows[0].get_by_name::<i32>("v").unwrap(), 11);
+}
+
+/// `cancel()` on a fully drained stream is a no-op.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn cancel_after_full_drain_is_noop() {
+    let Some(cfg) = get_test_config() else {
+        return;
+    };
+    let mut client = Client::connect(cfg).await.expect("connect");
+
+    let mut stream = client
+        .query_stream("SELECT TOP 2 object_id FROM sys.objects", &[])
+        .await
+        .expect("stream");
+    while stream.try_next().await.expect("row").is_some() {}
+    stream
+        .cancel()
+        .await
+        .expect("cancel after drain is a no-op");
+
+    let rows = client
+        .query("SELECT 1 AS v", &[])
+        .await
+        .expect("reuse")
+        .collect_all()
+        .await
+        .expect("collect");
+    assert_eq!(rows[0].get_by_name::<i32>("v").unwrap(), 1);
+}
+
 /// Parameterized streaming works (sp_executesql path).
 #[tokio::test]
 #[ignore = "Requires SQL Server"]

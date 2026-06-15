@@ -238,6 +238,47 @@ impl<S: ConnectionState> Client<S> {
         }
     }
 
+    /// Cancel an in-flight response that was abandoned without being drained —
+    /// e.g. a [`RowStream`](crate::RowStream) dropped or cancelled mid-result.
+    ///
+    /// Sends an Attention and drains to the server's DONE_ATTN acknowledgement so
+    /// the socket is clean and the connection reusable. A no-op when nothing is
+    /// in flight. Bounded by [`ATTENTION_ACK_TIMEOUT`]: if the acknowledgement
+    /// never arrives the connection is left marked in-flight (so the pool
+    /// discards it on return) and an error is returned.
+    pub(crate) async fn cancel_in_flight_response(&mut self) -> Result<()> {
+        if !self.in_flight {
+            return Ok(());
+        }
+        let canceller = self.connection_cancel_handle();
+        let drain = async {
+            canceller.cancel().await?;
+            // With the cancelling flag set, `read_response_message` routes through
+            // the codec's drain-after-cancel path and returns `Err(Cancelled)`
+            // once the DONE_ATTN acknowledgement is consumed (clearing
+            // `in_flight`). Any full messages that arrive before the ack are
+            // discarded.
+            loop {
+                match self.read_response_message().await {
+                    Err(Error::Cancelled) => return Ok(()),
+                    Ok(_) => continue,
+                    Err(e) => return Err(e),
+                }
+            }
+        };
+        match tokio::time::timeout(ATTENTION_ACK_TIMEOUT, drain).await {
+            Ok(result) => result,
+            Err(_) => {
+                tracing::warn!(
+                    timeout = ?ATTENTION_ACK_TIMEOUT,
+                    "attention acknowledgement not received while cancelling an \
+                     abandoned response; connection left dirty"
+                );
+                Err(Error::Cancelled)
+            }
+        }
+    }
+
     /// Process transaction-related EnvChange tokens.
     ///
     /// This handles BeginTransaction, CommitTransaction, and RollbackTransaction
@@ -280,6 +321,11 @@ impl<S: ConnectionState> Client<S> {
     /// If `needs_reset` is set (from pool return), the RESETCONNECTION flag
     /// is included in the first packet to reset connection state.
     async fn send_sql_batch(&mut self, sql: &str) -> Result<()> {
+        // If a previous streamed response was abandoned (a RowStream dropped
+        // mid-result), drain it before issuing a new request so the next read
+        // does not pick up the old response's bytes.
+        self.cancel_in_flight_response().await?;
+
         let payload =
             tds_protocol::encode_sql_batch_with_transaction(sql, self.transaction_descriptor);
         let max_packet = self.config.packet_size as usize;
@@ -321,6 +367,10 @@ impl<S: ConnectionState> Client<S> {
     /// If `needs_reset` is set (from pool return), the RESETCONNECTION flag
     /// is included in the first packet to reset connection state.
     pub(crate) async fn send_rpc(&mut self, rpc: &RpcRequest) -> Result<()> {
+        // Drain an abandoned streamed response (see `send_sql_batch`) before
+        // issuing this request.
+        self.cancel_in_flight_response().await?;
+
         let payload = rpc.encode_with_transaction(self.transaction_descriptor);
         let max_packet = self.config.packet_size as usize;
 
