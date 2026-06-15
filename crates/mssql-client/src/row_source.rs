@@ -99,6 +99,13 @@ impl RowSource {
         self.eom
     }
 
+    /// Consume the source, returning its unconsumed buffer and end-of-message
+    /// flag. Used to hand the post-metadata buffer to the BLOB streaming path,
+    /// which decodes rows column-by-column rather than whole-row.
+    pub(crate) fn into_parts(self) -> (Bytes, bool) {
+        (self.buf, self.eom)
+    }
+
     /// Attempt to decode the next token from the buffered bytes.
     ///
     /// Returns [`Pull::Token`] on success (advancing past the consumed bytes),

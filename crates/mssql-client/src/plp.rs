@@ -17,14 +17,9 @@
 //! Peak memory is one chunk slice, not the whole value.
 //!
 //! This module is sans-IO: it never touches a socket. The async BLOB reader
-//! drives it by reading packets and refilling the buffer, exactly as
-//! [`RowSource`](crate::row_source::RowSource) drives token decoding.
-//!
-//! This is the engine; its socket-backed caller lands in a following step, so
-//! non-test builds currently see it as unused.
-
-// Foundation landed before its caller (same pattern as the Stage 1 row source).
-#![allow(dead_code)]
+//! ([`BlobStream`](crate::BlobStream)) drives it by reading packets and
+//! refilling the buffer, exactly as [`RowSource`](crate::row_source::RowSource)
+//! drives token decoding.
 
 use bytes::{Buf, Bytes};
 

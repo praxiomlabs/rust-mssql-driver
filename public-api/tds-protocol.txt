@@ -2175,6 +2175,7 @@ pub tds_protocol::token::NbcRow::data: bytes::bytes::Bytes
 pub tds_protocol::token::NbcRow::null_bitmap: alloc::vec::Vec<u8>
 impl tds_protocol::token::NbcRow
 pub fn tds_protocol::token::NbcRow::decode(&mut impl bytes::buf::buf_impl::Buf, &tds_protocol::token::ColMetaData) -> core::result::Result<Self, tds_protocol::error::ProtocolError>
+pub fn tds_protocol::token::NbcRow::decode_prefix(&mut impl bytes::buf::buf_impl::Buf, &tds_protocol::token::ColMetaData, usize) -> core::result::Result<Self, tds_protocol::error::ProtocolError>
 pub fn tds_protocol::token::NbcRow::is_null(&self, usize) -> bool
 impl core::clone::Clone for tds_protocol::token::NbcRow
 pub fn tds_protocol::token::NbcRow::clone(&self) -> tds_protocol::token::NbcRow
@@ -2248,6 +2249,7 @@ pub struct tds_protocol::token::RawRow
 pub tds_protocol::token::RawRow::data: bytes::bytes::Bytes
 impl tds_protocol::token::RawRow
 pub fn tds_protocol::token::RawRow::decode(&mut impl bytes::buf::buf_impl::Buf, &tds_protocol::token::ColMetaData) -> core::result::Result<Self, tds_protocol::error::ProtocolError>
+pub fn tds_protocol::token::RawRow::decode_prefix(&mut impl bytes::buf::buf_impl::Buf, &tds_protocol::token::ColMetaData, usize) -> core::result::Result<Self, tds_protocol::error::ProtocolError>
 impl core::clone::Clone for tds_protocol::token::RawRow
 pub fn tds_protocol::token::RawRow::clone(&self) -> tds_protocol::token::RawRow
 impl core::fmt::Debug for tds_protocol::token::RawRow
@@ -4671,6 +4673,7 @@ pub tds_protocol::NbcRow::data: bytes::bytes::Bytes
 pub tds_protocol::NbcRow::null_bitmap: alloc::vec::Vec<u8>
 impl tds_protocol::token::NbcRow
 pub fn tds_protocol::token::NbcRow::decode(&mut impl bytes::buf::buf_impl::Buf, &tds_protocol::token::ColMetaData) -> core::result::Result<Self, tds_protocol::error::ProtocolError>
+pub fn tds_protocol::token::NbcRow::decode_prefix(&mut impl bytes::buf::buf_impl::Buf, &tds_protocol::token::ColMetaData, usize) -> core::result::Result<Self, tds_protocol::error::ProtocolError>
 pub fn tds_protocol::token::NbcRow::is_null(&self, usize) -> bool
 impl core::clone::Clone for tds_protocol::token::NbcRow
 pub fn tds_protocol::token::NbcRow::clone(&self) -> tds_protocol::token::NbcRow
@@ -5144,6 +5147,7 @@ pub struct tds_protocol::RawRow
 pub tds_protocol::RawRow::data: bytes::bytes::Bytes
 impl tds_protocol::token::RawRow
 pub fn tds_protocol::token::RawRow::decode(&mut impl bytes::buf::buf_impl::Buf, &tds_protocol::token::ColMetaData) -> core::result::Result<Self, tds_protocol::error::ProtocolError>
+pub fn tds_protocol::token::RawRow::decode_prefix(&mut impl bytes::buf::buf_impl::Buf, &tds_protocol::token::ColMetaData, usize) -> core::result::Result<Self, tds_protocol::error::ProtocolError>
 impl core::clone::Clone for tds_protocol::token::RawRow
 pub fn tds_protocol::token::RawRow::clone(&self) -> tds_protocol::token::RawRow
 impl core::fmt::Debug for tds_protocol::token::RawRow

@@ -1047,6 +1047,26 @@ impl RawRow {
         })
     }
 
+    /// Decode only the first `prefix_len` columns of a ROW token, leaving `src`
+    /// positioned at the start of column `prefix_len`.
+    ///
+    /// Used by the BLOB streaming path to decode the leading scalar columns of a
+    /// row and stop at a trailing MAX column, whose PLP value is then streamed
+    /// directly from the socket rather than buffered.
+    pub fn decode_prefix(
+        src: &mut impl Buf,
+        metadata: &ColMetaData,
+        prefix_len: usize,
+    ) -> Result<Self, ProtocolError> {
+        let mut data = bytes::BytesMut::new();
+        for col in metadata.columns.iter().take(prefix_len) {
+            Self::decode_column_value(src, col, &mut data)?;
+        }
+        Ok(Self {
+            data: data.freeze(),
+        })
+    }
+
     /// Decode a single column value and append to the output buffer.
     fn decode_column_value(
         src: &mut impl Buf,
@@ -1439,6 +1459,42 @@ impl NbcRow {
             if !is_null {
                 // Read the value - for NBCROW, we read without the length prefix
                 // for fixed-length types, and with length prefix for variable types
+                RawRow::decode_column_value(src, col, &mut data)?;
+            }
+        }
+
+        Ok(Self {
+            null_bitmap,
+            data: data.freeze(),
+        })
+    }
+
+    /// Decode the null bitmap and the first `prefix_len` columns of an NBCROW,
+    /// leaving `src` positioned at column `prefix_len`'s value (when that column
+    /// is non-NULL per the bitmap). The returned row carries the full bitmap and
+    /// the leading non-NULL values; query the trailing column's nullness with
+    /// [`is_null`](Self::is_null).
+    pub fn decode_prefix(
+        src: &mut impl Buf,
+        metadata: &ColMetaData,
+        prefix_len: usize,
+    ) -> Result<Self, ProtocolError> {
+        let col_count = metadata.columns.len();
+        let bitmap_len = col_count.div_ceil(8);
+
+        if src.remaining() < bitmap_len {
+            return Err(ProtocolError::UnexpectedEof);
+        }
+
+        let mut null_bitmap = vec![0u8; bitmap_len];
+        for byte in &mut null_bitmap {
+            *byte = src.get_u8();
+        }
+
+        let mut data = bytes::BytesMut::new();
+        for (i, col) in metadata.columns.iter().enumerate().take(prefix_len) {
+            let is_null = (null_bitmap[i / 8] & (1 << (i % 8))) != 0;
+            if !is_null {
                 RawRow::decode_column_value(src, col, &mut data)?;
             }
         }
