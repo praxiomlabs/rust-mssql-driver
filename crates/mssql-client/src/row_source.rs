@@ -22,15 +22,9 @@
 //! [`RowSource::push_packet`]. That keeps the resumption logic — the part that
 //! is easy to get wrong across packet splits — unit-testable synchronously
 //! against synthesized byte streams, independent of any async transport. Wiring
-//! it to `QueryStream` and the `Ready → Streaming` type-state is a later stage;
-//! the eager path is unchanged for now.
-//!
-//! Until that wiring lands, the public-facing entry points here are exercised
-//! only by this module's own tests, so non-test builds see them as unused.
-
-// Stage 1 lands the engine before its caller; the `Streaming` wiring in the next
-// stage removes the need for this allow.
-#![allow(dead_code)]
+//! it drives [`RowStream`](crate::RowStream), the incremental streaming read
+//! path; the buffered eager path ([`QueryStream`](crate::QueryStream)) is
+//! unchanged.
 
 use bytes::{Bytes, BytesMut};
 use tds_protocol::ProtocolError;

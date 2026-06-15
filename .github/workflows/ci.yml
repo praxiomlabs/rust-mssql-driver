@@ -423,7 +423,7 @@ jobs:
         run: >-
           cargo nextest run --all-features --run-ignored ignored-only
           --no-fail-fast
-          -E 'not (binary(azure_sql) or test(azure_identity_auth) or test(cert_auth) or binary(kerberos_live) or binary(streaming_memory))${{ matrix.extra_exclude }}'
+          -E 'not (binary(azure_sql) or test(azure_identity_auth) or test(cert_auth) or binary(kerberos_live))${{ matrix.extra_exclude }}'
         env:
           MSSQL_HOST: localhost
           MSSQL_PORT: 1433

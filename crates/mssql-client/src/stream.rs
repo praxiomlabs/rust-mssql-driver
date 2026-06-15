@@ -28,7 +28,9 @@
 //! observe decode errors at iteration time instead of at
 //! `call_procedure().await?` / `query_multiple().await?`.
 //!
-//! For truly large result sets, consider using OFFSET/FETCH pagination.
+//! For truly large result sets that should not be buffered at all, use
+//! [`Client::query_stream`](crate::Client::query_stream), which reads packets
+//! from the network on demand (peak memory ~one row), or page with OFFSET/FETCH.
 
 use std::collections::VecDeque;
 use std::pin::Pin;
@@ -62,8 +64,10 @@ pub(crate) enum PendingRow {
 /// this is returned; each [`Row`] is *decoded* lazily as it is pulled, not
 /// fetched incrementally from the network. Peak memory is therefore roughly
 /// the size of the raw response payload regardless of how you iterate. For
-/// genuinely large result sets, page with `OFFSET`/`FETCH` in SQL rather
-/// than relying on this type to bound memory.
+/// genuinely large result sets, use
+/// [`Client::query_stream`](crate::Client::query_stream) (incremental, peak
+/// memory ~one row) or page with `OFFSET`/`FETCH` in SQL rather than relying on
+/// this type to bound memory.
 ///
 /// # Example
 ///
