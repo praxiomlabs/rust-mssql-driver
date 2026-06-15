@@ -12,8 +12,6 @@ For supported features, see [README.md](README.md).
 |----------|------------|-------------|
 | Protocol | MARS | Use connection pooling |
 | Protocol | Named Pipes / Shared Memory | Use TCP/IP |
-| Protocol | True LOB Streaming | Chunked reads via SQL |
-| Protocol | Incremental result streaming (whole response is buffered) | Page with OFFSET/FETCH |
 | Protocol | Server-Side Cursors | Use OFFSET/FETCH pagination |
 | Data Types | NUMERIC/DECIMAL beyond 28-29 significant digits | CAST to narrower NUMERIC, FLOAT, or VARCHAR |
 | Collations | OEM code pages CP437 / CP850 (legacy SQL collations) | Use a CP125x or UTF-8 collation, or CAST to NVARCHAR |
@@ -64,40 +62,36 @@ let (result1, result2) = tokio::join!(
 
 ---
 
-### Result Set Buffering (No Incremental Streaming)
+### Result Set Buffering — `query()` (default) vs `query_stream()`
 
-**Status:** The full server response is buffered in memory; rows decode lazily
+**Status:** Both buffered-convenience and true incremental streaming are
+supported.
 
-`query()` reads the entire server response into one buffer before returning.
-The returned result set then *decodes* each row lazily as you iterate, so
-peak memory tracks the raw response size (not the response plus a fully
-typed `Vec<Row>`) — but it does **not** bound memory to a single row the way
-true incremental network streaming would. A multi-GB result set means
-multi-GB resident memory. There is currently no maximum-response-size guard.
+`query()` reads the entire server response into one buffer before returning,
+then decodes each row lazily as you iterate — convenient and synchronously
+iterable, but a multi-GB result set means multi-GB resident memory (cap it
+with `Config::max_response_size`).
 
-**Workaround:** Page the query with `OFFSET`/`FETCH` so each fetch is
-bounded:
-
-```sql
-SELECT ... FROM t ORDER BY id OFFSET @skip ROWS FETCH NEXT @take ROWS ONLY
-```
+For large result sets, use **`query_stream()`**, which reads TDS packets on
+demand and bounds peak memory to roughly one row regardless of result-set
+size (`while let Some(row) = stream.try_next().await? { … }`). `OFFSET`/`FETCH`
+paging remains an alternative when you want server-side bounding.
 
 ---
 
-### Large Object (LOB) Streaming
+### Large Object (LOB) Streaming — `query_stream_blob()`
 
-**Status:** Buffered only (no true streaming)
+**Status:** Supported for a row's trailing MAX column.
 
-Large objects (VARCHAR(MAX), NVARCHAR(MAX), VARBINARY(MAX)) are fully buffered in memory
-(this is a specific case of the whole-response buffering described above).
+A row's trailing `VARBINARY(MAX)` / `NVARCHAR(MAX)` / `VARCHAR(MAX)` / `XML`
+column can be sub-streamed from the socket with **`query_stream_blob()`**
+(`stream.copy_blob_to(&mut writer).await?`), so a multi-GB cell is read in
+bounded memory rather than materialized. The MAX column must be the last
+column, and Always Encrypted result sets are not yet supported on this path.
 
-**Workaround:** For objects over 100MB, chunk via SQL:
-
-```sql
-SELECT SUBSTRING(large_column, @offset, @chunk_size) FROM table WHERE id = @id
-```
-
-Or store large binary data externally (Azure Blob Storage, S3).
+For the buffered `query()` path, a MAX cell is fully buffered; chunk via SQL
+(`SUBSTRING`) or store large binary data externally if you cannot use
+`query_stream_blob()`.
 
 ---
 
@@ -367,11 +361,12 @@ Windows-only protocols with limited use in modern deployments.
 
 ### Server-Side Cursors
 
-Not implemented. Bound large reads by paging in SQL rather than holding a
-server-side cursor; see "Result Set Buffering" above for why paging (not the
-result set type) is what limits client memory.
+Not implemented. To bound client memory over a large read, use `query_stream`
+(incremental, peak ~one row — see "Result Set Buffering" above) or page with
+`OFFSET`/`FETCH` in SQL.
 
-**Alternative:** Use `OFFSET`/`FETCH` for pagination.
+**Alternative:** `query_stream` / `query_stream_blob`, or `OFFSET`/`FETCH`
+pagination.
 
 ### Circuit Breaker Pattern
 

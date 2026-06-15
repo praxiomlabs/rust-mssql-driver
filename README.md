@@ -13,6 +13,9 @@ An async Microsoft SQL Server driver for Rust.
 - **Built-in connection pooling** — no external pooling crate required
 - **Type-state connections** — invalid operations are compile errors
 - **Pure-Rust TLS** — rustls; no OpenSSL, no system dependencies
+- **Incremental streaming** — `query_stream` reads rows from the socket on
+  demand (peak memory ~one row); `query_stream_blob` sub-streams a multi-GB
+  MAX/BLOB column without buffering it
 - **Beyond queries** — transactions and savepoints, stored procedures with OUTPUT
   params, table-valued parameters, bulk insert, Always Encrypted (read + write),
   OpenTelemetry
@@ -216,8 +219,6 @@ Known gaps, so you don't have to discover them yourself:
   live infrastructure.
 - Always Encrypted reads are fully transparent; writes cover the common scalar
   types (some temporal and fixed-width types are pending — see LIMITATIONS.md).
-- Rows decode lazily, but the response is buffered in memory — true streaming
-  from the socket is planned.
 - Parameterized queries run via `sp_executesql` (the server still reuses
   plans); the client-side prepared-statement cache is planned.
 - No MARS (multiple active result sets on one connection).
@@ -239,7 +240,7 @@ See the [`examples/`](crates/mssql-client/examples/) directory:
 
 - [`basic.rs`](crates/mssql-client/examples/basic.rs) - Connection and queries
 - [`transactions.rs`](crates/mssql-client/examples/transactions.rs) - Transaction handling
-- [`streaming.rs`](crates/mssql-client/examples/streaming.rs) - Iterating large result sets (lazy row decoding)
+- [`streaming.rs`](crates/mssql-client/examples/streaming.rs) - Incremental streaming of large result sets and BLOBs (`query_stream` / `query_stream_blob`)
 - [`bulk_insert.rs`](crates/mssql-client/examples/bulk_insert.rs) - Bulk data loading
 - [`derive_macros.rs`](crates/mssql-client/examples/derive_macros.rs) - Row mapping macros
 

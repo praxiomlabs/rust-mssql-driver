@@ -12,7 +12,7 @@ This guide helps you migrate from [tiberius](https://github.com/prisma/tiberius)
 | TDS 8.0 strict | Not supported | Yes |
 | Prepared statements | Manual | `sp_executesql` (client-side cache planned) |
 | Azure redirects | Manual handling | Automatic |
-| Result streaming | Iterator | Stream with collect |
+| Result streaming | Stream (incremental) | Buffered `query` (sync iterator) + incremental `query_stream` / `query_stream_blob` |
 | Transaction safety | Runtime checks | Compile-time checks |
 
 ## Connection Setup
@@ -69,10 +69,17 @@ let value: i32 = row[0].get(0).unwrap();
 **rust-mssql-driver:**
 ```rust
 let stream = client.query("SELECT 1 AS value", &[]).await?;
-// The result set is iterated synchronously (the response is already
-// buffered; rows decode lazily). Each item is a `Result<Row, Error>`.
+// `query` buffers the response and iterates synchronously (rows decode
+// lazily). Each item is a `Result<Row, Error>`.
 let row = stream.into_iter().next().expect("one row")?;
 let value: i32 = row.get(0)?;
+
+// For large result sets, `query_stream` reads from the socket on demand
+// (peak memory ~one row), closer to Tiberius's streaming model:
+let mut stream = client.query_stream("SELECT * FROM huge_table", &[]).await?;
+while let Some(row) = stream.try_next().await? {
+    let _row = row?;
+}
 ```
 
 ### Parameterized Queries
