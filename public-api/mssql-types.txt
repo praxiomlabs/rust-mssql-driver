@@ -223,6 +223,10 @@ pub fn core::option::Option<T>::from_sql(&mssql_types::value::SqlValue) -> core:
 pub fn core::option::Option<T>::from_sql_nullable(&mssql_types::value::SqlValue) -> core::result::Result<core::option::Option<Self>, mssql_types::error::TypeError>
 pub mod mssql_types::to_sql
 #[non_exhaustive] pub enum mssql_types::to_sql::EncryptedParamType
+pub mssql_types::to_sql::EncryptedParamType::Binary
+pub mssql_types::to_sql::EncryptedParamType::Binary::length: u16
+pub mssql_types::to_sql::EncryptedParamType::Char
+pub mssql_types::to_sql::EncryptedParamType::Char::length: u16
 pub mssql_types::to_sql::EncryptedParamType::DateTime
 pub mssql_types::to_sql::EncryptedParamType::DateTime2
 pub mssql_types::to_sql::EncryptedParamType::DateTime2::scale: u8
@@ -231,6 +235,8 @@ pub mssql_types::to_sql::EncryptedParamType::DateTimeOffset::scale: u8
 pub mssql_types::to_sql::EncryptedParamType::Decimal
 pub mssql_types::to_sql::EncryptedParamType::Decimal::precision: u8
 pub mssql_types::to_sql::EncryptedParamType::Decimal::scale: u8
+pub mssql_types::to_sql::EncryptedParamType::NChar
+pub mssql_types::to_sql::EncryptedParamType::NChar::length: u16
 pub mssql_types::to_sql::EncryptedParamType::Time
 pub mssql_types::to_sql::EncryptedParamType::Time::scale: u8
 impl core::clone::Clone for mssql_types::to_sql::EncryptedParamType
@@ -270,6 +276,80 @@ impl<T> core::clone::CloneToUninit for mssql_types::to_sql::EncryptedParamType w
 pub unsafe fn mssql_types::to_sql::EncryptedParamType::clone_to_uninit(&self, *mut u8)
 impl<T> core::convert::From<T> for mssql_types::to_sql::EncryptedParamType
 pub fn mssql_types::to_sql::EncryptedParamType::from(T) -> T
+pub struct mssql_types::to_sql::Binary
+impl core::clone::Clone for mssql_types::to_sql::Binary
+pub fn mssql_types::to_sql::Binary::clone(&self) -> mssql_types::to_sql::Binary
+impl core::fmt::Debug for mssql_types::to_sql::Binary
+pub fn mssql_types::to_sql::Binary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl mssql_types::to_sql::ToSql for mssql_types::to_sql::Binary
+pub fn mssql_types::to_sql::Binary::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
+pub fn mssql_types::to_sql::Binary::sql_type(&self) -> &'static str
+pub fn mssql_types::to_sql::Binary::to_sql(&self) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
+impl !core::marker::Freeze for mssql_types::to_sql::Binary
+impl core::marker::Send for mssql_types::to_sql::Binary
+impl core::marker::Sync for mssql_types::to_sql::Binary
+impl core::marker::Unpin for mssql_types::to_sql::Binary
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_types::to_sql::Binary
+impl core::panic::unwind_safe::UnwindSafe for mssql_types::to_sql::Binary
+impl<T, U> core::convert::Into<U> for mssql_types::to_sql::Binary where U: core::convert::From<T>
+pub fn mssql_types::to_sql::Binary::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_types::to_sql::Binary where U: core::convert::Into<T>
+pub type mssql_types::to_sql::Binary::Error = core::convert::Infallible
+pub fn mssql_types::to_sql::Binary::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_types::to_sql::Binary where U: core::convert::TryFrom<T>
+pub type mssql_types::to_sql::Binary::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_types::to_sql::Binary::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_types::to_sql::Binary where T: core::clone::Clone
+pub type mssql_types::to_sql::Binary::Owned = T
+pub fn mssql_types::to_sql::Binary::clone_into(&self, &mut T)
+pub fn mssql_types::to_sql::Binary::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_types::to_sql::Binary where T: 'static + ?core::marker::Sized
+pub fn mssql_types::to_sql::Binary::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_types::to_sql::Binary where T: ?core::marker::Sized
+pub fn mssql_types::to_sql::Binary::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_types::to_sql::Binary where T: ?core::marker::Sized
+pub fn mssql_types::to_sql::Binary::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_types::to_sql::Binary where T: core::clone::Clone
+pub unsafe fn mssql_types::to_sql::Binary::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_types::to_sql::Binary
+pub fn mssql_types::to_sql::Binary::from(T) -> T
+pub struct mssql_types::to_sql::Char
+impl core::clone::Clone for mssql_types::to_sql::Char
+pub fn mssql_types::to_sql::Char::clone(&self) -> mssql_types::to_sql::Char
+impl core::fmt::Debug for mssql_types::to_sql::Char
+pub fn mssql_types::to_sql::Char::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl mssql_types::to_sql::ToSql for mssql_types::to_sql::Char
+pub fn mssql_types::to_sql::Char::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
+pub fn mssql_types::to_sql::Char::sql_type(&self) -> &'static str
+pub fn mssql_types::to_sql::Char::to_sql(&self) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
+impl core::marker::Freeze for mssql_types::to_sql::Char
+impl core::marker::Send for mssql_types::to_sql::Char
+impl core::marker::Sync for mssql_types::to_sql::Char
+impl core::marker::Unpin for mssql_types::to_sql::Char
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_types::to_sql::Char
+impl core::panic::unwind_safe::UnwindSafe for mssql_types::to_sql::Char
+impl<T, U> core::convert::Into<U> for mssql_types::to_sql::Char where U: core::convert::From<T>
+pub fn mssql_types::to_sql::Char::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_types::to_sql::Char where U: core::convert::Into<T>
+pub type mssql_types::to_sql::Char::Error = core::convert::Infallible
+pub fn mssql_types::to_sql::Char::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_types::to_sql::Char where U: core::convert::TryFrom<T>
+pub type mssql_types::to_sql::Char::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_types::to_sql::Char::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_types::to_sql::Char where T: core::clone::Clone
+pub type mssql_types::to_sql::Char::Owned = T
+pub fn mssql_types::to_sql::Char::clone_into(&self, &mut T)
+pub fn mssql_types::to_sql::Char::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_types::to_sql::Char where T: 'static + ?core::marker::Sized
+pub fn mssql_types::to_sql::Char::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_types::to_sql::Char where T: ?core::marker::Sized
+pub fn mssql_types::to_sql::Char::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_types::to_sql::Char where T: ?core::marker::Sized
+pub fn mssql_types::to_sql::Char::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_types::to_sql::Char where T: core::clone::Clone
+pub unsafe fn mssql_types::to_sql::Char::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_types::to_sql::Char
+pub fn mssql_types::to_sql::Char::from(T) -> T
 pub struct mssql_types::to_sql::DateTime2
 impl core::clone::Clone for mssql_types::to_sql::DateTime2
 pub fn mssql_types::to_sql::DateTime2::clone(&self) -> mssql_types::to_sql::DateTime2
@@ -384,6 +464,43 @@ impl<T> core::clone::CloneToUninit for mssql_types::to_sql::DateTimeOffset where
 pub unsafe fn mssql_types::to_sql::DateTimeOffset::clone_to_uninit(&self, *mut u8)
 impl<T> core::convert::From<T> for mssql_types::to_sql::DateTimeOffset
 pub fn mssql_types::to_sql::DateTimeOffset::from(T) -> T
+pub struct mssql_types::to_sql::NChar
+impl core::clone::Clone for mssql_types::to_sql::NChar
+pub fn mssql_types::to_sql::NChar::clone(&self) -> mssql_types::to_sql::NChar
+impl core::fmt::Debug for mssql_types::to_sql::NChar
+pub fn mssql_types::to_sql::NChar::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl mssql_types::to_sql::ToSql for mssql_types::to_sql::NChar
+pub fn mssql_types::to_sql::NChar::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
+pub fn mssql_types::to_sql::NChar::sql_type(&self) -> &'static str
+pub fn mssql_types::to_sql::NChar::to_sql(&self) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
+impl core::marker::Freeze for mssql_types::to_sql::NChar
+impl core::marker::Send for mssql_types::to_sql::NChar
+impl core::marker::Sync for mssql_types::to_sql::NChar
+impl core::marker::Unpin for mssql_types::to_sql::NChar
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_types::to_sql::NChar
+impl core::panic::unwind_safe::UnwindSafe for mssql_types::to_sql::NChar
+impl<T, U> core::convert::Into<U> for mssql_types::to_sql::NChar where U: core::convert::From<T>
+pub fn mssql_types::to_sql::NChar::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_types::to_sql::NChar where U: core::convert::Into<T>
+pub type mssql_types::to_sql::NChar::Error = core::convert::Infallible
+pub fn mssql_types::to_sql::NChar::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_types::to_sql::NChar where U: core::convert::TryFrom<T>
+pub type mssql_types::to_sql::NChar::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_types::to_sql::NChar::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_types::to_sql::NChar where T: core::clone::Clone
+pub type mssql_types::to_sql::NChar::Owned = T
+pub fn mssql_types::to_sql::NChar::clone_into(&self, &mut T)
+pub fn mssql_types::to_sql::NChar::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_types::to_sql::NChar where T: 'static + ?core::marker::Sized
+pub fn mssql_types::to_sql::NChar::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_types::to_sql::NChar where T: ?core::marker::Sized
+pub fn mssql_types::to_sql::NChar::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_types::to_sql::NChar where T: ?core::marker::Sized
+pub fn mssql_types::to_sql::NChar::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_types::to_sql::NChar where T: core::clone::Clone
+pub unsafe fn mssql_types::to_sql::NChar::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_types::to_sql::NChar
+pub fn mssql_types::to_sql::NChar::from(T) -> T
 pub struct mssql_types::to_sql::Numeric
 impl core::clone::Clone for mssql_types::to_sql::Numeric
 pub fn mssql_types::to_sql::Numeric::clone(&self) -> mssql_types::to_sql::Numeric
@@ -582,6 +699,14 @@ impl mssql_types::to_sql::ToSql for i64
 pub fn i64::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
 pub fn i64::sql_type(&self) -> &'static str
 pub fn i64::to_sql(&self) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
+impl mssql_types::to_sql::ToSql for mssql_types::to_sql::Binary
+pub fn mssql_types::to_sql::Binary::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
+pub fn mssql_types::to_sql::Binary::sql_type(&self) -> &'static str
+pub fn mssql_types::to_sql::Binary::to_sql(&self) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
+impl mssql_types::to_sql::ToSql for mssql_types::to_sql::Char
+pub fn mssql_types::to_sql::Char::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
+pub fn mssql_types::to_sql::Char::sql_type(&self) -> &'static str
+pub fn mssql_types::to_sql::Char::to_sql(&self) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
 impl mssql_types::to_sql::ToSql for mssql_types::to_sql::DateTime2
 pub fn mssql_types::to_sql::DateTime2::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
 pub fn mssql_types::to_sql::DateTime2::sql_type(&self) -> &'static str
@@ -594,6 +719,10 @@ impl mssql_types::to_sql::ToSql for mssql_types::to_sql::DateTimeOffset
 pub fn mssql_types::to_sql::DateTimeOffset::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
 pub fn mssql_types::to_sql::DateTimeOffset::sql_type(&self) -> &'static str
 pub fn mssql_types::to_sql::DateTimeOffset::to_sql(&self) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
+impl mssql_types::to_sql::ToSql for mssql_types::to_sql::NChar
+pub fn mssql_types::to_sql::NChar::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
+pub fn mssql_types::to_sql::NChar::sql_type(&self) -> &'static str
+pub fn mssql_types::to_sql::NChar::to_sql(&self) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
 impl mssql_types::to_sql::ToSql for mssql_types::to_sql::Numeric
 pub fn mssql_types::to_sql::Numeric::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
 pub fn mssql_types::to_sql::Numeric::sql_type(&self) -> &'static str
@@ -646,9 +775,12 @@ impl<T: mssql_types::to_sql::ToSql> mssql_types::to_sql::ToSql for core::option:
 pub fn core::option::Option<T>::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
 pub fn core::option::Option<T>::sql_type(&self) -> &'static str
 pub fn core::option::Option<T>::to_sql(&self) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
+pub fn mssql_types::to_sql::binary(impl core::convert::Into<bytes::bytes::Bytes>, u16) -> mssql_types::to_sql::Binary
+pub fn mssql_types::to_sql::char(impl core::convert::Into<alloc::string::String>, u16) -> mssql_types::to_sql::Char
 pub fn mssql_types::to_sql::datetime(chrono::naive::datetime::NaiveDateTime) -> mssql_types::to_sql::DateTimeLegacy
 pub fn mssql_types::to_sql::datetime2(chrono::naive::datetime::NaiveDateTime, u8) -> mssql_types::to_sql::DateTime2
 pub fn mssql_types::to_sql::datetimeoffset(chrono::datetime::DateTime<chrono::offset::fixed::FixedOffset>, u8) -> mssql_types::to_sql::DateTimeOffset
+pub fn mssql_types::to_sql::nchar(impl core::convert::Into<alloc::string::String>, u16) -> mssql_types::to_sql::NChar
 pub fn mssql_types::to_sql::null<T: mssql_types::to_sql::SqlTyped>() -> mssql_types::to_sql::TypedNull
 pub fn mssql_types::to_sql::numeric(rust_decimal::decimal::Decimal, u8, u8) -> mssql_types::to_sql::Numeric
 pub fn mssql_types::to_sql::time(chrono::naive::time::NaiveTime, u8) -> mssql_types::to_sql::Time
@@ -1101,6 +1233,10 @@ pub unsafe fn mssql_types::value::SmallMoney::clone_to_uninit(&self, *mut u8)
 impl<T> core::convert::From<T> for mssql_types::value::SmallMoney
 pub fn mssql_types::value::SmallMoney::from(T) -> T
 #[non_exhaustive] pub enum mssql_types::EncryptedParamType
+pub mssql_types::EncryptedParamType::Binary
+pub mssql_types::EncryptedParamType::Binary::length: u16
+pub mssql_types::EncryptedParamType::Char
+pub mssql_types::EncryptedParamType::Char::length: u16
 pub mssql_types::EncryptedParamType::DateTime
 pub mssql_types::EncryptedParamType::DateTime2
 pub mssql_types::EncryptedParamType::DateTime2::scale: u8
@@ -1109,6 +1245,8 @@ pub mssql_types::EncryptedParamType::DateTimeOffset::scale: u8
 pub mssql_types::EncryptedParamType::Decimal
 pub mssql_types::EncryptedParamType::Decimal::precision: u8
 pub mssql_types::EncryptedParamType::Decimal::scale: u8
+pub mssql_types::EncryptedParamType::NChar
+pub mssql_types::EncryptedParamType::NChar::length: u16
 pub mssql_types::EncryptedParamType::Time
 pub mssql_types::EncryptedParamType::Time::scale: u8
 impl core::clone::Clone for mssql_types::to_sql::EncryptedParamType
@@ -1424,6 +1562,80 @@ impl<T> core::borrow::BorrowMut<T> for mssql_types::error::TypeError where T: ?c
 pub fn mssql_types::error::TypeError::borrow_mut(&mut self) -> &mut T
 impl<T> core::convert::From<T> for mssql_types::error::TypeError
 pub fn mssql_types::error::TypeError::from(T) -> T
+pub struct mssql_types::Binary
+impl core::clone::Clone for mssql_types::to_sql::Binary
+pub fn mssql_types::to_sql::Binary::clone(&self) -> mssql_types::to_sql::Binary
+impl core::fmt::Debug for mssql_types::to_sql::Binary
+pub fn mssql_types::to_sql::Binary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl mssql_types::to_sql::ToSql for mssql_types::to_sql::Binary
+pub fn mssql_types::to_sql::Binary::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
+pub fn mssql_types::to_sql::Binary::sql_type(&self) -> &'static str
+pub fn mssql_types::to_sql::Binary::to_sql(&self) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
+impl !core::marker::Freeze for mssql_types::to_sql::Binary
+impl core::marker::Send for mssql_types::to_sql::Binary
+impl core::marker::Sync for mssql_types::to_sql::Binary
+impl core::marker::Unpin for mssql_types::to_sql::Binary
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_types::to_sql::Binary
+impl core::panic::unwind_safe::UnwindSafe for mssql_types::to_sql::Binary
+impl<T, U> core::convert::Into<U> for mssql_types::to_sql::Binary where U: core::convert::From<T>
+pub fn mssql_types::to_sql::Binary::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_types::to_sql::Binary where U: core::convert::Into<T>
+pub type mssql_types::to_sql::Binary::Error = core::convert::Infallible
+pub fn mssql_types::to_sql::Binary::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_types::to_sql::Binary where U: core::convert::TryFrom<T>
+pub type mssql_types::to_sql::Binary::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_types::to_sql::Binary::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_types::to_sql::Binary where T: core::clone::Clone
+pub type mssql_types::to_sql::Binary::Owned = T
+pub fn mssql_types::to_sql::Binary::clone_into(&self, &mut T)
+pub fn mssql_types::to_sql::Binary::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_types::to_sql::Binary where T: 'static + ?core::marker::Sized
+pub fn mssql_types::to_sql::Binary::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_types::to_sql::Binary where T: ?core::marker::Sized
+pub fn mssql_types::to_sql::Binary::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_types::to_sql::Binary where T: ?core::marker::Sized
+pub fn mssql_types::to_sql::Binary::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_types::to_sql::Binary where T: core::clone::Clone
+pub unsafe fn mssql_types::to_sql::Binary::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_types::to_sql::Binary
+pub fn mssql_types::to_sql::Binary::from(T) -> T
+pub struct mssql_types::Char
+impl core::clone::Clone for mssql_types::to_sql::Char
+pub fn mssql_types::to_sql::Char::clone(&self) -> mssql_types::to_sql::Char
+impl core::fmt::Debug for mssql_types::to_sql::Char
+pub fn mssql_types::to_sql::Char::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl mssql_types::to_sql::ToSql for mssql_types::to_sql::Char
+pub fn mssql_types::to_sql::Char::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
+pub fn mssql_types::to_sql::Char::sql_type(&self) -> &'static str
+pub fn mssql_types::to_sql::Char::to_sql(&self) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
+impl core::marker::Freeze for mssql_types::to_sql::Char
+impl core::marker::Send for mssql_types::to_sql::Char
+impl core::marker::Sync for mssql_types::to_sql::Char
+impl core::marker::Unpin for mssql_types::to_sql::Char
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_types::to_sql::Char
+impl core::panic::unwind_safe::UnwindSafe for mssql_types::to_sql::Char
+impl<T, U> core::convert::Into<U> for mssql_types::to_sql::Char where U: core::convert::From<T>
+pub fn mssql_types::to_sql::Char::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_types::to_sql::Char where U: core::convert::Into<T>
+pub type mssql_types::to_sql::Char::Error = core::convert::Infallible
+pub fn mssql_types::to_sql::Char::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_types::to_sql::Char where U: core::convert::TryFrom<T>
+pub type mssql_types::to_sql::Char::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_types::to_sql::Char::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_types::to_sql::Char where T: core::clone::Clone
+pub type mssql_types::to_sql::Char::Owned = T
+pub fn mssql_types::to_sql::Char::clone_into(&self, &mut T)
+pub fn mssql_types::to_sql::Char::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_types::to_sql::Char where T: 'static + ?core::marker::Sized
+pub fn mssql_types::to_sql::Char::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_types::to_sql::Char where T: ?core::marker::Sized
+pub fn mssql_types::to_sql::Char::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_types::to_sql::Char where T: ?core::marker::Sized
+pub fn mssql_types::to_sql::Char::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_types::to_sql::Char where T: core::clone::Clone
+pub unsafe fn mssql_types::to_sql::Char::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_types::to_sql::Char
+pub fn mssql_types::to_sql::Char::from(T) -> T
 pub struct mssql_types::Collation
 pub mssql_types::Collation::flags: u8
 pub mssql_types::Collation::lcid: u32
@@ -1621,6 +1833,43 @@ impl<T> core::clone::CloneToUninit for mssql_types::value::Money where T: core::
 pub unsafe fn mssql_types::value::Money::clone_to_uninit(&self, *mut u8)
 impl<T> core::convert::From<T> for mssql_types::value::Money
 pub fn mssql_types::value::Money::from(T) -> T
+pub struct mssql_types::NChar
+impl core::clone::Clone for mssql_types::to_sql::NChar
+pub fn mssql_types::to_sql::NChar::clone(&self) -> mssql_types::to_sql::NChar
+impl core::fmt::Debug for mssql_types::to_sql::NChar
+pub fn mssql_types::to_sql::NChar::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl mssql_types::to_sql::ToSql for mssql_types::to_sql::NChar
+pub fn mssql_types::to_sql::NChar::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
+pub fn mssql_types::to_sql::NChar::sql_type(&self) -> &'static str
+pub fn mssql_types::to_sql::NChar::to_sql(&self) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
+impl core::marker::Freeze for mssql_types::to_sql::NChar
+impl core::marker::Send for mssql_types::to_sql::NChar
+impl core::marker::Sync for mssql_types::to_sql::NChar
+impl core::marker::Unpin for mssql_types::to_sql::NChar
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_types::to_sql::NChar
+impl core::panic::unwind_safe::UnwindSafe for mssql_types::to_sql::NChar
+impl<T, U> core::convert::Into<U> for mssql_types::to_sql::NChar where U: core::convert::From<T>
+pub fn mssql_types::to_sql::NChar::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_types::to_sql::NChar where U: core::convert::Into<T>
+pub type mssql_types::to_sql::NChar::Error = core::convert::Infallible
+pub fn mssql_types::to_sql::NChar::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_types::to_sql::NChar where U: core::convert::TryFrom<T>
+pub type mssql_types::to_sql::NChar::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_types::to_sql::NChar::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_types::to_sql::NChar where T: core::clone::Clone
+pub type mssql_types::to_sql::NChar::Owned = T
+pub fn mssql_types::to_sql::NChar::clone_into(&self, &mut T)
+pub fn mssql_types::to_sql::NChar::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_types::to_sql::NChar where T: 'static + ?core::marker::Sized
+pub fn mssql_types::to_sql::NChar::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_types::to_sql::NChar where T: ?core::marker::Sized
+pub fn mssql_types::to_sql::NChar::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_types::to_sql::NChar where T: ?core::marker::Sized
+pub fn mssql_types::to_sql::NChar::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_types::to_sql::NChar where T: core::clone::Clone
+pub unsafe fn mssql_types::to_sql::NChar::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_types::to_sql::NChar
+pub fn mssql_types::to_sql::NChar::from(T) -> T
 pub struct mssql_types::Numeric
 impl core::clone::Clone for mssql_types::to_sql::Numeric
 pub fn mssql_types::to_sql::Numeric::clone(&self) -> mssql_types::to_sql::Numeric
@@ -2107,6 +2356,14 @@ impl mssql_types::to_sql::ToSql for i64
 pub fn i64::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
 pub fn i64::sql_type(&self) -> &'static str
 pub fn i64::to_sql(&self) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
+impl mssql_types::to_sql::ToSql for mssql_types::to_sql::Binary
+pub fn mssql_types::to_sql::Binary::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
+pub fn mssql_types::to_sql::Binary::sql_type(&self) -> &'static str
+pub fn mssql_types::to_sql::Binary::to_sql(&self) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
+impl mssql_types::to_sql::ToSql for mssql_types::to_sql::Char
+pub fn mssql_types::to_sql::Char::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
+pub fn mssql_types::to_sql::Char::sql_type(&self) -> &'static str
+pub fn mssql_types::to_sql::Char::to_sql(&self) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
 impl mssql_types::to_sql::ToSql for mssql_types::to_sql::DateTime2
 pub fn mssql_types::to_sql::DateTime2::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
 pub fn mssql_types::to_sql::DateTime2::sql_type(&self) -> &'static str
@@ -2119,6 +2376,10 @@ impl mssql_types::to_sql::ToSql for mssql_types::to_sql::DateTimeOffset
 pub fn mssql_types::to_sql::DateTimeOffset::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
 pub fn mssql_types::to_sql::DateTimeOffset::sql_type(&self) -> &'static str
 pub fn mssql_types::to_sql::DateTimeOffset::to_sql(&self) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
+impl mssql_types::to_sql::ToSql for mssql_types::to_sql::NChar
+pub fn mssql_types::to_sql::NChar::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
+pub fn mssql_types::to_sql::NChar::sql_type(&self) -> &'static str
+pub fn mssql_types::to_sql::NChar::to_sql(&self) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
 impl mssql_types::to_sql::ToSql for mssql_types::to_sql::Numeric
 pub fn mssql_types::to_sql::Numeric::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
 pub fn mssql_types::to_sql::Numeric::sql_type(&self) -> &'static str
@@ -2171,12 +2432,15 @@ impl<T: mssql_types::to_sql::ToSql> mssql_types::to_sql::ToSql for core::option:
 pub fn core::option::Option<T>::encrypted_param_type(&self) -> core::option::Option<mssql_types::to_sql::EncryptedParamType>
 pub fn core::option::Option<T>::sql_type(&self) -> &'static str
 pub fn core::option::Option<T>::to_sql(&self) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
+pub fn mssql_types::binary(impl core::convert::Into<bytes::bytes::Bytes>, u16) -> mssql_types::to_sql::Binary
+pub fn mssql_types::char(impl core::convert::Into<alloc::string::String>, u16) -> mssql_types::to_sql::Char
 pub fn mssql_types::datetime(chrono::naive::datetime::NaiveDateTime) -> mssql_types::to_sql::DateTimeLegacy
 pub fn mssql_types::datetime2(chrono::naive::datetime::NaiveDateTime, u8) -> mssql_types::to_sql::DateTime2
 pub fn mssql_types::datetimeoffset(chrono::datetime::DateTime<chrono::offset::fixed::FixedOffset>, u8) -> mssql_types::to_sql::DateTimeOffset
 pub fn mssql_types::decode_utf16_string(&[u8]) -> core::result::Result<alloc::string::String, mssql_types::error::TypeError>
 pub fn mssql_types::decode_value(&mut bytes::bytes::Bytes, &mssql_types::decode::TypeInfo) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
 pub fn mssql_types::encode_utf16_string(&str, &mut bytes::bytes_mut::BytesMut)
+pub fn mssql_types::nchar(impl core::convert::Into<alloc::string::String>, u16) -> mssql_types::to_sql::NChar
 pub fn mssql_types::null<T: mssql_types::to_sql::SqlTyped>() -> mssql_types::to_sql::TypedNull
 pub fn mssql_types::numeric(rust_decimal::decimal::Decimal, u8, u8) -> mssql_types::to_sql::Numeric
 pub fn mssql_types::time(chrono::naive::time::NaiveTime, u8) -> mssql_types::to_sql::Time

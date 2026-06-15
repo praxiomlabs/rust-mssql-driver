@@ -1366,7 +1366,9 @@ pub tds_protocol::rpc::TypeInfo::tvp_type_name: core::option::Option<alloc::stri
 pub tds_protocol::rpc::TypeInfo::type_id: u8
 impl tds_protocol::rpc::TypeInfo
 pub fn tds_protocol::rpc::TypeInfo::bigint() -> Self
+pub fn tds_protocol::rpc::TypeInfo::binary(u16) -> Self
 pub fn tds_protocol::rpc::TypeInfo::bit() -> Self
+pub fn tds_protocol::rpc::TypeInfo::char(u16) -> Self
 pub fn tds_protocol::rpc::TypeInfo::date() -> Self
 pub fn tds_protocol::rpc::TypeInfo::datetime() -> Self
 pub fn tds_protocol::rpc::TypeInfo::datetime2(u8) -> Self
@@ -1376,6 +1378,7 @@ pub fn tds_protocol::rpc::TypeInfo::encode(&self, &mut bytes::bytes_mut::BytesMu
 pub fn tds_protocol::rpc::TypeInfo::float() -> Self
 pub fn tds_protocol::rpc::TypeInfo::int() -> Self
 pub fn tds_protocol::rpc::TypeInfo::money() -> Self
+pub fn tds_protocol::rpc::TypeInfo::nchar(u16) -> Self
 pub fn tds_protocol::rpc::TypeInfo::nvarchar(u16) -> Self
 pub fn tds_protocol::rpc::TypeInfo::nvarchar_max() -> Self
 pub fn tds_protocol::rpc::TypeInfo::real() -> Self
@@ -5363,7 +5366,9 @@ pub tds_protocol::RpcTypeInfo::tvp_type_name: core::option::Option<alloc::string
 pub tds_protocol::RpcTypeInfo::type_id: u8
 impl tds_protocol::rpc::TypeInfo
 pub fn tds_protocol::rpc::TypeInfo::bigint() -> Self
+pub fn tds_protocol::rpc::TypeInfo::binary(u16) -> Self
 pub fn tds_protocol::rpc::TypeInfo::bit() -> Self
+pub fn tds_protocol::rpc::TypeInfo::char(u16) -> Self
 pub fn tds_protocol::rpc::TypeInfo::date() -> Self
 pub fn tds_protocol::rpc::TypeInfo::datetime() -> Self
 pub fn tds_protocol::rpc::TypeInfo::datetime2(u8) -> Self
@@ -5373,6 +5378,7 @@ pub fn tds_protocol::rpc::TypeInfo::encode(&self, &mut bytes::bytes_mut::BytesMu
 pub fn tds_protocol::rpc::TypeInfo::float() -> Self
 pub fn tds_protocol::rpc::TypeInfo::int() -> Self
 pub fn tds_protocol::rpc::TypeInfo::money() -> Self
+pub fn tds_protocol::rpc::TypeInfo::nchar(u16) -> Self
 pub fn tds_protocol::rpc::TypeInfo::nvarchar(u16) -> Self
 pub fn tds_protocol::rpc::TypeInfo::nvarchar_max() -> Self
 pub fn tds_protocol::rpc::TypeInfo::real() -> Self

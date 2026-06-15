@@ -1,6 +1,8 @@
 pub mod mssql_client
 pub use mssql_client::AuthError
+pub use mssql_client::Binary
 pub use mssql_client::CertificateDer
+pub use mssql_client::Char
 pub use mssql_client::CodecError
 pub use mssql_client::Collation
 pub use mssql_client::Credentials
@@ -12,6 +14,7 @@ pub use mssql_client::FromRow
 pub use mssql_client::FromSql
 pub use mssql_client::KeyStoreProvider
 pub use mssql_client::Money
+pub use mssql_client::NChar
 pub use mssql_client::Numeric
 pub use mssql_client::ProtocolError
 pub use mssql_client::SecretString
@@ -29,9 +32,12 @@ pub use mssql_client::ToSql
 pub use mssql_client::Tvp
 pub use mssql_client::TypeError
 pub use mssql_client::TypedNull
+pub use mssql_client::binary
+pub use mssql_client::char
 pub use mssql_client::datetime
 pub use mssql_client::datetime2
 pub use mssql_client::datetimeoffset
+pub use mssql_client::nchar
 pub use mssql_client::null
 pub use mssql_client::numeric
 pub use mssql_client::time
