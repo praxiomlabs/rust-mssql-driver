@@ -462,6 +462,12 @@ jobs:
           # the 10 GB Actions limit and LRU-evicting main's caches (cache thrashing).
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/setup-linux-deps
+      - name: Add bare-metal target to the pinned toolchain
+        # rust-toolchain.toml pins the toolchain, so the no_std target must be
+        # added to THAT toolchain — not dtolnay's stable — for the bare-metal
+        # build in `cargo xtask check-features` to actually run (it hard-fails
+        # in CI if the target is missing rather than silently host-checking).
+        run: rustup target add thumbv7em-none-eabi
       - name: Install cargo-hack
         run: cargo install cargo-hack --locked
       - name: Validate feature flag combinations

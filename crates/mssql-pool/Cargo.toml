@@ -32,7 +32,7 @@ otel = ["mssql-client/otel"]
 [dependencies]
 mssql-client = { workspace = true }
 tokio = { workspace = true }
-thiserror = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
 tracing = { workspace = true }
 parking_lot = { workspace = true }
 async-trait = { workspace = true }

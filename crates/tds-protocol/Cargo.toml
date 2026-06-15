@@ -16,7 +16,7 @@ all-features = true
 
 [features]
 default = ["std", "encoding"]
-std = []
+std = ["bytes/std"]
 alloc = []
 # Collation-aware string encoding/decoding support
 # Enables Collation::encoding() method for proper VARCHAR decoding

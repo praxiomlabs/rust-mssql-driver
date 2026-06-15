@@ -43,7 +43,7 @@ azure-keyvault = ["always-encrypted", "dep:azure_security_keyvault_keys", "dep:a
 windows-certstore = ["always-encrypted", "dep:windows"]
 
 [dependencies]
-thiserror = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
 tracing = { workspace = true }
 bytes = { workspace = true }
 async-trait = { workspace = true }
