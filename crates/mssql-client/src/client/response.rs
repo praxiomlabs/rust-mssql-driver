@@ -10,6 +10,22 @@ use crate::state::ConnectionState;
 
 use super::{Client, ConnectionHandle};
 
+/// Convert a server `ERROR` token into the public [`Error::Server`].
+///
+/// Shared by the buffered reader and the streaming row source so the two paths
+/// surface identical server errors.
+pub(crate) fn server_token_to_error(err: &tds_protocol::token::ServerError) -> Error {
+    Error::Server {
+        number: err.number,
+        state: err.state,
+        class: err.class,
+        message: err.message.clone(),
+        server: (!err.server.is_empty()).then(|| err.server.clone()),
+        procedure: (!err.procedure.is_empty()).then(|| err.procedure.clone()),
+        line: err.line as u32,
+    }
+}
+
 impl<S: ConnectionState> Client<S> {
     /// Read the next response message from the connection.
     ///
@@ -38,6 +54,39 @@ impl<S: ConnectionState> Client<S> {
         }
     }
 
+    /// Read a single TDS packet from the connection on demand.
+    ///
+    /// Lower-level than [`read_response_message`](Self::read_response_message):
+    /// it does **not** reassemble the whole multi-packet response, so it is the
+    /// primitive the incremental streaming path uses to pull one packet at a
+    /// time. Returns the packet payload and whether it carried END_OF_MESSAGE,
+    /// or `None` at end of stream.
+    pub(crate) async fn read_response_packet(&mut self) -> Result<Option<(bytes::Bytes, bool)>> {
+        let connection = self.connection.as_mut().ok_or(Error::ConnectionClosed)?;
+        let result = match connection {
+            #[cfg(feature = "tls")]
+            ConnectionHandle::Tls(conn) => conn.read_packet().await,
+            #[cfg(feature = "tls")]
+            ConnectionHandle::TlsPrelogin(conn) => conn.read_packet().await,
+            ConnectionHandle::Plain(conn) => conn.read_packet().await,
+        };
+        match result {
+            Ok(Some(packet)) => {
+                let is_eom = packet.is_end_of_message();
+                Ok(Some((packet.payload.freeze(), is_eom)))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Mark the in-flight response as fully drained — the connection is clean
+    /// for the next request. Used by the streaming path, which (unlike the
+    /// buffered readers) does not read the whole response up front.
+    pub(crate) fn note_response_drained(&mut self) {
+        self.in_flight = false;
+    }
+
     /// Create a TokenParser with encryption awareness when configured.
     pub(super) fn create_parser(&self, payload: bytes::Bytes) -> TokenParser {
         let parser = TokenParser::new(payload);
@@ -55,7 +104,7 @@ impl<S: ConnectionState> Client<S> {
     /// Returns `None` if encryption is not configured or the result set has
     /// no encrypted columns.
     #[cfg(feature = "always-encrypted")]
-    async fn resolve_decryptor(
+    pub(crate) async fn resolve_decryptor(
         &self,
         meta: &ColMetaData,
     ) -> Result<Option<crate::column_decryptor::ColumnDecryptor>> {
@@ -70,7 +119,7 @@ impl<S: ConnectionState> Client<S> {
     }
 
     /// Build column metadata from ColMetaData, using base types for encrypted columns.
-    fn build_columns(meta: &ColMetaData) -> Vec<crate::row::Column> {
+    pub(crate) fn build_columns(meta: &ColMetaData) -> Vec<crate::row::Column> {
         meta.columns
             .iter()
             .enumerate()
@@ -179,23 +228,7 @@ impl<S: ConnectionState> Client<S> {
                     }
                 }
                 Token::Error(err) => {
-                    return Err(Error::Server {
-                        number: err.number,
-                        state: err.state,
-                        class: err.class,
-                        message: err.message.clone(),
-                        server: if err.server.is_empty() {
-                            None
-                        } else {
-                            Some(err.server.clone())
-                        },
-                        procedure: if err.procedure.is_empty() {
-                            None
-                        } else {
-                            Some(err.procedure.clone())
-                        },
-                        line: err.line as u32,
-                    });
+                    return Err(server_token_to_error(&err));
                 }
                 Token::Done(done) => {
                     if done.status.error {

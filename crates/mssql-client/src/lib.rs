@@ -37,10 +37,9 @@ pub mod instrumentation;
 pub mod procedure;
 pub mod query;
 pub mod row;
-// Sans-IO incremental token decoder for the streaming read path (Stage 1 of the
-// streaming redesign). Crate-private until it is wired to QueryStream + the
-// `Streaming` type-state in a later stage; the eager path is unchanged.
+// Sans-IO incremental token decoder driving the streaming read path.
 pub(crate) mod row_source;
+pub mod row_stream;
 pub mod state;
 // Not yet wired into the query path (queries use sp_executesql); kept
 // crate-private until the cache is actually used, so the public API does not
@@ -142,6 +141,7 @@ pub use state::{
 pub mod __fuzzing {
     pub use crate::column_parser::parse_column_value;
 }
+pub use row_stream::RowStream;
 pub use stream::{
     ExecuteResult, MultiResultStream, OutputParam, ProcedureResult, QueryStream, ResultSet,
 };
@@ -226,6 +226,12 @@ mod auto_trait_tests {
     fn query_stream_is_send_sync() {
         assert_send::<QueryStream<'_>>();
         assert_sync::<QueryStream<'_>>();
+    }
+
+    #[test]
+    fn row_stream_is_send_sync() {
+        assert_send::<RowStream<'_>>();
+        assert_sync::<RowStream<'_>>();
     }
 
     #[test]

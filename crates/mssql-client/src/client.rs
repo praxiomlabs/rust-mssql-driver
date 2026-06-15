@@ -24,7 +24,7 @@
 
 mod connect;
 mod params;
-mod response;
+pub(crate) mod response;
 
 use std::marker::PhantomData;
 
@@ -1099,6 +1099,118 @@ impl Client<Ready> {
                 resp.pending_rows,
                 resp.meta,
             ))
+        }
+    }
+
+    /// Execute a query and stream rows incrementally from the network.
+    ///
+    /// Unlike [`query`](Self::query) — which buffers the whole response in
+    /// memory before returning — this reads TDS packets on demand as rows are
+    /// pulled, so peak memory is roughly one packet plus one row regardless of
+    /// result-set size. Use it for large result sets; use [`query`](Self::query)
+    /// for the common small-result case where the buffered, synchronously
+    /// iterable [`QueryStream`] is more convenient.
+    ///
+    /// The returned [`RowStream`](crate::RowStream) borrows the client for its
+    /// lifetime, so no other request can run on this connection until the stream
+    /// is consumed or dropped.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
+    /// let mut stream = client.query_stream("SELECT id FROM big_table", &[]).await?;
+    /// while let Some(row) = stream.try_next().await? {
+    ///     let id: i32 = row.get_by_name("id")?;
+    ///     let _ = id;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn query_stream<'a>(
+        &'a mut self,
+        sql: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<crate::row_stream::RowStream<'a>> {
+        use crate::client::response::server_token_to_error;
+        use crate::row_source::{Pull, RowSource};
+        use tds_protocol::token::Token;
+
+        tracing::debug!(sql = sql, params_count = params.len(), "streaming query");
+
+        // Send the request (same wire format as the buffered path).
+        if params.is_empty() {
+            self.send_sql_batch(sql).await?;
+        } else {
+            let rpc = self.build_parameterized_rpc(sql, params).await?;
+            self.send_rpc(&rpc).await?;
+        }
+        self.in_flight = true;
+
+        #[cfg(feature = "always-encrypted")]
+        let encryption_enabled = self.encryption_context.is_some();
+        #[cfg(not(feature = "always-encrypted"))]
+        let encryption_enabled = false;
+
+        let mut source = RowSource::new(encryption_enabled);
+
+        // Prelude: pull packets until the first result set's ColMetaData (so the
+        // columns and any Always Encrypted decryptor are resolved up front), or
+        // until a terminal Done/Error if there is no result set.
+        loop {
+            match source.pull()? {
+                Pull::Token(Token::ColMetaData(meta)) => {
+                    let columns = Self::build_columns(&meta);
+                    #[cfg(feature = "always-encrypted")]
+                    let decryptor = self
+                        .resolve_decryptor(&meta)
+                        .await?
+                        .map(std::sync::Arc::new);
+                    return Ok(crate::row_stream::RowStream::new(
+                        self,
+                        source,
+                        columns,
+                        meta,
+                        #[cfg(feature = "always-encrypted")]
+                        decryptor,
+                    ));
+                }
+                Pull::Token(Token::Error(err)) => {
+                    self.in_flight = false;
+                    return Err(server_token_to_error(&err));
+                }
+                Pull::Token(Token::Done(done)) => {
+                    if done.status.error {
+                        self.in_flight = false;
+                        return Err(Error::Query(
+                            "query failed (server set error flag in DONE token)".to_string(),
+                        ));
+                    }
+                    if !done.status.more {
+                        // No result set (e.g. an INSERT) — an empty stream.
+                        self.in_flight = false;
+                        return Ok(crate::row_stream::RowStream::empty(self));
+                    }
+                    // More results may follow; keep looking for ColMetaData.
+                }
+                Pull::Token(Token::EnvChange(env)) => {
+                    Self::process_transaction_env_change(&env, &mut self.transaction_descriptor);
+                }
+                Pull::Token(_) => {
+                    // Info / Order / DoneProc / DoneInProc, etc. — keep pulling.
+                }
+                Pull::NeedMore => match self.read_response_packet().await? {
+                    Some((payload, is_eom)) => source.push_packet(payload, is_eom),
+                    None => {
+                        self.in_flight = false;
+                        return Err(Error::ConnectionClosed);
+                    }
+                },
+                Pull::End => {
+                    self.in_flight = false;
+                    return Ok(crate::row_stream::RowStream::empty(self));
+                }
+            }
         }
     }
 

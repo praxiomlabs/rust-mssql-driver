@@ -1,19 +1,19 @@
-//! Stage 0 of the streaming redesign: the falsification harness.
+//! The streaming-redesign memory proof and regression guard.
 //!
-//! This is the *definition of done* for true result streaming and the
-//! regression guard. It runs a query whose response is ~10 MB and asserts that
-//! peak heap allocation during consumption stays bounded to roughly one row —
-//! not the whole response. A custom counting global allocator (this binary
-//! only) makes the measurement deterministic, unlike RSS.
+//! This is the *definition of done* for true result streaming. It runs a query
+//! whose response is ~10 MB and asserts that peak heap allocation during
+//! consumption stays bounded to roughly one row — not the whole response. A
+//! custom counting global allocator (this binary only) makes the measurement
+//! deterministic, unlike RSS.
 //!
-//! Against today's buffered implementation (`read_query_response` reassembles
-//! every packet into one `Bytes` and parses all rows into a `Vec` before
-//! returning), this test **FAILS**: peak ≈ the full response. When pull-based
-//! streaming lands, peak drops to ~one row and it passes.
+//! It consumes via [`Client::query_stream`] (the incremental path added in the
+//! streaming redesign), which reads TDS packets on demand. Against the buffered
+//! [`Client::query`] this assertion would FAIL (peak ≈ the full response,
+//! measured at ~40 MB for this query); against `query_stream` peak stays at
+//! ~one packet plus one row, so it passes.
 //!
-//! It is excluded from the CI ignored-run until streaming makes it pass (see
-//! the `-E` filter in `.github/workflows/ci.yml`); run it manually with a live
-//! server:
+//! Run it against a live server (it is `#[ignore]`d so it never runs without
+//! one):
 //! ```text
 //! MSSQL_HOST=localhost MSSQL_PORT=1433 MSSQL_USER=sa MSSQL_PASSWORD='YourStrong@Passw0rd' \
 //!   cargo nextest run -p mssql-client --test streaming_memory --run-ignored ignored-only
@@ -73,7 +73,7 @@ const LARGE_QUERY: &str = "\
     SELECT i, CAST(REPLICATE('x', 100) AS CHAR(100)) AS pad FROM n OPTION (MAXRECURSION 0)";
 
 #[tokio::test]
-#[ignore = "Requires a live SQL Server; currently FAILS (defines streaming done)"]
+#[ignore = "Requires a live SQL Server"]
 async fn streaming_query_bounds_peak_memory() {
     let Some(cfg) = config() else {
         return;
@@ -81,14 +81,14 @@ async fn streaming_query_bounds_peak_memory() {
     let mut client = Client::connect(cfg).await.expect("connect");
 
     // Baseline the live bytes, then measure the peak reached while the query
-    // runs and the rows are consumed.
+    // runs and the rows are consumed incrementally.
     let baseline = LIVE.load(Ordering::Relaxed);
     PEAK.store(baseline, Ordering::Relaxed);
 
-    let stream = client.query(LARGE_QUERY, &[]).await.expect("query");
+    let mut stream = client.query_stream(LARGE_QUERY, &[]).await.expect("query");
     let mut count = 0usize;
-    for row in stream {
-        row.expect("row");
+    while let Some(row) = stream.try_next().await.expect("row") {
+        let _ = row;
         count += 1;
     }
 
@@ -97,7 +97,8 @@ async fn streaming_query_bounds_peak_memory() {
 
     assert_eq!(count, 100_000, "expected 100k rows");
     // ~one row is ~100 bytes; one packet is ~8 KB. A 2 MB bound is far below the
-    // ~10 MB response, so it can only pass if rows stream rather than buffer.
+    // ~10 MB response (the buffered path peaks at ~40 MB), so it can only pass
+    // if rows stream rather than buffer.
     assert!(
         peak_delta < 2_000_000,
         "peak heap delta was {peak_delta} bytes — streaming should bound this to \

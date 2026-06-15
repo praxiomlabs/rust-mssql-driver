@@ -69,6 +69,8 @@ The following APIs are considered stable and covered by semver guarantees:
 |-----|-----------|
 | `Client::connect()` | Stable |
 | `Client::query()` | Stable |
+| `Client::query_stream()` | Stable |
+| `RowStream` (`try_next` / `collect_all` / `columns`) | Stable |
 | `Client::execute()` | Stable |
 | `Client::close()` | Stable |
 | `Client::begin_transaction()` | Stable |
