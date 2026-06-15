@@ -69,7 +69,7 @@ jobs:
       - name: Use stable toolchain despite the MSRV pin
         run: echo "RUSTUP_TOOLCHAIN=stable" >> "$GITHUB_ENV"
       - name: Run release-plz
-        uses: release-plz/action@v0.5.129
+        uses: release-plz/action@v0.5.130
         with:
           command: release
         env:
@@ -109,7 +109,7 @@ jobs:
       - name: Use stable toolchain despite the MSRV pin
         run: echo "RUSTUP_TOOLCHAIN=stable" >> "$GITHUB_ENV"
       - name: Run release-plz
-        uses: release-plz/action@v0.5.129
+        uses: release-plz/action@v0.5.130
         with:
           command: release-pr
         env:
