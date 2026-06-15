@@ -208,7 +208,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.10.0] - 2026-04-17
 
-> **v0.9.0 was yanked from crates.io.** v0.9.0 contained two critical bugs
+> **Do not use v0.9.0.** It remains published on crates.io (it was not yanked) but contained two critical bugs
 > (LOGIN7 feature extension pointer indirection and `EncryptionContext`
 > provider loss under `Config` clone) that prevented Always Encrypted from
 > functioning at all. Both are fixed in this release. If you are evaluating
