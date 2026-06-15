@@ -334,10 +334,107 @@ fn denormalize_decrypted(plaintext: Vec<u8>, base_col: &ColumnData) -> Result<Sq
             }
             parse_money_value(&mut plaintext.as_slice(), 8)
         }
+        // TIME: scale-aware tick count (3/4/5 bytes) → NaiveTime.
+        #[cfg(feature = "chrono")]
+        TypeId::Time => {
+            let scale = base_col.type_info.scale.unwrap_or(7);
+            ae_time_from_bytes(&plaintext, scale).map(SqlValue::Time)
+        }
+        // DATETIME2: time(scale) bytes followed by a 3-byte date.
+        #[cfg(feature = "chrono")]
+        TypeId::DateTime2 => {
+            let scale = base_col.type_info.scale.unwrap_or(7);
+            let split = plaintext.len().checked_sub(3).ok_or_else(|| {
+                Error::Encryption(format!("decrypted DATETIME2 has {} bytes", plaintext.len()))
+            })?;
+            let time = ae_time_from_bytes(&plaintext[..split], scale)?;
+            let date = ae_date_from_bytes(&plaintext[split..])?;
+            Ok(SqlValue::DateTime(date.and_time(time)))
+        }
+        // DATETIMEOFFSET: UTC time(scale) + 3-byte UTC date + 2-byte offset minutes.
+        #[cfg(feature = "chrono")]
+        TypeId::DateTimeOffset => {
+            use chrono::TimeZone;
+            let scale = base_col.type_info.scale.unwrap_or(7);
+            let n = plaintext.len();
+            let time_len = n.checked_sub(5).ok_or_else(|| {
+                Error::Encryption(format!("decrypted DATETIMEOFFSET has {n} bytes"))
+            })?;
+            let time = ae_time_from_bytes(&plaintext[..time_len], scale)?;
+            let date = ae_date_from_bytes(&plaintext[time_len..time_len + 3])?;
+            let offset_min = i16::from_le_bytes([plaintext[n - 2], plaintext[n - 1]]);
+            let offset =
+                chrono::FixedOffset::east_opt(i32::from(offset_min) * 60).ok_or_else(|| {
+                    Error::Encryption(format!(
+                        "decrypted DATETIMEOFFSET offset {offset_min} invalid"
+                    ))
+                })?;
+            Ok(SqlValue::DateTimeOffset(
+                offset.from_utc_datetime(&date.and_time(time)),
+            ))
+        }
+        // Legacy DATETIME (8 bytes) / SMALLDATETIME (4 bytes); the AE normalized
+        // form equals the wire form, so reuse the wire decoders.
+        #[cfg(feature = "chrono")]
+        TypeId::DateTime | TypeId::DateTime4 | TypeId::DateTimeN => match plaintext.len() {
+            8 => {
+                let b = decrypted_array::<8>(&plaintext, "datetime")?;
+                let days = i64::from(i32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+                let ticks = u64::from(u32::from_le_bytes([b[4], b[5], b[6], b[7]]));
+                datetime_from_wire(days, ticks).map(SqlValue::DateTime)
+            }
+            4 => {
+                let b = decrypted_array::<4>(&plaintext, "smalldatetime")?;
+                let days = i64::from(u16::from_le_bytes([b[0], b[1]]));
+                let minutes = u32::from(u16::from_le_bytes([b[2], b[3]]));
+                smalldatetime_from_wire(days, minutes).map(SqlValue::DateTime)
+            }
+            n => Err(Error::Encryption(format!(
+                "decrypted DATETIME has {n} bytes, expected 4 or 8"
+            ))),
+        },
         other => Err(Error::Encryption(format!(
             "Always Encrypted read is not yet implemented for base type {other:?}"
         ))),
     }
+}
+
+/// Decode an AE-normalized `time(scale)` tick count (3/4/5 little-endian bytes)
+/// back to a `NaiveTime`.
+#[cfg(all(feature = "always-encrypted", feature = "chrono"))]
+fn ae_time_from_bytes(b: &[u8], scale: u8) -> Result<chrono::NaiveTime> {
+    if b.len() > 8 || scale > 7 {
+        return Err(Error::Encryption(format!(
+            "decrypted TIME has {} bytes at scale {scale}",
+            b.len()
+        )));
+    }
+    let mut buf = [0u8; 8];
+    buf[..b.len()].copy_from_slice(b);
+    let ticks = u64::from_le_bytes(buf);
+    let nanos = ticks
+        .checked_mul(10u64.pow(9 - u32::from(scale)))
+        .ok_or_else(|| Error::Encryption("decrypted TIME out of range".to_string()))?;
+    let secs = u32::try_from(nanos / 1_000_000_000)
+        .map_err(|_| Error::Encryption("decrypted TIME out of range".to_string()))?;
+    let nsub = (nanos % 1_000_000_000) as u32;
+    chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nsub)
+        .ok_or_else(|| Error::Encryption(format!("decrypted TIME {secs}s out of range")))
+}
+
+/// Decode a 3-byte little-endian days-since-0001 count back to a `NaiveDate`.
+#[cfg(all(feature = "always-encrypted", feature = "chrono"))]
+fn ae_date_from_bytes(b: &[u8]) -> Result<chrono::NaiveDate> {
+    if b.len() != 3 {
+        return Err(Error::Encryption(format!(
+            "decrypted date has {} bytes, expected 3",
+            b.len()
+        )));
+    }
+    let days = u32::from(b[0]) | (u32::from(b[1]) << 8) | (u32::from(b[2]) << 16);
+    chrono::NaiveDate::from_num_days_from_ce_opt(days as i32 + 1).ok_or_else(|| {
+        Error::Encryption(format!("decrypted date day count {days} is out of range"))
+    })
 }
 
 /// Convert decrypted plaintext into a fixed-size array, erroring on a length

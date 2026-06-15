@@ -1248,6 +1248,137 @@ mod live_server {
         assert_eq!(g_smallmoney, money, "SMALLMONEY round-trips");
     }
 
+    /// Write→read round-trip for the typed temporal parameters: `time`,
+    /// `datetime2` (both at scale 7 and scale 3, exercising the scale-aware
+    /// byte length), `datetimeoffset`, legacy `datetime`, and `smalldatetime`.
+    /// Values are chosen to land exactly on each column's resolution.
+    #[cfg(feature = "chrono")]
+    #[tokio::test]
+    #[ignore = "Requires SQL Server with Always Encrypted"]
+    async fn test_temporal_parameter_encryption_round_trip() {
+        use chrono::{FixedOffset, NaiveDate, TimeZone};
+        use mssql_client::{SmallDateTime, datetime, datetime2, datetimeoffset, time};
+
+        let admin_cfg = match admin_config() {
+            Some(c) => c,
+            None => return,
+        };
+        let mut admin = Client::connect(admin_cfg).await.expect("admin connect");
+        let (rsa_key, pem) = fresh_rsa_keypair();
+        let cek = fresh_cek();
+        let enc = "ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = [{CEK}], \
+                   ENCRYPTION_TYPE = DETERMINISTIC, ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256')";
+        let ddl = format!(
+            "CREATE TABLE [{{TABLE}}] ( Id INT NOT NULL PRIMARY KEY, \
+             EncTime TIME(7) {enc} NULL, \
+             EncTime3 TIME(3) {enc} NULL, \
+             EncDt2 DATETIME2(7) {enc} NULL, \
+             EncDt2s DATETIME2(3) {enc} NULL, \
+             EncDto DATETIMEOFFSET(7) {enc} NULL, \
+             EncDt DATETIME {enc} NULL, \
+             EncSdt SMALLDATETIME {enc} NULL )"
+        );
+        let fx = setup(&mut admin, &cek, &rsa_key, &ddl).await;
+        drop(admin);
+        let mut client = Client::connect(encrypted_config(&pem).expect("cfg"))
+            .await
+            .expect("ae connect");
+
+        let day = NaiveDate::from_ymd_opt(2024, 3, 15).unwrap();
+        let t7 = day.and_hms_nano_opt(13, 14, 15, 123_456_700).unwrap();
+        let t3 = day.and_hms_milli_opt(13, 14, 15, 123).unwrap();
+        let dto = FixedOffset::east_opt(5 * 3600 + 30 * 60)
+            .unwrap()
+            .from_local_datetime(&t7)
+            .single()
+            .unwrap();
+        let dt_legacy = day.and_hms_milli_opt(13, 14, 15, 123).unwrap();
+        let sdt = day.and_hms_opt(13, 14, 0).unwrap();
+
+        let sql = format!(
+            "INSERT INTO [{}] (Id, EncTime, EncTime3, EncDt2, EncDt2s, EncDto, EncDt, EncSdt) \
+             VALUES (@p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8)",
+            fx.table_name
+        );
+        let inserted = client
+            .execute(
+                &sql,
+                &[
+                    &1i32,
+                    &time(t7.time(), 7),
+                    &time(t3.time(), 3),
+                    &datetime2(t7, 7),
+                    &datetime2(t3, 3),
+                    &datetimeoffset(dto, 7),
+                    &datetime(dt_legacy),
+                    &SmallDateTime(sdt),
+                ],
+            )
+            .await;
+
+        type Row = (
+            chrono::NaiveTime,
+            chrono::NaiveTime,
+            chrono::NaiveDateTime,
+            chrono::NaiveDateTime,
+            chrono::DateTime<FixedOffset>,
+            chrono::NaiveDateTime,
+            chrono::NaiveDateTime,
+        );
+        let read: Result<Row, String> = if inserted.is_ok() {
+            let select = format!(
+                "SELECT EncTime, EncTime3, EncDt2, EncDt2s, EncDto, EncDt, EncSdt \
+                 FROM [{}] WHERE Id = @p1",
+                fx.table_name
+            );
+            async {
+                let rows = client
+                    .query(&select, &[&1i32])
+                    .await
+                    .map_err(|e| format!("select: {e}"))?;
+                let mut found = None;
+                for r in rows {
+                    let r = r.map_err(|e| format!("row: {e}"))?;
+                    found = Some((
+                        r.get::<chrono::NaiveTime>(0)
+                            .map_err(|e| format!("time: {e}"))?,
+                        r.get::<chrono::NaiveTime>(1)
+                            .map_err(|e| format!("time3: {e}"))?,
+                        r.get::<chrono::NaiveDateTime>(2)
+                            .map_err(|e| format!("dt2: {e}"))?,
+                        r.get::<chrono::NaiveDateTime>(3)
+                            .map_err(|e| format!("dt2s: {e}"))?,
+                        r.get::<chrono::DateTime<FixedOffset>>(4)
+                            .map_err(|e| format!("dto: {e}"))?,
+                        r.get::<chrono::NaiveDateTime>(5)
+                            .map_err(|e| format!("dt: {e}"))?,
+                        r.get::<chrono::NaiveDateTime>(6)
+                            .map_err(|e| format!("sdt: {e}"))?,
+                    ));
+                }
+                found.ok_or_else(|| "no row".to_string())
+            }
+            .await
+        } else {
+            Err("insert failed".to_string())
+        };
+
+        let mut admin = Client::connect(admin_config().expect("cfg"))
+            .await
+            .expect("admin reconnect");
+        teardown(&mut admin, &fx).await;
+
+        assert_eq!(inserted.expect("temporal insert"), 1, "one row inserted");
+        let (g_t7, g_t3, g_dt2, g_dt2s, g_dto, g_dt, g_sdt) = read.expect("read back");
+        assert_eq!(g_t7, t7.time(), "TIME(7) round-trips");
+        assert_eq!(g_t3, t3.time(), "TIME(3) round-trips");
+        assert_eq!(g_dt2, t7, "DATETIME2(7) round-trips");
+        assert_eq!(g_dt2s, t3, "DATETIME2(3) round-trips");
+        assert_eq!(g_dto, dto, "DATETIMEOFFSET round-trips");
+        assert_eq!(g_dt, dt_legacy, "DATETIME round-trips");
+        assert_eq!(g_sdt, sdt, "SMALLDATETIME round-trips");
+    }
+
     /// Typed NULL (`null::<T>()`) into encrypted columns of several types: the
     /// typed NULL carries its SQL type, so the server accepts it against the
     /// target column (an untyped `Option::None` would be declared `nvarchar(1)`

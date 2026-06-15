@@ -65,16 +65,21 @@
 //! `null::<T>()`): with `Column Encryption Setting=Enabled` the
 //! driver describes the parameters (`sp_describe_parameter_encryption`),
 //! encrypts those bound to encrypted columns client-side, and sends them as
-//! encrypted RPC parameters (deterministic and randomized). The remaining
-//! temporal types (`datetime`, `datetime2`, `time`, `datetimeoffset`) and the
-//! fixed-width `char`/`nchar`/`binary` types are not yet supported and return an
-//! error rather than sending plaintext.
+//! encrypted RPC parameters (deterministic and randomized). The temporal types
+//! are supported through typed-parameter wrappers — `time(v, scale)`,
+//! `datetime2(v, scale)`, `datetimeoffset(v, scale)`, `datetime(v)` (legacy),
+//! and the `SmallDateTime` wrapper. Only the fixed-width `char`/`nchar`/`binary`
+//! types remain unsupported and return an error rather than sending plaintext.
 //!
 //! Bind a `decimal` parameter with `numeric(value, precision, scale)`, not a
-//! plain `Decimal`: an encrypted `decimal` column requires the declared
-//! precision and scale to match the column exactly, and a plain `Decimal` does
-//! not carry a precision — so it is rejected by the server with `Operand type
-//! clash` (Msg 206) at the describe step.
+//! plain `Decimal`, and a scaled temporal with its wrapper, not a bare
+//! `NaiveDateTime`/`NaiveTime`: an encrypted column requires the declared type —
+//! including precision/scale — to match the column exactly, which a bare value
+//! can't convey, so the server rejects it with `Operand type clash` (Msg 206) at
+//! the describe step. The scale-7 temporal forms are validated byte-for-byte
+//! against `Microsoft.Data.SqlClient`; lower scales are validated by live
+//! round-trip (Microsoft's own client defaults temporal parameters to scale 7,
+//! so it can't emit lower-scale forms for a byte-exact comparison).
 //!
 //! ## Security Model
 //!
@@ -666,8 +671,38 @@ fn describe_type_error(col: &str, idx: usize, expected: &str, got: Option<&SqlVa
 /// carry no length prefix. These layouts are validated byte-for-byte against
 /// Microsoft.Data.SqlClient (see the `ae_normalization` tests). Only the types
 /// supported so far are handled; others return `UnsupportedOperation`.
+///
+/// Typed temporal parameters (`time`/`datetime2`/`datetimeoffset`/`datetime`)
+/// pass their [`mssql_types::EncryptedParamType`] in `param_type`: their byte
+/// length depends on the column scale, so the value alone is insufficient.
 #[cfg(feature = "always-encrypted")]
-pub fn normalize_for_encryption(value: &SqlValue) -> Result<Vec<u8>, EncryptionError> {
+pub fn normalize_for_encryption(
+    value: &SqlValue,
+    param_type: Option<mssql_types::EncryptedParamType>,
+) -> Result<Vec<u8>, EncryptionError> {
+    // Typed temporal parameters carry the column scale (the encrypted byte
+    // length depends on it), so they're handled from the hint, not the value.
+    #[cfg(feature = "chrono")]
+    {
+        use mssql_types::EncryptedParamType as E;
+        match (param_type, value) {
+            (Some(E::Time { scale }), SqlValue::Time(t)) => return normalize_ae_time(*t, scale),
+            (Some(E::DateTime2 { scale }), SqlValue::DateTime(dt)) => {
+                return normalize_ae_datetime2(*dt, scale);
+            }
+            (Some(E::DateTimeOffset { scale }), SqlValue::DateTimeOffset(dto)) => {
+                return normalize_ae_datetimeoffset(*dto, scale);
+            }
+            (Some(E::DateTime), SqlValue::DateTime(dt)) => {
+                let mut buf = bytes::BytesMut::with_capacity(8);
+                mssql_types::encode::encode_datetime_legacy(*dt, &mut buf);
+                return Ok(buf.to_vec());
+            }
+            _ => {}
+        }
+    }
+    #[cfg(not(feature = "chrono"))]
+    let _ = param_type;
     match value {
         // All integer types AND bit normalize to 8-byte little-endian (the value
         // widened to i64). Validated against .NET: tinyint/smallint are 8 bytes,
@@ -720,11 +755,82 @@ pub fn normalize_for_encryption(value: &SqlValue) -> Result<Vec<u8>, EncryptionE
             out.extend_from_slice(&(cents as u32).to_le_bytes());
             Ok(out)
         }
+        // SMALLDATETIME: 2-byte days-since-1900 + 2-byte minutes-since-midnight.
+        // Declared correctly by the `SmallDateTime` wrapper, so no scale hint.
+        #[cfg(feature = "chrono")]
+        SqlValue::SmallDateTime(dt) => {
+            let mut buf = bytes::BytesMut::with_capacity(4);
+            mssql_types::encode::encode_smalldatetime(*dt, &mut buf).map_err(|e| {
+                EncryptionError::UnsupportedOperation(format!("SMALLDATETIME: {e}"))
+            })?;
+            Ok(buf.to_vec())
+        }
         other => Err(EncryptionError::UnsupportedOperation(format!(
             "Always Encrypted parameter encryption is not yet implemented for {}",
             other.type_name()
         ))),
     }
+}
+
+/// Days since 0001-01-01 as 3 little-endian bytes — the date part of the AE
+/// normalized form for `date`, `datetime2`, and `datetimeoffset`.
+#[cfg(all(feature = "always-encrypted", feature = "chrono"))]
+fn ae_date_bytes(d: chrono::NaiveDate) -> [u8; 3] {
+    use chrono::Datelike;
+    let days = (d.num_days_from_ce() - 1) as u32;
+    let b = days.to_le_bytes();
+    [b[0], b[1], b[2]]
+}
+
+/// The AE normalized form for `time(scale)`: a little-endian count of
+/// `10^-scale`-second ticks since midnight, in 3/4/5 bytes for scale 0–2/3–4/5–7
+/// (matching SQL Server's `time` storage). Sub-scale digits are rounded.
+#[cfg(all(feature = "always-encrypted", feature = "chrono"))]
+fn normalize_ae_time(t: chrono::NaiveTime, scale: u8) -> Result<Vec<u8>, EncryptionError> {
+    use chrono::Timelike;
+    if scale > 7 {
+        return Err(EncryptionError::UnsupportedOperation(format!(
+            "time scale {scale} out of range (0–7)"
+        )));
+    }
+    let nanos =
+        u64::from(t.num_seconds_from_midnight()) * 1_000_000_000 + u64::from(t.nanosecond());
+    let divisor = 10u64.pow(9 - u32::from(scale));
+    let ticks = (nanos + divisor / 2) / divisor;
+    let len = match scale {
+        0..=2 => 3,
+        3..=4 => 4,
+        _ => 5,
+    };
+    Ok(ticks.to_le_bytes()[..len].to_vec())
+}
+
+/// AE normalized `datetime2(scale)`: `time(scale)` ticks followed by the
+/// 3-byte date.
+#[cfg(all(feature = "always-encrypted", feature = "chrono"))]
+fn normalize_ae_datetime2(
+    dt: chrono::NaiveDateTime,
+    scale: u8,
+) -> Result<Vec<u8>, EncryptionError> {
+    let mut out = normalize_ae_time(dt.time(), scale)?;
+    out.extend_from_slice(&ae_date_bytes(dt.date()));
+    Ok(out)
+}
+
+/// AE normalized `datetimeoffset(scale)`: the UTC `time(scale)` ticks, the
+/// 3-byte UTC date, then the offset in minutes as a 2-byte little-endian i16.
+#[cfg(all(feature = "always-encrypted", feature = "chrono"))]
+fn normalize_ae_datetimeoffset(
+    dto: chrono::DateTime<chrono::FixedOffset>,
+    scale: u8,
+) -> Result<Vec<u8>, EncryptionError> {
+    use chrono::Offset;
+    let utc = dto.naive_utc();
+    let mut out = normalize_ae_time(utc.time(), scale)?;
+    out.extend_from_slice(&ae_date_bytes(utc.date()));
+    let offset_minutes = (dto.offset().fix().local_minus_utc() / 60) as i16;
+    out.extend_from_slice(&offset_minutes.to_le_bytes());
+    Ok(out)
 }
 
 /// The MONEY fixed-point value (`value * 10_000`) as an `i64`, rounding excess
@@ -785,7 +891,7 @@ mod tests {
                 "01ADE71457495F00FC9A16456F1B1EECB901D88DE97887025C189B1C4432E02071AB7594C48518CA5621E90165FAE337475B4CF3A3D00EF2D862FB0473713DF1E1",
             ),
         ] {
-            let norm = normalize_for_encryption(&value).unwrap();
+            let norm = normalize_for_encryption(&value, None).unwrap();
             let cipher = enc
                 .encrypt(&norm, mssql_auth::EncryptionType::Deterministic)
                 .unwrap();
@@ -805,7 +911,7 @@ mod tests {
     #[cfg(feature = "always-encrypted")]
     #[test]
     fn ae_normalization_rejects_unnormalizable_value() {
-        assert!(normalize_for_encryption(&SqlValue::Null).is_err());
+        assert!(normalize_for_encryption(&SqlValue::Null, None).is_err());
     }
 
     /// Numeric-scalar normalization, validated byte-for-byte against
@@ -852,7 +958,7 @@ mod tests {
                 "0171611557351FBC4561EBF0B9C98E0DC38AD2BD3E2C1D1E82F185D7E67D0425E506D11DD67BA3EB38F34FB01A8FCEF7E4B9A7256944334A521526613CFF6C8C5F",
             ),
         ] {
-            let norm = normalize_for_encryption(&value).unwrap();
+            let norm = normalize_for_encryption(&value, None).unwrap();
             let cipher = enc
                 .encrypt(&norm, mssql_auth::EncryptionType::Deterministic)
                 .unwrap();
@@ -893,7 +999,7 @@ mod tests {
                 "0188B4F75A1F4BDA53C9CDDC1918C09CB57F68E13F5560F1F1D7168FE70707337B1156A97915B244F3C03D3E7352882A599511BD243471FD03683F371CF44E4B76",
             ),
         ] {
-            let norm = normalize_for_encryption(&value).unwrap();
+            let norm = normalize_for_encryption(&value, None).unwrap();
             let cipher = enc
                 .encrypt(&norm, mssql_auth::EncryptionType::Deterministic)
                 .unwrap();
@@ -939,7 +1045,7 @@ mod tests {
                 "01B4CE4CAD8D6B241A1555C377A0ADD4C79424DD5162F710D116594F725C1BAB015169A0C7716076EEC90E013519B961DEF427BFC32462D9E45D166C791B73F793",
             ),
         ] {
-            let norm = normalize_for_encryption(&value).unwrap();
+            let norm = normalize_for_encryption(&value, None).unwrap();
             let cipher = enc
                 .encrypt(&norm, mssql_auth::EncryptionType::Deterministic)
                 .unwrap();
@@ -950,6 +1056,68 @@ mod tests {
                 value.type_name()
             );
         }
+    }
+
+    /// Temporal AE normalization, validated byte-for-byte against the forms
+    /// `Microsoft.Data.SqlClient` produces (decrypted from its ciphertext;
+    /// comparing the normalized plaintext is equivalent to comparing ciphertext
+    /// because AEAD is deterministic). Scale 7 here; lower scales are covered by
+    /// the live round-trip + `_temporal_scales` below.
+    #[cfg(all(feature = "always-encrypted", feature = "chrono"))]
+    #[test]
+    fn ae_normalization_matches_dotnet_temporal() {
+        use mssql_types::EncryptedParamType as E;
+        fn unhex(s: &str) -> Vec<u8> {
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+                .collect()
+        }
+
+        let day = chrono::NaiveDate::from_ymd_opt(2024, 3, 15).unwrap();
+        let dt = day.and_hms_nano_opt(13, 14, 15, 123_456_700).unwrap();
+
+        // time(7)
+        assert_eq!(
+            normalize_for_encryption(&SqlValue::Time(dt.time()), Some(E::Time { scale: 7 }))
+                .unwrap(),
+            unhex("07c4aaf46e"),
+        );
+        // datetime2(7)
+        assert_eq!(
+            normalize_for_encryption(&SqlValue::DateTime(dt), Some(E::DateTime2 { scale: 7 }))
+                .unwrap(),
+            unhex("07c4aaf46e8f460b"),
+        );
+        // datetimeoffset(7) +05:30 — normalized as UTC time + UTC date + offset minutes
+        let dto = {
+            use chrono::TimeZone;
+            chrono::FixedOffset::east_opt(5 * 3600 + 30 * 60)
+                .unwrap()
+                .from_local_datetime(&dt)
+                .single()
+                .unwrap()
+        };
+        assert_eq!(
+            normalize_for_encryption(
+                &SqlValue::DateTimeOffset(dto),
+                Some(E::DateTimeOffset { scale: 7 })
+            )
+            .unwrap(),
+            unhex("0788f2da408f460b4a01"),
+        );
+        // legacy datetime
+        let dt_legacy = day.and_hms_milli_opt(13, 14, 15, 123).unwrap();
+        assert_eq!(
+            normalize_for_encryption(&SqlValue::DateTime(dt_legacy), Some(E::DateTime)).unwrap(),
+            unhex("34b10000d925da00"),
+        );
+        // smalldatetime (no scale hint — declared by the SmallDateTime wrapper)
+        let sdt = day.and_hms_opt(13, 14, 0).unwrap();
+        assert_eq!(
+            normalize_for_encryption(&SqlValue::SmallDateTime(sdt), None).unwrap(),
+            unhex("34b11a03"),
+        );
     }
 
     #[test]
