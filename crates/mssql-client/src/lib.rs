@@ -37,6 +37,10 @@ pub mod instrumentation;
 pub mod procedure;
 pub mod query;
 pub mod row;
+// Sans-IO incremental token decoder for the streaming read path (Stage 1 of the
+// streaming redesign). Crate-private until it is wired to QueryStream + the
+// `Streaming` type-state in a later stage; the eager path is unchanged.
+pub(crate) mod row_source;
 pub mod state;
 // Not yet wired into the query path (queries use sp_executesql); kept
 // crate-private until the cache is actually used, so the public API does not
