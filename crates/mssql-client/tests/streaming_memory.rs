@@ -105,3 +105,39 @@ async fn streaming_query_bounds_peak_memory() {
          roughly one row, not the whole ~10 MB response"
     );
 }
+
+/// A single ~30 MB `VARBINARY(MAX)` cell streamed to a sink must keep peak heap
+/// far below the cell size — proving the BLOB is read in chunks from the socket
+/// rather than materialized. The buffered path would hold the whole 30 MB.
+#[tokio::test]
+#[ignore = "Requires a live SQL Server"]
+async fn blob_streaming_bounds_peak_memory() {
+    let Some(cfg) = config() else {
+        return;
+    };
+    let mut client = Client::connect(cfg).await.expect("connect");
+
+    const BIG_BLOB: &str = "SELECT 1 AS id, \
+        CAST(REPLICATE(CAST('A' AS VARCHAR(MAX)), 30000000) AS VARBINARY(MAX)) AS doc";
+
+    let baseline = LIVE.load(Ordering::Relaxed);
+    PEAK.store(baseline, Ordering::Relaxed);
+
+    let mut stream = client
+        .query_stream_blob(BIG_BLOB, &[])
+        .await
+        .expect("stream");
+    let _ = stream.next().await.expect("next").expect("one row");
+    let mut sink = tokio::io::sink();
+    let n = stream.copy_blob_to(&mut sink).await.expect("copy blob");
+
+    let peak_delta = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
+    eprintln!("blob_bytes={n} peak_delta={peak_delta} bytes");
+
+    assert_eq!(n, 30_000_000, "expected a 30 MB blob");
+    assert!(
+        peak_delta < 2_000_000,
+        "peak heap delta was {peak_delta} bytes — blob streaming should bound \
+         this to ~one chunk, not the whole 30 MB cell"
+    );
+}

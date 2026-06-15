@@ -1264,6 +1264,121 @@ impl Client<Ready> {
         }
     }
 
+    /// Execute a query and stream a row's trailing MAX column from the network.
+    ///
+    /// For result sets whose last column is a single MAX type
+    /// (`VARBINARY(MAX)`, `NVARCHAR(MAX)`, `VARCHAR(MAX)`, `XML`), this reads
+    /// that column's bytes incrementally from the socket instead of
+    /// materializing the cell — so a multi-GB BLOB can be streamed to a sink in
+    /// bounded memory. The leading (scalar) columns are decoded eagerly into the
+    /// per-row [`Row`](crate::Row).
+    ///
+    /// The MAX column must be the **last** column. The returned
+    /// [`BlobStream`](crate::BlobStream) yields scalar [`Row`](crate::Row)s via
+    /// [`next`](crate::BlobStream::next); read each row's blob with
+    /// [`read_chunk`](crate::BlobStream::read_chunk) /
+    /// [`copy_blob_to`](crate::BlobStream::copy_blob_to) before advancing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the result set has no trailing MAX column, has more
+    /// than one MAX column, the MAX column is not last, or the result set uses
+    /// Always Encrypted (not yet supported on this path).
+    pub async fn query_stream_blob<'a>(
+        &'a mut self,
+        sql: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<crate::blob_stream::BlobStream<'a>> {
+        use crate::client::response::server_token_to_error;
+        use crate::row_source::{Pull, RowSource};
+        use tds_protocol::token::Token;
+
+        if params.is_empty() {
+            self.send_sql_batch(sql).await?;
+        } else {
+            let rpc = self.build_parameterized_rpc(sql, params).await?;
+            self.send_rpc(&rpc).await?;
+        }
+        self.in_flight = true;
+
+        #[cfg(feature = "always-encrypted")]
+        let encryption_enabled = self.encryption_context.is_some();
+        #[cfg(not(feature = "always-encrypted"))]
+        let encryption_enabled = false;
+
+        let mut source = RowSource::new(encryption_enabled);
+
+        loop {
+            match source.pull()? {
+                Pull::Token(Token::ColMetaData(meta)) => {
+                    let blob_index = Self::validate_blob_result_set(&meta)?;
+                    let (buf, eom) = source.into_parts();
+                    return Ok(crate::blob_stream::BlobStream::new(
+                        self,
+                        buf,
+                        eom,
+                        encryption_enabled,
+                        meta,
+                        blob_index,
+                    ));
+                }
+                Pull::Token(Token::Error(err)) => {
+                    self.in_flight = false;
+                    return Err(server_token_to_error(&err));
+                }
+                Pull::Token(Token::Done(_)) => {
+                    self.in_flight = false;
+                    return Err(Error::Protocol(
+                        "query_stream_blob: query produced no result set".to_string(),
+                    ));
+                }
+                Pull::Token(_) => {}
+                Pull::NeedMore => match self.read_response_packet().await? {
+                    Some((payload, is_eom)) => source.push_packet(payload, is_eom),
+                    None => {
+                        self.in_flight = false;
+                        return Err(Error::ConnectionClosed);
+                    }
+                },
+                Pull::End => {
+                    self.in_flight = false;
+                    return Err(Error::Protocol(
+                        "query_stream_blob: query produced no result set".to_string(),
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Validate that a result set is shaped for [`query_stream_blob`] and return
+    /// the index of its single trailing MAX column.
+    fn validate_blob_result_set(meta: &tds_protocol::token::ColMetaData) -> Result<usize> {
+        if meta.cek_table.is_some() {
+            return Err(Error::Protocol(
+                "query_stream_blob does not support Always Encrypted result sets".to_string(),
+            ));
+        }
+        let max_cols: Vec<usize> = meta
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| crate::blob_stream::is_plp_max(c))
+            .map(|(i, _)| i)
+            .collect();
+        match max_cols.as_slice() {
+            [] => Err(Error::Protocol(
+                "query_stream_blob: result set has no MAX column — use query_stream".to_string(),
+            )),
+            [idx] if *idx == meta.columns.len() - 1 => Ok(*idx),
+            [_] => Err(Error::Protocol(
+                "query_stream_blob: the MAX column must be the last column".to_string(),
+            )),
+            _ => Err(Error::Protocol(
+                "query_stream_blob: result set has more than one MAX column".to_string(),
+            )),
+        }
+    }
+
     /// Execute a query with a specific timeout.
     ///
     /// This overrides the default `command_timeout` from the connection configuration

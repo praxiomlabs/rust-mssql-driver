@@ -18,6 +18,7 @@
 //   column_parser ──→ error, mssql_types, tds_protocol
 
 pub mod blob;
+pub mod blob_stream;
 pub(crate) mod browser;
 pub mod bulk;
 pub mod cancel;
@@ -142,6 +143,7 @@ pub use state::{
 pub mod __fuzzing {
     pub use crate::column_parser::parse_column_value;
 }
+pub use blob_stream::BlobStream;
 pub use row_stream::RowStream;
 pub use stream::{
     ExecuteResult, MultiResultStream, OutputParam, ProcedureResult, QueryStream, ResultSet,
@@ -233,6 +235,12 @@ mod auto_trait_tests {
     fn row_stream_is_send_sync() {
         assert_send::<RowStream<'_>>();
         assert_sync::<RowStream<'_>>();
+    }
+
+    #[test]
+    fn blob_stream_is_send_sync() {
+        assert_send::<BlobStream<'_>>();
+        assert_sync::<BlobStream<'_>>();
     }
 
     #[test]

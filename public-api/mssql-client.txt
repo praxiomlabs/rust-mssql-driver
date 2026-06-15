@@ -126,6 +126,47 @@ impl<T> typenum::type_operators::Same for mssql_client::blob::BlobReader
 pub type mssql_client::blob::BlobReader::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::blob::BlobReader where V: ppv_lite86::types::MultiLane<T>
 pub fn mssql_client::blob::BlobReader::vzip(self) -> V
+pub mod mssql_client::blob_stream
+pub struct mssql_client::blob_stream::BlobStream<'a>
+impl<'a> mssql_client::blob_stream::BlobStream<'a>
+pub fn mssql_client::blob_stream::BlobStream<'a>::blob_is_null(&self) -> bool
+pub fn mssql_client::blob_stream::BlobStream<'a>::blob_len(&self) -> core::option::Option<u64>
+pub fn mssql_client::blob_stream::BlobStream<'a>::columns(&self) -> &[mssql_client::row::Column]
+pub async fn mssql_client::blob_stream::BlobStream<'a>::copy_blob_to<W>(&mut self, &mut W) -> mssql_client::error::Result<u64> where W: tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub async fn mssql_client::blob_stream::BlobStream<'a>::next(&mut self) -> mssql_client::error::Result<core::option::Option<mssql_client::row::Row>>
+pub async fn mssql_client::blob_stream::BlobStream<'a>::read_chunk(&mut self) -> mssql_client::error::Result<core::option::Option<bytes::bytes::Bytes>>
+impl<'a> !core::marker::Freeze for mssql_client::blob_stream::BlobStream<'a>
+impl<'a> core::marker::Send for mssql_client::blob_stream::BlobStream<'a>
+impl<'a> core::marker::Sync for mssql_client::blob_stream::BlobStream<'a>
+impl<'a> core::marker::Unpin for mssql_client::blob_stream::BlobStream<'a>
+impl<'a> !core::panic::unwind_safe::RefUnwindSafe for mssql_client::blob_stream::BlobStream<'a>
+impl<'a> !core::panic::unwind_safe::UnwindSafe for mssql_client::blob_stream::BlobStream<'a>
+impl<T, U> core::convert::Into<U> for mssql_client::blob_stream::BlobStream<'a> where U: core::convert::From<T>
+pub fn mssql_client::blob_stream::BlobStream<'a>::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_client::blob_stream::BlobStream<'a> where U: core::convert::Into<T>
+pub type mssql_client::blob_stream::BlobStream<'a>::Error = core::convert::Infallible
+pub fn mssql_client::blob_stream::BlobStream<'a>::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_client::blob_stream::BlobStream<'a> where U: core::convert::TryFrom<T>
+pub type mssql_client::blob_stream::BlobStream<'a>::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_client::blob_stream::BlobStream<'a>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_client::blob_stream::BlobStream<'a> where T: 'static + ?core::marker::Sized
+pub fn mssql_client::blob_stream::BlobStream<'a>::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_client::blob_stream::BlobStream<'a> where T: ?core::marker::Sized
+pub fn mssql_client::blob_stream::BlobStream<'a>::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_client::blob_stream::BlobStream<'a> where T: ?core::marker::Sized
+pub fn mssql_client::blob_stream::BlobStream<'a>::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_client::blob_stream::BlobStream<'a>
+pub fn mssql_client::blob_stream::BlobStream<'a>::from(T) -> T
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_client::blob_stream::BlobStream<'a>
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_client::blob_stream::BlobStream<'a> where T: ?core::marker::Sized
+pub fn mssql_client::blob_stream::BlobStream<'a>::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_client::blob_stream::BlobStream<'a>::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_client::blob_stream::BlobStream<'a>
+impl<T> tracing::instrument::WithSubscriber for mssql_client::blob_stream::BlobStream<'a>
+impl<T> typenum::type_operators::Same for mssql_client::blob_stream::BlobStream<'a>
+pub type mssql_client::blob_stream::BlobStream<'a>::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::blob_stream::BlobStream<'a> where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_client::blob_stream::BlobStream<'a>::vzip(self) -> V
 pub mod mssql_client::bulk
 pub struct mssql_client::bulk::BulkColumn
 pub mssql_client::bulk::BulkColumn::name: alloc::string::String
@@ -772,6 +813,7 @@ pub fn mssql_client::client::Client<mssql_client::state::Ready>::port(&self) -> 
 pub async fn mssql_client::client::Client<mssql_client::state::Ready>::query<'a>(&'a mut self, &str, &[&(dyn mssql_types::to_sql::ToSql + core::marker::Sync)]) -> mssql_client::error::Result<mssql_client::stream::QueryStream<'a>>
 pub async fn mssql_client::client::Client<mssql_client::state::Ready>::query_multiple<'a>(&'a mut self, &str, &[&(dyn mssql_types::to_sql::ToSql + core::marker::Sync)]) -> mssql_client::error::Result<mssql_client::stream::MultiResultStream<'a>>
 pub async fn mssql_client::client::Client<mssql_client::state::Ready>::query_stream<'a>(&'a mut self, &str, &[&(dyn mssql_types::to_sql::ToSql + core::marker::Sync)]) -> mssql_client::error::Result<mssql_client::row_stream::RowStream<'a>>
+pub async fn mssql_client::client::Client<mssql_client::state::Ready>::query_stream_blob<'a>(&'a mut self, &str, &[&(dyn mssql_types::to_sql::ToSql + core::marker::Sync)]) -> mssql_client::error::Result<mssql_client::blob_stream::BlobStream<'a>>
 pub async fn mssql_client::client::Client<mssql_client::state::Ready>::query_with_timeout<'a>(&'a mut self, &str, &[&(dyn mssql_types::to_sql::ToSql + core::marker::Sync)], core::time::Duration) -> mssql_client::error::Result<mssql_client::stream::QueryStream<'a>>
 pub async fn mssql_client::client::Client<mssql_client::state::Ready>::simple_query(&mut self, &str) -> mssql_client::error::Result<()>
 impl<S: mssql_client::state::ConnectionState> mssql_client::client::Client<S>
@@ -3688,6 +3730,46 @@ impl<T> typenum::type_operators::Same for mssql_client::change_tracking::SyncVer
 pub type mssql_client::change_tracking::SyncVersionStatus::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::change_tracking::SyncVersionStatus where V: ppv_lite86::types::MultiLane<T>
 pub fn mssql_client::change_tracking::SyncVersionStatus::vzip(self) -> V
+pub struct mssql_client::BlobStream<'a>
+impl<'a> mssql_client::blob_stream::BlobStream<'a>
+pub fn mssql_client::blob_stream::BlobStream<'a>::blob_is_null(&self) -> bool
+pub fn mssql_client::blob_stream::BlobStream<'a>::blob_len(&self) -> core::option::Option<u64>
+pub fn mssql_client::blob_stream::BlobStream<'a>::columns(&self) -> &[mssql_client::row::Column]
+pub async fn mssql_client::blob_stream::BlobStream<'a>::copy_blob_to<W>(&mut self, &mut W) -> mssql_client::error::Result<u64> where W: tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub async fn mssql_client::blob_stream::BlobStream<'a>::next(&mut self) -> mssql_client::error::Result<core::option::Option<mssql_client::row::Row>>
+pub async fn mssql_client::blob_stream::BlobStream<'a>::read_chunk(&mut self) -> mssql_client::error::Result<core::option::Option<bytes::bytes::Bytes>>
+impl<'a> !core::marker::Freeze for mssql_client::blob_stream::BlobStream<'a>
+impl<'a> core::marker::Send for mssql_client::blob_stream::BlobStream<'a>
+impl<'a> core::marker::Sync for mssql_client::blob_stream::BlobStream<'a>
+impl<'a> core::marker::Unpin for mssql_client::blob_stream::BlobStream<'a>
+impl<'a> !core::panic::unwind_safe::RefUnwindSafe for mssql_client::blob_stream::BlobStream<'a>
+impl<'a> !core::panic::unwind_safe::UnwindSafe for mssql_client::blob_stream::BlobStream<'a>
+impl<T, U> core::convert::Into<U> for mssql_client::blob_stream::BlobStream<'a> where U: core::convert::From<T>
+pub fn mssql_client::blob_stream::BlobStream<'a>::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_client::blob_stream::BlobStream<'a> where U: core::convert::Into<T>
+pub type mssql_client::blob_stream::BlobStream<'a>::Error = core::convert::Infallible
+pub fn mssql_client::blob_stream::BlobStream<'a>::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_client::blob_stream::BlobStream<'a> where U: core::convert::TryFrom<T>
+pub type mssql_client::blob_stream::BlobStream<'a>::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_client::blob_stream::BlobStream<'a>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for mssql_client::blob_stream::BlobStream<'a> where T: 'static + ?core::marker::Sized
+pub fn mssql_client::blob_stream::BlobStream<'a>::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_client::blob_stream::BlobStream<'a> where T: ?core::marker::Sized
+pub fn mssql_client::blob_stream::BlobStream<'a>::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_client::blob_stream::BlobStream<'a> where T: ?core::marker::Sized
+pub fn mssql_client::blob_stream::BlobStream<'a>::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for mssql_client::blob_stream::BlobStream<'a>
+pub fn mssql_client::blob_stream::BlobStream<'a>::from(T) -> T
+impl<T> opentelemetry::context::future_ext::FutureExt for mssql_client::blob_stream::BlobStream<'a>
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_client::blob_stream::BlobStream<'a> where T: ?core::marker::Sized
+pub fn mssql_client::blob_stream::BlobStream<'a>::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_client::blob_stream::BlobStream<'a>::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_client::blob_stream::BlobStream<'a>
+impl<T> tracing::instrument::WithSubscriber for mssql_client::blob_stream::BlobStream<'a>
+impl<T> typenum::type_operators::Same for mssql_client::blob_stream::BlobStream<'a>
+pub type mssql_client::blob_stream::BlobStream<'a>::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::blob_stream::BlobStream<'a> where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_client::blob_stream::BlobStream<'a>::vzip(self) -> V
 pub struct mssql_client::BulkColumn
 pub mssql_client::BulkColumn::name: alloc::string::String
 pub mssql_client::BulkColumn::nullable: bool
@@ -4202,6 +4284,7 @@ pub fn mssql_client::client::Client<mssql_client::state::Ready>::port(&self) -> 
 pub async fn mssql_client::client::Client<mssql_client::state::Ready>::query<'a>(&'a mut self, &str, &[&(dyn mssql_types::to_sql::ToSql + core::marker::Sync)]) -> mssql_client::error::Result<mssql_client::stream::QueryStream<'a>>
 pub async fn mssql_client::client::Client<mssql_client::state::Ready>::query_multiple<'a>(&'a mut self, &str, &[&(dyn mssql_types::to_sql::ToSql + core::marker::Sync)]) -> mssql_client::error::Result<mssql_client::stream::MultiResultStream<'a>>
 pub async fn mssql_client::client::Client<mssql_client::state::Ready>::query_stream<'a>(&'a mut self, &str, &[&(dyn mssql_types::to_sql::ToSql + core::marker::Sync)]) -> mssql_client::error::Result<mssql_client::row_stream::RowStream<'a>>
+pub async fn mssql_client::client::Client<mssql_client::state::Ready>::query_stream_blob<'a>(&'a mut self, &str, &[&(dyn mssql_types::to_sql::ToSql + core::marker::Sync)]) -> mssql_client::error::Result<mssql_client::blob_stream::BlobStream<'a>>
 pub async fn mssql_client::client::Client<mssql_client::state::Ready>::query_with_timeout<'a>(&'a mut self, &str, &[&(dyn mssql_types::to_sql::ToSql + core::marker::Sync)], core::time::Duration) -> mssql_client::error::Result<mssql_client::stream::QueryStream<'a>>
 pub async fn mssql_client::client::Client<mssql_client::state::Ready>::simple_query(&mut self, &str) -> mssql_client::error::Result<()>
 impl<S: mssql_client::state::ConnectionState> mssql_client::client::Client<S>
