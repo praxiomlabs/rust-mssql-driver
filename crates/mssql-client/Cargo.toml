@@ -69,7 +69,7 @@ mssql-auth = { workspace = true }
 mssql-derive = { workspace = true, optional = true }
 bytes = { workspace = true }
 tokio = { workspace = true }
-thiserror = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
 tracing = { workspace = true }
 futures-core = { workspace = true }
 once_cell = { workspace = true }

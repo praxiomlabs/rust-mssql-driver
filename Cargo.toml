@@ -45,7 +45,9 @@ tokio-util = { version = "0.7", features = ["codec"] }
 tokio-rustls = "0.26"
 
 # Data handling
-bytes = "1.9"
+# default-features = false keeps bytes no_std (alloc-only) so tds-protocol can
+# build for bare-metal targets; std crates re-enable via `features = ["std"]`.
+bytes = { version = "1.9", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 uuid = { version = "1.11", features = ["v4"] }
 rust_decimal = "1.36"
@@ -63,7 +65,7 @@ webpki-roots = "1.0"
 p12 = "0.6"
 
 # Error handling
-thiserror = "2.0"
+thiserror = { version = "2.0", default-features = false }
 
 # Logging and tracing
 tracing = "0.1"
