@@ -458,6 +458,18 @@ impl TypeInfo {
         }
     }
 
+    /// Create type info for legacy DATETIME (8-byte days+1/300s ticks via DATETIMEN / 0x6F).
+    pub fn datetime() -> Self {
+        Self {
+            type_id: 0x6F, // DATETIMENTYPE
+            max_length: Some(8),
+            precision: None,
+            scale: None,
+            collation: None,
+            tvp_type_name: None,
+        }
+    }
+
     /// Create type info for a Table-Valued Parameter.
     ///
     /// # Arguments

@@ -112,8 +112,11 @@ pub use tds_protocol::version::TdsVersion;
 #[cfg(feature = "zeroize")]
 pub use mssql_auth::{SecretString, SecureCredentials};
 #[cfg(feature = "chrono")]
-pub use mssql_types::SmallDateTime;
-pub use mssql_types::{DecimalParamInfo, FromSql, SqlTyped, SqlValue, ToSql, TypedNull, null};
+pub use mssql_types::{
+    DateTime2, DateTimeLegacy, DateTimeOffset, SmallDateTime, Time, datetime, datetime2,
+    datetimeoffset, time,
+};
+pub use mssql_types::{EncryptedParamType, FromSql, SqlTyped, SqlValue, ToSql, TypedNull, null};
 #[cfg(feature = "decimal")]
 pub use mssql_types::{Money, Numeric, SmallMoney, numeric};
 pub use procedure::ProcedureBuilder;
