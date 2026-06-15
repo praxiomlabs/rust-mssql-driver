@@ -111,12 +111,15 @@ pub use tds_protocol::version::TdsVersion;
 // Secure credential types (with zeroize feature)
 #[cfg(feature = "zeroize")]
 pub use mssql_auth::{SecretString, SecureCredentials};
+pub use mssql_types::{
+    Binary, Char, EncryptedParamType, FromSql, NChar, SqlTyped, SqlValue, ToSql, TypedNull, binary,
+    char, nchar, null,
+};
 #[cfg(feature = "chrono")]
 pub use mssql_types::{
     DateTime2, DateTimeLegacy, DateTimeOffset, SmallDateTime, Time, datetime, datetime2,
     datetimeoffset, time,
 };
-pub use mssql_types::{EncryptedParamType, FromSql, SqlTyped, SqlValue, ToSql, TypedNull, null};
 #[cfg(feature = "decimal")]
 pub use mssql_types::{Money, Numeric, SmallMoney, numeric};
 pub use procedure::ProcedureBuilder;

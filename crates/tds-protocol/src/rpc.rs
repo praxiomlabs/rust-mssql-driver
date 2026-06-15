@@ -338,6 +338,42 @@ impl TypeInfo {
         }
     }
 
+    /// Create type info for fixed-length CHAR (BIGCHARTYPE / 0xAF), length in bytes.
+    pub fn char(len: u16) -> Self {
+        Self {
+            type_id: 0xAF, // BIGCHARTYPE
+            max_length: Some(len),
+            precision: None,
+            scale: None,
+            collation: Some(Self::DEFAULT_COLLATION),
+            tvp_type_name: None,
+        }
+    }
+
+    /// Create type info for fixed-length NCHAR (NCHARTYPE / 0xEF), length in characters.
+    pub fn nchar(len: u16) -> Self {
+        Self {
+            type_id: 0xEF,             // NCHARTYPE
+            max_length: Some(len * 2), // UTF-16, so double the char count
+            precision: None,
+            scale: None,
+            collation: Some(Self::DEFAULT_COLLATION),
+            tvp_type_name: None,
+        }
+    }
+
+    /// Create type info for fixed-length BINARY (BIGBINARYTYPE / 0xAD), length in bytes.
+    pub fn binary(len: u16) -> Self {
+        Self {
+            type_id: 0xAD, // BIGBINARYTYPE
+            max_length: Some(len),
+            precision: None,
+            scale: None,
+            collation: None,
+            tvp_type_name: None,
+        }
+    }
+
     /// Create type info for UNIQUEIDENTIFIER.
     pub fn uniqueidentifier() -> Self {
         Self {
@@ -501,12 +537,13 @@ impl TypeInfo {
                     buf.put_u8(len as u8);
                 }
             }
-            0xE7 | 0xA7 | 0xA5 | 0xEF => {
-                // NVARCHARTYPE, BIGVARCHARTYPE, BIGVARBINTYPE, NCHARTYPE
+            0xE7 | 0xA7 | 0xA5 | 0xEF | 0xAF | 0xAD => {
+                // NVARCHAR, BIGVARCHAR, BIGVARBIN, NCHAR, BIGCHAR, BIGBINARY — all
+                // carry a u16 length; the character types also carry a collation.
                 if let Some(len) = self.max_length {
                     buf.put_u16_le(len);
                 }
-                // Collation for string types
+                // Collation for character types (None for the binary types)
                 if let Some(collation) = self.collation {
                     buf.put_slice(&collation);
                 }
@@ -988,6 +1025,9 @@ impl RpcRequest {
                             format!("varbinary({len})")
                         }
                     }
+                    0xAF => format!("char({})", ti.max_length.unwrap_or(1)),
+                    0xEF => format!("nchar({})", ti.max_length.unwrap_or(2) / 2),
+                    0xAD => format!("binary({})", ti.max_length.unwrap_or(1)),
                     0x24 => "uniqueidentifier".to_string(),
                     0x28 => "date".to_string(),
                     0x29 => {

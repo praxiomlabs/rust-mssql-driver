@@ -46,11 +46,13 @@ pub use decode::{Collation, TdsDecode, TypeInfo, decode_utf16_string, decode_val
 pub use encode::{TdsEncode, encode_utf16_string};
 pub use error::TypeError;
 pub use from_sql::FromSql;
+pub use to_sql::{
+    Binary, Char, EncryptedParamType, NChar, SqlTyped, ToSql, TypedNull, binary, char, nchar, null,
+};
 #[cfg(feature = "chrono")]
 pub use to_sql::{
     DateTime2, DateTimeLegacy, DateTimeOffset, Time, datetime, datetime2, datetimeoffset, time,
 };
-pub use to_sql::{EncryptedParamType, SqlTyped, ToSql, TypedNull, null};
 #[cfg(feature = "decimal")]
 pub use to_sql::{Numeric, numeric};
 pub use tvp::{TvpColumnDef, TvpColumnType, TvpData, TvpError};
