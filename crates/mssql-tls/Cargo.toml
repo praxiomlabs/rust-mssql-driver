@@ -17,7 +17,7 @@ rustls = { workspace = true }
 webpki-roots = { workspace = true }
 tokio = { workspace = true }
 tokio-rustls = { workspace = true }
-thiserror = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
 tracing = { workspace = true }
 
 [dev-dependencies]

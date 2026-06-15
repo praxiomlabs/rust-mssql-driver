@@ -17,7 +17,7 @@ tds-protocol = { workspace = true }
 bytes = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
-thiserror = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
 tracing = { workspace = true }
 pin-project-lite = { workspace = true }
 futures-core = { workspace = true }

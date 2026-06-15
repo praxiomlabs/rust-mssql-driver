@@ -117,18 +117,50 @@ fn check_features(sh: &Shell) -> Result<()> {
         "cargo hack check -p tds-protocol --each-feature --no-dev-deps --exclude-no-default-features --exclude-features encoding"
     )
     .run()?;
-    // Verify no_std + alloc works
-    cmd!(
-        sh,
-        "cargo check -p tds-protocol --no-default-features --features alloc"
-    )
-    .run()?;
-    // Verify encoding works in no_std context
-    cmd!(
-        sh,
-        "cargo check -p tds-protocol --no-default-features --features alloc,encoding"
-    )
-    .run()?;
+    // Verify no_std for REAL, against a bare-metal target where std is genuinely
+    // unavailable. A host `--no-default-features` build does NOT prove no_std —
+    // std is still linkable — which is exactly how a broken no_std (bytes/thiserror
+    // pulling std) once passed CI. Fall back to the host check with a loud warning
+    // when the target isn't installed.
+    let no_std_target = "thumbv7em-none-eabi";
+    let installed = cmd!(sh, "rustup target list --installed")
+        .read()
+        .unwrap_or_default();
+    if installed.lines().any(|l| l.trim() == no_std_target) {
+        cmd!(
+            sh,
+            "cargo build -p tds-protocol --no-default-features --features alloc --target {no_std_target}"
+        )
+        .run()?;
+        cmd!(
+            sh,
+            "cargo build -p tds-protocol --no-default-features --features alloc,encoding --target {no_std_target}"
+        )
+        .run()?;
+    } else if std::env::var_os("CI").is_some() {
+        // In CI the target MUST be present — silently falling back to a host
+        // check is how the no_std guarantee would rot unnoticed.
+        bail!(
+            "{no_std_target} is not installed for the active toolchain, so the no_std build \
+             cannot be verified. The CI job must `rustup target add {no_std_target}` for the \
+             pinned toolchain (rust-toolchain.toml) before running this."
+        );
+    } else {
+        println!(
+            "  WARN: {no_std_target} not installed — falling back to a host check that does NOT prove no_std."
+        );
+        println!("        Install it with: rustup target add {no_std_target}");
+        cmd!(
+            sh,
+            "cargo check -p tds-protocol --no-default-features --features alloc"
+        )
+        .run()?;
+        cmd!(
+            sh,
+            "cargo check -p tds-protocol --no-default-features --features alloc,encoding"
+        )
+        .run()?;
+    }
 
     // mssql-types: all features are independent
     println!("\n  mssql-types...");
