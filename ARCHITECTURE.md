@@ -535,45 +535,56 @@ if results.next_result().await? {
 
 **Status:** Accepted
 
-**Decision:** Results are streamed by default with optional buffering.
+**Decision:** Two query paths are offered — a buffered convenience path
+(`query`) and a true incremental streaming path (`query_stream` /
+`query_stream_blob`) — mirroring `tokio-postgres` (`query`/`query_raw`) and
+`sqlx` (`fetch_all`/`fetch`).
 
-> **Implementation status (2026-06):** what ships today is *lazy decode over
-> a buffered response*: the full TDS payload is reassembled in memory, then
-> rows are decoded one at a time as pulled (peak memory ≈ raw payload size,
-> not payload + `Vec<Row>`). True incremental network streaming is not
-> implemented. See the `mssql-client` `stream` module docs.
+> **Implementation status (2026-06):** true incremental network streaming is
+> implemented. `query_stream` reads TDS packets on demand and yields rows
+> without buffering the whole response (peak memory ≈ one packet + one row);
+> `query_stream_blob` sub-streams a row's trailing MAX column from the socket
+> (peak ≈ one chunk). The buffered `query` remains for the common small-result
+> case — it reassembles the full payload then decodes rows lazily (peak ≈ raw
+> payload size). Validated by the counting-allocator tests in
+> `tests/streaming_memory.rs` (≈10 MB result set → ~20 KB peak; 30 MB BLOB →
+> ~9 KB peak).
 
-**Streaming (Default):**
+**Buffered (default, convenient — `QueryStream`):**
 ```rust
-let rows = client.query("SELECT * FROM large_table", &[]).await?;
+// Synchronously iterable; whole response buffered, rows decode lazily.
+let rows = client.query("SELECT * FROM small_table", &[]).await?;
 for row in rows {
     let _row = row?;
-    // Rows decode lazily; peak memory ~ raw response payload
+}
+// or collect:
+let rows: Vec<Row> = client.query(sql, &[]).await?.collect_all().await?;
+```
+
+**Incremental streaming (large result sets — `RowStream`):**
+```rust
+// Reads packets on demand; peak memory ~ one row, not the whole result set.
+let mut stream = client.query_stream("SELECT * FROM huge_table", &[]).await?;
+while let Some(row) = stream.try_next().await? {
+    let _row = row?; // process and drop; nothing else is buffered
 }
 ```
 
-**Buffered (Explicit):**
+**Large Object (BLOB) sub-streaming (`BlobStream`):**
 ```rust
-let rows: Vec<Row> = client
-    .query("SELECT * FROM small_table", &[])
-    .await?
-    .collect_all()
-    .await?;
-```
-
-**Large Object Streaming:**
-```rust
+// The trailing MAX column streams from the socket, never fully materialized.
 let mut stream = client
-    .query("SELECT blob_column FROM documents WHERE id = @p1", &[&doc_id])
+    .query_stream_blob("SELECT id, blob_column FROM documents", &[])
     .await?;
-
-if let Some(row) = stream.next() {
-    let row = row?;
-    if let Some(mut blob_reader) = row.get_stream(0) {
-        tokio::io::copy(&mut blob_reader, &mut file).await?;
-    }
+while let Some(row) = stream.next().await? {
+    let _id: i32 = row.get_by_name("id")?;
+    stream.copy_blob_to(&mut file).await?;
 }
 ```
+
+Cancellation/early-drop: `RowStream::cancel` (and `BlobStream` drop) send an
+Attention and drain so the connection stays reusable; the split-I/O design
+(ADR-005) carries the Attention path.
 
 ---
 

@@ -1,8 +1,12 @@
-//! Lazy row decoding example.
+//! Streaming examples.
 //!
-//! This example iterates a large result set with `QueryStream`: the response
-//! is buffered, but rows decode lazily as they are consumed (the Arc<Bytes>
-//! pattern from ADR-004), so only one decoded `Row` is alive at a time.
+//! Three ways to read results:
+//! - `query` — buffers the whole response, then decodes rows lazily as you
+//!   iterate synchronously (convenient for small/medium results).
+//! - `query_stream` — reads TDS packets on demand and yields rows without
+//!   buffering the whole response (peak memory ~one row; for large results).
+//! - `query_stream_blob` — sub-streams a row's trailing MAX/BLOB column from
+//!   the socket (peak ~one chunk; for multi-GB cells).
 //!
 //! # Running
 //!
@@ -34,8 +38,14 @@ async fn main() -> Result<(), Error> {
     println!("Connected to SQL Server");
 
     // Generate test data using a numbers table pattern
-    println!("\n=== Streaming Large Result Set ===");
+    println!("\n=== Buffered query (lazy row decode) ===");
     streaming_example(&mut client).await?;
+
+    println!("\n=== Incremental streaming (query_stream) ===");
+    incremental_streaming_example(&mut client).await?;
+
+    println!("\n=== BLOB sub-streaming (query_stream_blob) ===");
+    blob_streaming_example(&mut client).await?;
 
     println!("\n=== Memory-Efficient Row Access ===");
     memory_efficient_access_example(&mut client).await?;
@@ -92,6 +102,55 @@ async fn streaming_example(client: &mut Client<Ready>) -> Result<(), Error> {
     println!("Processed {count} rows, sum = {sum}");
     println!("Expected sum: {}", (10000 * 10001) / 2);
 
+    Ok(())
+}
+
+/// Demonstrates true incremental streaming: rows are read from the socket on
+/// demand, so peak memory stays at roughly one row regardless of result size.
+async fn incremental_streaming_example(client: &mut Client<Ready>) -> Result<(), Error> {
+    let query = r#"
+        WITH Numbers AS (
+            SELECT 1 AS n
+            UNION ALL
+            SELECT n + 1 FROM Numbers WHERE n < 100000
+        )
+        SELECT n FROM Numbers OPTION (MAXRECURSION 0)
+    "#;
+
+    println!("Streaming 100,000 rows (nothing but ~one row is buffered)...");
+    let start = Instant::now();
+
+    let mut stream = client.query_stream(query, &[]).await?;
+    let mut count = 0u64;
+    let mut sum: i64 = 0;
+    while let Some(row) = stream.try_next().await? {
+        let n: i32 = row.get(0)?;
+        sum += n as i64;
+        count += 1;
+    }
+
+    println!(
+        "Streamed {count} rows in {:?}, sum = {sum}",
+        start.elapsed()
+    );
+    Ok(())
+}
+
+/// Demonstrates BLOB sub-streaming: a row's trailing MAX column is read in
+/// chunks from the socket and copied to a writer, never fully materialized.
+async fn blob_streaming_example(client: &mut Client<Ready>) -> Result<(), Error> {
+    // A 1 MB VARBINARY(MAX) cell alongside a scalar id.
+    let query = "SELECT 1 AS id, \
+        CAST(REPLICATE(CAST('A' AS VARCHAR(MAX)), 1000000) AS VARBINARY(MAX)) AS doc";
+
+    let mut stream = client.query_stream_blob(query, &[]).await?;
+    if let Some(row) = stream.next().await? {
+        let id: i32 = row.get_by_name("id")?;
+        // Stream straight to a sink (use a tokio::fs::File in real code).
+        let mut sink = tokio::io::sink();
+        let bytes = stream.copy_blob_to(&mut sink).await?;
+        println!("Row id={id}: streamed {bytes} blob bytes to the sink");
+    }
     Ok(())
 }
 
