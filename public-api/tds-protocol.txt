@@ -806,6 +806,7 @@ pub const fn tds_protocol::packet::PacketStatus::iter_names(&self) -> bitflags::
 impl bitflags::traits::Flags for tds_protocol::packet::PacketStatus
 pub type tds_protocol::packet::PacketStatus::Bits = u8
 pub const tds_protocol::packet::PacketStatus::FLAGS: &'static [bitflags::traits::Flag<tds_protocol::packet::PacketStatus>]
+pub fn tds_protocol::packet::PacketStatus::all_named() -> tds_protocol::packet::PacketStatus
 pub fn tds_protocol::packet::PacketStatus::bits(&self) -> u8
 pub fn tds_protocol::packet::PacketStatus::from_bits_retain(u8) -> tds_protocol::packet::PacketStatus
 impl bitflags::traits::PublicFlags for tds_protocol::packet::PacketStatus
@@ -4964,6 +4965,7 @@ pub const fn tds_protocol::packet::PacketStatus::iter_names(&self) -> bitflags::
 impl bitflags::traits::Flags for tds_protocol::packet::PacketStatus
 pub type tds_protocol::packet::PacketStatus::Bits = u8
 pub const tds_protocol::packet::PacketStatus::FLAGS: &'static [bitflags::traits::Flag<tds_protocol::packet::PacketStatus>]
+pub fn tds_protocol::packet::PacketStatus::all_named() -> tds_protocol::packet::PacketStatus
 pub fn tds_protocol::packet::PacketStatus::bits(&self) -> u8
 pub fn tds_protocol::packet::PacketStatus::from_bits_retain(u8) -> tds_protocol::packet::PacketStatus
 impl bitflags::traits::PublicFlags for tds_protocol::packet::PacketStatus
