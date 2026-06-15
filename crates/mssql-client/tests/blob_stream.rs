@@ -152,6 +152,75 @@ async fn blob_stream_nvarchar_max() {
     assert!(buf.chunks(2).all(|c| c == [0x41, 0x00]));
 }
 
+/// Dropping the stream after reading only part of a large blob leaves the
+/// connection in-flight; a directly reused client recovers it on the next
+/// request rather than reading the abandoned blob's bytes.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn blob_stream_drop_mid_blob_then_reuse() {
+    let Some(cfg) = get_test_config() else {
+        return;
+    };
+    let mut client = Client::connect(cfg).await.expect("connect");
+
+    // A 2 MB blob — large enough that a few chunks leaves most of it on the wire.
+    const SQL: &str = "SELECT 1 AS id, \
+        CAST(REPLICATE(CAST('A' AS VARCHAR(MAX)), 2000000) AS VARBINARY(MAX)) AS doc";
+
+    {
+        let mut stream = client.query_stream_blob(SQL, &[]).await.expect("stream");
+        let _ = stream.next().await.expect("next").expect("one row");
+        // Read just one chunk, then drop the stream with the blob half-read.
+        let chunk = stream.read_chunk().await.expect("chunk");
+        assert!(chunk.is_some(), "expected at least one blob chunk");
+    }
+
+    // The next request must recover the abandoned response, not its bytes.
+    let rows = client
+        .query("SELECT 23 AS v", &[])
+        .await
+        .expect("reuse after mid-blob drop")
+        .collect_all()
+        .await
+        .expect("collect");
+    assert_eq!(rows[0].get_by_name::<i32>("v").unwrap(), 23);
+}
+
+/// `query_stream_blob` works on a `Client<InTransaction>`.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn blob_stream_within_transaction() {
+    let Some(cfg) = get_test_config() else {
+        return;
+    };
+    let client = Client::connect(cfg).await.expect("connect");
+    let mut tx = client.begin_transaction().await.expect("begin");
+
+    const SQL: &str = "SELECT 1 AS id, \
+        CAST(REPLICATE(CAST('B' AS VARCHAR(MAX)), 80000) AS VARBINARY(MAX)) AS doc";
+
+    {
+        let mut stream = tx.query_stream_blob(SQL, &[]).await.expect("stream in tx");
+        let row = stream.next().await.expect("next").expect("one row");
+        assert_eq!(row.get_by_name::<i32>("id").unwrap(), 1);
+        let mut sink: Vec<u8> = Vec::new();
+        let n = stream.copy_blob_to(&mut sink).await.expect("copy blob");
+        assert_eq!(n, 80_000);
+        assert!(sink.iter().all(|&b| b == 0x42), "all bytes must be 'B'");
+        assert!(stream.next().await.expect("next").is_none());
+    }
+
+    let mut client = tx.commit().await.expect("commit");
+    let rows = client
+        .query("SELECT 29 AS v", &[])
+        .await
+        .expect("reuse after commit")
+        .collect_all()
+        .await
+        .expect("collect");
+    assert_eq!(rows[0].get_by_name::<i32>("v").unwrap(), 29);
+}
+
 /// Validation: a result set with no MAX column is rejected.
 #[tokio::test]
 #[ignore = "Requires SQL Server"]

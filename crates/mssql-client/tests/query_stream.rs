@@ -242,6 +242,98 @@ async fn cancel_after_full_drain_is_noop() {
     assert_eq!(rows[0].get_by_name::<i32>("v").unwrap(), 1);
 }
 
+/// A server error raised *after* rows have already been yielded surfaces on
+/// `try_next`, and the connection is left clean for the next request.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn error_mid_stream_then_reuse() {
+    let Some(cfg) = get_test_config() else {
+        return;
+    };
+    let mut client = Client::connect(cfg).await.expect("connect");
+
+    // First statement yields a row; the second raises a mid-stream error.
+    const SQL: &str = "SELECT 1 AS n; RAISERROR('boom', 16, 1);";
+
+    {
+        let mut stream = client.query_stream(SQL, &[]).await.expect("stream");
+        // The first row comes through fine.
+        let row = stream.try_next().await.expect("first row").expect("a row");
+        assert_eq!(row.get_by_name::<i32>("n").unwrap(), 1);
+        // A later pull hits the server error.
+        let mut found: Option<Error> = None;
+        loop {
+            match stream.try_next().await {
+                Ok(Some(_)) => continue,
+                Ok(None) => break,
+                Err(e) => {
+                    found = Some(e);
+                    break;
+                }
+            }
+        }
+        let err = found.expect("expected a server error, got end of stream");
+        assert!(
+            matches!(err, Error::Server { .. }),
+            "expected Error::Server, got {err:?}"
+        );
+    }
+
+    // The connection must be reusable after surfacing the mid-stream error.
+    let rows = client
+        .query("SELECT 13 AS v", &[])
+        .await
+        .expect("reuse after mid-stream error")
+        .collect_all()
+        .await
+        .expect("collect");
+    assert_eq!(rows[0].get_by_name::<i32>("v").unwrap(), 13);
+}
+
+/// `query_stream` works on a `Client<InTransaction>`: it reads uncommitted rows
+/// written earlier in the same transaction, and the transaction can be
+/// committed/rolled back once the stream is dropped.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn query_stream_within_transaction() {
+    let Some(cfg) = get_test_config() else {
+        return;
+    };
+    let client = Client::connect(cfg).await.expect("connect");
+
+    let mut tx = client.begin_transaction().await.expect("begin");
+    tx.execute("CREATE TABLE #stream_tx (n INT)", &[])
+        .await
+        .expect("create temp table");
+    tx.execute("INSERT INTO #stream_tx VALUES (1), (2), (3)", &[])
+        .await
+        .expect("insert");
+
+    let mut got: Vec<i32> = Vec::new();
+    {
+        // Stream the uncommitted rows from within the transaction.
+        let mut stream = tx
+            .query_stream("SELECT n FROM #stream_tx ORDER BY n", &[])
+            .await
+            .expect("stream in transaction");
+        while let Some(row) = stream.try_next().await.expect("row") {
+            got.push(row.get_by_name::<i32>("n").unwrap());
+        }
+    }
+    assert_eq!(got, vec![1, 2, 3], "streamed the in-transaction rows");
+
+    // The borrow has ended, so the transaction can now be rolled back.
+    let mut client = tx.rollback().await.expect("rollback");
+    let rows = client
+        .query("SELECT 17 AS v", &[])
+        .await
+        .expect("reuse after rollback")
+        .collect_all()
+        .await
+        .expect("collect");
+    assert_eq!(rows[0].get_by_name::<i32>("v").unwrap(), 17);
+}
+
 /// Parameterized streaming works (sp_executesql path).
 #[tokio::test]
 #[ignore = "Requires SQL Server"]

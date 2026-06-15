@@ -13,9 +13,16 @@
 //! ```
 //!
 //! Queries do not change the connection state: `query()` borrows the client
-//! mutably and returns an iterable result. The [`Streaming`] state type is
-//! declared for the planned socket-streaming work but no API currently
-//! transitions into it.
+//! mutably and returns an iterable result.
+//!
+//! Incremental streaming (`query_stream` / `query_stream_blob`) likewise does
+//! **not** transition into a dedicated state. Rather than the [`Streaming`]
+//! type-state originally sketched, the streams borrow the client mutably
+//! (`&mut Client<S>`) for their lifetime: the borrow checker already enforces
+//! that no other request can run on the connection until the stream is dropped,
+//! and a `&mut` borrow — unlike a consuming state transition — works uniformly
+//! for both [`Ready`] and [`InTransaction`] clients and returns the borrow
+//! automatically. The [`Streaming`] marker is therefore retained but unused.
 
 use std::marker::PhantomData;
 

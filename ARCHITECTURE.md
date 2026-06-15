@@ -547,8 +547,11 @@ if results.next_result().await? {
 > (peak ≈ one chunk). The buffered `query` remains for the common small-result
 > case — it reassembles the full payload then decodes rows lazily (peak ≈ raw
 > payload size). Validated by the counting-allocator tests in
-> `tests/streaming_memory.rs` (≈10 MB result set → ~20 KB peak; 30 MB BLOB →
-> ~9 KB peak).
+> `tests/streaming_memory.rs`: a ≈10 MB result set and a 30 MB BLOB each keep
+> peak heap delta under the test's conservative 2 MB assertion (observed peaks
+> are far lower — roughly ~20 KB and ~9 KB respectively — but the asserted
+> bound is loose to stay robust against allocator noise). The buffered path
+> would peak near the full payload (~40 MB for the same result set).
 
 **Buffered (default, convenient — `QueryStream`):**
 ```rust

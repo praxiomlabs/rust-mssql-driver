@@ -42,7 +42,7 @@ use crate::client::response::server_token_to_error;
 use crate::error::{Error, Result};
 use crate::plp::{PlpDecoder, PlpEvent};
 use crate::row::{Column, Row};
-use crate::state::Ready;
+use crate::state::{ConnectionState, Ready};
 
 /// Whether a column is a PLP-encoded MAX type that this path can sub-stream.
 pub(crate) fn is_plp_max(col: &ColumnData) -> bool {
@@ -59,8 +59,8 @@ pub(crate) fn is_plp_max(col: &ColumnData) -> bool {
 /// socket. See the [module docs](self). Obtain one from
 /// [`Client::query_stream_blob`](crate::Client::query_stream_blob).
 #[must_use = "streams must be consumed; dropping a stream discards remaining rows"]
-pub struct BlobStream<'a> {
-    client: &'a mut Client<Ready>,
+pub struct BlobStream<'a, S: ConnectionState = Ready> {
+    client: &'a mut Client<S>,
     /// Unconsumed wire bytes (post-metadata), shared by the column decode and
     /// the PLP chunk streaming.
     buf: Bytes,
@@ -82,9 +82,9 @@ pub struct BlobStream<'a> {
     finished: bool,
 }
 
-impl<'a> BlobStream<'a> {
+impl<'a, S: ConnectionState> BlobStream<'a, S> {
     pub(crate) fn new(
-        client: &'a mut Client<Ready>,
+        client: &'a mut Client<S>,
         buf: Bytes,
         eom: bool,
         encryption_enabled: bool,
@@ -95,7 +95,7 @@ impl<'a> BlobStream<'a> {
             columns: meta.columns.iter().take(blob_index).cloned().collect(),
             cek_table: meta.cek_table.clone(),
         };
-        let scalar_columns = Client::<Ready>::build_columns(&prefix_meta);
+        let scalar_columns = Client::<S>::build_columns(&prefix_meta);
         Self {
             client,
             buf,
@@ -158,6 +158,12 @@ impl<'a> BlobStream<'a> {
 
     /// Read the next chunk of the current row's blob, or `None` when it is fully
     /// read (or NULL). Reads more packets from the socket as needed.
+    ///
+    /// Chunks are **raw bytes**, not decoded text. For an `NVARCHAR(MAX)` /
+    /// `XML` column the bytes are little-endian UCS-2, and a chunk boundary can
+    /// fall in the middle of a two-byte code unit (or a surrogate pair) — so do
+    /// not decode each chunk to `str` independently. Concatenate the chunks
+    /// first (or stream to a byte sink), then decode the whole value.
     pub async fn read_chunk(&mut self) -> Result<Option<Bytes>> {
         loop {
             let event = match self.plp.as_mut() {
@@ -315,7 +321,14 @@ impl<'a> BlobStream<'a> {
             Token::ColMetaData(_) => Err(Error::Protocol(
                 "query_stream_blob does not support multiple result sets".to_string(),
             )),
-            // DoneProc / DoneInProc / Info / Order / EnvChange / etc.
+            Token::EnvChange(ref e) => {
+                // Keep the transaction descriptor in sync with raw
+                // BEGIN/COMMIT/ROLLBACK seen mid-stream, as the buffered
+                // readers do.
+                self.client.apply_transaction_env_change(e);
+                Ok(Control::Continue)
+            }
+            // DoneProc / DoneInProc / Info / Order / etc.
             _ => Ok(Control::Continue),
         }
     }
