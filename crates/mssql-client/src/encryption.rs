@@ -1134,6 +1134,7 @@ mod tests {
     /// against Microsoft.Data.SqlClient. KEY FACT: the normalized form is the
     /// value's bytes, NOT padded to the declared width — char in the column code
     /// page (Windows-1252), nchar as UTF-16LE, binary raw.
+    #[cfg(feature = "always-encrypted")]
     #[test]
     fn ae_normalization_matches_dotnet_fixed_width() {
         use mssql_types::EncryptedParamType as E;
