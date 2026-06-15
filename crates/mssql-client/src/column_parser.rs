@@ -282,6 +282,13 @@ fn denormalize_decrypted(plaintext: Vec<u8>, base_col: &ColumnData) -> Result<Sq
             let s = String::from_utf16(&units).map_err(|_| {
                 Error::Encryption("decrypted NVARCHAR is not valid UTF-16".to_string())
             })?;
+            // Fixed-width NCHAR is space-padded to its declared length (the AE
+            // normalized form is unpadded); match SQL Server / .NET on read.
+            let s = if base_col.type_id == TypeId::NChar {
+                pad_fixed_char(s, base_col.type_info.max_length.unwrap_or(0) as usize / 2)
+            } else {
+                s
+            };
             Ok(SqlValue::String(s))
         }
         // CHAR/VARCHAR normalize to the column code-page (Windows-1252) bytes.
@@ -292,7 +299,14 @@ fn denormalize_decrypted(plaintext: Vec<u8>, base_col: &ColumnData) -> Result<Sq
                     "decrypted CHAR is not valid Windows-1252".to_string(),
                 ));
             }
-            Ok(SqlValue::String(s.into_owned()))
+            let s = s.into_owned();
+            // Fixed-width CHAR is space-padded to its declared length.
+            let s = if matches!(base_col.type_id, TypeId::Char | TypeId::BigChar) {
+                pad_fixed_char(s, base_col.type_info.max_length.unwrap_or(0) as usize)
+            } else {
+                s
+            };
+            Ok(SqlValue::String(s))
         }
         // VARBINARY/BINARY normalize to the raw bytes.
         TypeId::BigVarBinary | TypeId::BigBinary | TypeId::VarBinary | TypeId::Binary => {
@@ -344,35 +358,37 @@ fn denormalize_decrypted(plaintext: Vec<u8>, base_col: &ColumnData) -> Result<Sq
             }
             parse_money_value(&mut plaintext.as_slice(), 8)
         }
-        // TIME: scale-aware tick count (3/4/5 bytes) → NaiveTime.
+        // TIME: a fixed 5-byte scale-7 tick count → NaiveTime (the value was
+        // already quantized to the column scale on the write side).
         #[cfg(feature = "chrono")]
-        TypeId::Time => {
-            let scale = base_col.type_info.scale.unwrap_or(7);
-            ae_time_from_bytes(&plaintext, scale).map(SqlValue::Time)
-        }
-        // DATETIME2: time(scale) bytes followed by a 3-byte date.
+        TypeId::Time => ae_time_from_bytes(&plaintext).map(SqlValue::Time),
+        // DATETIME2: a fixed 5-byte time followed by a 3-byte date (8 bytes).
         #[cfg(feature = "chrono")]
         TypeId::DateTime2 => {
-            let scale = base_col.type_info.scale.unwrap_or(7);
-            let split = plaintext.len().checked_sub(3).ok_or_else(|| {
-                Error::Encryption(format!("decrypted DATETIME2 has {} bytes", plaintext.len()))
-            })?;
-            let time = ae_time_from_bytes(&plaintext[..split], scale)?;
-            let date = ae_date_from_bytes(&plaintext[split..])?;
+            if plaintext.len() != 8 {
+                return Err(Error::Encryption(format!(
+                    "decrypted DATETIME2 has {} bytes, expected 8",
+                    plaintext.len()
+                )));
+            }
+            let time = ae_time_from_bytes(&plaintext[..5])?;
+            let date = ae_date_from_bytes(&plaintext[5..8])?;
             Ok(SqlValue::DateTime(date.and_time(time)))
         }
-        // DATETIMEOFFSET: UTC time(scale) + 3-byte UTC date + 2-byte offset minutes.
+        // DATETIMEOFFSET: a fixed 5-byte UTC time + 3-byte UTC date + 2-byte
+        // signed offset minutes (10 bytes).
         #[cfg(feature = "chrono")]
         TypeId::DateTimeOffset => {
             use chrono::TimeZone;
-            let scale = base_col.type_info.scale.unwrap_or(7);
-            let n = plaintext.len();
-            let time_len = n.checked_sub(5).ok_or_else(|| {
-                Error::Encryption(format!("decrypted DATETIMEOFFSET has {n} bytes"))
-            })?;
-            let time = ae_time_from_bytes(&plaintext[..time_len], scale)?;
-            let date = ae_date_from_bytes(&plaintext[time_len..time_len + 3])?;
-            let offset_min = i16::from_le_bytes([plaintext[n - 2], plaintext[n - 1]]);
+            if plaintext.len() != 10 {
+                return Err(Error::Encryption(format!(
+                    "decrypted DATETIMEOFFSET has {} bytes, expected 10",
+                    plaintext.len()
+                )));
+            }
+            let time = ae_time_from_bytes(&plaintext[..5])?;
+            let date = ae_date_from_bytes(&plaintext[5..8])?;
+            let offset_min = i16::from_le_bytes([plaintext[8], plaintext[9]]);
             let offset =
                 chrono::FixedOffset::east_opt(i32::from(offset_min) * 60).ok_or_else(|| {
                     Error::Encryption(format!(
@@ -409,27 +425,41 @@ fn denormalize_decrypted(plaintext: Vec<u8>, base_col: &ColumnData) -> Result<Sq
     }
 }
 
-/// Decode an AE-normalized `time(scale)` tick count (3/4/5 little-endian bytes)
-/// back to a `NaiveTime`.
+/// Decode an AE-normalized time value back to a `NaiveTime`. Always Encrypted
+/// stores it as a fixed 5-byte little-endian scale-7 (100ns) tick count,
+/// regardless of the column scale (the value was quantized to the column scale
+/// on the write side).
 #[cfg(all(feature = "always-encrypted", feature = "chrono"))]
-fn ae_time_from_bytes(b: &[u8], scale: u8) -> Result<chrono::NaiveTime> {
-    if b.len() > 8 || scale > 7 {
+fn ae_time_from_bytes(b: &[u8]) -> Result<chrono::NaiveTime> {
+    if b.len() != 5 {
         return Err(Error::Encryption(format!(
-            "decrypted TIME has {} bytes at scale {scale}",
+            "decrypted TIME has {} bytes, expected 5",
             b.len()
         )));
     }
     let mut buf = [0u8; 8];
-    buf[..b.len()].copy_from_slice(b);
-    let ticks = u64::from_le_bytes(buf);
-    let nanos = ticks
-        .checked_mul(10u64.pow(9 - u32::from(scale)))
+    buf[..5].copy_from_slice(b);
+    let ticks7 = u64::from_le_bytes(buf);
+    let nanos = ticks7
+        .checked_mul(100)
         .ok_or_else(|| Error::Encryption("decrypted TIME out of range".to_string()))?;
     let secs = u32::try_from(nanos / 1_000_000_000)
         .map_err(|_| Error::Encryption("decrypted TIME out of range".to_string()))?;
     let nsub = (nanos % 1_000_000_000) as u32;
     chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nsub)
         .ok_or_else(|| Error::Encryption(format!("decrypted TIME {secs}s out of range")))
+}
+
+/// Right-pad a decrypted fixed-width `char`/`nchar` value with spaces to its
+/// declared character length (the AE normalized form is stored unpadded, but
+/// fixed-width columns read back space-padded, matching SQL Server / .NET).
+#[cfg(feature = "always-encrypted")]
+fn pad_fixed_char(mut s: String, target_chars: usize) -> String {
+    let cur = s.chars().count();
+    if cur < target_chars {
+        s.extend(std::iter::repeat_n(' ', target_chars - cur));
+    }
+    s
 }
 
 /// Decode a 3-byte little-endian days-since-0001 count back to a `NaiveDate`.

@@ -80,11 +80,11 @@
 //! `Operand type clash` (Msg 206) at the describe step. Encrypted `char`/`nchar`
 //! columns must use a `*_BIN2` collation (a SQL Server requirement for
 //! deterministic encryption of character types); `char` is encoded as
-//! Windows-1252. The scale-7 temporal and the fixed-width forms are validated
-//! byte-for-byte against `Microsoft.Data.SqlClient`; lower temporal scales are
-//! validated by live round-trip (Microsoft's own client defaults temporal
-//! parameters to scale 7, so it can't emit lower-scale forms for a byte-exact
-//! comparison).
+//! Windows-1252. Temporal values are normalized to Always Encrypted's
+//! fixed-width form (time = 5 bytes, datetime2 = 8, datetimeoffset = 10, the
+//! value truncated to the column scale but stored at scale-7 width), matching
+//! `Microsoft.Data.SqlClient` and validated byte-for-byte against it at both
+//! scale 7 and scale 3.
 //!
 //! ## Security Model
 //!
@@ -805,14 +805,19 @@ fn normalize_ae_time(t: chrono::NaiveTime, scale: u8) -> Result<Vec<u8>, Encrypt
     }
     let nanos =
         u64::from(t.num_seconds_from_midnight()) * 1_000_000_000 + u64::from(t.nanosecond());
-    let divisor = 10u64.pow(9 - u32::from(scale));
-    let ticks = (nanos + divisor / 2) / divisor;
-    let len = match scale {
-        0..=2 => 3,
-        3..=4 => 4,
-        _ => 5,
-    };
-    Ok(ticks.to_le_bytes()[..len].to_vec())
+    // Always Encrypted normalizes temporal to a FIXED scale-7 (100ns) width — 5
+    // bytes for time — with the value quantized (truncated) to the column scale,
+    // NOT the scale-dependent 3/4/5-byte TDS storage form. This matches
+    // Microsoft.Data.SqlClient's `SerializeTime`, which forces
+    // `length = MAX_TIME_LENGTH = 5` and quantizes via
+    // `ticks / TICKS_FROM_SCALE[scale] * TICKS_FROM_SCALE[scale]`. The two forms
+    // coincide only at scale 7, so the old scale-dependent length emitted
+    // ciphertext no Microsoft client could read at scale 0–6. Validated
+    // byte-exact vs .NET at scale 3 and scale 7.
+    let ticks7 = nanos / 100;
+    let quantum = 10u64.pow(7 - u32::from(scale));
+    let quantized = (ticks7 / quantum) * quantum;
+    Ok(quantized.to_le_bytes()[..5].to_vec())
 }
 
 /// AE normalized `datetime2(scale)`: `time(scale)` ticks followed by the
@@ -1116,6 +1121,29 @@ mod tests {
             .unwrap(),
             unhex("0788f2da408f460b4a01"),
         );
+
+        // Scale 3: AE keeps the FIXED 5/8/10-byte width and truncates the value
+        // to the column scale (.1234567 → .1230000) — the case the old
+        // scale-dependent length got wrong. Captured from Microsoft.Data.SqlClient.
+        assert_eq!(
+            normalize_for_encryption(&SqlValue::Time(dt.time()), Some(E::Time { scale: 3 }))
+                .unwrap(),
+            unhex("30b2aaf46e"),
+        );
+        assert_eq!(
+            normalize_for_encryption(&SqlValue::DateTime(dt), Some(E::DateTime2 { scale: 3 }))
+                .unwrap(),
+            unhex("30b2aaf46e8f460b"),
+        );
+        assert_eq!(
+            normalize_for_encryption(
+                &SqlValue::DateTimeOffset(dto),
+                Some(E::DateTimeOffset { scale: 3 })
+            )
+            .unwrap(),
+            unhex("3076f2da408f460b4a01"),
+        );
+
         // legacy datetime
         let dt_legacy = day.and_hms_milli_opt(13, 14, 15, 123).unwrap();
         assert_eq!(

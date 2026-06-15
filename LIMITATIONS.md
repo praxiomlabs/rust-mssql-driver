@@ -247,10 +247,11 @@ value: an encrypted column requires the declared type — precision/scale/length
 included — to match exactly, so a plain `Decimal`, `NaiveDateTime`/`NaiveTime`, or
 `String` is rejected with `Operand type clash` (Msg 206). `numeric` also rejects,
 client-side, a value whose digits exceed the declared precision (the server cannot
-range-check an encrypted value). The scale-7 temporal and the fixed-width forms are
-validated byte-for-byte against `Microsoft.Data.SqlClient`; lower temporal scales
-are validated by live round-trip, because Microsoft's client defaults temporal
-parameters to scale 7 and cannot emit lower-scale forms for a byte-exact comparison.
+range-check an encrypted value). Temporal values are normalized to Always
+Encrypted's fixed-width form (`time` = 5 bytes, `datetime2` = 8, `datetimeoffset`
+= 10; the value truncated to the column scale but stored at scale-7 width), matching
+`Microsoft.Data.SqlClient` and validated byte-for-byte against it at both scale 7
+and scale 3.
 
 Constraints on the typed wrappers:
 - Encrypted `char`/`nchar` columns must use a `*_BIN2` collation (a SQL Server
