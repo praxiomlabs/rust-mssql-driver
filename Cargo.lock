@@ -2500,6 +2500,7 @@ dependencies = [
  "bytes",
  "chrono",
  "criterion",
+ "encoding_rs",
  "futures-core",
  "lru",
  "mssql-auth",

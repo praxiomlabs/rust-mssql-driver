@@ -1379,6 +1379,91 @@ mod live_server {
         assert_eq!(g_sdt, sdt, "SMALLDATETIME round-trips");
     }
 
+    /// Write→read round-trip for the fixed-width `char`/`nchar`/`binary` types.
+    /// AE requires `char`/`nchar` columns to use a `*_BIN2` collation for
+    /// deterministic encryption. The normalized form is the value's bytes,
+    /// unpadded, so the values read back at their original length.
+    #[tokio::test]
+    #[ignore = "Requires SQL Server with Always Encrypted"]
+    async fn test_fixed_width_parameter_encryption_round_trip() {
+        use mssql_client::{binary, char, nchar};
+
+        let admin_cfg = match admin_config() {
+            Some(c) => c,
+            None => return,
+        };
+        let mut admin = Client::connect(admin_cfg).await.expect("admin connect");
+        let (rsa_key, pem) = fresh_rsa_keypair();
+        let cek = fresh_cek();
+        let enc = "ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = [{CEK}], \
+                   ENCRYPTION_TYPE = DETERMINISTIC, ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256')";
+        let ddl = format!(
+            "CREATE TABLE [{{TABLE}}] ( Id INT NOT NULL PRIMARY KEY, \
+             EncChar CHAR(10) COLLATE Latin1_General_BIN2 {enc} NULL, \
+             EncNChar NCHAR(10) COLLATE Latin1_General_BIN2 {enc} NULL, \
+             EncBinary BINARY(10) {enc} NULL )"
+        );
+        let fx = setup(&mut admin, &cek, &rsa_key, &ddl).await;
+        drop(admin);
+        let mut client = Client::connect(encrypted_config(&pem).expect("cfg"))
+            .await
+            .expect("ae connect");
+
+        let bin_val: Vec<u8> = vec![1, 2, 3, 4, 5];
+        let sql = format!(
+            "INSERT INTO [{}] (Id, EncChar, EncNChar, EncBinary) VALUES (@p1, @p2, @p3, @p4)",
+            fx.table_name
+        );
+        let inserted = client
+            .execute(
+                &sql,
+                &[
+                    &1i32,
+                    &char("Hello", 10),
+                    &nchar("Hello", 10),
+                    &binary(bin_val.clone(), 10),
+                ],
+            )
+            .await;
+
+        let read: Result<(String, String, Vec<u8>), String> = if inserted.is_ok() {
+            let select = format!(
+                "SELECT EncChar, EncNChar, EncBinary FROM [{}] WHERE Id = @p1",
+                fx.table_name
+            );
+            async {
+                let rows = client
+                    .query(&select, &[&1i32])
+                    .await
+                    .map_err(|e| format!("select: {e}"))?;
+                let mut found = None;
+                for r in rows {
+                    let r = r.map_err(|e| format!("row: {e}"))?;
+                    found = Some((
+                        r.get::<String>(0).map_err(|e| format!("char: {e}"))?,
+                        r.get::<String>(1).map_err(|e| format!("nchar: {e}"))?,
+                        r.get::<Vec<u8>>(2).map_err(|e| format!("binary: {e}"))?,
+                    ));
+                }
+                found.ok_or_else(|| "no row".to_string())
+            }
+            .await
+        } else {
+            Err("insert failed".to_string())
+        };
+
+        let mut admin = Client::connect(admin_config().expect("cfg"))
+            .await
+            .expect("admin reconnect");
+        teardown(&mut admin, &fx).await;
+
+        assert_eq!(inserted.expect("fixed-width insert"), 1, "one row inserted");
+        let (g_char, g_nchar, g_binary) = read.expect("read back");
+        assert_eq!(g_char, "Hello", "CHAR round-trips (unpadded)");
+        assert_eq!(g_nchar, "Hello", "NCHAR round-trips (unpadded)");
+        assert_eq!(g_binary, bin_val, "BINARY round-trips (unpadded)");
+    }
+
     /// Typed NULL (`null::<T>()`) into encrypted columns of several types: the
     /// typed NULL carries its SQL type, so the server accepts it against the
     /// target column (an untyped `Option::None` would be declared `nvarchar(1)`

@@ -284,6 +284,16 @@ fn denormalize_decrypted(plaintext: Vec<u8>, base_col: &ColumnData) -> Result<Sq
             })?;
             Ok(SqlValue::String(s))
         }
+        // CHAR/VARCHAR normalize to the column code-page (Windows-1252) bytes.
+        TypeId::BigChar | TypeId::Char | TypeId::BigVarChar | TypeId::VarChar => {
+            let (s, _, had_errors) = encoding_rs::WINDOWS_1252.decode(&plaintext);
+            if had_errors {
+                return Err(Error::Encryption(
+                    "decrypted CHAR is not valid Windows-1252".to_string(),
+                ));
+            }
+            Ok(SqlValue::String(s.into_owned()))
+        }
         // VARBINARY/BINARY normalize to the raw bytes.
         TypeId::BigVarBinary | TypeId::BigBinary | TypeId::VarBinary | TypeId::Binary => {
             Ok(SqlValue::Binary(bytes::Bytes::from(plaintext)))

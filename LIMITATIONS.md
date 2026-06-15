@@ -233,28 +233,33 @@ Parameter (write) encryption is implemented for `int`, `tinyint`, `smallint`,
 `date`, `money`, `smallmoney`, `decimal` (via `numeric(value, precision, scale)`),
 the temporal types `time`/`datetime2`/`datetimeoffset` (via `time(v, scale)` /
 `datetime2(v, scale)` / `datetimeoffset(v, scale)`), legacy `datetime` (via
-`datetime(v)`), `smalldatetime` (via the `SmallDateTime` wrapper), and typed
-`NULL` (via `null::<T>()`). With `Column Encryption Setting=Enabled`, a
-parameterized query or `execute` automatically describes its parameters
+`datetime(v)`), `smalldatetime` (via the `SmallDateTime` wrapper), the fixed-width
+`char`/`nchar`/`binary` (via `char(v, len)` / `nchar(v, len)` / `binary(v, len)`),
+and typed `NULL` (via `null::<T>()`). The full scalar/temporal/fixed-width set is
+covered (#234 complete). With `Column Encryption Setting=Enabled`, a parameterized
+query or `execute` automatically describes its parameters
 (`sp_describe_parameter_encryption`), encrypts those bound to encrypted columns
 client-side, and sends them as encrypted RPC parameters. Both deterministic and
 randomized encryption are supported.
 
-Bind a `decimal`/temporal parameter with its typed wrapper, not a bare value: an
-encrypted column requires the declared type — precision/scale included — to match
-exactly, so a plain `Decimal` (no precision) or `NaiveDateTime`/`NaiveTime` (no
-scale, and ambiguous between `datetime` and `datetime2`) is rejected with
-`Operand type clash` (Msg 206). `numeric` also rejects, client-side, a value whose
-digits exceed the declared precision (the server cannot range-check an encrypted
-value). The scale-7 temporal forms are validated byte-for-byte against
-`Microsoft.Data.SqlClient`; lower scales are validated by live round-trip, because
-Microsoft's client defaults temporal parameters to scale 7 and cannot emit
-lower-scale forms for a byte-exact comparison.
+Bind a `decimal`/temporal/fixed-width parameter with its typed wrapper, not a bare
+value: an encrypted column requires the declared type — precision/scale/length
+included — to match exactly, so a plain `Decimal`, `NaiveDateTime`/`NaiveTime`, or
+`String` is rejected with `Operand type clash` (Msg 206). `numeric` also rejects,
+client-side, a value whose digits exceed the declared precision (the server cannot
+range-check an encrypted value). The scale-7 temporal and the fixed-width forms are
+validated byte-for-byte against `Microsoft.Data.SqlClient`; lower temporal scales
+are validated by live round-trip, because Microsoft's client defaults temporal
+parameters to scale 7 and cannot emit lower-scale forms for a byte-exact comparison.
+
+Constraints on the typed wrappers:
+- Encrypted `char`/`nchar` columns must use a `*_BIN2` collation (a SQL Server
+  requirement for deterministic encryption of character types); `char` values are
+  encoded in Windows-1252 (other code pages are not supported).
+- The AE normalized form is not padded to the declared width, so `char`/`binary`
+  values read back at their original length, not the column width.
 
 Not yet implemented:
-- Parameter encryption for the fixed-width `char`, `nchar`, and `binary` types:
-  these require declaring an exact width (and, for `char`, a code page). Tracked
-  in [#234](https://github.com/praxiomlabs/rust-mssql-driver/issues/234).
 - Secure enclave operations.
 - Caching of `sp_describe_parameter_encryption`: each parameterized statement
   currently incurs one extra describe round-trip when Always Encrypted is

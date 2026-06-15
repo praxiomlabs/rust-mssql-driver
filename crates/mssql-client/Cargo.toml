@@ -36,7 +36,7 @@ zeroize = ["mssql-auth/zeroize"]
 fuzzing = []
 # Always Encrypted client-side encryption support
 # Activates crypto deps in mssql-auth: aes, cbc, hmac, sha2, rsa, rand, parking_lot
-always-encrypted = ["mssql-auth/always-encrypted"]
+always-encrypted = ["mssql-auth/always-encrypted", "dep:encoding_rs"]
 # Collation-aware string encoding/decoding for VARCHAR columns.
 # Forwarded to both tds-protocol (wire-level) and mssql-types (type-level).
 # Both use encoding_rs for codec support.
@@ -84,6 +84,7 @@ uuid = { workspace = true, optional = true }
 
 # Optional: rust_decimal for DECIMAL/NUMERIC types
 rust_decimal = { workspace = true, optional = true }
+encoding_rs = { workspace = true, optional = true }
 
 # Optional: OpenTelemetry integration
 opentelemetry = { workspace = true, optional = true }

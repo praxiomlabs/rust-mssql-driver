@@ -64,6 +64,23 @@ pub enum EncryptedParamType {
     },
     /// Legacy `datetime` (8 bytes; ~3.33 ms resolution).
     DateTime,
+    /// Fixed-length `char(length)` (length in bytes; the encrypted column must
+    /// use a `*_BIN2` collation, and the value is encoded in its code page).
+    Char {
+        /// Declared length in bytes.
+        length: u16,
+    },
+    /// Fixed-length `nchar(length)` (length in UTF-16 characters; the encrypted
+    /// column must use a `*_BIN2` collation).
+    NChar {
+        /// Declared length in characters.
+        length: u16,
+    },
+    /// Fixed-length `binary(length)` (length in bytes).
+    Binary {
+        /// Declared length in bytes.
+        length: u16,
+    },
 }
 
 impl ToSql for bool {
@@ -524,6 +541,109 @@ impl ToSql for DateTimeLegacy {
 
     fn encrypted_param_type(&self) -> Option<EncryptedParamType> {
         Some(EncryptedParamType::DateTime)
+    }
+}
+
+/// A fixed-length `char(length)` parameter for an Always Encrypted column (see [`char()`]).
+#[derive(Debug, Clone)]
+pub struct Char {
+    value: String,
+    length: u16,
+}
+
+/// Create a `char(length)` parameter for an Always Encrypted `char` column.
+///
+/// The encrypted column must use a `*_BIN2` collation (SQL Server requires it
+/// for deterministic encryption of character types). The value is encoded in
+/// the column's code page; only Windows-1252 (the default) is supported.
+#[must_use]
+pub fn char(value: impl Into<String>, length: u16) -> Char {
+    Char {
+        value: value.into(),
+        length,
+    }
+}
+
+impl ToSql for Char {
+    fn to_sql(&self) -> Result<SqlValue, TypeError> {
+        Ok(SqlValue::String(self.value.clone()))
+    }
+
+    fn sql_type(&self) -> &'static str {
+        "CHAR"
+    }
+
+    fn encrypted_param_type(&self) -> Option<EncryptedParamType> {
+        Some(EncryptedParamType::Char {
+            length: self.length,
+        })
+    }
+}
+
+/// A fixed-length `nchar(length)` parameter for an Always Encrypted column (see [`nchar`]).
+#[derive(Debug, Clone)]
+pub struct NChar {
+    value: String,
+    length: u16,
+}
+
+/// Create an `nchar(length)` parameter for an Always Encrypted `nchar` column.
+///
+/// The encrypted column must use a `*_BIN2` collation. The value is encoded as
+/// UTF-16, identically to `nvarchar`.
+#[must_use]
+pub fn nchar(value: impl Into<String>, length: u16) -> NChar {
+    NChar {
+        value: value.into(),
+        length,
+    }
+}
+
+impl ToSql for NChar {
+    fn to_sql(&self) -> Result<SqlValue, TypeError> {
+        Ok(SqlValue::String(self.value.clone()))
+    }
+
+    fn sql_type(&self) -> &'static str {
+        "NCHAR"
+    }
+
+    fn encrypted_param_type(&self) -> Option<EncryptedParamType> {
+        Some(EncryptedParamType::NChar {
+            length: self.length,
+        })
+    }
+}
+
+/// A fixed-length `binary(length)` parameter for an Always Encrypted column (see [`binary`]).
+#[derive(Debug, Clone)]
+pub struct Binary {
+    value: bytes::Bytes,
+    length: u16,
+}
+
+/// Create a `binary(length)` parameter for an Always Encrypted `binary` column.
+#[must_use]
+pub fn binary(value: impl Into<bytes::Bytes>, length: u16) -> Binary {
+    Binary {
+        value: value.into(),
+        length,
+    }
+}
+
+impl ToSql for Binary {
+    fn to_sql(&self) -> Result<SqlValue, TypeError> {
+        Ok(SqlValue::Binary(self.value.clone()))
+    }
+
+    fn sql_type(&self) -> &'static str {
+        "BINARY"
+    }
+
+    fn encrypted_param_type(&self) -> Option<EncryptedParamType> {
+        Some(EncryptedParamType::Binary {
+            length: self.length,
+        })
     }
 }
 
