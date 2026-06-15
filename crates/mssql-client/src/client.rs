@@ -312,6 +312,15 @@ impl<S: ConnectionState> Client<S> {
         }
     }
 
+    /// Apply a transaction-related `ENVCHANGE` to this client's descriptor.
+    ///
+    /// Lets the streaming readers (which live in sibling modules) keep the
+    /// transaction descriptor in sync with raw `BEGIN`/`COMMIT`/`ROLLBACK`
+    /// batches seen mid-stream, exactly as the buffered readers do.
+    pub(crate) fn apply_transaction_env_change(&mut self, env: &EnvChange) {
+        Self::process_transaction_env_change(env, &mut self.transaction_descriptor);
+    }
+
     /// Send a SQL batch to the server.
     ///
     /// Uses the client's current transaction descriptor in ALL_HEADERS.
@@ -1016,6 +1025,194 @@ impl<S: ConnectionState> Client<S> {
     pub(crate) fn server_collation(&self) -> Option<&tds_protocol::token::Collation> {
         self.server_collation.as_ref()
     }
+
+    /// Shared implementation behind `query_stream` for both `Ready` and
+    /// `InTransaction`. Sends the request, then pulls packets until the first
+    /// result set's `ColMetaData` (resolving columns and any Always Encrypted
+    /// decryptor up front) before handing back a [`RowStream`].
+    pub(crate) async fn query_stream_inner<'a>(
+        &'a mut self,
+        sql: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<crate::row_stream::RowStream<'a, S>> {
+        use crate::client::response::server_token_to_error;
+        use crate::row_source::{Pull, RowSource};
+        use tds_protocol::token::Token;
+
+        tracing::debug!(sql = sql, params_count = params.len(), "streaming query");
+
+        // Send the request (same wire format as the buffered path).
+        if params.is_empty() {
+            self.send_sql_batch(sql).await?;
+        } else {
+            let rpc = self.build_parameterized_rpc(sql, params).await?;
+            self.send_rpc(&rpc).await?;
+        }
+        self.in_flight = true;
+
+        #[cfg(feature = "always-encrypted")]
+        let encryption_enabled = self.encryption_context.is_some();
+        #[cfg(not(feature = "always-encrypted"))]
+        let encryption_enabled = false;
+
+        let mut source = RowSource::new(encryption_enabled);
+
+        // Prelude: pull packets until the first result set's ColMetaData (so the
+        // columns and any Always Encrypted decryptor are resolved up front), or
+        // until a terminal Done/Error if there is no result set.
+        loop {
+            match source.pull()? {
+                Pull::Token(Token::ColMetaData(meta)) => {
+                    let columns = Self::build_columns(&meta);
+                    #[cfg(feature = "always-encrypted")]
+                    let decryptor = self
+                        .resolve_decryptor(&meta)
+                        .await?
+                        .map(std::sync::Arc::new);
+                    return Ok(crate::row_stream::RowStream::new(
+                        self,
+                        source,
+                        columns,
+                        meta,
+                        #[cfg(feature = "always-encrypted")]
+                        decryptor,
+                    ));
+                }
+                Pull::Token(Token::Error(err)) => {
+                    self.in_flight = false;
+                    return Err(server_token_to_error(&err));
+                }
+                Pull::Token(Token::Done(done)) => {
+                    if done.status.error {
+                        self.in_flight = false;
+                        return Err(Error::Query(
+                            "query failed (server set error flag in DONE token)".to_string(),
+                        ));
+                    }
+                    if !done.status.more {
+                        // No result set (e.g. an INSERT) — an empty stream.
+                        self.in_flight = false;
+                        return Ok(crate::row_stream::RowStream::empty(self));
+                    }
+                    // More results may follow; keep looking for ColMetaData.
+                }
+                Pull::Token(Token::EnvChange(env)) => {
+                    Self::process_transaction_env_change(&env, &mut self.transaction_descriptor);
+                }
+                Pull::Token(_) => {
+                    // Info / Order / DoneProc / DoneInProc, etc. — keep pulling.
+                }
+                Pull::NeedMore => match self.read_response_packet().await? {
+                    Some((payload, is_eom)) => source.push_packet(payload, is_eom),
+                    None => {
+                        self.in_flight = false;
+                        return Err(Error::ConnectionClosed);
+                    }
+                },
+                Pull::End => {
+                    self.in_flight = false;
+                    return Ok(crate::row_stream::RowStream::empty(self));
+                }
+            }
+        }
+    }
+
+    /// Shared implementation behind `query_stream_blob` for both `Ready` and
+    /// `InTransaction`.
+    pub(crate) async fn query_stream_blob_inner<'a>(
+        &'a mut self,
+        sql: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<crate::blob_stream::BlobStream<'a, S>> {
+        use crate::client::response::server_token_to_error;
+        use crate::row_source::{Pull, RowSource};
+        use tds_protocol::token::Token;
+
+        if params.is_empty() {
+            self.send_sql_batch(sql).await?;
+        } else {
+            let rpc = self.build_parameterized_rpc(sql, params).await?;
+            self.send_rpc(&rpc).await?;
+        }
+        self.in_flight = true;
+
+        #[cfg(feature = "always-encrypted")]
+        let encryption_enabled = self.encryption_context.is_some();
+        #[cfg(not(feature = "always-encrypted"))]
+        let encryption_enabled = false;
+
+        let mut source = RowSource::new(encryption_enabled);
+
+        loop {
+            match source.pull()? {
+                Pull::Token(Token::ColMetaData(meta)) => {
+                    let blob_index = Self::validate_blob_result_set(&meta)?;
+                    let (buf, eom) = source.into_parts();
+                    return Ok(crate::blob_stream::BlobStream::new(
+                        self,
+                        buf,
+                        eom,
+                        encryption_enabled,
+                        meta,
+                        blob_index,
+                    ));
+                }
+                Pull::Token(Token::Error(err)) => {
+                    self.in_flight = false;
+                    return Err(server_token_to_error(&err));
+                }
+                Pull::Token(Token::Done(_)) => {
+                    self.in_flight = false;
+                    return Err(Error::Protocol(
+                        "query_stream_blob: query produced no result set".to_string(),
+                    ));
+                }
+                Pull::Token(_) => {}
+                Pull::NeedMore => match self.read_response_packet().await? {
+                    Some((payload, is_eom)) => source.push_packet(payload, is_eom),
+                    None => {
+                        self.in_flight = false;
+                        return Err(Error::ConnectionClosed);
+                    }
+                },
+                Pull::End => {
+                    self.in_flight = false;
+                    return Err(Error::Protocol(
+                        "query_stream_blob: query produced no result set".to_string(),
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Validate that a result set is shaped for [`query_stream_blob`] and return
+    /// the index of its single trailing MAX column.
+    fn validate_blob_result_set(meta: &tds_protocol::token::ColMetaData) -> Result<usize> {
+        if meta.cek_table.is_some() {
+            return Err(Error::Protocol(
+                "query_stream_blob does not support Always Encrypted result sets".to_string(),
+            ));
+        }
+        let max_cols: Vec<usize> = meta
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| crate::blob_stream::is_plp_max(c))
+            .map(|(i, _)| i)
+            .collect();
+        match max_cols.as_slice() {
+            [] => Err(Error::Protocol(
+                "query_stream_blob: result set has no MAX column — use query_stream".to_string(),
+            )),
+            [idx] if *idx == meta.columns.len() - 1 => Ok(*idx),
+            [_] => Err(Error::Protocol(
+                "query_stream_blob: the MAX column must be the last column".to_string(),
+            )),
+            _ => Err(Error::Protocol(
+                "query_stream_blob: result set has more than one MAX column".to_string(),
+            )),
+        }
+    }
 }
 
 impl Client<Ready> {
@@ -1163,7 +1360,8 @@ impl Client<Ready> {
     ///
     /// The returned [`RowStream`](crate::RowStream) borrows the client for its
     /// lifetime, so no other request can run on this connection until the stream
-    /// is consumed or dropped.
+    /// is consumed or dropped. Also available on `Client<InTransaction>` to
+    /// stream within a transaction.
     ///
     /// # Example
     ///
@@ -1181,87 +1379,8 @@ impl Client<Ready> {
         &'a mut self,
         sql: &str,
         params: &[&(dyn crate::ToSql + Sync)],
-    ) -> Result<crate::row_stream::RowStream<'a>> {
-        use crate::client::response::server_token_to_error;
-        use crate::row_source::{Pull, RowSource};
-        use tds_protocol::token::Token;
-
-        tracing::debug!(sql = sql, params_count = params.len(), "streaming query");
-
-        // Send the request (same wire format as the buffered path).
-        if params.is_empty() {
-            self.send_sql_batch(sql).await?;
-        } else {
-            let rpc = self.build_parameterized_rpc(sql, params).await?;
-            self.send_rpc(&rpc).await?;
-        }
-        self.in_flight = true;
-
-        #[cfg(feature = "always-encrypted")]
-        let encryption_enabled = self.encryption_context.is_some();
-        #[cfg(not(feature = "always-encrypted"))]
-        let encryption_enabled = false;
-
-        let mut source = RowSource::new(encryption_enabled);
-
-        // Prelude: pull packets until the first result set's ColMetaData (so the
-        // columns and any Always Encrypted decryptor are resolved up front), or
-        // until a terminal Done/Error if there is no result set.
-        loop {
-            match source.pull()? {
-                Pull::Token(Token::ColMetaData(meta)) => {
-                    let columns = Self::build_columns(&meta);
-                    #[cfg(feature = "always-encrypted")]
-                    let decryptor = self
-                        .resolve_decryptor(&meta)
-                        .await?
-                        .map(std::sync::Arc::new);
-                    return Ok(crate::row_stream::RowStream::new(
-                        self,
-                        source,
-                        columns,
-                        meta,
-                        #[cfg(feature = "always-encrypted")]
-                        decryptor,
-                    ));
-                }
-                Pull::Token(Token::Error(err)) => {
-                    self.in_flight = false;
-                    return Err(server_token_to_error(&err));
-                }
-                Pull::Token(Token::Done(done)) => {
-                    if done.status.error {
-                        self.in_flight = false;
-                        return Err(Error::Query(
-                            "query failed (server set error flag in DONE token)".to_string(),
-                        ));
-                    }
-                    if !done.status.more {
-                        // No result set (e.g. an INSERT) — an empty stream.
-                        self.in_flight = false;
-                        return Ok(crate::row_stream::RowStream::empty(self));
-                    }
-                    // More results may follow; keep looking for ColMetaData.
-                }
-                Pull::Token(Token::EnvChange(env)) => {
-                    Self::process_transaction_env_change(&env, &mut self.transaction_descriptor);
-                }
-                Pull::Token(_) => {
-                    // Info / Order / DoneProc / DoneInProc, etc. — keep pulling.
-                }
-                Pull::NeedMore => match self.read_response_packet().await? {
-                    Some((payload, is_eom)) => source.push_packet(payload, is_eom),
-                    None => {
-                        self.in_flight = false;
-                        return Err(Error::ConnectionClosed);
-                    }
-                },
-                Pull::End => {
-                    self.in_flight = false;
-                    return Ok(crate::row_stream::RowStream::empty(self));
-                }
-            }
-        }
+    ) -> Result<crate::row_stream::RowStream<'a, Ready>> {
+        self.query_stream_inner(sql, params).await
     }
 
     /// Execute a query and stream a row's trailing MAX column from the network.
@@ -1277,7 +1396,8 @@ impl Client<Ready> {
     /// [`BlobStream`](crate::BlobStream) yields scalar [`Row`](crate::Row)s via
     /// [`next`](crate::BlobStream::next); read each row's blob with
     /// [`read_chunk`](crate::BlobStream::read_chunk) /
-    /// [`copy_blob_to`](crate::BlobStream::copy_blob_to) before advancing.
+    /// [`copy_blob_to`](crate::BlobStream::copy_blob_to) before advancing. Also
+    /// available on `Client<InTransaction>`.
     ///
     /// # Errors
     ///
@@ -1288,95 +1408,8 @@ impl Client<Ready> {
         &'a mut self,
         sql: &str,
         params: &[&(dyn crate::ToSql + Sync)],
-    ) -> Result<crate::blob_stream::BlobStream<'a>> {
-        use crate::client::response::server_token_to_error;
-        use crate::row_source::{Pull, RowSource};
-        use tds_protocol::token::Token;
-
-        if params.is_empty() {
-            self.send_sql_batch(sql).await?;
-        } else {
-            let rpc = self.build_parameterized_rpc(sql, params).await?;
-            self.send_rpc(&rpc).await?;
-        }
-        self.in_flight = true;
-
-        #[cfg(feature = "always-encrypted")]
-        let encryption_enabled = self.encryption_context.is_some();
-        #[cfg(not(feature = "always-encrypted"))]
-        let encryption_enabled = false;
-
-        let mut source = RowSource::new(encryption_enabled);
-
-        loop {
-            match source.pull()? {
-                Pull::Token(Token::ColMetaData(meta)) => {
-                    let blob_index = Self::validate_blob_result_set(&meta)?;
-                    let (buf, eom) = source.into_parts();
-                    return Ok(crate::blob_stream::BlobStream::new(
-                        self,
-                        buf,
-                        eom,
-                        encryption_enabled,
-                        meta,
-                        blob_index,
-                    ));
-                }
-                Pull::Token(Token::Error(err)) => {
-                    self.in_flight = false;
-                    return Err(server_token_to_error(&err));
-                }
-                Pull::Token(Token::Done(_)) => {
-                    self.in_flight = false;
-                    return Err(Error::Protocol(
-                        "query_stream_blob: query produced no result set".to_string(),
-                    ));
-                }
-                Pull::Token(_) => {}
-                Pull::NeedMore => match self.read_response_packet().await? {
-                    Some((payload, is_eom)) => source.push_packet(payload, is_eom),
-                    None => {
-                        self.in_flight = false;
-                        return Err(Error::ConnectionClosed);
-                    }
-                },
-                Pull::End => {
-                    self.in_flight = false;
-                    return Err(Error::Protocol(
-                        "query_stream_blob: query produced no result set".to_string(),
-                    ));
-                }
-            }
-        }
-    }
-
-    /// Validate that a result set is shaped for [`query_stream_blob`] and return
-    /// the index of its single trailing MAX column.
-    fn validate_blob_result_set(meta: &tds_protocol::token::ColMetaData) -> Result<usize> {
-        if meta.cek_table.is_some() {
-            return Err(Error::Protocol(
-                "query_stream_blob does not support Always Encrypted result sets".to_string(),
-            ));
-        }
-        let max_cols: Vec<usize> = meta
-            .columns
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| crate::blob_stream::is_plp_max(c))
-            .map(|(i, _)| i)
-            .collect();
-        match max_cols.as_slice() {
-            [] => Err(Error::Protocol(
-                "query_stream_blob: result set has no MAX column — use query_stream".to_string(),
-            )),
-            [idx] if *idx == meta.columns.len() - 1 => Ok(*idx),
-            [_] => Err(Error::Protocol(
-                "query_stream_blob: the MAX column must be the last column".to_string(),
-            )),
-            _ => Err(Error::Protocol(
-                "query_stream_blob: result set has more than one MAX column".to_string(),
-            )),
-        }
+    ) -> Result<crate::blob_stream::BlobStream<'a, Ready>> {
+        self.query_stream_blob_inner(sql, params).await
     }
 
     /// Execute a query with a specific timeout.
@@ -1957,6 +1990,34 @@ impl Client<InTransaction> {
                 resp.meta,
             ))
         }
+    }
+
+    /// Stream rows incrementally from the network within the transaction.
+    ///
+    /// Identical to [`Client<Ready>::query_stream`] except the query runs inside
+    /// the open transaction. The returned [`RowStream`](crate::RowStream)
+    /// borrows the transaction client for its lifetime, so the stream must be
+    /// consumed or dropped before the transaction can be committed or rolled
+    /// back.
+    pub async fn query_stream<'a>(
+        &'a mut self,
+        sql: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<crate::row_stream::RowStream<'a, InTransaction>> {
+        self.query_stream_inner(sql, params).await
+    }
+
+    /// Stream a row's trailing MAX column from the network within the
+    /// transaction.
+    ///
+    /// See [`Client<Ready>::query_stream_blob`] for semantics and constraints;
+    /// the only difference is that the query runs inside the open transaction.
+    pub async fn query_stream_blob<'a>(
+        &'a mut self,
+        sql: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<crate::blob_stream::BlobStream<'a, InTransaction>> {
+        self.query_stream_blob_inner(sql, params).await
     }
 
     /// Execute a statement within the transaction.

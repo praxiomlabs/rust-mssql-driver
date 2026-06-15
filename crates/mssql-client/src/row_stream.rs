@@ -29,7 +29,7 @@ use crate::Client;
 use crate::error::{Error, Result};
 use crate::row::{Column, Row};
 use crate::row_source::{Pull, RowSource};
-use crate::state::Ready;
+use crate::state::{ConnectionState, Ready};
 
 /// An incrementally streamed result set: rows are read from the network as they
 /// are pulled, not buffered up front.
@@ -42,10 +42,12 @@ use crate::state::Ready;
 /// is consumed via [`try_next`](Self::try_next) / [`collect_all`](Self::collect_all)
 /// rather than the synchronous [`Iterator`] that `QueryStream` offers.
 #[must_use = "streams must be consumed; dropping a stream discards remaining rows"]
-pub struct RowStream<'a> {
+pub struct RowStream<'a, S: ConnectionState = Ready> {
     /// The client whose connection supplies packets. Borrowed for the stream's
-    /// lifetime so no other request can run concurrently.
-    client: &'a mut Client<Ready>,
+    /// lifetime so no other request can run concurrently. Generic over the
+    /// connection state so the same stream serves both `Ready` and
+    /// `InTransaction` clients.
+    client: &'a mut Client<S>,
     /// The incremental token decoder over the rolling packet buffer.
     source: RowSource,
     /// Columns for the current result set (rebuilt on each ColMetaData).
@@ -59,11 +61,11 @@ pub struct RowStream<'a> {
     finished: bool,
 }
 
-impl<'a> RowStream<'a> {
+impl<'a, S: ConnectionState> RowStream<'a, S> {
     /// Construct a stream positioned just after the first ColMetaData, ready to
     /// yield the result set's rows. Called by `Client::query_stream`.
     pub(crate) fn new(
-        client: &'a mut Client<Ready>,
+        client: &'a mut Client<S>,
         source: RowSource,
         columns: Vec<Column>,
         meta: ColMetaData,
@@ -84,7 +86,7 @@ impl<'a> RowStream<'a> {
 
     /// Construct an already-finished stream (the query produced no result set,
     /// e.g. an `INSERT`). The caller has already cleared the in-flight flag.
-    pub(crate) fn empty(client: &'a mut Client<Ready>) -> Self {
+    pub(crate) fn empty(client: &'a mut Client<S>) -> Self {
         Self {
             client,
             source: RowSource::new(false),
@@ -141,8 +143,14 @@ impl<'a> RowStream<'a> {
                     // Otherwise keep going: rows of another result set, or the
                     // final DONE followed by Pull::End, may still come.
                 }
+                Pull::Token(Token::EnvChange(env)) => {
+                    // Keep the transaction descriptor in sync with raw
+                    // BEGIN/COMMIT/ROLLBACK seen mid-stream, as the buffered
+                    // readers do.
+                    self.client.apply_transaction_env_change(&env);
+                }
                 Pull::Token(_) => {
-                    // Info / EnvChange / Order / DoneProc / DoneInProc, etc.
+                    // Info / Order / DoneProc / DoneInProc, etc.
                     // Not row data; keep pulling.
                 }
                 Pull::NeedMore => match self.client.read_response_packet().await? {
@@ -199,7 +207,7 @@ impl<'a> RowStream<'a> {
 
     /// Adopt a new result set's metadata mid-stream (multi-statement batch).
     async fn switch_result_set(&mut self, meta: ColMetaData) -> Result<()> {
-        self.columns = Client::<Ready>::build_columns(&meta);
+        self.columns = Client::<S>::build_columns(&meta);
         #[cfg(feature = "always-encrypted")]
         {
             self.decryptor = self

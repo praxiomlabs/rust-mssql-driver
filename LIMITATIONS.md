@@ -77,6 +77,12 @@ demand and bounds peak memory to roughly one row regardless of result-set
 size (`while let Some(row) = stream.try_next().await? { … }`). `OFFSET`/`FETCH`
 paging remains an alternative when you want server-side bounding.
 
+`query_stream()` (and `query_stream_blob()`) are available on both
+`Client<Ready>` and `Client<InTransaction>`, so a large result set can be
+streamed inside an open transaction. The stream borrows the client mutably for
+its lifetime, so it must be consumed or dropped before the transaction can be
+committed or rolled back.
+
 ---
 
 ### Large Object (LOB) Streaming — `query_stream_blob()`
