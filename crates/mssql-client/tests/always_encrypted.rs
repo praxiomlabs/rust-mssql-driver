@@ -1459,8 +1459,10 @@ mod live_server {
 
         assert_eq!(inserted.expect("fixed-width insert"), 1, "one row inserted");
         let (g_char, g_nchar, g_binary) = read.expect("read back");
-        assert_eq!(g_char, "Hello", "CHAR round-trips (unpadded)");
-        assert_eq!(g_nchar, "Hello", "NCHAR round-trips (unpadded)");
+        // Fixed-width CHAR/NCHAR read back space-padded to the column width
+        // (matching SQL Server / .NET), even though the encrypted form is unpadded.
+        assert_eq!(g_char, "Hello     ", "CHAR(10) reads back space-padded");
+        assert_eq!(g_nchar, "Hello     ", "NCHAR(10) reads back space-padded");
         assert_eq!(g_binary, bin_val, "BINARY round-trips (unpadded)");
     }
 
