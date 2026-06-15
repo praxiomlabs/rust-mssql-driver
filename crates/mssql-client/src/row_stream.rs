@@ -172,6 +172,25 @@ impl<'a> RowStream<'a> {
         Ok(out)
     }
 
+    /// Stop the stream early and leave the connection reusable.
+    ///
+    /// Sends an Attention to the server and drains to its acknowledgement so the
+    /// connection is clean for the next request — the correct way to abandon a
+    /// large result set you no longer need.
+    ///
+    /// Calling this is optional: simply **dropping** a partially-read stream is
+    /// safe but leaves the connection marked in-flight, so a pooled connection
+    /// is discarded on return and a directly reused client recovers it (with an
+    /// Attention/drain) on its next request. `cancel` avoids that discard and
+    /// reports any error from the cancellation.
+    pub async fn cancel(mut self) -> Result<()> {
+        if self.finished {
+            return Ok(());
+        }
+        self.finished = true;
+        self.client.cancel_in_flight_response().await
+    }
+
     /// Mark the stream finished and the connection clean for the next request.
     fn finish(&mut self) {
         self.finished = true;

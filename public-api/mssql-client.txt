@@ -2195,6 +2195,7 @@ pub fn mssql_client::row::RowIter<'a>::vzip(self) -> V
 pub mod mssql_client::row_stream
 pub struct mssql_client::row_stream::RowStream<'a>
 impl<'a> mssql_client::row_stream::RowStream<'a>
+pub async fn mssql_client::row_stream::RowStream<'a>::cancel(self) -> mssql_client::error::Result<()>
 pub async fn mssql_client::row_stream::RowStream<'a>::collect_all(self) -> mssql_client::error::Result<alloc::vec::Vec<mssql_client::row::Row>>
 pub fn mssql_client::row_stream::RowStream<'a>::columns(&self) -> &[mssql_client::row::Column]
 pub fn mssql_client::row_stream::RowStream<'a>::is_finished(&self) -> bool
@@ -5582,6 +5583,7 @@ impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::row::Row where V: ppv_li
 pub fn mssql_client::row::Row::vzip(self) -> V
 pub struct mssql_client::RowStream<'a>
 impl<'a> mssql_client::row_stream::RowStream<'a>
+pub async fn mssql_client::row_stream::RowStream<'a>::cancel(self) -> mssql_client::error::Result<()>
 pub async fn mssql_client::row_stream::RowStream<'a>::collect_all(self) -> mssql_client::error::Result<alloc::vec::Vec<mssql_client::row::Row>>
 pub fn mssql_client::row_stream::RowStream<'a>::columns(&self) -> &[mssql_client::row::Column]
 pub fn mssql_client::row_stream::RowStream<'a>::is_finished(&self) -> bool
