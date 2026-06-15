@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.16.1...v0.17.0) - 2026-06-15
+
+### Added
+
+- *(encryption)* Always Encrypted write/read for char/nchar/binary — #234 complete
+- *(types)* char/nchar/binary typed parameters for Always Encrypted
+- *(encryption)* Always Encrypted write/read for temporal types
+- *(types)* [**breaking**] generalize the Always Encrypted parameter-type hook
+
+### Other
+
+- *(encryption)* gate the fixed-width byte-exact test on always-encrypted
+- [**breaking**] tighten public surface before the API freeze
+- *(client)* [**breaking**] remove the unwired query-builder types
+
 ## [0.16.1](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.16.0...v0.16.1) - 2026-06-14
 
 ### Fixed
