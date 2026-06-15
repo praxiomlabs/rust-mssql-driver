@@ -192,6 +192,9 @@ fn encrypted_param_type_info(
         E::DateTime2 { scale } => TypeInfo::datetime2(scale),
         E::DateTimeOffset { scale } => TypeInfo::datetimeoffset(scale),
         E::DateTime => TypeInfo::datetime(),
+        E::Char { length } => TypeInfo::char(length),
+        E::NChar { length } => TypeInfo::nchar(length),
+        E::Binary { length } => TypeInfo::binary(length),
         _ => {
             return Err(Error::Encryption(
                 "unsupported Always Encrypted parameter type".to_string(),

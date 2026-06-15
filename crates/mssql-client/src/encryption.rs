@@ -65,21 +65,26 @@
 //! `null::<T>()`): with `Column Encryption Setting=Enabled` the
 //! driver describes the parameters (`sp_describe_parameter_encryption`),
 //! encrypts those bound to encrypted columns client-side, and sends them as
-//! encrypted RPC parameters (deterministic and randomized). The temporal types
-//! are supported through typed-parameter wrappers — `time(v, scale)`,
-//! `datetime2(v, scale)`, `datetimeoffset(v, scale)`, `datetime(v)` (legacy),
-//! and the `SmallDateTime` wrapper. Only the fixed-width `char`/`nchar`/`binary`
-//! types remain unsupported and return an error rather than sending plaintext.
+//! encrypted RPC parameters (deterministic and randomized). The temporal and
+//! fixed-width types are supported through typed-parameter wrappers —
+//! `time(v, scale)`, `datetime2(v, scale)`, `datetimeoffset(v, scale)`,
+//! `datetime(v)` (legacy), the `SmallDateTime` wrapper, and `char(v, len)` /
+//! `nchar(v, len)` / `binary(v, len)`. The full scalar/temporal/fixed-width set
+//! is now covered.
 //!
 //! Bind a `decimal` parameter with `numeric(value, precision, scale)`, not a
-//! plain `Decimal`, and a scaled temporal with its wrapper, not a bare
-//! `NaiveDateTime`/`NaiveTime`: an encrypted column requires the declared type —
-//! including precision/scale — to match the column exactly, which a bare value
-//! can't convey, so the server rejects it with `Operand type clash` (Msg 206) at
-//! the describe step. The scale-7 temporal forms are validated byte-for-byte
-//! against `Microsoft.Data.SqlClient`; lower scales are validated by live
-//! round-trip (Microsoft's own client defaults temporal parameters to scale 7,
-//! so it can't emit lower-scale forms for a byte-exact comparison).
+//! plain `Decimal`, and a scaled temporal or fixed-width value with its wrapper,
+//! not a bare `NaiveDateTime`/`NaiveTime`/`String`: an encrypted column requires
+//! the declared type — precision/scale/length included — to match the column
+//! exactly, which a bare value can't convey, so the server rejects it with
+//! `Operand type clash` (Msg 206) at the describe step. Encrypted `char`/`nchar`
+//! columns must use a `*_BIN2` collation (a SQL Server requirement for
+//! deterministic encryption of character types); `char` is encoded as
+//! Windows-1252. The scale-7 temporal and the fixed-width forms are validated
+//! byte-for-byte against `Microsoft.Data.SqlClient`; lower temporal scales are
+//! validated by live round-trip (Microsoft's own client defaults temporal
+//! parameters to scale 7, so it can't emit lower-scale forms for a byte-exact
+//! comparison).
 //!
 //! ## Security Model
 //!
@@ -680,6 +685,13 @@ pub fn normalize_for_encryption(
     value: &SqlValue,
     param_type: Option<mssql_types::EncryptedParamType>,
 ) -> Result<Vec<u8>, EncryptionError> {
+    // CHAR: the value's bytes in the column code page (Windows-1252), unpadded.
+    // NCHAR/BINARY reuse the String/Binary value arms below (UTF-16 / raw).
+    if let (Some(mssql_types::EncryptedParamType::Char { .. }), SqlValue::String(s)) =
+        (param_type, value)
+    {
+        return Ok(encoding_rs::WINDOWS_1252.encode(s).0.into_owned());
+    }
     // Typed temporal parameters carry the column scale (the encrypted byte
     // length depends on it), so they're handled from the hint, not the value.
     #[cfg(feature = "chrono")]
@@ -701,8 +713,6 @@ pub fn normalize_for_encryption(
             _ => {}
         }
     }
-    #[cfg(not(feature = "chrono"))]
-    let _ = param_type;
     match value {
         // All integer types AND bit normalize to 8-byte little-endian (the value
         // widened to i64). Validated against .NET: tinyint/smallint are 8 bytes,
@@ -1117,6 +1127,48 @@ mod tests {
         assert_eq!(
             normalize_for_encryption(&SqlValue::SmallDateTime(sdt), None).unwrap(),
             unhex("34b11a03"),
+        );
+    }
+
+    /// Fixed-width char/nchar/binary AE normalization, validated byte-for-byte
+    /// against Microsoft.Data.SqlClient. KEY FACT: the normalized form is the
+    /// value's bytes, NOT padded to the declared width — char in the column code
+    /// page (Windows-1252), nchar as UTF-16LE, binary raw.
+    #[test]
+    fn ae_normalization_matches_dotnet_fixed_width() {
+        use mssql_types::EncryptedParamType as E;
+        fn unhex(s: &str) -> Vec<u8> {
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+                .collect()
+        }
+        // char(10) "Hello" → Windows-1252 "Hello" (5 bytes, unpadded)
+        assert_eq!(
+            normalize_for_encryption(
+                &SqlValue::String("Hello".to_string()),
+                Some(E::Char { length: 10 })
+            )
+            .unwrap(),
+            unhex("48656c6c6f"),
+        );
+        // nchar(10) "Hello" → UTF-16LE (10 bytes, unpadded)
+        assert_eq!(
+            normalize_for_encryption(
+                &SqlValue::String("Hello".to_string()),
+                Some(E::NChar { length: 10 })
+            )
+            .unwrap(),
+            unhex("480065006c006c006f00"),
+        );
+        // binary(10) [1,2,3,4,5] → raw (5 bytes, unpadded)
+        assert_eq!(
+            normalize_for_encryption(
+                &SqlValue::Binary(bytes::Bytes::from_static(&[1, 2, 3, 4, 5])),
+                Some(E::Binary { length: 10 })
+            )
+            .unwrap(),
+            unhex("0102030405"),
         );
     }
 
