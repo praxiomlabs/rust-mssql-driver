@@ -43,9 +43,9 @@ Criteria for 1.0:
    the `1.0-blocker` label).
 2. **The public API surface is frozen and future-proofed** — error enums
    `#[non_exhaustive]` (done), public structs with private fields or
-   `#[non_exhaustive]`, sealed extension traits (e.g. the SQL↔Rust type-mapping
-   traits) so methods can be added without a breaking change, `#[must_use]` on
-   builders and futures.
+   `#[non_exhaustive]`, and `#[must_use]` on builders and futures. The SQL↔Rust
+   type- and row-mapping traits stay *open* (see the sealing posture below) and
+   evolve via additive default methods, not by sealing.
 3. **A published support pledge** — once 1.0 ships we commit to maintaining the
    1.0 line and a minimum interval before any 2.0, paired with the existing
    rolling MSRV policy. We will not declare 1.0 until we can make and honour
