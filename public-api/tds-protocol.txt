@@ -1368,6 +1368,7 @@ impl tds_protocol::rpc::TypeInfo
 pub fn tds_protocol::rpc::TypeInfo::bigint() -> Self
 pub fn tds_protocol::rpc::TypeInfo::bit() -> Self
 pub fn tds_protocol::rpc::TypeInfo::date() -> Self
+pub fn tds_protocol::rpc::TypeInfo::datetime() -> Self
 pub fn tds_protocol::rpc::TypeInfo::datetime2(u8) -> Self
 pub fn tds_protocol::rpc::TypeInfo::datetimeoffset(u8) -> Self
 pub fn tds_protocol::rpc::TypeInfo::decimal(u8, u8) -> Self
@@ -5364,6 +5365,7 @@ impl tds_protocol::rpc::TypeInfo
 pub fn tds_protocol::rpc::TypeInfo::bigint() -> Self
 pub fn tds_protocol::rpc::TypeInfo::bit() -> Self
 pub fn tds_protocol::rpc::TypeInfo::date() -> Self
+pub fn tds_protocol::rpc::TypeInfo::datetime() -> Self
 pub fn tds_protocol::rpc::TypeInfo::datetime2(u8) -> Self
 pub fn tds_protocol::rpc::TypeInfo::datetimeoffset(u8) -> Self
 pub fn tds_protocol::rpc::TypeInfo::decimal(u8, u8) -> Self

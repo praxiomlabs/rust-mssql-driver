@@ -4,7 +4,10 @@ pub use mssql_client::CertificateDer
 pub use mssql_client::CodecError
 pub use mssql_client::Collation
 pub use mssql_client::Credentials
-pub use mssql_client::DecimalParamInfo
+pub use mssql_client::DateTime2
+pub use mssql_client::DateTimeLegacy
+pub use mssql_client::DateTimeOffset
+pub use mssql_client::EncryptedParamType
 pub use mssql_client::FromRow
 pub use mssql_client::FromSql
 pub use mssql_client::KeyStoreProvider
@@ -18,6 +21,7 @@ pub use mssql_client::SmallMoney
 pub use mssql_client::SqlTyped
 pub use mssql_client::SqlValue
 pub use mssql_client::TdsVersion
+pub use mssql_client::Time
 pub use mssql_client::TlsConfig
 pub use mssql_client::TlsError
 pub use mssql_client::ToParams
@@ -25,8 +29,12 @@ pub use mssql_client::ToSql
 pub use mssql_client::Tvp
 pub use mssql_client::TypeError
 pub use mssql_client::TypedNull
+pub use mssql_client::datetime
+pub use mssql_client::datetime2
+pub use mssql_client::datetimeoffset
 pub use mssql_client::null
 pub use mssql_client::numeric
+pub use mssql_client::time
 pub mod mssql_client::attributes
 pub const mssql_client::attributes::DB_CONNECTION_ID: &str
 pub const mssql_client::attributes::DB_ISOLATION_LEVEL: &str
@@ -1385,7 +1393,7 @@ impl<T> typenum::type_operators::Same for mssql_client::encryption::ResultSetEnc
 pub type mssql_client::encryption::ResultSetEncryptionInfo::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::encryption::ResultSetEncryptionInfo where V: ppv_lite86::types::MultiLane<T>
 pub fn mssql_client::encryption::ResultSetEncryptionInfo::vzip(self) -> V
-pub fn mssql_client::encryption::normalize_for_encryption(&mssql_types::value::SqlValue) -> core::result::Result<alloc::vec::Vec<u8>, mssql_auth::encryption::EncryptionError>
+pub fn mssql_client::encryption::normalize_for_encryption(&mssql_types::value::SqlValue, core::option::Option<mssql_types::to_sql::EncryptedParamType>) -> core::result::Result<alloc::vec::Vec<u8>, mssql_auth::encryption::EncryptionError>
 pub mod mssql_client::error
 #[non_exhaustive] pub enum mssql_client::error::Error
 pub mssql_client::error::Error::Authentication(mssql_auth::error::AuthError)

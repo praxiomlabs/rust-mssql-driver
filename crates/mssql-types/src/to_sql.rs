@@ -17,23 +17,53 @@ pub trait ToSql {
     /// Get the SQL type name for this value.
     fn sql_type(&self) -> &'static str;
 
-    /// Explicit decimal precision and scale, when the value alone cannot convey
-    /// it. `None` for every type except [`Numeric`] (created with [`numeric`]),
-    /// which uses it to declare `decimal(precision, scale)` for an Always
-    /// Encrypted column whose declared precision must match exactly.
-    fn decimal_param_info(&self) -> Option<DecimalParamInfo> {
+    /// The explicit SQL type a parameter must be declared and encrypted as,
+    /// when the value alone cannot convey it.
+    ///
+    /// Returns `None` for every type except the typed-parameter wrappers
+    /// (e.g. [`numeric`], [`datetime2`], [`time`]). An Always Encrypted column
+    /// requires the declared type — including precision, scale, or length — to
+    /// match the column exactly, which a bare value cannot always express (a
+    /// `Decimal` carries no precision; a `NaiveDateTime` is ambiguous between
+    /// `datetime` and `datetime2(n)`). The driver uses this to declare the
+    /// parameter for `sp_describe_parameter_encryption` and to normalize the
+    /// value before encryption.
+    fn encrypted_param_type(&self) -> Option<EncryptedParamType> {
         None
     }
 }
 
-/// Explicit precision and scale for a `decimal`/`numeric` parameter (see
-/// [`numeric`]).
-#[derive(Debug, Clone, Copy)]
-pub struct DecimalParamInfo {
-    /// Total number of significant digits (1–38).
-    pub precision: u8,
-    /// Number of digits to the right of the decimal point.
-    pub scale: u8,
+/// The explicit SQL type for an Always Encrypted parameter whose value cannot
+/// convey it (see [`numeric`], [`time`], [`datetime2`], [`datetimeoffset`],
+/// [`datetime`]). Carries the precision/scale/length the encrypted column
+/// requires the declared parameter type to match exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EncryptedParamType {
+    /// `decimal(precision, scale)`.
+    Decimal {
+        /// Total number of significant digits (1–38).
+        precision: u8,
+        /// Number of digits to the right of the decimal point.
+        scale: u8,
+    },
+    /// `time(scale)`.
+    Time {
+        /// Fractional-second digits (0–7).
+        scale: u8,
+    },
+    /// `datetime2(scale)`.
+    DateTime2 {
+        /// Fractional-second digits (0–7).
+        scale: u8,
+    },
+    /// `datetimeoffset(scale)`.
+    DateTimeOffset {
+        /// Fractional-second digits (0–7).
+        scale: u8,
+    },
+    /// Legacy `datetime` (8 bytes; ~3.33 ms resolution).
+    DateTime,
 }
 
 impl ToSql for bool {
@@ -239,8 +269,8 @@ impl<T: ToSql> ToSql for Option<T> {
         }
     }
 
-    fn decimal_param_info(&self) -> Option<DecimalParamInfo> {
-        self.as_ref().and_then(ToSql::decimal_param_info)
+    fn encrypted_param_type(&self) -> Option<EncryptedParamType> {
+        self.as_ref().and_then(ToSql::encrypted_param_type)
     }
 }
 
@@ -253,8 +283,8 @@ impl<T: ToSql + ?Sized> ToSql for &T {
         (*self).sql_type()
     }
 
-    fn decimal_param_info(&self) -> Option<DecimalParamInfo> {
-        (*self).decimal_param_info()
+    fn encrypted_param_type(&self) -> Option<EncryptedParamType> {
+        (*self).encrypted_param_type()
     }
 }
 
@@ -345,11 +375,155 @@ impl ToSql for Numeric {
         "DECIMAL"
     }
 
-    fn decimal_param_info(&self) -> Option<DecimalParamInfo> {
-        Some(DecimalParamInfo {
+    fn encrypted_param_type(&self) -> Option<EncryptedParamType> {
+        Some(EncryptedParamType::Decimal {
             precision: self.precision,
             scale: self.scale,
         })
+    }
+}
+
+/// Fractional-second scale for `time`/`datetime2`/`datetimeoffset` is 0–7.
+#[cfg(feature = "chrono")]
+fn validate_temporal_scale(scale: u8) -> Result<(), TypeError> {
+    if scale > 7 {
+        return Err(TypeError::InvalidDateTime(format!(
+            "fractional-second scale {scale} is out of range (0–7)"
+        )));
+    }
+    Ok(())
+}
+
+/// A `time(scale)` parameter for an Always Encrypted column (see [`time`]).
+#[cfg(feature = "chrono")]
+#[derive(Debug, Clone, Copy)]
+pub struct Time {
+    value: chrono::NaiveTime,
+    scale: u8,
+}
+
+/// Create a `time(scale)` parameter for an Always Encrypted `time` column.
+///
+/// AE requires the declared `time(scale)` to match the column exactly, and the
+/// scale also determines the encrypted byte length, so the value alone is
+/// insufficient. `scale` is the fractional-second digits (0–7).
+#[cfg(feature = "chrono")]
+#[must_use]
+pub fn time(value: chrono::NaiveTime, scale: u8) -> Time {
+    Time { value, scale }
+}
+
+#[cfg(feature = "chrono")]
+impl ToSql for Time {
+    fn to_sql(&self) -> Result<SqlValue, TypeError> {
+        validate_temporal_scale(self.scale)?;
+        Ok(SqlValue::Time(self.value))
+    }
+
+    fn sql_type(&self) -> &'static str {
+        "TIME"
+    }
+
+    fn encrypted_param_type(&self) -> Option<EncryptedParamType> {
+        Some(EncryptedParamType::Time { scale: self.scale })
+    }
+}
+
+/// A `datetime2(scale)` parameter for an Always Encrypted column (see [`datetime2`]).
+#[cfg(feature = "chrono")]
+#[derive(Debug, Clone, Copy)]
+pub struct DateTime2 {
+    value: chrono::NaiveDateTime,
+    scale: u8,
+}
+
+/// Create a `datetime2(scale)` parameter for an Always Encrypted `datetime2`
+/// column. A plain `NaiveDateTime` defaults to `datetime2(7)`, so an explicit
+/// scale is required to match a column with a different scale (and to encrypt
+/// at the right byte length). `scale` is the fractional-second digits (0–7).
+#[cfg(feature = "chrono")]
+#[must_use]
+pub fn datetime2(value: chrono::NaiveDateTime, scale: u8) -> DateTime2 {
+    DateTime2 { value, scale }
+}
+
+#[cfg(feature = "chrono")]
+impl ToSql for DateTime2 {
+    fn to_sql(&self) -> Result<SqlValue, TypeError> {
+        validate_temporal_scale(self.scale)?;
+        Ok(SqlValue::DateTime(self.value))
+    }
+
+    fn sql_type(&self) -> &'static str {
+        "DATETIME2"
+    }
+
+    fn encrypted_param_type(&self) -> Option<EncryptedParamType> {
+        Some(EncryptedParamType::DateTime2 { scale: self.scale })
+    }
+}
+
+/// A `datetimeoffset(scale)` parameter for an Always Encrypted column (see
+/// [`datetimeoffset`]).
+#[cfg(feature = "chrono")]
+#[derive(Debug, Clone, Copy)]
+pub struct DateTimeOffset {
+    value: chrono::DateTime<chrono::FixedOffset>,
+    scale: u8,
+}
+
+/// Create a `datetimeoffset(scale)` parameter for an Always Encrypted
+/// `datetimeoffset` column. `scale` is the fractional-second digits (0–7).
+#[cfg(feature = "chrono")]
+#[must_use]
+pub fn datetimeoffset(value: chrono::DateTime<chrono::FixedOffset>, scale: u8) -> DateTimeOffset {
+    DateTimeOffset { value, scale }
+}
+
+#[cfg(feature = "chrono")]
+impl ToSql for DateTimeOffset {
+    fn to_sql(&self) -> Result<SqlValue, TypeError> {
+        validate_temporal_scale(self.scale)?;
+        Ok(SqlValue::DateTimeOffset(self.value))
+    }
+
+    fn sql_type(&self) -> &'static str {
+        "DATETIMEOFFSET"
+    }
+
+    fn encrypted_param_type(&self) -> Option<EncryptedParamType> {
+        Some(EncryptedParamType::DateTimeOffset { scale: self.scale })
+    }
+}
+
+/// A legacy `datetime` parameter for an Always Encrypted column (see [`datetime`]).
+#[cfg(feature = "chrono")]
+#[derive(Debug, Clone, Copy)]
+pub struct DateTimeLegacy {
+    value: chrono::NaiveDateTime,
+}
+
+/// Create a legacy `datetime` parameter for an Always Encrypted `datetime`
+/// column. A plain `NaiveDateTime` defaults to `datetime2`, which an encrypted
+/// legacy `datetime` column rejects; this declares `datetime` explicitly.
+#[cfg(feature = "chrono")]
+#[must_use]
+pub fn datetime(value: chrono::NaiveDateTime) -> DateTimeLegacy {
+    DateTimeLegacy { value }
+}
+
+#[cfg(feature = "chrono")]
+impl ToSql for DateTimeLegacy {
+    fn to_sql(&self) -> Result<SqlValue, TypeError> {
+        Ok(SqlValue::DateTime(self.value))
+    }
+
+    fn sql_type(&self) -> &'static str {
+        "DATETIME"
+    }
+
+    fn encrypted_param_type(&self) -> Option<EncryptedParamType> {
+        Some(EncryptedParamType::DateTime)
     }
 }
 

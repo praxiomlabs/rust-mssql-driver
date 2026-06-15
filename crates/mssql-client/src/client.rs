@@ -176,6 +176,30 @@ fn null_param_type_info(sql_type: &str) -> Option<tds_protocol::rpc::TypeInfo> {
     })
 }
 
+/// Map a typed-parameter wrapper's [`EncryptedParamType`] to the `TypeInfo` the
+/// driver declares it as (for `sp_describe_parameter_encryption` and the
+/// `CryptoMetadata` base type). Unknown future variants error rather than
+/// silently declaring the wrong type.
+#[cfg(feature = "always-encrypted")]
+fn encrypted_param_type_info(
+    ty: mssql_types::EncryptedParamType,
+) -> Result<tds_protocol::rpc::TypeInfo> {
+    use mssql_types::EncryptedParamType as E;
+    use tds_protocol::rpc::TypeInfo;
+    Ok(match ty {
+        E::Decimal { precision, scale } => TypeInfo::decimal(precision, scale),
+        E::Time { scale } => TypeInfo::time(scale),
+        E::DateTime2 { scale } => TypeInfo::datetime2(scale),
+        E::DateTimeOffset { scale } => TypeInfo::datetimeoffset(scale),
+        E::DateTime => TypeInfo::datetime(),
+        _ => {
+            return Err(Error::Encryption(
+                "unsupported Always Encrypted parameter type".to_string(),
+            ));
+        }
+    })
+}
+
 // Private helper methods available to all connection states
 impl<S: ConnectionState> Client<S> {
     /// The default per-command deadline from `command_timeout`.
@@ -487,9 +511,12 @@ impl<S: ConnectionState> Client<S> {
         let collation = self.server_collation().cloned();
         let mut values: Vec<mssql_types::SqlValue> = Vec::with_capacity(params.len());
         let mut plaintext: Vec<RpcParam> = Vec::with_capacity(params.len());
+        let mut hints: Vec<Option<mssql_types::EncryptedParamType>> =
+            Vec::with_capacity(params.len());
         for (i, p) in params.iter().enumerate() {
             let name = format!("@p{}", i + 1);
             let value = p.to_sql()?;
+            let hint = p.encrypted_param_type();
             // A typed NULL (e.g. `null::<i32>()`) is declared by its SQL type so
             // describe accepts it against the target encrypted column; an untyped
             // NULL falls back to the default in `sql_value_to_rpc_param`.
@@ -502,18 +529,20 @@ impl<S: ConnectionState> Client<S> {
                         send_unicode,
                         collation.as_ref(),
                     )?;
-                    // `numeric(v, p, s)` declares an explicit `decimal(p, s)` so
-                    // describe matches an encrypted decimal column exactly — the
-                    // value alone conveys scale but not precision.
-                    if let Some(d) = p.decimal_param_info() {
-                        param.type_info =
-                            tds_protocol::rpc::TypeInfo::decimal(d.precision, d.scale);
+                    // A typed-parameter wrapper (e.g. `numeric(v, p, s)`,
+                    // `datetime2(v, scale)`) declares an explicit SQL type so
+                    // describe matches the encrypted column exactly — the value
+                    // alone cannot convey precision/scale or the legacy-`datetime`
+                    // vs `datetime2` distinction.
+                    if let Some(ty) = hint {
+                        param.type_info = encrypted_param_type_info(ty)?;
                     }
                     param
                 }
             };
             plaintext.push(rpc_param);
             values.push(value);
+            hints.push(hint);
         }
 
         if plaintext.is_empty() {
@@ -531,7 +560,7 @@ impl<S: ConnectionState> Client<S> {
 
         // Encrypt the flagged parameters; pass the rest through untouched.
         let mut final_params: Vec<RpcParam> = Vec::with_capacity(plaintext.len());
-        for (value, param) in values.into_iter().zip(plaintext) {
+        for ((value, param), hint) in values.into_iter().zip(plaintext).zip(hints) {
             let Some(crypto) = info.get_parameter(&param.name) else {
                 final_params.push(param);
                 continue;
@@ -559,7 +588,7 @@ impl<S: ConnectionState> Client<S> {
                 final_params.push(RpcParam::encrypted_null(param.name, metadata));
                 continue;
             }
-            let normalized = crate::encryption::normalize_for_encryption(&value)?;
+            let normalized = crate::encryption::normalize_for_encryption(&value, hint)?;
             let ciphertext = ctx
                 .encrypt_value(&normalized, entry, crypto.encryption_type)
                 .await?;
