@@ -16,7 +16,8 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 
-use mssql_types::decode::{TypeInfo, decode_value};
+use mssql_types::__private::decode_value;
+use mssql_types::decode::TypeInfo;
 use mssql_types::{FromSql, SqlValue, TypeError};
 
 use crate::blob::BlobReader;

@@ -177,290 +177,309 @@ pub fn encode_utf16_string(s: &str, buf: &mut BytesMut) {
     }
 }
 
-/// Encode a UUID in SQL Server's mixed-endian format.
+/// Low-level TDS wire encoders shared across the workspace crates.
 ///
-/// SQL Server stores UUIDs in a unique byte order:
-/// - First 4 bytes: little-endian
-/// - Next 2 bytes: little-endian
-/// - Next 2 bytes: little-endian
-/// - Last 8 bytes: big-endian (as-is)
-#[cfg(feature = "uuid")]
-pub fn encode_uuid(uuid: uuid::Uuid, buf: &mut BytesMut) {
-    let bytes = uuid.as_bytes();
+/// Internal plumbing reached cross-crate only via [`crate::__private`]; not
+/// public API and exempt from semver guarantees (see #242).
+pub(crate) mod sealed {
+    // Every encoder here is `#[cfg(feature = ...)]`-gated (uuid / decimal /
+    // chrono), so this module — and the glob imports of it — can be empty under
+    // `--no-default-features`.
+    #[allow(unused_imports)]
+    use super::*;
 
-    // First group (4 bytes) - reverse for little-endian
-    buf.put_u8(bytes[3]);
-    buf.put_u8(bytes[2]);
-    buf.put_u8(bytes[1]);
-    buf.put_u8(bytes[0]);
+    /// Encode a UUID in SQL Server's mixed-endian format.
+    ///
+    /// SQL Server stores UUIDs in a unique byte order:
+    /// - First 4 bytes: little-endian
+    /// - Next 2 bytes: little-endian
+    /// - Next 2 bytes: little-endian
+    /// - Last 8 bytes: big-endian (as-is)
+    #[cfg(feature = "uuid")]
+    pub fn encode_uuid(uuid: uuid::Uuid, buf: &mut BytesMut) {
+        let bytes = uuid.as_bytes();
 
-    // Second group (2 bytes) - reverse for little-endian
-    buf.put_u8(bytes[5]);
-    buf.put_u8(bytes[4]);
+        // First group (4 bytes) - reverse for little-endian
+        buf.put_u8(bytes[3]);
+        buf.put_u8(bytes[2]);
+        buf.put_u8(bytes[1]);
+        buf.put_u8(bytes[0]);
 
-    // Third group (2 bytes) - reverse for little-endian
-    buf.put_u8(bytes[7]);
-    buf.put_u8(bytes[6]);
+        // Second group (2 bytes) - reverse for little-endian
+        buf.put_u8(bytes[5]);
+        buf.put_u8(bytes[4]);
 
-    // Last 8 bytes - big-endian (keep as-is)
-    buf.put_slice(&bytes[8..16]);
-}
+        // Third group (2 bytes) - reverse for little-endian
+        buf.put_u8(bytes[7]);
+        buf.put_u8(bytes[6]);
 
-/// Encode a decimal value.
-///
-/// TDS DECIMAL format:
-/// - 1 byte: sign (0 = negative, 1 = positive)
-/// - Remaining bytes: absolute value in little-endian
-#[cfg(feature = "decimal")]
-pub fn encode_decimal(decimal: rust_decimal::Decimal, buf: &mut BytesMut) {
-    let sign = if decimal.is_sign_negative() { 0u8 } else { 1u8 };
-    buf.put_u8(sign);
+        // Last 8 bytes - big-endian (keep as-is)
+        buf.put_slice(&bytes[8..16]);
+    }
 
-    // Get the mantissa and encode as 128-bit integer
-    let mantissa = decimal.mantissa().unsigned_abs();
-    buf.put_u128_le(mantissa);
-}
+    /// Encode a decimal value.
+    ///
+    /// TDS DECIMAL format:
+    /// - 1 byte: sign (0 = negative, 1 = positive)
+    /// - Remaining bytes: absolute value in little-endian
+    #[cfg(feature = "decimal")]
+    pub fn encode_decimal(decimal: rust_decimal::Decimal, buf: &mut BytesMut) {
+        let sign = if decimal.is_sign_negative() { 0u8 } else { 1u8 };
+        buf.put_u8(sign);
 
-/// Rescale a decimal to MONEY's 4-decimal fixed-point representation.
-///
-/// Returns the signed 128-bit integer representing the value multiplied by
-/// 10_000. Excess precision past 4 decimal places is truncated toward zero.
-#[cfg(feature = "decimal")]
-fn decimal_to_money_cents(value: rust_decimal::Decimal) -> Result<i128, TypeError> {
-    let mantissa: i128 = value.mantissa();
-    let scale: u32 = value.scale();
-    if scale <= 4 {
-        let factor = 10_i128.pow(4 - scale);
-        mantissa.checked_mul(factor).ok_or(TypeError::OutOfRange {
+        // Get the mantissa and encode as 128-bit integer
+        let mantissa = decimal.mantissa().unsigned_abs();
+        buf.put_u128_le(mantissa);
+    }
+
+    /// Rescale a decimal to MONEY's 4-decimal fixed-point representation.
+    ///
+    /// Returns the signed 128-bit integer representing the value multiplied by
+    /// 10_000. Excess precision past 4 decimal places is truncated toward zero.
+    #[cfg(feature = "decimal")]
+    fn decimal_to_money_cents(value: rust_decimal::Decimal) -> Result<i128, TypeError> {
+        let mantissa: i128 = value.mantissa();
+        let scale: u32 = value.scale();
+        if scale <= 4 {
+            let factor = 10_i128.pow(4 - scale);
+            mantissa.checked_mul(factor).ok_or(TypeError::OutOfRange {
+                target_type: "MONEY",
+            })
+        } else {
+            let factor = 10_i128.pow(scale - 4);
+            Ok(mantissa / factor)
+        }
+    }
+
+    /// Convert a decimal to the scaled i64 used on the MONEY wire.
+    ///
+    /// This is the shared pre-encoding step for both RPC parameter encoding and
+    /// TVP column encoding — each path knows how to frame the payload, but they
+    /// agree on how to derive the scaled integer from the decimal.
+    #[cfg(feature = "decimal")]
+    pub fn decimal_to_money_cents_i64(value: rust_decimal::Decimal) -> Result<i64, TypeError> {
+        let cents_i128 = decimal_to_money_cents(value)?;
+        i64::try_from(cents_i128).map_err(|_| TypeError::OutOfRange {
             target_type: "MONEY",
         })
-    } else {
-        let factor = 10_i128.pow(scale - 4);
-        Ok(mantissa / factor)
     }
-}
 
-/// Convert a decimal to the scaled i64 used on the MONEY wire.
-///
-/// This is the shared pre-encoding step for both RPC parameter encoding and
-/// TVP column encoding — each path knows how to frame the payload, but they
-/// agree on how to derive the scaled integer from the decimal.
-#[cfg(feature = "decimal")]
-pub fn decimal_to_money_cents_i64(value: rust_decimal::Decimal) -> Result<i64, TypeError> {
-    let cents_i128 = decimal_to_money_cents(value)?;
-    i64::try_from(cents_i128).map_err(|_| TypeError::OutOfRange {
-        target_type: "MONEY",
-    })
-}
+    /// Convert a decimal to the scaled i32 used on the SMALLMONEY wire.
+    #[cfg(feature = "decimal")]
+    pub fn decimal_to_smallmoney_cents_i32(value: rust_decimal::Decimal) -> Result<i32, TypeError> {
+        let cents_i128 = decimal_to_money_cents(value)?;
+        i32::try_from(cents_i128).map_err(|_| TypeError::OutOfRange {
+            target_type: "SMALLMONEY",
+        })
+    }
 
-/// Convert a decimal to the scaled i32 used on the SMALLMONEY wire.
-#[cfg(feature = "decimal")]
-pub fn decimal_to_smallmoney_cents_i32(value: rust_decimal::Decimal) -> Result<i32, TypeError> {
-    let cents_i128 = decimal_to_money_cents(value)?;
-    i32::try_from(cents_i128).map_err(|_| TypeError::OutOfRange {
-        target_type: "SMALLMONEY",
-    })
-}
+    /// Encode a decimal as MONEY (8 bytes): the signed 64-bit scaled integer is
+    /// written as the high 32 bits LE followed by the low 32 bits LE, per
+    /// MS-TDS §2.2.5.5.1.2.
+    #[cfg(feature = "decimal")]
+    pub fn encode_money(value: rust_decimal::Decimal, buf: &mut BytesMut) -> Result<(), TypeError> {
+        let cents = decimal_to_money_cents_i64(value)?;
+        let high = (cents >> 32) as i32;
+        let low = (cents & 0xFFFF_FFFF) as u32;
+        buf.put_i32_le(high);
+        buf.put_u32_le(low);
+        Ok(())
+    }
 
-/// Encode a decimal as MONEY (8 bytes): the signed 64-bit scaled integer is
-/// written as the high 32 bits LE followed by the low 32 bits LE, per
-/// MS-TDS §2.2.5.5.1.2.
-#[cfg(feature = "decimal")]
-pub fn encode_money(value: rust_decimal::Decimal, buf: &mut BytesMut) -> Result<(), TypeError> {
-    let cents = decimal_to_money_cents_i64(value)?;
-    let high = (cents >> 32) as i32;
-    let low = (cents & 0xFFFF_FFFF) as u32;
-    buf.put_i32_le(high);
-    buf.put_u32_le(low);
-    Ok(())
-}
+    /// Encode a decimal as SMALLMONEY (4 bytes): the signed 32-bit scaled integer
+    /// is written little-endian.
+    #[cfg(feature = "decimal")]
+    pub fn encode_smallmoney(
+        value: rust_decimal::Decimal,
+        buf: &mut BytesMut,
+    ) -> Result<(), TypeError> {
+        let cents = decimal_to_smallmoney_cents_i32(value)?;
+        buf.put_i32_le(cents);
+        Ok(())
+    }
 
-/// Encode a decimal as SMALLMONEY (4 bytes): the signed 32-bit scaled integer
-/// is written little-endian.
-#[cfg(feature = "decimal")]
-pub fn encode_smallmoney(
-    value: rust_decimal::Decimal,
-    buf: &mut BytesMut,
-) -> Result<(), TypeError> {
-    let cents = decimal_to_smallmoney_cents_i32(value)?;
-    buf.put_i32_le(cents);
-    Ok(())
-}
+    /// Convert a NaiveDateTime to the DATETIME wire representation.
+    ///
+    /// Returns `(days_since_1900_i32, ticks_u32)` where each tick is 1/300 second.
+    /// This is the shared pre-encoding step for both RPC parameter encoding and
+    /// TVP column encoding.
+    #[cfg(feature = "chrono")]
+    pub fn datetime_to_legacy_days_ticks(dt: chrono::NaiveDateTime) -> (i32, u32) {
+        use chrono::Timelike;
+        let epoch = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("epoch 1900-01-01 is valid");
+        let days = (dt.date() - epoch).num_days() as i32;
 
-/// Convert a NaiveDateTime to the DATETIME wire representation.
-///
-/// Returns `(days_since_1900_i32, ticks_u32)` where each tick is 1/300 second.
-/// This is the shared pre-encoding step for both RPC parameter encoding and
-/// TVP column encoding.
-#[cfg(feature = "chrono")]
-pub fn datetime_to_legacy_days_ticks(dt: chrono::NaiveDateTime) -> (i32, u32) {
-    use chrono::Timelike;
-    let epoch = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("epoch 1900-01-01 is valid");
-    let days = (dt.date() - epoch).num_days() as i32;
+        let since_midnight = dt.time().num_seconds_from_midnight() as u64 * 1000
+            + u64::from(dt.time().nanosecond()) / 1_000_000;
+        // Convert ms → 1/300s ticks: ticks = round(ms * 300 / 1000) = round(ms * 3 / 10)
+        let ticks = ((since_midnight * 3 + 5) / 10) as u32;
+        (days, ticks)
+    }
 
-    let since_midnight = dt.time().num_seconds_from_midnight() as u64 * 1000
-        + u64::from(dt.time().nanosecond()) / 1_000_000;
-    // Convert ms → 1/300s ticks: ticks = round(ms * 300 / 1000) = round(ms * 3 / 10)
-    let ticks = ((since_midnight * 3 + 5) / 10) as u32;
-    (days, ticks)
-}
+    /// Encode a DATETIME value (8 bytes): days since 1900 (`i32` LE) + time units
+    /// since midnight (`u32` LE) where each unit is 1/300 of a second.
+    #[cfg(feature = "chrono")]
+    pub fn encode_datetime_legacy(dt: chrono::NaiveDateTime, buf: &mut BytesMut) {
+        let (days, ticks) = datetime_to_legacy_days_ticks(dt);
+        buf.put_i32_le(days);
+        buf.put_u32_le(ticks);
+    }
 
-/// Encode a DATETIME value (8 bytes): days since 1900 (`i32` LE) + time units
-/// since midnight (`u32` LE) where each unit is 1/300 of a second.
-#[cfg(feature = "chrono")]
-pub fn encode_datetime_legacy(dt: chrono::NaiveDateTime, buf: &mut BytesMut) {
-    let (days, ticks) = datetime_to_legacy_days_ticks(dt);
-    buf.put_i32_le(days);
-    buf.put_u32_le(ticks);
-}
+    /// Convert a NaiveDateTime to the SMALLDATETIME wire representation.
+    ///
+    /// Returns `(days_since_1900_u16, minutes_since_midnight_u16)`. Seconds are
+    /// rounded to the nearest minute (30s rounds up per SQL Server semantics); when
+    /// that rounding lands on or past 24:00 the carry propagates into the next day
+    /// — e.g. 23:59:45 → next day 00:00 — so the result stays within SQL Server's
+    /// valid minute range of 0..1439. Returns `Err` if the resulting date is
+    /// outside the SMALLDATETIME range (1900-01-01 through 2079-06-06).
+    #[cfg(feature = "chrono")]
+    pub fn datetime_to_smalldatetime_days_minutes(
+        dt: chrono::NaiveDateTime,
+    ) -> Result<(u16, u16), TypeError> {
+        use chrono::Timelike;
+        let epoch = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("epoch 1900-01-01 is valid");
 
-/// Convert a NaiveDateTime to the SMALLDATETIME wire representation.
-///
-/// Returns `(days_since_1900_u16, minutes_since_midnight_u16)`. Seconds are
-/// rounded to the nearest minute (30s rounds up per SQL Server semantics); when
-/// that rounding lands on or past 24:00 the carry propagates into the next day
-/// — e.g. 23:59:45 → next day 00:00 — so the result stays within SQL Server's
-/// valid minute range of 0..1439. Returns `Err` if the resulting date is
-/// outside the SMALLDATETIME range (1900-01-01 through 2079-06-06).
-#[cfg(feature = "chrono")]
-pub fn datetime_to_smalldatetime_days_minutes(
-    dt: chrono::NaiveDateTime,
-) -> Result<(u16, u16), TypeError> {
-    use chrono::Timelike;
-    let epoch = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).expect("epoch 1900-01-01 is valid");
+        let total_seconds = dt.time().hour() * 3600 + dt.time().minute() * 60 + dt.time().second();
+        let minutes_raw = (total_seconds + 30) / 60;
+        // Carry over into the next day when seconds round up past 24:00 so that
+        // the returned minute count stays within SQL Server's valid 0..1439 range.
+        // SQL Server itself does the same thing when casting 23:59:45 to
+        // SMALLDATETIME — sending minutes=1440 directly on the wire is rejected
+        // as "invalid instance of data type smalldatetime".
+        let (day_carry, minutes) = if minutes_raw >= 1440 {
+            (1i64, 0u16)
+        } else {
+            (0i64, minutes_raw as u16)
+        };
 
-    let total_seconds = dt.time().hour() * 3600 + dt.time().minute() * 60 + dt.time().second();
-    let minutes_raw = (total_seconds + 30) / 60;
-    // Carry over into the next day when seconds round up past 24:00 so that
-    // the returned minute count stays within SQL Server's valid 0..1439 range.
-    // SQL Server itself does the same thing when casting 23:59:45 to
-    // SMALLDATETIME — sending minutes=1440 directly on the wire is rejected
-    // as "invalid instance of data type smalldatetime".
-    let (day_carry, minutes) = if minutes_raw >= 1440 {
-        (1i64, 0u16)
-    } else {
-        (0i64, minutes_raw as u16)
-    };
-
-    let days_i64 = (dt.date() - epoch).num_days() + day_carry;
-    let days: u16 = u16::try_from(days_i64).map_err(|_| {
+        let days_i64 = (dt.date() - epoch).num_days() + day_carry;
+        let days: u16 = u16::try_from(days_i64).map_err(|_| {
         TypeError::InvalidDateTime(format!(
             "SMALLDATETIME year must be 1900-2079, got date with {days_i64} days since 1900-01-01"
         ))
     })?;
 
-    Ok((days, minutes))
-}
-
-/// Encode a SMALLDATETIME value (4 bytes): days since 1900 (`u16` LE) +
-/// minutes since midnight (`u16` LE). Seconds are rounded to the nearest
-/// minute (30s rounds up per SQL Server semantics).
-///
-/// # Errors
-///
-/// Returns an error if the date is outside the SMALLDATETIME range
-/// (1900-01-01 through 2079-06-06).
-#[cfg(feature = "chrono")]
-pub fn encode_smalldatetime(
-    dt: chrono::NaiveDateTime,
-    buf: &mut BytesMut,
-) -> Result<(), TypeError> {
-    let (days, minutes) = datetime_to_smalldatetime_days_minutes(dt)?;
-    buf.put_u16_le(days);
-    buf.put_u16_le(minutes);
-    Ok(())
-}
-
-/// Encode a DATE value.
-///
-/// TDS DATE is the number of days since 0001-01-01.
-///
-/// # Errors
-///
-/// Returns an error if the date is outside SQL Server's DATE range
-/// (0001-01-01 through 9999-12-31). chrono permits dates beyond both ends,
-/// which previously wrapped silently into garbage wire values.
-#[cfg(feature = "chrono")]
-pub fn encode_date(date: chrono::NaiveDate, buf: &mut BytesMut) -> Result<(), TypeError> {
-    /// Days from 0001-01-01 to 9999-12-31, the last representable DATE.
-    const MAX_DAYS: i64 = 3_652_058;
-
-    let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("valid date");
-    let days = date.signed_duration_since(base).num_days();
-    if !(0..=MAX_DAYS).contains(&days) {
-        return Err(TypeError::InvalidDateTime(format!(
-            "DATE must be between 0001-01-01 and 9999-12-31, got {date}"
-        )));
+        Ok((days, minutes))
     }
-    let days = days as u32;
 
-    // DATE is encoded as 3 bytes (little-endian)
-    buf.put_u8((days & 0xFF) as u8);
-    buf.put_u8(((days >> 8) & 0xFF) as u8);
-    buf.put_u8(((days >> 16) & 0xFF) as u8);
-    Ok(())
+    /// Encode a SMALLDATETIME value (4 bytes): days since 1900 (`u16` LE) +
+    /// minutes since midnight (`u16` LE). Seconds are rounded to the nearest
+    /// minute (30s rounds up per SQL Server semantics).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the date is outside the SMALLDATETIME range
+    /// (1900-01-01 through 2079-06-06).
+    #[cfg(feature = "chrono")]
+    pub fn encode_smalldatetime(
+        dt: chrono::NaiveDateTime,
+        buf: &mut BytesMut,
+    ) -> Result<(), TypeError> {
+        let (days, minutes) = datetime_to_smalldatetime_days_minutes(dt)?;
+        buf.put_u16_le(days);
+        buf.put_u16_le(minutes);
+        Ok(())
+    }
+
+    /// Encode a DATE value.
+    ///
+    /// TDS DATE is the number of days since 0001-01-01.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the date is outside SQL Server's DATE range
+    /// (0001-01-01 through 9999-12-31). chrono permits dates beyond both ends,
+    /// which previously wrapped silently into garbage wire values.
+    #[cfg(feature = "chrono")]
+    pub fn encode_date(date: chrono::NaiveDate, buf: &mut BytesMut) -> Result<(), TypeError> {
+        /// Days from 0001-01-01 to 9999-12-31, the last representable DATE.
+        const MAX_DAYS: i64 = 3_652_058;
+
+        let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("valid date");
+        let days = date.signed_duration_since(base).num_days();
+        if !(0..=MAX_DAYS).contains(&days) {
+            return Err(TypeError::InvalidDateTime(format!(
+                "DATE must be between 0001-01-01 and 9999-12-31, got {date}"
+            )));
+        }
+        let days = days as u32;
+
+        // DATE is encoded as 3 bytes (little-endian)
+        buf.put_u8((days & 0xFF) as u8);
+        buf.put_u8(((days >> 8) & 0xFF) as u8);
+        buf.put_u8(((days >> 16) & 0xFF) as u8);
+        Ok(())
+    }
+
+    /// Encode a TIME value.
+    ///
+    /// TDS TIME is encoded as 100-nanosecond intervals since midnight.
+    #[cfg(feature = "chrono")]
+    pub fn encode_time(time: chrono::NaiveTime, buf: &mut BytesMut) {
+        use chrono::Timelike;
+
+        // Calculate 100-ns intervals since midnight
+        // Scale = 7 (100-nanosecond precision)
+        let nanos =
+            time.num_seconds_from_midnight() as u64 * 1_000_000_000 + time.nanosecond() as u64;
+        let intervals = nanos / 100;
+
+        // TIME with scale 7 uses 5 bytes
+        buf.put_u8((intervals & 0xFF) as u8);
+        buf.put_u8(((intervals >> 8) & 0xFF) as u8);
+        buf.put_u8(((intervals >> 16) & 0xFF) as u8);
+        buf.put_u8(((intervals >> 24) & 0xFF) as u8);
+        buf.put_u8(((intervals >> 32) & 0xFF) as u8);
+    }
+
+    /// Encode a DATETIME2 value.
+    ///
+    /// DATETIME2 is encoded as TIME followed by DATE.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the date portion is outside the DATE range; see
+    /// [`encode_date`].
+    #[cfg(feature = "chrono")]
+    pub fn encode_datetime2(
+        datetime: chrono::NaiveDateTime,
+        buf: &mut BytesMut,
+    ) -> Result<(), TypeError> {
+        encode_time(datetime.time(), buf);
+        encode_date(datetime.date(), buf)
+    }
+
+    /// Encode a DATETIMEOFFSET value.
+    ///
+    /// DATETIMEOFFSET is encoded as TIME + DATE + offset (in minutes). Per
+    /// MS-TDS §2.2.5.5.1.9 the date/time portion is the **UTC** instant, not the
+    /// local wall-clock; the offset is carried separately.
+    #[cfg(feature = "chrono")]
+    pub fn encode_datetimeoffset(
+        datetime: chrono::DateTime<chrono::FixedOffset>,
+        buf: &mut BytesMut,
+    ) -> Result<(), TypeError> {
+        use chrono::Offset;
+
+        // Encode the UTC date/time components
+        let utc = datetime.naive_utc();
+        encode_time(utc.time(), buf);
+        encode_date(utc.date(), buf)?;
+
+        // Encode timezone offset in minutes (signed 16-bit)
+        let offset_seconds = datetime.offset().fix().local_minus_utc();
+        let offset_minutes = (offset_seconds / 60) as i16;
+        buf.put_i16_le(offset_minutes);
+        Ok(())
+    }
 }
 
-/// Encode a TIME value.
-///
-/// TDS TIME is encoded as 100-nanosecond intervals since midnight.
-#[cfg(feature = "chrono")]
-pub fn encode_time(time: chrono::NaiveTime, buf: &mut BytesMut) {
-    use chrono::Timelike;
-
-    // Calculate 100-ns intervals since midnight
-    // Scale = 7 (100-nanosecond precision)
-    let nanos = time.num_seconds_from_midnight() as u64 * 1_000_000_000 + time.nanosecond() as u64;
-    let intervals = nanos / 100;
-
-    // TIME with scale 7 uses 5 bytes
-    buf.put_u8((intervals & 0xFF) as u8);
-    buf.put_u8(((intervals >> 8) & 0xFF) as u8);
-    buf.put_u8(((intervals >> 16) & 0xFF) as u8);
-    buf.put_u8(((intervals >> 24) & 0xFF) as u8);
-    buf.put_u8(((intervals >> 32) & 0xFF) as u8);
-}
-
-/// Encode a DATETIME2 value.
-///
-/// DATETIME2 is encoded as TIME followed by DATE.
-///
-/// # Errors
-///
-/// Returns an error if the date portion is outside the DATE range; see
-/// [`encode_date`].
-#[cfg(feature = "chrono")]
-pub fn encode_datetime2(
-    datetime: chrono::NaiveDateTime,
-    buf: &mut BytesMut,
-) -> Result<(), TypeError> {
-    encode_time(datetime.time(), buf);
-    encode_date(datetime.date(), buf)
-}
-
-/// Encode a DATETIMEOFFSET value.
-///
-/// DATETIMEOFFSET is encoded as TIME + DATE + offset (in minutes). Per
-/// MS-TDS §2.2.5.5.1.9 the date/time portion is the **UTC** instant, not the
-/// local wall-clock; the offset is carried separately.
-#[cfg(feature = "chrono")]
-pub fn encode_datetimeoffset(
-    datetime: chrono::DateTime<chrono::FixedOffset>,
-    buf: &mut BytesMut,
-) -> Result<(), TypeError> {
-    use chrono::Offset;
-
-    // Encode the UTC date/time components
-    let utc = datetime.naive_utc();
-    encode_time(utc.time(), buf);
-    encode_date(utc.date(), buf)?;
-
-    // Encode timezone offset in minutes (signed 16-bit)
-    let offset_seconds = datetime.offset().fix().local_minus_utc();
-    let offset_minutes = (offset_seconds / 60) as i16;
-    buf.put_i16_le(offset_minutes);
-    Ok(())
-}
+// Re-export the sealed encoders into the module scope so intra-crate callers
+// (the `TdsEncode` impl above, sibling modules) keep using `crate::encode::*`.
+// Empty under `--no-default-features` (all encoders are feature-gated).
+#[allow(unused_imports)]
+pub(crate) use sealed::*;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]

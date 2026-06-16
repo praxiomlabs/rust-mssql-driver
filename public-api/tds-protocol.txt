@@ -14,7 +14,6 @@ pub const tds_protocol::collation::LCID_MASK: u32
 pub const tds_protocol::collation::PRIMARY_LANGUAGE_MASK: u32
 pub fn tds_protocol::collation::code_page_for_lcid(u32) -> core::option::Option<u16>
 pub fn tds_protocol::collation::code_page_for_sort_id(u8) -> core::option::Option<u16>
-pub fn tds_protocol::collation::encode_str_for_collation(&str, core::option::Option<&tds_protocol::token::Collation>) -> alloc::vec::Vec<u8>
 pub fn tds_protocol::collation::encoding_for_lcid(u32) -> core::option::Option<&'static encoding_rs::Encoding>
 pub fn tds_protocol::collation::encoding_for_sort_id(u8) -> core::option::Option<&'static encoding_rs::Encoding>
 pub fn tds_protocol::collation::encoding_name_for_lcid(u32) -> &'static str
@@ -1467,8 +1466,6 @@ impl<T> core::clone::CloneToUninit for tds_protocol::sql_batch::SqlBatch where T
 pub unsafe fn tds_protocol::sql_batch::SqlBatch::clone_to_uninit(&self, *mut u8)
 impl<T> core::convert::From<T> for tds_protocol::sql_batch::SqlBatch
 pub fn tds_protocol::sql_batch::SqlBatch::from(T) -> T
-pub fn tds_protocol::sql_batch::encode_sql_batch(&str) -> bytes::bytes::Bytes
-pub fn tds_protocol::sql_batch::encode_sql_batch_with_transaction(&str, u64) -> bytes::bytes::Bytes
 pub mod tds_protocol::token
 #[non_exhaustive] #[repr(u8)] pub enum tds_protocol::token::EnvChangeType
 pub tds_protocol::token::EnvChangeType::BeginTransaction = 8
@@ -2746,24 +2743,6 @@ pub const tds_protocol::tvp::TVP_END_TOKEN: u8
 pub const tds_protocol::tvp::TVP_NULL_TOKEN: u16
 pub const tds_protocol::tvp::TVP_ROW_TOKEN: u8
 pub const tds_protocol::tvp::TVP_TYPE_ID: u8
-pub fn tds_protocol::tvp::encode_tvp_bit(bool, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::tvp::encode_tvp_date(u32, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::tvp::encode_tvp_datetime(i32, u32, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::tvp::encode_tvp_datetime2(u64, u32, u8, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::tvp::encode_tvp_datetimeoffset(u64, u32, i16, u8, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::tvp::encode_tvp_decimal(u8, u128, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::tvp::encode_tvp_float(f64, u8, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::tvp::encode_tvp_guid(&[u8; 16], &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::tvp::encode_tvp_int(i64, u8, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::tvp::encode_tvp_money(i64, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::tvp::encode_tvp_null(&tds_protocol::tvp::TvpWireType, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::tvp::encode_tvp_nvarchar(&str, u16, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::tvp::encode_tvp_smalldatetime(u16, u16, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::tvp::encode_tvp_smallmoney(i32, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::tvp::encode_tvp_time(u64, u8, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::tvp::encode_tvp_varbinary(&[u8], u16, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::tvp::encode_tvp_varchar(&str, u16, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::tvp::encode_tvp_varchar_with_collation(&str, u16, core::option::Option<&tds_protocol::token::Collation>, &mut bytes::bytes_mut::BytesMut)
 pub mod tds_protocol::types
 #[non_exhaustive] #[repr(u8)] pub enum tds_protocol::types::TypeId
 pub tds_protocol::types::TypeId::BigBinary = 173
@@ -6002,20 +5981,4 @@ pub const tds_protocol::PACKET_HEADER_SIZE: usize
 pub const tds_protocol::TVP_END_TOKEN: u8
 pub const tds_protocol::TVP_ROW_TOKEN: u8
 pub const tds_protocol::TVP_TYPE_ID: u8
-pub fn tds_protocol::encode_sql_batch(&str) -> bytes::bytes::Bytes
-pub fn tds_protocol::encode_sql_batch_with_transaction(&str, u64) -> bytes::bytes::Bytes
-pub fn tds_protocol::encode_tvp_bit(bool, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::encode_tvp_date(u32, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::encode_tvp_datetime2(u64, u32, u8, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::encode_tvp_datetimeoffset(u64, u32, i16, u8, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::encode_tvp_decimal(u8, u128, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::encode_tvp_float(f64, u8, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::encode_tvp_guid(&[u8; 16], &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::encode_tvp_int(i64, u8, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::encode_tvp_null(&tds_protocol::tvp::TvpWireType, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::encode_tvp_nvarchar(&str, u16, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::encode_tvp_time(u64, u8, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::encode_tvp_varbinary(&[u8], u16, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::encode_tvp_varchar(&str, u16, &mut bytes::bytes_mut::BytesMut)
-pub fn tds_protocol::encode_tvp_varchar_with_collation(&str, u16, core::option::Option<&tds_protocol::token::Collation>, &mut bytes::bytes_mut::BytesMut)
 pub fn tds_protocol::is_column_encrypted(u16) -> bool

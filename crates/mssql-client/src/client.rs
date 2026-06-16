@@ -335,8 +335,10 @@ impl<S: ConnectionState> Client<S> {
         // does not pick up the old response's bytes.
         self.cancel_in_flight_response().await?;
 
-        let payload =
-            tds_protocol::encode_sql_batch_with_transaction(sql, self.transaction_descriptor);
+        let payload = tds_protocol::__private::encode_sql_batch_with_transaction(
+            sql,
+            self.transaction_descriptor,
+        );
         let max_packet = self.config.packet_size as usize;
 
         // Check if we need to reset the connection on this request

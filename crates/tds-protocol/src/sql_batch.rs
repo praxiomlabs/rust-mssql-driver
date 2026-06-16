@@ -10,81 +10,94 @@ use bytes::{BufMut, Bytes, BytesMut};
 use crate::codec::write_utf16_string;
 use crate::prelude::*;
 
-/// Encode a SQL batch request with auto-commit (no explicit transaction).
+/// Low-level `SQLBatch` wire encoders shared across the workspace crates.
 ///
-/// The SQL batch packet payload includes:
-/// 1. ALL_HEADERS section (required for TDS 7.2+)
-/// 2. SQL text encoded as UTF-16LE
-///
-/// This function returns the encoded payload (without the packet header).
-/// For requests within an explicit transaction, use [`encode_sql_batch_with_transaction`].
-///
-/// # Example
-///
-/// ```
-/// use tds_protocol::sql_batch::encode_sql_batch;
-///
-/// let sql = "SELECT * FROM users WHERE id = 1";
-/// let payload = encode_sql_batch(sql);
-///
-/// // Payload includes ALL_HEADERS + UTF-16LE encoded SQL
-/// assert!(!payload.is_empty());
-/// ```
-#[must_use]
-pub fn encode_sql_batch(sql: &str) -> Bytes {
-    encode_sql_batch_with_transaction(sql, 0)
+/// Internal plumbing reached cross-crate only via [`crate::__private`]; not
+/// public API and exempt from semver guarantees (see #242). The public
+/// [`SqlBatch`] builder below is the user-facing API.
+pub(crate) mod sealed {
+    use super::*;
+
+    /// Encode a SQL batch request with auto-commit (no explicit transaction).
+    ///
+    /// The SQL batch packet payload includes:
+    /// 1. ALL_HEADERS section (required for TDS 7.2+)
+    /// 2. SQL text encoded as UTF-16LE
+    ///
+    /// This function returns the encoded payload (without the packet header).
+    /// For requests within an explicit transaction, use [`encode_sql_batch_with_transaction`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use tds_protocol::sql_batch::encode_sql_batch;
+    ///
+    /// let sql = "SELECT * FROM users WHERE id = 1";
+    /// let payload = encode_sql_batch(sql);
+    ///
+    /// // Payload includes ALL_HEADERS + UTF-16LE encoded SQL
+    /// assert!(!payload.is_empty());
+    /// ```
+    #[must_use]
+    pub fn encode_sql_batch(sql: &str) -> Bytes {
+        encode_sql_batch_with_transaction(sql, 0)
+    }
+
+    /// Encode a SQL batch request with a transaction descriptor.
+    ///
+    /// Per MS-TDS spec, when executing within an explicit transaction:
+    /// - The `transaction_descriptor` MUST be the value returned by the server
+    ///   in the BeginTransaction EnvChange token.
+    /// - For auto-commit mode (no explicit transaction), use 0.
+    ///
+    /// # Arguments
+    ///
+    /// * `sql` - The SQL text to execute
+    /// * `transaction_descriptor` - The transaction descriptor from BeginTransaction EnvChange,
+    ///   or 0 for auto-commit mode.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use tds_protocol::sql_batch::encode_sql_batch_with_transaction;
+    ///
+    /// // Within a transaction with descriptor 0x1234567890ABCDEF
+    /// let sql = "INSERT INTO users VALUES (1, 'Alice')";
+    /// let tx_descriptor = 0x1234567890ABCDEF_u64;
+    /// let payload = encode_sql_batch_with_transaction(sql, tx_descriptor);
+    /// ```
+    #[must_use]
+    pub fn encode_sql_batch_with_transaction(sql: &str, transaction_descriptor: u64) -> Bytes {
+        // Capacity: ALL_HEADERS (22 bytes) + SQL UTF-16LE (sql.len() * 2)
+        let mut buf = BytesMut::with_capacity(22 + sql.len() * 2);
+
+        // ALL_HEADERS section (required for TDS 7.2+)
+        // Per MS-TDS spec: ALL_HEADERS = TotalLength + Headers
+        let all_headers_start = buf.len();
+        buf.put_u32_le(0); // Total length placeholder
+
+        // Transaction descriptor header (type 0x0002)
+        // Per MS-TDS 2.2.5.3: HeaderLength (4) + HeaderType (2) + TransactionDescriptor (8) + OutstandingRequestCount (4)
+        buf.put_u32_le(18); // Header length = 18 bytes
+        buf.put_u16_le(0x0002); // Header type: transaction descriptor
+        buf.put_u64_le(transaction_descriptor); // Transaction descriptor from BeginTransaction EnvChange
+        buf.put_u32_le(1); // Outstanding request count (1 for non-MARS connections)
+
+        // Fill in ALL_HEADERS total length
+        let all_headers_len = buf.len() - all_headers_start;
+        let len_bytes = (all_headers_len as u32).to_le_bytes();
+        buf[all_headers_start..all_headers_start + 4].copy_from_slice(&len_bytes);
+
+        // SQL text as UTF-16LE
+        write_utf16_string(&mut buf, sql);
+
+        buf.freeze()
+    }
 }
 
-/// Encode a SQL batch request with a transaction descriptor.
-///
-/// Per MS-TDS spec, when executing within an explicit transaction:
-/// - The `transaction_descriptor` MUST be the value returned by the server
-///   in the BeginTransaction EnvChange token.
-/// - For auto-commit mode (no explicit transaction), use 0.
-///
-/// # Arguments
-///
-/// * `sql` - The SQL text to execute
-/// * `transaction_descriptor` - The transaction descriptor from BeginTransaction EnvChange,
-///   or 0 for auto-commit mode.
-///
-/// # Example
-///
-/// ```
-/// use tds_protocol::sql_batch::encode_sql_batch_with_transaction;
-///
-/// // Within a transaction with descriptor 0x1234567890ABCDEF
-/// let sql = "INSERT INTO users VALUES (1, 'Alice')";
-/// let tx_descriptor = 0x1234567890ABCDEF_u64;
-/// let payload = encode_sql_batch_with_transaction(sql, tx_descriptor);
-/// ```
-#[must_use]
-pub fn encode_sql_batch_with_transaction(sql: &str, transaction_descriptor: u64) -> Bytes {
-    // Capacity: ALL_HEADERS (22 bytes) + SQL UTF-16LE (sql.len() * 2)
-    let mut buf = BytesMut::with_capacity(22 + sql.len() * 2);
-
-    // ALL_HEADERS section (required for TDS 7.2+)
-    // Per MS-TDS spec: ALL_HEADERS = TotalLength + Headers
-    let all_headers_start = buf.len();
-    buf.put_u32_le(0); // Total length placeholder
-
-    // Transaction descriptor header (type 0x0002)
-    // Per MS-TDS 2.2.5.3: HeaderLength (4) + HeaderType (2) + TransactionDescriptor (8) + OutstandingRequestCount (4)
-    buf.put_u32_le(18); // Header length = 18 bytes
-    buf.put_u16_le(0x0002); // Header type: transaction descriptor
-    buf.put_u64_le(transaction_descriptor); // Transaction descriptor from BeginTransaction EnvChange
-    buf.put_u32_le(1); // Outstanding request count (1 for non-MARS connections)
-
-    // Fill in ALL_HEADERS total length
-    let all_headers_len = buf.len() - all_headers_start;
-    let len_bytes = (all_headers_len as u32).to_le_bytes();
-    buf[all_headers_start..all_headers_start + 4].copy_from_slice(&len_bytes);
-
-    // SQL text as UTF-16LE
-    write_utf16_string(&mut buf, sql);
-
-    buf.freeze()
-}
+// Keep `encode_sql_batch` reachable for the intra-crate `SqlBatch::encode`
+// caller below; off the public surface (see crate::__private).
+pub(crate) use sealed::encode_sql_batch;
 
 /// SQL batch builder for more complex batches.
 ///

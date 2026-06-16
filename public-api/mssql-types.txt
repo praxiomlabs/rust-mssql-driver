@@ -85,7 +85,6 @@ pub fn mssql_types::decode::TypeInfo::from(T) -> T
 pub trait mssql_types::decode::TdsDecode: core::marker::Sized
 pub fn mssql_types::decode::TdsDecode::decode(&mut bytes::bytes::Bytes, &mssql_types::decode::TypeInfo) -> core::result::Result<Self, mssql_types::error::TypeError>
 pub fn mssql_types::decode::decode_utf16_string(&[u8]) -> core::result::Result<alloc::string::String, mssql_types::error::TypeError>
-pub fn mssql_types::decode::decode_value(&mut bytes::bytes::Bytes, &mssql_types::decode::TypeInfo) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
 pub mod mssql_types::encode
 pub trait mssql_types::encode::TdsEncode
 pub fn mssql_types::encode::TdsEncode::encode(&self, &mut bytes::bytes_mut::BytesMut) -> core::result::Result<(), mssql_types::error::TypeError>
@@ -93,21 +92,7 @@ pub fn mssql_types::encode::TdsEncode::type_id(&self) -> u8
 impl mssql_types::encode::TdsEncode for mssql_types::value::SqlValue
 pub fn mssql_types::value::SqlValue::encode(&self, &mut bytes::bytes_mut::BytesMut) -> core::result::Result<(), mssql_types::error::TypeError>
 pub fn mssql_types::value::SqlValue::type_id(&self) -> u8
-pub fn mssql_types::encode::datetime_to_legacy_days_ticks(chrono::naive::datetime::NaiveDateTime) -> (i32, u32)
-pub fn mssql_types::encode::datetime_to_smalldatetime_days_minutes(chrono::naive::datetime::NaiveDateTime) -> core::result::Result<(u16, u16), mssql_types::error::TypeError>
-pub fn mssql_types::encode::decimal_to_money_cents_i64(rust_decimal::decimal::Decimal) -> core::result::Result<i64, mssql_types::error::TypeError>
-pub fn mssql_types::encode::decimal_to_smallmoney_cents_i32(rust_decimal::decimal::Decimal) -> core::result::Result<i32, mssql_types::error::TypeError>
-pub fn mssql_types::encode::encode_date(chrono::naive::date::NaiveDate, &mut bytes::bytes_mut::BytesMut) -> core::result::Result<(), mssql_types::error::TypeError>
-pub fn mssql_types::encode::encode_datetime2(chrono::naive::datetime::NaiveDateTime, &mut bytes::bytes_mut::BytesMut) -> core::result::Result<(), mssql_types::error::TypeError>
-pub fn mssql_types::encode::encode_datetime_legacy(chrono::naive::datetime::NaiveDateTime, &mut bytes::bytes_mut::BytesMut)
-pub fn mssql_types::encode::encode_datetimeoffset(chrono::datetime::DateTime<chrono::offset::fixed::FixedOffset>, &mut bytes::bytes_mut::BytesMut) -> core::result::Result<(), mssql_types::error::TypeError>
-pub fn mssql_types::encode::encode_decimal(rust_decimal::decimal::Decimal, &mut bytes::bytes_mut::BytesMut)
-pub fn mssql_types::encode::encode_money(rust_decimal::decimal::Decimal, &mut bytes::bytes_mut::BytesMut) -> core::result::Result<(), mssql_types::error::TypeError>
-pub fn mssql_types::encode::encode_smalldatetime(chrono::naive::datetime::NaiveDateTime, &mut bytes::bytes_mut::BytesMut) -> core::result::Result<(), mssql_types::error::TypeError>
-pub fn mssql_types::encode::encode_smallmoney(rust_decimal::decimal::Decimal, &mut bytes::bytes_mut::BytesMut) -> core::result::Result<(), mssql_types::error::TypeError>
-pub fn mssql_types::encode::encode_time(chrono::naive::time::NaiveTime, &mut bytes::bytes_mut::BytesMut)
 pub fn mssql_types::encode::encode_utf16_string(&str, &mut bytes::bytes_mut::BytesMut)
-pub fn mssql_types::encode::encode_uuid(uuid::Uuid, &mut bytes::bytes_mut::BytesMut)
 pub mod mssql_types::error
 #[non_exhaustive] pub enum mssql_types::error::TypeError
 pub mssql_types::error::TypeError::BufferTooSmall
@@ -2438,7 +2423,6 @@ pub fn mssql_types::datetime(chrono::naive::datetime::NaiveDateTime) -> mssql_ty
 pub fn mssql_types::datetime2(chrono::naive::datetime::NaiveDateTime, u8) -> mssql_types::to_sql::DateTime2
 pub fn mssql_types::datetimeoffset(chrono::datetime::DateTime<chrono::offset::fixed::FixedOffset>, u8) -> mssql_types::to_sql::DateTimeOffset
 pub fn mssql_types::decode_utf16_string(&[u8]) -> core::result::Result<alloc::string::String, mssql_types::error::TypeError>
-pub fn mssql_types::decode_value(&mut bytes::bytes::Bytes, &mssql_types::decode::TypeInfo) -> core::result::Result<mssql_types::value::SqlValue, mssql_types::error::TypeError>
 pub fn mssql_types::encode_utf16_string(&str, &mut bytes::bytes_mut::BytesMut)
 pub fn mssql_types::nchar(impl core::convert::Into<alloc::string::String>, u16) -> mssql_types::to_sql::NChar
 pub fn mssql_types::null<T: mssql_types::to_sql::SqlTyped>() -> mssql_types::to_sql::TypedNull

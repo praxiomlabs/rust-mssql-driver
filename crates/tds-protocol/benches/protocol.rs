@@ -5,8 +5,8 @@
 use bytes::{Bytes, BytesMut};
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
+use tds_protocol::__private::encode_sql_batch;
 use tds_protocol::{
-    encode_sql_batch,
     packet::{PACKET_HEADER_SIZE, PacketHeader, PacketStatus, PacketType},
     prelogin::{EncryptionLevel, PreLogin},
 };

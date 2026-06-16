@@ -4,18 +4,18 @@
 //! RPC parameters, including Table-Valued Parameter (TVP) encoding.
 
 use bytes::BytesMut;
-use tds_protocol::rpc::{RpcParam, TypeInfo as RpcTypeInfo};
 #[cfg(feature = "decimal")]
-use tds_protocol::tvp::encode_tvp_decimal;
-use tds_protocol::tvp::{
-    TvpColumnDef as TvpWireColumnDef, TvpEncoder, TvpWireType, encode_tvp_bit, encode_tvp_float,
-    encode_tvp_int, encode_tvp_null, encode_tvp_nvarchar, encode_tvp_varbinary,
-    encode_tvp_varchar_with_collation,
+use tds_protocol::__private::encode_tvp_decimal;
+use tds_protocol::__private::{
+    encode_tvp_bit, encode_tvp_float, encode_tvp_int, encode_tvp_null, encode_tvp_nvarchar,
+    encode_tvp_varbinary, encode_tvp_varchar_with_collation,
 };
 #[cfg(feature = "chrono")]
-use tds_protocol::tvp::{encode_tvp_datetime, encode_tvp_smalldatetime};
+use tds_protocol::__private::{encode_tvp_datetime, encode_tvp_smalldatetime};
 #[cfg(feature = "decimal")]
-use tds_protocol::tvp::{encode_tvp_money, encode_tvp_smallmoney};
+use tds_protocol::__private::{encode_tvp_money, encode_tvp_smallmoney};
+use tds_protocol::rpc::{RpcParam, TypeInfo as RpcTypeInfo};
+use tds_protocol::tvp::{TvpColumnDef as TvpWireColumnDef, TvpEncoder, TvpWireType};
 
 use crate::error::{Error, Result};
 use crate::state::ConnectionState;
@@ -106,50 +106,50 @@ impl<S: ConnectionState> Client<S> {
             #[cfg(feature = "decimal")]
             SqlValue::Decimal(d) => {
                 let mut buf = BytesMut::with_capacity(17);
-                mssql_types::encode::encode_decimal(*d, &mut buf);
+                mssql_types::__private::encode_decimal(*d, &mut buf);
                 let scale = d.scale() as u8;
                 RpcParam::new(name, RpcTypeInfo::decimal(38, scale), buf.freeze())
             }
             #[cfg(feature = "decimal")]
             SqlValue::Money(d) => {
                 let mut buf = BytesMut::with_capacity(8);
-                mssql_types::encode::encode_money(*d, &mut buf)?;
+                mssql_types::__private::encode_money(*d, &mut buf)?;
                 RpcParam::new(name, RpcTypeInfo::money(), buf.freeze())
             }
             #[cfg(feature = "decimal")]
             SqlValue::SmallMoney(d) => {
                 let mut buf = BytesMut::with_capacity(4);
-                mssql_types::encode::encode_smallmoney(*d, &mut buf)?;
+                mssql_types::__private::encode_smallmoney(*d, &mut buf)?;
                 RpcParam::new(name, RpcTypeInfo::smallmoney(), buf.freeze())
             }
             #[cfg(feature = "chrono")]
             SqlValue::Date(d) => {
                 let mut buf = BytesMut::with_capacity(3);
-                mssql_types::encode::encode_date(*d, &mut buf)?;
+                mssql_types::__private::encode_date(*d, &mut buf)?;
                 RpcParam::new(name, RpcTypeInfo::date(), buf.freeze())
             }
             #[cfg(feature = "chrono")]
             SqlValue::Time(t) => {
                 let mut buf = BytesMut::with_capacity(5);
-                mssql_types::encode::encode_time(*t, &mut buf);
+                mssql_types::__private::encode_time(*t, &mut buf);
                 RpcParam::new(name, RpcTypeInfo::time(7), buf.freeze())
             }
             #[cfg(feature = "chrono")]
             SqlValue::DateTime(dt) => {
                 let mut buf = BytesMut::with_capacity(8);
-                mssql_types::encode::encode_datetime2(*dt, &mut buf)?;
+                mssql_types::__private::encode_datetime2(*dt, &mut buf)?;
                 RpcParam::new(name, RpcTypeInfo::datetime2(7), buf.freeze())
             }
             #[cfg(feature = "chrono")]
             SqlValue::SmallDateTime(dt) => {
                 let mut buf = BytesMut::with_capacity(4);
-                mssql_types::encode::encode_smalldatetime(*dt, &mut buf)?;
+                mssql_types::__private::encode_smalldatetime(*dt, &mut buf)?;
                 RpcParam::new(name, RpcTypeInfo::smalldatetime(), buf.freeze())
             }
             #[cfg(feature = "chrono")]
             SqlValue::DateTimeOffset(dto) => {
                 let mut buf = BytesMut::with_capacity(10);
-                mssql_types::encode::encode_datetimeoffset(*dto, &mut buf)?;
+                mssql_types::__private::encode_datetimeoffset(*dto, &mut buf)?;
                 RpcParam::new(name, RpcTypeInfo::datetimeoffset(7), buf.freeze())
             }
             #[cfg(feature = "json")]
@@ -434,11 +434,11 @@ impl<S: ConnectionState> Client<S> {
                 // authoritative dispatch key.
                 match wire_type {
                     TvpWireType::Money => {
-                        let scaled = mssql_types::encode::decimal_to_money_cents_i64(*d)?;
+                        let scaled = mssql_types::__private::decimal_to_money_cents_i64(*d)?;
                         encode_tvp_money(scaled, buf);
                     }
                     TvpWireType::SmallMoney => {
-                        let scaled = mssql_types::encode::decimal_to_smallmoney_cents_i32(*d)?;
+                        let scaled = mssql_types::__private::decimal_to_smallmoney_cents_i32(*d)?;
                         encode_tvp_smallmoney(scaled, buf);
                     }
                     _ => {
@@ -451,7 +451,7 @@ impl<S: ConnectionState> Client<S> {
             #[cfg(feature = "uuid")]
             SqlValue::Uuid(u) => {
                 let bytes = u.as_bytes();
-                tds_protocol::tvp::encode_tvp_guid(bytes, buf);
+                tds_protocol::__private::encode_tvp_guid(bytes, buf);
             }
             #[cfg(feature = "chrono")]
             SqlValue::Date(d) => {
@@ -459,7 +459,7 @@ impl<S: ConnectionState> Client<S> {
                 let base =
                     chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
                 let days = d.signed_duration_since(base).num_days() as u32;
-                tds_protocol::tvp::encode_tvp_date(days, buf);
+                tds_protocol::__private::encode_tvp_date(days, buf);
             }
             #[cfg(feature = "chrono")]
             SqlValue::Time(t) => {
@@ -471,7 +471,7 @@ impl<S: ConnectionState> Client<S> {
                     TvpWireType::Time { scale } => *scale,
                     _ => 7,
                 };
-                tds_protocol::tvp::encode_tvp_time(intervals, scale, buf);
+                tds_protocol::__private::encode_tvp_time(intervals, scale, buf);
             }
             #[cfg(feature = "chrono")]
             SqlValue::DateTime(dt) | SqlValue::SmallDateTime(dt) => {
@@ -481,12 +481,13 @@ impl<S: ConnectionState> Client<S> {
                 // gets the DATETIME2 time+date format.
                 match wire_type {
                     TvpWireType::DateTime => {
-                        let (days, ticks) = mssql_types::encode::datetime_to_legacy_days_ticks(*dt);
+                        let (days, ticks) =
+                            mssql_types::__private::datetime_to_legacy_days_ticks(*dt);
                         encode_tvp_datetime(days, ticks, buf);
                     }
                     TvpWireType::SmallDateTime => {
                         let (days, minutes) =
-                            mssql_types::encode::datetime_to_smalldatetime_days_minutes(*dt)?;
+                            mssql_types::__private::datetime_to_smalldatetime_days_minutes(*dt)?;
                         encode_tvp_smalldatetime(days, minutes, buf);
                     }
                     _ => {
@@ -503,7 +504,7 @@ impl<S: ConnectionState> Client<S> {
                             TvpWireType::DateTime2 { scale } => *scale,
                             _ => 7,
                         };
-                        tds_protocol::tvp::encode_tvp_datetime2(intervals, days, scale, buf);
+                        tds_protocol::__private::encode_tvp_datetime2(intervals, days, scale, buf);
                     }
                 }
             }
@@ -527,7 +528,7 @@ impl<S: ConnectionState> Client<S> {
                     TvpWireType::DateTimeOffset { scale } => *scale,
                     _ => 7,
                 };
-                tds_protocol::tvp::encode_tvp_datetimeoffset(
+                tds_protocol::__private::encode_tvp_datetimeoffset(
                     intervals,
                     days,
                     offset_minutes,
