@@ -107,6 +107,45 @@ jobs:
       - name: Check public-API snapshots
         run: scripts/check-public-api.sh
 
+  public-api-windows:
+    name: Public API (Windows)
+    runs-on: windows-latest
+    # The Linux public-api job runs --all-features, which physically cannot see
+    # cfg(windows)/Windows-feature public items (FILESTREAM, the Windows
+    # certificate store CMK provider, SSPI auth) — so a breaking change to those
+    # signatures would sail past the freeze gate (#283). This leg freezes them
+    # against public-api/<crate>.windows.txt. These baselines cannot be
+    # regenerated on a contributor's Linux box (aws-lc-sys/openssl-sys do not
+    # cross-compile to Windows), so this job uploads the freshly generated
+    # snapshots as an artifact: to update the frozen surface, download it and
+    # commit the files. The git-diff step is the gate.
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-12-09
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install cargo-public-api
+        run: cargo install cargo-public-api --version 0.52.0 --locked
+      - name: Generate Windows public-API snapshots
+        shell: bash
+        run: scripts/check-public-api.sh update
+      - name: Upload generated snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-api-windows-snapshots
+          path: public-api/*.windows.txt
+      - name: Check against committed snapshots
+        shell: bash
+        # `git add -N` makes not-yet-committed snapshots visible to `git diff`
+        # so the gate also fails closed during bootstrap (missing baseline).
+        run: |
+          git add -N public-api/*.windows.txt
+          git diff --exit-code -- public-api/*.windows.txt
+
   deny:
     name: Dependency Audit
     runs-on: ubuntu-latest

@@ -238,6 +238,12 @@ Stability is enforced through:
 2. **CI on all Tier 1 platforms** - Every PR tested
 3. **cargo-deny** - Dependency auditing
 4. **cargo-semver-checks** - Automated semver verification in CI
+5. **Public-API snapshots** - `scripts/check-public-api.sh` diffs committed
+   snapshots of every crate's public surface, catching changes
+   `cargo-semver-checks` can miss. Platform-gated API (FILESTREAM, the Windows
+   certificate store CMK provider, SSPI auth) is frozen by a dedicated Windows
+   CI leg against `public-api/<crate>.windows.txt`, since the Linux
+   `--all-features` baseline cannot see `cfg(windows)` items.
 
 ## Reporting Stability Issues
 
