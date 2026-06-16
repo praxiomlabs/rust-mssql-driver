@@ -569,7 +569,7 @@ impl BulkInsert {
     /// This follows the pattern used by Tiberius: the server's own metadata
     /// from `SELECT TOP 0` is echoed back rather than constructing it from
     /// user-specified types.
-    pub fn new_with_server_metadata(
+    pub(crate) fn new_with_server_metadata(
         mut columns: Vec<BulkColumn>,
         batch_size: usize,
         raw_colmetadata: Option<bytes::Bytes>,

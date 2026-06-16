@@ -155,11 +155,7 @@ pub use tvp::{Tvp, TvpColumn, TvpRow, TvpValue};
 pub use filestream::{FileStream, FileStreamAccess, open_options as filestream_options};
 
 // Always Encrypted types
-#[cfg(feature = "always-encrypted")]
-pub use encryption::EncryptionContext;
-pub use encryption::{
-    EncryptionConfig, ParameterCryptoInfo, ParameterEncryptionInfo, ResultSetEncryptionInfo,
-};
+pub use encryption::EncryptionConfig;
 
 // OpenTelemetry instrumentation (available whether or not otel feature is enabled)
 pub use instrumentation::{

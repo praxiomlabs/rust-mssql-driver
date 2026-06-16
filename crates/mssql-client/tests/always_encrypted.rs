@@ -131,9 +131,7 @@ fn test_encryption_type_wire_conversion() {
 // Tests for mssql-client encryption types
 // =============================================================================
 
-use mssql_client::{
-    EncryptionConfig, ParameterCryptoInfo, ParameterEncryptionInfo, ResultSetEncryptionInfo,
-};
+use mssql_client::EncryptionConfig;
 
 #[test]
 fn test_encryption_config_builder() {
@@ -142,59 +140,6 @@ fn test_encryption_config_builder() {
     assert!(config.enabled);
     assert!(!config.cache_ceks);
     assert!(!config.is_ready()); // No providers registered
-}
-
-#[test]
-fn test_result_set_encryption_info_column_tracking() {
-    let cek_table = CekTable::new();
-    let mut info = ResultSetEncryptionInfo::new(cek_table, 5);
-
-    // Initially no columns are encrypted
-    for i in 0..5 {
-        assert!(!info.is_column_encrypted(i));
-        assert!(info.get_encryption_type(i).is_none());
-    }
-
-    // Mark column 2 as encrypted
-    let metadata = CryptoMetadata {
-        cek_table_ordinal: 0,
-        base_user_type: 0,
-        base_col_type: 0x26,
-        base_type_info: tds_protocol::token::TypeInfo::default(),
-        algorithm_id: 2,
-        encryption_type: EncryptionTypeWire::Deterministic,
-        normalization_version: 1,
-    };
-    info.set_column_crypto(2, metadata);
-
-    assert!(!info.is_column_encrypted(0));
-    assert!(!info.is_column_encrypted(1));
-    assert!(info.is_column_encrypted(2));
-    assert!(!info.is_column_encrypted(3));
-    assert!(!info.is_column_encrypted(4));
-
-    assert_eq!(
-        info.get_encryption_type(2),
-        Some(EncryptionTypeWire::Deterministic)
-    );
-}
-
-#[test]
-fn test_parameter_encryption_info_tracking() {
-    let mut info = ParameterEncryptionInfo::new();
-
-    assert!(!info.needs_encryption("@SSN"));
-    assert!(!info.needs_encryption("@Name"));
-
-    let ssn_crypto = ParameterCryptoInfo::new(0, EncryptionTypeWire::Deterministic, 2, 1);
-    info.add_parameter("@SSN".to_string(), ssn_crypto);
-
-    assert!(info.needs_encryption("@SSN"));
-    assert!(!info.needs_encryption("@Name"));
-
-    let param = info.get_parameter("@SSN").unwrap();
-    assert_eq!(param.cek_ordinal, 0);
-    assert_eq!(param.encryption_type, EncryptionTypeWire::Deterministic);
 }
 
 // =============================================================================
@@ -693,91 +638,6 @@ mod live_server {
     // -------------------------------------------------------------------------
     // Tests
     // -------------------------------------------------------------------------
-
-    /// Drive `sp_describe_parameter_encryption` against a live AE table and
-    /// assert the parser surfaces the CEK and per-parameter directives the
-    /// server reports. This is step one of parameter (write) encryption: the
-    /// statement targets one deterministic INT column and one randomized
-    /// NVARCHAR column, so the server must classify `@p0` deterministic and
-    /// `@p1` randomized, both bound to the table's single CEK.
-    ///
-    /// Runs in the 2017/2019/2022 CI matrix; the parser reads only the
-    /// version-stable first nine RS1 columns, so it must pass on 2017 (which
-    /// omits the 2019+ enclave columns).
-    #[tokio::test]
-    #[ignore = "Requires SQL Server with Always Encrypted"]
-    async fn test_describe_parameter_encryption_classifies_params() {
-        use tds_protocol::crypto::EncryptionTypeWire;
-
-        let admin_cfg = match admin_config() {
-            Some(c) => c,
-            None => return,
-        };
-        let mut admin = Client::connect(admin_cfg).await.expect("admin connect");
-
-        let (rsa_key, pem) = fresh_rsa_keypair();
-        let cek = fresh_cek();
-
-        let fx = setup(
-            &mut admin,
-            &cek,
-            &rsa_key,
-            "CREATE TABLE [{TABLE}] ( \
-             Id INT NOT NULL PRIMARY KEY, \
-             EncInt INT ENCRYPTED WITH ( \
-             COLUMN_ENCRYPTION_KEY = [{CEK}], \
-             ENCRYPTION_TYPE = DETERMINISTIC, \
-             ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256' ) NULL, \
-             EncName NVARCHAR(64) COLLATE Latin1_General_BIN2 ENCRYPTED WITH ( \
-             COLUMN_ENCRYPTION_KEY = [{CEK}], \
-             ENCRYPTION_TYPE = RANDOMIZED, \
-             ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256' ) NULL )",
-        )
-        .await;
-        drop(admin);
-
-        let mut client = Client::connect(encrypted_config(&pem).expect("cfg"))
-            .await
-            .expect("ae connect");
-
-        let tsql = format!(
-            "INSERT INTO [{}] (EncInt, EncName) VALUES (@p0, @p1)",
-            fx.table_name
-        );
-        let described = client
-            .describe_parameter_encryption(&tsql, "@p0 int, @p1 nvarchar(64)")
-            .await;
-
-        // Teardown before asserting so a failure never leaks server objects.
-        let mut admin = Client::connect(admin_config().expect("cfg"))
-            .await
-            .expect("admin reconnect");
-        teardown(&mut admin, &fx).await;
-
-        let info = described.expect("describe_parameter_encryption");
-
-        // Exactly one CEK, surfaced with the provider/path/algorithm we
-        // provisioned and a non-empty wrapped-key envelope.
-        assert_eq!(info.cek_table.len(), 1, "exactly one CEK");
-        let entry = info.cek_table.get(0).expect("cek entry 0");
-        let value = entry.primary_value().expect("cek value");
-        assert_eq!(value.key_store_provider_name, PROVIDER_NAME);
-        assert_eq!(value.cmk_path, KEY_PATH);
-        assert_eq!(value.encryption_algorithm, "RSA_OAEP");
-        assert!(!value.encrypted_value.is_empty(), "wrapped-key envelope");
-
-        // @p0 -> deterministic INT, @p1 -> randomized NVARCHAR, both on CEK 0.
-        let p0 = info.get_parameter("@p0").expect("@p0 directive");
-        assert_eq!(p0.encryption_type, EncryptionTypeWire::Deterministic);
-        assert_eq!(p0.algorithm_id, 2, "AEAD_AES_256_CBC_HMAC_SHA256");
-        assert_eq!(p0.normalization_rule_version, 1);
-        assert_eq!(p0.cek_ordinal, 0, "translated to positional CEK index");
-        assert!(info.cek_table.get(p0.cek_ordinal).is_some());
-
-        let p1 = info.get_parameter("@p1").expect("@p1 directive");
-        assert_eq!(p1.encryption_type, EncryptionTypeWire::Randomized);
-        assert_eq!(p1.cek_ordinal, 0);
-    }
 
     /// Full Always Encrypted write→read round-trip: the driver encrypts
     /// deterministic INT, NVARCHAR, and VARBINARY parameters plus a randomized
