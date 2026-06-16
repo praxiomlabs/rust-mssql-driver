@@ -159,7 +159,7 @@ impl TvpWireType {
     ///
     /// The collation declared here tells the server which codepage VARCHAR
     /// cell bytes are in. It must match the encoding used for the cell data
-    /// (see [`encode_tvp_varchar_with_collation`]). `None` falls back to
+    /// (see `encode_tvp_varchar_with_collation`). `None` falls back to
     /// [`DEFAULT_COLLATION`] (Latin1_General_CI_AS / Windows-1252).
     pub fn encode_type_info_with_collation(
         &self,
@@ -419,324 +419,336 @@ impl<'a> TvpEncoder<'a> {
     }
 }
 
-/// Encode a NULL value for a TVP column.
+/// Low-level per-type TVP value encoders shared across the workspace crates.
 ///
-/// Different types use different NULL indicators.
-pub fn encode_tvp_null(wire_type: &TvpWireType, buf: &mut BytesMut) {
-    match wire_type {
-        TvpWireType::NVarChar { max_length } | TvpWireType::VarChar { max_length } => {
-            if *max_length == 0xFFFF {
-                // MAX type uses PLP NULL
+/// Internal plumbing reached cross-crate only via [`crate::__private`]; not
+/// public API and exempt from semver guarantees (see #242). The public
+/// [`TvpEncoder`]/[`TvpColumnDef`] types above are the user-facing API.
+pub(crate) mod sealed {
+    use super::*;
+
+    /// Encode a NULL value for a TVP column.
+    ///
+    /// Different types use different NULL indicators.
+    pub fn encode_tvp_null(wire_type: &TvpWireType, buf: &mut BytesMut) {
+        match wire_type {
+            TvpWireType::NVarChar { max_length } | TvpWireType::VarChar { max_length } => {
+                if *max_length == 0xFFFF {
+                    // MAX type uses PLP NULL
+                    buf.put_u64_le(0xFFFFFFFFFFFFFFFF);
+                } else {
+                    // Regular type uses 0xFFFF
+                    buf.put_u16_le(0xFFFF);
+                }
+            }
+            TvpWireType::VarBinary { max_length } => {
+                if *max_length == 0xFFFF {
+                    buf.put_u64_le(0xFFFFFFFFFFFFFFFF);
+                } else {
+                    buf.put_u16_le(0xFFFF);
+                }
+            }
+            TvpWireType::Xml => {
+                // XML uses PLP NULL
                 buf.put_u64_le(0xFFFFFFFFFFFFFFFF);
-            } else {
-                // Regular type uses 0xFFFF
-                buf.put_u16_le(0xFFFF);
+            }
+            _ => {
+                // Most types use 0 length
+                buf.put_u8(0);
             }
         }
-        TvpWireType::VarBinary { max_length } => {
-            if *max_length == 0xFFFF {
-                buf.put_u64_le(0xFFFFFFFFFFFFFFFF);
-            } else {
-                buf.put_u16_le(0xFFFF);
+    }
+
+    /// Encode a BIT value for TVP.
+    pub fn encode_tvp_bit(value: bool, buf: &mut BytesMut) {
+        buf.put_u8(1); // Length
+        buf.put_u8(if value { 1 } else { 0 });
+    }
+
+    /// Encode an integer value for TVP.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `size` is not 1, 2, 4, or 8. Callers must use sizes derived
+    /// from `TvpWireType::Int { size }` which are always valid.
+    pub fn encode_tvp_int(value: i64, size: u8, buf: &mut BytesMut) {
+        buf.put_u8(size); // Length
+        match size {
+            1 => buf.put_i8(value as i8),
+            2 => buf.put_i16_le(value as i16),
+            4 => buf.put_i32_le(value as i32),
+            8 => buf.put_i64_le(value),
+            _ => unreachable!(
+                "encode_tvp_int called with invalid size {size}; expected 1, 2, 4, or 8"
+            ),
+        }
+    }
+
+    /// Encode a float value for TVP.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `size` is not 4 or 8. Callers must use sizes derived
+    /// from `TvpWireType::Float { size }` which are always valid.
+    pub fn encode_tvp_float(value: f64, size: u8, buf: &mut BytesMut) {
+        buf.put_u8(size); // Length
+        match size {
+            4 => buf.put_f32_le(value as f32),
+            8 => buf.put_f64_le(value),
+            _ => unreachable!("encode_tvp_float called with invalid size {size}; expected 4 or 8"),
+        }
+    }
+
+    /// Encode a NVARCHAR value for TVP.
+    pub fn encode_tvp_nvarchar(value: &str, max_length: u16, buf: &mut BytesMut) {
+        let utf16: Vec<u16> = value.encode_utf16().collect();
+        let byte_len = utf16.len() * 2;
+
+        if max_length == 0xFFFF {
+            // MAX type - use PLP format
+            buf.put_u64_le(byte_len as u64); // Total length
+            buf.put_u32_le(byte_len as u32); // Chunk length
+            for code_unit in utf16 {
+                buf.put_u16_le(code_unit);
+            }
+            buf.put_u32_le(0); // Terminator
+        } else {
+            // Regular type
+            buf.put_u16_le(byte_len as u16);
+            for code_unit in utf16 {
+                buf.put_u16_le(code_unit);
             }
         }
-        TvpWireType::Xml => {
-            // XML uses PLP NULL
-            buf.put_u64_le(0xFFFFFFFFFFFFFFFF);
-        }
-        _ => {
-            // Most types use 0 length
-            buf.put_u8(0);
-        }
     }
-}
 
-/// Encode a BIT value for TVP.
-pub fn encode_tvp_bit(value: bool, buf: &mut BytesMut) {
-    buf.put_u8(1); // Length
-    buf.put_u8(if value { 1 } else { 0 });
-}
-
-/// Encode an integer value for TVP.
-///
-/// # Panics
-///
-/// Panics if `size` is not 1, 2, 4, or 8. Callers must use sizes derived
-/// from `TvpWireType::Int { size }` which are always valid.
-pub fn encode_tvp_int(value: i64, size: u8, buf: &mut BytesMut) {
-    buf.put_u8(size); // Length
-    match size {
-        1 => buf.put_i8(value as i8),
-        2 => buf.put_i16_le(value as i16),
-        4 => buf.put_i32_le(value as i32),
-        8 => buf.put_i64_le(value),
-        _ => unreachable!("encode_tvp_int called with invalid size {size}; expected 1, 2, 4, or 8"),
+    /// Encode a VARCHAR value for TVP using single-byte codepage encoding.
+    ///
+    /// SQL Server stores VARCHAR data as single-byte characters using the column collation
+    /// code page. Passing UTF-16 bytes (as NVARCHAR) into a VARCHAR column corrupts every
+    /// character: "abc" would be stored as "a\0b\0c\0".
+    ///
+    /// Encodes using Windows-1252 (Latin1_General_CI_AS), matching [`DEFAULT_COLLATION`]
+    /// declared in TVP column metadata. Use
+    /// [`encode_tvp_varchar_with_collation`] to encode for the server's actual
+    /// collation.
+    pub fn encode_tvp_varchar(value: &str, max_length: u16, buf: &mut BytesMut) {
+        encode_tvp_varchar_with_collation(value, max_length, None, buf);
     }
-}
 
-/// Encode a float value for TVP.
-///
-/// # Panics
-///
-/// Panics if `size` is not 4 or 8. Callers must use sizes derived
-/// from `TvpWireType::Float { size }` which are always valid.
-pub fn encode_tvp_float(value: f64, size: u8, buf: &mut BytesMut) {
-    buf.put_u8(size); // Length
-    match size {
-        4 => buf.put_f32_le(value as f32),
-        8 => buf.put_f64_le(value),
-        _ => unreachable!("encode_tvp_float called with invalid size {size}; expected 4 or 8"),
-    }
-}
+    /// Encode a VARCHAR value for TVP using the codepage of `collation`.
+    ///
+    /// The collation must match the one declared in the TVP column metadata
+    /// (see [`TvpWireType::encode_type_info_with_collation`]) so the server
+    /// interprets the cell bytes in the codepage they were encoded with.
+    /// Characters not representable in the codepage are replaced with `?`.
+    pub fn encode_tvp_varchar_with_collation(
+        value: &str,
+        max_length: u16,
+        collation: Option<&crate::token::Collation>,
+        buf: &mut BytesMut,
+    ) {
+        let encoded = crate::collation::encode_str_for_collation(value, collation);
+        let byte_len = encoded.len();
 
-/// Encode a NVARCHAR value for TVP.
-pub fn encode_tvp_nvarchar(value: &str, max_length: u16, buf: &mut BytesMut) {
-    let utf16: Vec<u16> = value.encode_utf16().collect();
-    let byte_len = utf16.len() * 2;
-
-    if max_length == 0xFFFF {
-        // MAX type - use PLP format
-        buf.put_u64_le(byte_len as u64); // Total length
-        buf.put_u32_le(byte_len as u32); // Chunk length
-        for code_unit in utf16 {
-            buf.put_u16_le(code_unit);
-        }
-        buf.put_u32_le(0); // Terminator
-    } else {
-        // Regular type
-        buf.put_u16_le(byte_len as u16);
-        for code_unit in utf16 {
-            buf.put_u16_le(code_unit);
+        if max_length == 0xFFFF {
+            // MAX type - use PLP format
+            buf.put_u64_le(byte_len as u64); // Total length
+            buf.put_u32_le(byte_len as u32); // Chunk length
+            buf.put_slice(&encoded);
+            buf.put_u32_le(0); // Terminator
+        } else {
+            // Regular type
+            buf.put_u16_le(byte_len as u16);
+            buf.put_slice(&encoded);
         }
     }
-}
 
-/// Encode a VARCHAR value for TVP using single-byte codepage encoding.
-///
-/// SQL Server stores VARCHAR data as single-byte characters using the column collation
-/// code page. Passing UTF-16 bytes (as NVARCHAR) into a VARCHAR column corrupts every
-/// character: "abc" would be stored as "a\0b\0c\0".
-///
-/// Encodes using Windows-1252 (Latin1_General_CI_AS), matching [`DEFAULT_COLLATION`]
-/// declared in TVP column metadata. Use
-/// [`encode_tvp_varchar_with_collation`] to encode for the server's actual
-/// collation.
-pub fn encode_tvp_varchar(value: &str, max_length: u16, buf: &mut BytesMut) {
-    encode_tvp_varchar_with_collation(value, max_length, None, buf);
-}
-
-/// Encode a VARCHAR value for TVP using the codepage of `collation`.
-///
-/// The collation must match the one declared in the TVP column metadata
-/// (see [`TvpWireType::encode_type_info_with_collation`]) so the server
-/// interprets the cell bytes in the codepage they were encoded with.
-/// Characters not representable in the codepage are replaced with `?`.
-pub fn encode_tvp_varchar_with_collation(
-    value: &str,
-    max_length: u16,
-    collation: Option<&crate::token::Collation>,
-    buf: &mut BytesMut,
-) {
-    let encoded = crate::collation::encode_str_for_collation(value, collation);
-    let byte_len = encoded.len();
-
-    if max_length == 0xFFFF {
-        // MAX type - use PLP format
-        buf.put_u64_le(byte_len as u64); // Total length
-        buf.put_u32_le(byte_len as u32); // Chunk length
-        buf.put_slice(&encoded);
-        buf.put_u32_le(0); // Terminator
-    } else {
-        // Regular type
-        buf.put_u16_le(byte_len as u16);
-        buf.put_slice(&encoded);
-    }
-}
-
-/// Encode a VARBINARY value for TVP.
-pub fn encode_tvp_varbinary(value: &[u8], max_length: u16, buf: &mut BytesMut) {
-    if max_length == 0xFFFF {
-        // MAX type - use PLP format
-        buf.put_u64_le(value.len() as u64);
-        buf.put_u32_le(value.len() as u32);
-        buf.put_slice(value);
-        buf.put_u32_le(0); // Terminator
-    } else {
-        buf.put_u16_le(value.len() as u16);
-        buf.put_slice(value);
-    }
-}
-
-/// Encode a UNIQUEIDENTIFIER value for TVP.
-///
-/// SQL Server uses mixed-endian format for UUIDs.
-pub fn encode_tvp_guid(uuid_bytes: &[u8; 16], buf: &mut BytesMut) {
-    buf.put_u8(16); // Length
-
-    // Mixed-endian: first 3 groups little-endian, last 2 groups big-endian
-    buf.put_u8(uuid_bytes[3]);
-    buf.put_u8(uuid_bytes[2]);
-    buf.put_u8(uuid_bytes[1]);
-    buf.put_u8(uuid_bytes[0]);
-
-    buf.put_u8(uuid_bytes[5]);
-    buf.put_u8(uuid_bytes[4]);
-
-    buf.put_u8(uuid_bytes[7]);
-    buf.put_u8(uuid_bytes[6]);
-
-    buf.put_slice(&uuid_bytes[8..16]);
-}
-
-/// Encode a DATE value for TVP (days since 0001-01-01).
-pub fn encode_tvp_date(days: u32, buf: &mut BytesMut) {
-    // DATE is 3 bytes
-    buf.put_u8((days & 0xFF) as u8);
-    buf.put_u8(((days >> 8) & 0xFF) as u8);
-    buf.put_u8(((days >> 16) & 0xFF) as u8);
-}
-
-/// Encode a TIME value for TVP.
-///
-/// Time is encoded as 100-nanosecond intervals since midnight.
-pub fn encode_tvp_time(intervals: u64, scale: u8, buf: &mut BytesMut) {
-    // Length depends on scale
-    let len = match scale {
-        0..=2 => 3,
-        3..=4 => 4,
-        5..=7 => 5,
-        _ => 5,
-    };
-    buf.put_u8(len);
-
-    for i in 0..len {
-        buf.put_u8((intervals >> (8 * i)) as u8);
-    }
-}
-
-/// Encode a DATETIME2 value for TVP.
-///
-/// DATETIME2 is TIME followed by DATE.
-pub fn encode_tvp_datetime2(time_intervals: u64, days: u32, scale: u8, buf: &mut BytesMut) {
-    // Length depends on scale (time bytes + 3 date bytes)
-    let time_len = match scale {
-        0..=2 => 3,
-        3..=4 => 4,
-        5..=7 => 5,
-        _ => 5,
-    };
-    buf.put_u8(time_len + 3);
-
-    // Time component
-    for i in 0..time_len {
-        buf.put_u8((time_intervals >> (8 * i)) as u8);
+    /// Encode a VARBINARY value for TVP.
+    pub fn encode_tvp_varbinary(value: &[u8], max_length: u16, buf: &mut BytesMut) {
+        if max_length == 0xFFFF {
+            // MAX type - use PLP format
+            buf.put_u64_le(value.len() as u64);
+            buf.put_u32_le(value.len() as u32);
+            buf.put_slice(value);
+            buf.put_u32_le(0); // Terminator
+        } else {
+            buf.put_u16_le(value.len() as u16);
+            buf.put_slice(value);
+        }
     }
 
-    // Date component
-    buf.put_u8((days & 0xFF) as u8);
-    buf.put_u8(((days >> 8) & 0xFF) as u8);
-    buf.put_u8(((days >> 16) & 0xFF) as u8);
-}
+    /// Encode a UNIQUEIDENTIFIER value for TVP.
+    ///
+    /// SQL Server uses mixed-endian format for UUIDs.
+    pub fn encode_tvp_guid(uuid_bytes: &[u8; 16], buf: &mut BytesMut) {
+        buf.put_u8(16); // Length
 
-/// Encode a DATETIMEOFFSET value for TVP.
-///
-/// DATETIMEOFFSET is TIME followed by DATE followed by timezone offset.
-///
-/// # Arguments
-///
-/// * `time_intervals` - Time in 100-nanosecond intervals since midnight
-/// * `days` - Days since year 1 (0001-01-01)
-/// * `offset_minutes` - Timezone offset in minutes (e.g., -480 for UTC-8, 330 for UTC+5:30)
-/// * `scale` - Fractional seconds precision (0-7)
-pub fn encode_tvp_datetimeoffset(
-    time_intervals: u64,
-    days: u32,
-    offset_minutes: i16,
-    scale: u8,
-    buf: &mut BytesMut,
-) {
-    // Length depends on scale (time bytes + 3 date bytes + 2 offset bytes)
-    let time_len = match scale {
-        0..=2 => 3,
-        3..=4 => 4,
-        5..=7 => 5,
-        _ => 5,
-    };
-    buf.put_u8(time_len + 3 + 2); // time + date + offset
+        // Mixed-endian: first 3 groups little-endian, last 2 groups big-endian
+        buf.put_u8(uuid_bytes[3]);
+        buf.put_u8(uuid_bytes[2]);
+        buf.put_u8(uuid_bytes[1]);
+        buf.put_u8(uuid_bytes[0]);
 
-    // Time component
-    for i in 0..time_len {
-        buf.put_u8((time_intervals >> (8 * i)) as u8);
+        buf.put_u8(uuid_bytes[5]);
+        buf.put_u8(uuid_bytes[4]);
+
+        buf.put_u8(uuid_bytes[7]);
+        buf.put_u8(uuid_bytes[6]);
+
+        buf.put_slice(&uuid_bytes[8..16]);
     }
 
-    // Date component
-    buf.put_u8((days & 0xFF) as u8);
-    buf.put_u8(((days >> 8) & 0xFF) as u8);
-    buf.put_u8(((days >> 16) & 0xFF) as u8);
+    /// Encode a DATE value for TVP (days since 0001-01-01).
+    pub fn encode_tvp_date(days: u32, buf: &mut BytesMut) {
+        // DATE is 3 bytes
+        buf.put_u8((days & 0xFF) as u8);
+        buf.put_u8(((days >> 8) & 0xFF) as u8);
+        buf.put_u8(((days >> 16) & 0xFF) as u8);
+    }
 
-    // Timezone offset in minutes (signed 16-bit little-endian)
-    buf.put_i16_le(offset_minutes);
-}
+    /// Encode a TIME value for TVP.
+    ///
+    /// Time is encoded as 100-nanosecond intervals since midnight.
+    pub fn encode_tvp_time(intervals: u64, scale: u8, buf: &mut BytesMut) {
+        // Length depends on scale
+        let len = match scale {
+            0..=2 => 3,
+            3..=4 => 4,
+            5..=7 => 5,
+            _ => 5,
+        };
+        buf.put_u8(len);
 
-/// Encode a DECIMAL value for TVP.
-///
-/// # Arguments
-///
-/// * `sign` - 0 for negative, 1 for positive
-/// * `mantissa` - The absolute value as a 128-bit integer
-pub fn encode_tvp_decimal(sign: u8, mantissa: u128, buf: &mut BytesMut) {
-    buf.put_u8(17); // Length: 1 byte sign + 16 bytes mantissa
-    buf.put_u8(sign);
-    buf.put_u128_le(mantissa);
-}
+        for i in 0..len {
+            buf.put_u8((intervals >> (8 * i)) as u8);
+        }
+    }
 
-/// Encode a MONEY value for TVP (8 bytes).
-///
-/// The MONEY wire format is a 64-bit signed integer scaled by 10_000, written
-/// as the high 32 bits little-endian followed by the low 32 bits little-endian
-/// (MS-TDS §2.2.5.5.1.2). `scaled` is the already-scaled cents value — callers
-/// that hold a `Decimal` should multiply by 10_000 and truncate to `i64` before
-/// calling this (see `mssql_types::encode::encode_money`).
-pub fn encode_tvp_money(scaled: i64, buf: &mut BytesMut) {
-    buf.put_u8(8); // Length
-    let high = (scaled >> 32) as i32;
-    let low = (scaled & 0xFFFF_FFFF) as u32;
-    buf.put_i32_le(high);
-    buf.put_u32_le(low);
-}
+    /// Encode a DATETIME2 value for TVP.
+    ///
+    /// DATETIME2 is TIME followed by DATE.
+    pub fn encode_tvp_datetime2(time_intervals: u64, days: u32, scale: u8, buf: &mut BytesMut) {
+        // Length depends on scale (time bytes + 3 date bytes)
+        let time_len = match scale {
+            0..=2 => 3,
+            3..=4 => 4,
+            5..=7 => 5,
+            _ => 5,
+        };
+        buf.put_u8(time_len + 3);
 
-/// Encode a SMALLMONEY value for TVP (4 bytes).
-///
-/// `scaled` is the 32-bit signed integer scaled by 10_000, written
-/// little-endian.
-pub fn encode_tvp_smallmoney(scaled: i32, buf: &mut BytesMut) {
-    buf.put_u8(4); // Length
-    buf.put_i32_le(scaled);
-}
+        // Time component
+        for i in 0..time_len {
+            buf.put_u8((time_intervals >> (8 * i)) as u8);
+        }
 
-/// Encode a legacy DATETIME value for TVP (8 bytes).
-///
-/// DATETIME wire format: days since 1900-01-01 (i32 LE) + time units since
-/// midnight (u32 LE) where each unit is 1/300 of a second.
-pub fn encode_tvp_datetime(days: i32, ticks: u32, buf: &mut BytesMut) {
-    buf.put_u8(8); // Length
-    buf.put_i32_le(days);
-    buf.put_u32_le(ticks);
-}
+        // Date component
+        buf.put_u8((days & 0xFF) as u8);
+        buf.put_u8(((days >> 8) & 0xFF) as u8);
+        buf.put_u8(((days >> 16) & 0xFF) as u8);
+    }
 
-/// Encode a SMALLDATETIME value for TVP (4 bytes).
-///
-/// SMALLDATETIME wire format: days since 1900-01-01 (u16 LE) + minutes since
-/// midnight (u16 LE). Sub-minute precision is discarded by the caller.
-pub fn encode_tvp_smalldatetime(days: u16, minutes: u16, buf: &mut BytesMut) {
-    buf.put_u8(4); // Length
-    buf.put_u16_le(days);
-    buf.put_u16_le(minutes);
+    /// Encode a DATETIMEOFFSET value for TVP.
+    ///
+    /// DATETIMEOFFSET is TIME followed by DATE followed by timezone offset.
+    ///
+    /// # Arguments
+    ///
+    /// * `time_intervals` - Time in 100-nanosecond intervals since midnight
+    /// * `days` - Days since year 1 (0001-01-01)
+    /// * `offset_minutes` - Timezone offset in minutes (e.g., -480 for UTC-8, 330 for UTC+5:30)
+    /// * `scale` - Fractional seconds precision (0-7)
+    pub fn encode_tvp_datetimeoffset(
+        time_intervals: u64,
+        days: u32,
+        offset_minutes: i16,
+        scale: u8,
+        buf: &mut BytesMut,
+    ) {
+        // Length depends on scale (time bytes + 3 date bytes + 2 offset bytes)
+        let time_len = match scale {
+            0..=2 => 3,
+            3..=4 => 4,
+            5..=7 => 5,
+            _ => 5,
+        };
+        buf.put_u8(time_len + 3 + 2); // time + date + offset
+
+        // Time component
+        for i in 0..time_len {
+            buf.put_u8((time_intervals >> (8 * i)) as u8);
+        }
+
+        // Date component
+        buf.put_u8((days & 0xFF) as u8);
+        buf.put_u8(((days >> 8) & 0xFF) as u8);
+        buf.put_u8(((days >> 16) & 0xFF) as u8);
+
+        // Timezone offset in minutes (signed 16-bit little-endian)
+        buf.put_i16_le(offset_minutes);
+    }
+
+    /// Encode a DECIMAL value for TVP.
+    ///
+    /// # Arguments
+    ///
+    /// * `sign` - 0 for negative, 1 for positive
+    /// * `mantissa` - The absolute value as a 128-bit integer
+    pub fn encode_tvp_decimal(sign: u8, mantissa: u128, buf: &mut BytesMut) {
+        buf.put_u8(17); // Length: 1 byte sign + 16 bytes mantissa
+        buf.put_u8(sign);
+        buf.put_u128_le(mantissa);
+    }
+
+    /// Encode a MONEY value for TVP (8 bytes).
+    ///
+    /// The MONEY wire format is a 64-bit signed integer scaled by 10_000, written
+    /// as the high 32 bits little-endian followed by the low 32 bits little-endian
+    /// (MS-TDS §2.2.5.5.1.2). `scaled` is the already-scaled cents value — callers
+    /// that hold a `Decimal` should multiply by 10_000 and truncate to `i64` before
+    /// calling this (see `mssql_types::encode::encode_money`).
+    pub fn encode_tvp_money(scaled: i64, buf: &mut BytesMut) {
+        buf.put_u8(8); // Length
+        let high = (scaled >> 32) as i32;
+        let low = (scaled & 0xFFFF_FFFF) as u32;
+        buf.put_i32_le(high);
+        buf.put_u32_le(low);
+    }
+
+    /// Encode a SMALLMONEY value for TVP (4 bytes).
+    ///
+    /// `scaled` is the 32-bit signed integer scaled by 10_000, written
+    /// little-endian.
+    pub fn encode_tvp_smallmoney(scaled: i32, buf: &mut BytesMut) {
+        buf.put_u8(4); // Length
+        buf.put_i32_le(scaled);
+    }
+
+    /// Encode a legacy DATETIME value for TVP (8 bytes).
+    ///
+    /// DATETIME wire format: days since 1900-01-01 (i32 LE) + time units since
+    /// midnight (u32 LE) where each unit is 1/300 of a second.
+    pub fn encode_tvp_datetime(days: i32, ticks: u32, buf: &mut BytesMut) {
+        buf.put_u8(8); // Length
+        buf.put_i32_le(days);
+        buf.put_u32_le(ticks);
+    }
+
+    /// Encode a SMALLDATETIME value for TVP (4 bytes).
+    ///
+    /// SMALLDATETIME wire format: days since 1900-01-01 (u16 LE) + minutes since
+    /// midnight (u16 LE). Sub-minute precision is discarded by the caller.
+    pub fn encode_tvp_smalldatetime(days: u16, minutes: u16, buf: &mut BytesMut) {
+        buf.put_u8(4); // Length
+        buf.put_u16_le(days);
+        buf.put_u16_le(minutes);
+    }
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
+    use super::sealed::*;
     use super::*;
 
     #[test]

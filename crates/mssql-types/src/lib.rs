@@ -42,7 +42,7 @@ pub mod to_sql;
 pub mod tvp;
 pub mod value;
 
-pub use decode::{Collation, TdsDecode, TypeInfo, decode_utf16_string, decode_value};
+pub use decode::{Collation, TdsDecode, TypeInfo, decode_utf16_string};
 pub use encode::{TdsEncode, encode_utf16_string};
 pub use error::TypeError;
 pub use from_sql::FromSql;
@@ -56,6 +56,20 @@ pub use to_sql::{
 #[cfg(feature = "decimal")]
 pub use to_sql::{Numeric, numeric};
 pub use tvp::{TvpColumnDef, TvpColumnType, TvpData, TvpError};
+
+/// Internal wire-codec helpers shared across the workspace crates.
+///
+/// **Not public API.** These are low-level TDS encoders/decoders consumed
+/// cross-crate by the rest of the driver; they are exempt from this crate's
+/// semver guarantees and must not be used from outside the workspace. See #242.
+#[doc(hidden)]
+#[allow(unused_imports)] // `encode::sealed` is empty under --no-default-features
+pub mod __private {
+    // Glob re-exports so the set tracks the `#[cfg(feature = ...)]` gating on the
+    // underlying encoders (uuid / decimal / chrono) without duplicating it here.
+    pub use crate::decode::sealed::*;
+    pub use crate::encode::sealed::*;
+}
 #[cfg(feature = "chrono")]
 pub use value::SmallDateTime;
 pub use value::SqlValue;

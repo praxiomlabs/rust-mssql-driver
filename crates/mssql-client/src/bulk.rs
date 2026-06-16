@@ -1000,13 +1000,13 @@ impl BulkInsert {
             SqlValue::Uuid(u) => {
                 buf.put_u8(16); // Length
                 // Use mssql_types encode function
-                mssql_types::encode::encode_uuid(*u, buf);
+                mssql_types::__private::encode_uuid(*u, buf);
             }
 
             #[cfg(feature = "chrono")]
             SqlValue::Date(d) => {
                 buf.put_u8(3); // Length
-                mssql_types::encode::encode_date(*d, buf)?;
+                mssql_types::__private::encode_date(*d, buf)?;
             }
 
             #[cfg(feature = "chrono")]
@@ -1030,8 +1030,8 @@ impl BulkInsert {
                         buf.put_u8(total_len);
                     }
                     match total_len {
-                        8 => mssql_types::encode::encode_datetime_legacy(*dt, buf),
-                        4 => mssql_types::encode::encode_smalldatetime(*dt, buf)?,
+                        8 => mssql_types::__private::encode_datetime_legacy(*dt, buf),
+                        4 => mssql_types::__private::encode_smalldatetime(*dt, buf)?,
                         _ => {
                             return Err(TypeError::InvalidDateTime(format!(
                                 "DATETIMEN max_length must be 4 or 8, got {total_len}"
@@ -1045,7 +1045,7 @@ impl BulkInsert {
                     buf.put_u8(total_len);
                     // Encode time then date
                     encode_time_with_scale(dt.time(), scale, buf);
-                    mssql_types::encode::encode_date(dt.date(), buf)?;
+                    mssql_types::__private::encode_date(dt.date(), buf)?;
                 }
             }
             #[cfg(feature = "chrono")]
@@ -1055,7 +1055,7 @@ impl BulkInsert {
                 if !is_fixed {
                     buf.put_u8(4);
                 }
-                mssql_types::encode::encode_smalldatetime(*dt, buf)?;
+                mssql_types::__private::encode_smalldatetime(*dt, buf)?;
             }
             #[cfg(feature = "decimal")]
             SqlValue::Money(d) => {
@@ -1063,14 +1063,14 @@ impl BulkInsert {
                 if !is_fixed {
                     buf.put_u8(8);
                 }
-                mssql_types::encode::encode_money(*d, buf)?;
+                mssql_types::__private::encode_money(*d, buf)?;
             }
             #[cfg(feature = "decimal")]
             SqlValue::SmallMoney(d) => {
                 if !is_fixed {
                     buf.put_u8(4);
                 }
-                mssql_types::encode::encode_smallmoney(*d, buf)?;
+                mssql_types::__private::encode_smallmoney(*d, buf)?;
             }
 
             #[cfg(feature = "chrono")]
@@ -1083,7 +1083,7 @@ impl BulkInsert {
                 // not the local wall-clock.
                 let utc = dto.naive_utc();
                 encode_time_with_scale(utc.time(), scale, buf);
-                mssql_types::encode::encode_date(utc.date(), buf)?;
+                mssql_types::__private::encode_date(utc.date(), buf)?;
                 // Timezone offset in minutes
                 use chrono::Offset;
                 let offset_minutes = (dto.offset().fix().local_minus_utc() / 60) as i16;
@@ -1137,8 +1137,8 @@ fn encode_money_value(
         buf.put_u8(money_bytes);
     }
     match money_bytes {
-        4 => mssql_types::encode::encode_smallmoney(value, buf),
-        8 => mssql_types::encode::encode_money(value, buf),
+        4 => mssql_types::__private::encode_smallmoney(value, buf),
+        8 => mssql_types::__private::encode_money(value, buf),
         _ => Err(TypeError::InvalidDecimal(format!(
             "MONEY column has invalid max_length: {money_bytes}"
         ))),
@@ -1212,10 +1212,10 @@ fn encode_plp_binary(data: &[u8], buf: &mut BytesMut) {
 
 /// Encode a Rust string into single-byte VARCHAR bytes using the column's collation.
 ///
-/// Delegates to [`tds_protocol::collation::encode_str_for_collation`] so the
+/// Delegates to [`tds_protocol::__private::encode_str_for_collation`] so the
 /// RPC parameter path and the bulk insert path share one implementation.
 fn encode_varchar_for_collation(value: &str, collation: Option<&Collation>) -> Vec<u8> {
-    tds_protocol::collation::encode_str_for_collation(value, collation)
+    tds_protocol::__private::encode_str_for_collation(value, collation)
 }
 
 /// Encode time with specific scale (for bulk copy).

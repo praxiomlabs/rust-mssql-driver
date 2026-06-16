@@ -120,7 +120,7 @@ pub use packet::{
 };
 pub use prelogin::{EncryptionLevel, PreLogin, PreLoginOption};
 pub use rpc::{ParamFlags, ProcId, RpcOptionFlags, RpcParam, RpcRequest, TypeInfo as RpcTypeInfo};
-pub use sql_batch::{SqlBatch, encode_sql_batch, encode_sql_batch_with_transaction};
+pub use sql_batch::SqlBatch;
 pub use token::{
     ColMetaData, Collation, ColumnData, Done, DoneInProc, DoneProc, DoneStatus, EnvChange,
     EnvChangeType, EnvChangeValue, FeatureExtAck, FedAuthInfo, LoginAck, NbcRow, Order, RawRow,
@@ -129,13 +129,24 @@ pub use token::{
 };
 pub use tvp::{
     TVP_END_TOKEN, TVP_ROW_TOKEN, TVP_TYPE_ID, TvpColumnDef as TvpWireColumnDef, TvpColumnFlags,
-    TvpEncoder, TvpWireType, encode_tvp_bit, encode_tvp_date, encode_tvp_datetime2,
-    encode_tvp_datetimeoffset, encode_tvp_decimal, encode_tvp_float, encode_tvp_guid,
-    encode_tvp_int, encode_tvp_null, encode_tvp_nvarchar, encode_tvp_time, encode_tvp_varbinary,
-    encode_tvp_varchar, encode_tvp_varchar_with_collation,
+    TvpEncoder, TvpWireType,
 };
 pub use types::{ColumnFlags, TypeId, Updateable};
 pub use version::{SqlServerVersion, TdsVersion};
+
+/// Internal wire-codec helpers shared across the workspace crates.
+///
+/// **Not public API.** These are low-level TDS encoders consumed cross-crate by
+/// the rest of the driver; they are exempt from this crate's semver guarantees
+/// and must not be used from outside the workspace. See #242.
+#[doc(hidden)]
+pub mod __private {
+    // Glob re-exports so the set tracks any `#[cfg(feature = ...)]` gating on the
+    // underlying encoders without duplicating it here.
+    pub use crate::collation::sealed::*;
+    pub use crate::sql_batch::sealed::*;
+    pub use crate::tvp::sealed::*;
+}
 
 // Always Encrypted metadata types
 pub use crypto::{

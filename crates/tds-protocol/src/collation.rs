@@ -405,40 +405,52 @@ fn encode_lossy_question_mark(value: &str, encoding: &'static encoding_rs::Encod
     out
 }
 
-/// Transcode a Rust `&str` into single-byte VARCHAR bytes for the given collation.
+/// Low-level collation-aware string encoder shared across the workspace crates.
 ///
-/// - UTF-8 collations (SQL Server 2019+) pass through as raw UTF-8 bytes.
-/// - Known non-UTF-8 LCIDs transcode via the matching `encoding_rs` codec.
-/// - Unknown or `None` collations fall back to Windows-1252 (Latin1_General_CI_AS).
-///
-/// Characters not representable in the target codepage are replaced with `?`,
-/// matching SQL Server's own conversion behavior and the other first-party
-/// drivers. (Regardless of whether the `encoding` feature is enabled.)
-pub fn encode_str_for_collation(
-    value: &str,
-    collation: Option<&crate::token::Collation>,
-) -> Vec<u8> {
-    #[cfg(feature = "encoding")]
-    {
-        if let Some(c) = collation {
-            if c.is_utf8() {
-                return value.as_bytes().to_vec();
+/// Internal plumbing reached cross-crate only via [`crate::__private`]; not
+/// public API and exempt from semver guarantees (see #242).
+pub(crate) mod sealed {
+    use super::*;
+
+    /// Transcode a Rust `&str` into single-byte VARCHAR bytes for the given collation.
+    ///
+    /// - UTF-8 collations (SQL Server 2019+) pass through as raw UTF-8 bytes.
+    /// - Known non-UTF-8 LCIDs transcode via the matching `encoding_rs` codec.
+    /// - Unknown or `None` collations fall back to Windows-1252 (Latin1_General_CI_AS).
+    ///
+    /// Characters not representable in the target codepage are replaced with `?`,
+    /// matching SQL Server's own conversion behavior and the other first-party
+    /// drivers. (Regardless of whether the `encoding` feature is enabled.)
+    pub fn encode_str_for_collation(
+        value: &str,
+        collation: Option<&crate::token::Collation>,
+    ) -> Vec<u8> {
+        #[cfg(feature = "encoding")]
+        {
+            if let Some(c) = collation {
+                if c.is_utf8() {
+                    return value.as_bytes().to_vec();
+                }
+                if let Some(encoding) = c.encoding() {
+                    return encode_lossy_question_mark(value, encoding);
+                }
             }
-            if let Some(encoding) = c.encoding() {
-                return encode_lossy_question_mark(value, encoding);
-            }
+            encode_lossy_question_mark(value, encoding_rs::WINDOWS_1252)
         }
-        encode_lossy_question_mark(value, encoding_rs::WINDOWS_1252)
-    }
-    #[cfg(not(feature = "encoding"))]
-    {
-        let _ = collation;
-        value
-            .chars()
-            .map(|ch| if (ch as u32) <= 0xFF { ch as u8 } else { b'?' })
-            .collect()
+        #[cfg(not(feature = "encoding"))]
+        {
+            let _ = collation;
+            value
+                .chars()
+                .map(|ch| if (ch as u32) <= 0xFF { ch as u8 } else { b'?' })
+                .collect()
+        }
     }
 }
+
+// Keep the crate-private path `crate::collation::encode_str_for_collation`
+// working for intra-crate callers (rpc, tvp); off the public surface.
+pub(crate) use sealed::encode_str_for_collation;
 
 #[cfg(all(test, feature = "encoding"))]
 #[allow(clippy::unwrap_used)]

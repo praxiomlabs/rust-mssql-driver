@@ -629,7 +629,7 @@ pub fn normalize_for_encryption(
             }
             (Some(E::DateTime), SqlValue::DateTime(dt)) => {
                 let mut buf = bytes::BytesMut::with_capacity(8);
-                mssql_types::encode::encode_datetime_legacy(*dt, &mut buf);
+                mssql_types::__private::encode_datetime_legacy(*dt, &mut buf);
                 return Ok(buf.to_vec());
             }
             _ => {}
@@ -692,7 +692,7 @@ pub fn normalize_for_encryption(
         #[cfg(feature = "chrono")]
         SqlValue::SmallDateTime(dt) => {
             let mut buf = bytes::BytesMut::with_capacity(4);
-            mssql_types::encode::encode_smalldatetime(*dt, &mut buf).map_err(|e| {
+            mssql_types::__private::encode_smalldatetime(*dt, &mut buf).map_err(|e| {
                 EncryptionError::UnsupportedOperation(format!("SMALLDATETIME: {e}"))
             })?;
             Ok(buf.to_vec())

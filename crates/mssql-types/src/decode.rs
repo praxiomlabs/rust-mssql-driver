@@ -195,52 +195,61 @@ impl TypeInfo {
     }
 }
 
-/// Decode a SQL value based on type information.
-pub fn decode_value(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, TypeError> {
-    match type_info.type_id {
-        // Fixed-length types
-        0x1F => Ok(SqlValue::Null),   // NULLTYPE
-        0x32 => decode_bit(buf),      // BITTYPE
-        0x30 => decode_tinyint(buf),  // INT1TYPE
-        0x34 => decode_smallint(buf), // INT2TYPE
-        0x38 => decode_int(buf),      // INT4TYPE
-        0x7F => decode_bigint(buf),   // INT8TYPE
-        0x3B => decode_float(buf),    // FLT4TYPE
-        0x3E => decode_double(buf),   // FLT8TYPE
+/// Low-level TDS value decoder shared across the workspace crates.
+///
+/// Internal plumbing reached cross-crate only via [`crate::__private`]; not
+/// public API and exempt from semver guarantees (see #242). The per-type
+/// helpers it dispatches to remain module-private below.
+pub(crate) mod sealed {
+    use super::*;
 
-        // Nullable integer types (INTNTYPE)
-        0x26 => decode_intn(buf, type_info),
+    /// Decode a SQL value based on type information.
+    pub fn decode_value(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, TypeError> {
+        match type_info.type_id {
+            // Fixed-length types
+            0x1F => Ok(SqlValue::Null),   // NULLTYPE
+            0x32 => decode_bit(buf),      // BITTYPE
+            0x30 => decode_tinyint(buf),  // INT1TYPE
+            0x34 => decode_smallint(buf), // INT2TYPE
+            0x38 => decode_int(buf),      // INT4TYPE
+            0x7F => decode_bigint(buf),   // INT8TYPE
+            0x3B => decode_float(buf),    // FLT4TYPE
+            0x3E => decode_double(buf),   // FLT8TYPE
 
-        // Variable-length string types
-        0xE7 => decode_nvarchar(buf, type_info), // NVARCHARTYPE
-        0xAF => decode_varchar(buf, type_info),  // BIGCHARTYPE
-        0xA7 => decode_varchar(buf, type_info),  // BIGVARCHARTYPE
+            // Nullable integer types (INTNTYPE)
+            0x26 => decode_intn(buf, type_info),
 
-        // Binary types
-        0xA5 => decode_varbinary(buf, type_info), // BIGVARBINTYPE
-        0xAD => decode_varbinary(buf, type_info), // BIGBINARYTYPE
+            // Variable-length string types
+            0xE7 => decode_nvarchar(buf, type_info), // NVARCHARTYPE
+            0xAF => decode_varchar(buf, type_info),  // BIGCHARTYPE
+            0xA7 => decode_varchar(buf, type_info),  // BIGVARCHARTYPE
 
-        // GUID
-        0x24 => decode_guid(buf),
+            // Binary types
+            0xA5 => decode_varbinary(buf, type_info), // BIGVARBINTYPE
+            0xAD => decode_varbinary(buf, type_info), // BIGBINARYTYPE
 
-        // Decimal/Numeric
-        0x6C | 0x6A => decode_decimal(buf, type_info),
+            // GUID
+            0x24 => decode_guid(buf),
 
-        // Date/Time types
-        0x28 => decode_date(buf),                      // DATETYPE
-        0x29 => decode_time(buf, type_info),           // TIMETYPE
-        0x2A => decode_datetime2(buf, type_info),      // DATETIME2TYPE
-        0x2B => decode_datetimeoffset(buf, type_info), // DATETIMEOFFSETTYPE
-        0x3D => decode_datetime(buf),                  // DATETIMETYPE
-        0x3F => decode_smalldatetime(buf),             // SMALLDATETIMETYPE
+            // Decimal/Numeric
+            0x6C | 0x6A => decode_decimal(buf, type_info),
 
-        // XML
-        0xF1 => decode_xml(buf),
+            // Date/Time types
+            0x28 => decode_date(buf),                      // DATETYPE
+            0x29 => decode_time(buf, type_info),           // TIMETYPE
+            0x2A => decode_datetime2(buf, type_info),      // DATETIME2TYPE
+            0x2B => decode_datetimeoffset(buf, type_info), // DATETIMEOFFSETTYPE
+            0x3D => decode_datetime(buf),                  // DATETIMETYPE
+            0x3F => decode_smalldatetime(buf),             // SMALLDATETIMETYPE
 
-        _ => Err(TypeError::UnsupportedConversion {
-            from: format!("TDS type 0x{:02X}", type_info.type_id),
-            to: "SqlValue",
-        }),
+            // XML
+            0xF1 => decode_xml(buf),
+
+            _ => Err(TypeError::UnsupportedConversion {
+                from: format!("TDS type 0x{:02X}", type_info.type_id),
+                to: "SqlValue",
+            }),
+        }
     }
 }
 
@@ -1075,6 +1084,7 @@ fn intervals_to_time(intervals: u64, scale: u8) -> chrono::NaiveTime {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
+    use super::sealed::decode_value;
     use super::*;
 
     #[test]
