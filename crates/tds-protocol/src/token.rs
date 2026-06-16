@@ -2419,137 +2419,142 @@ impl TokenParser {
         &mut self,
         metadata: Option<&ColMetaData>,
     ) -> Result<Option<Token>, ProtocolError> {
-        if !self.has_remaining() {
-            return Ok(None);
+        loop {
+            if !self.has_remaining() {
+                return Ok(None);
+            }
+
+            let mut buf = &self.data[self.position..];
+            let start_pos = self.position;
+
+            let token_type_byte = buf.get_u8();
+            let token_type = TokenType::from_u8(token_type_byte);
+
+            let token = match token_type {
+                Some(TokenType::Done) => {
+                    let done = Done::decode(&mut buf)?;
+                    Token::Done(done)
+                }
+                Some(TokenType::DoneProc) => {
+                    let done = DoneProc::decode(&mut buf)?;
+                    Token::DoneProc(done)
+                }
+                Some(TokenType::DoneInProc) => {
+                    let done = DoneInProc::decode(&mut buf)?;
+                    Token::DoneInProc(done)
+                }
+                Some(TokenType::Error) => {
+                    let error = ServerError::decode(&mut buf)?;
+                    Token::Error(error)
+                }
+                Some(TokenType::Info) => {
+                    let info = ServerInfo::decode(&mut buf)?;
+                    Token::Info(info)
+                }
+                Some(TokenType::LoginAck) => {
+                    let login_ack = LoginAck::decode(&mut buf)?;
+                    Token::LoginAck(login_ack)
+                }
+                Some(TokenType::EnvChange) => {
+                    let env_change = EnvChange::decode(&mut buf)?;
+                    Token::EnvChange(env_change)
+                }
+                Some(TokenType::Order) => {
+                    let order = Order::decode(&mut buf)?;
+                    Token::Order(order)
+                }
+                Some(TokenType::FeatureExtAck) => {
+                    let ack = FeatureExtAck::decode(&mut buf)?;
+                    Token::FeatureExtAck(ack)
+                }
+                Some(TokenType::Sspi) => {
+                    let sspi = SspiToken::decode(&mut buf)?;
+                    Token::Sspi(sspi)
+                }
+                Some(TokenType::FedAuthInfo) => {
+                    let info = FedAuthInfo::decode(&mut buf)?;
+                    Token::FedAuthInfo(info)
+                }
+                Some(TokenType::ReturnStatus) => {
+                    if buf.remaining() < 4 {
+                        return Err(ProtocolError::UnexpectedEof);
+                    }
+                    let status = buf.get_i32_le();
+                    Token::ReturnStatus(status)
+                }
+                Some(TokenType::ColMetaData) => {
+                    let col_meta = if self.encryption_enabled {
+                        ColMetaData::decode_encrypted(&mut buf)?
+                    } else {
+                        ColMetaData::decode(&mut buf)?
+                    };
+                    Token::ColMetaData(col_meta)
+                }
+                Some(TokenType::Row) => {
+                    let meta = metadata.ok_or_else(|| {
+                        ProtocolError::StringEncoding(
+                            #[cfg(feature = "std")]
+                            "Row token requires column metadata".to_string(),
+                            #[cfg(not(feature = "std"))]
+                            "Row token requires column metadata",
+                        )
+                    })?;
+                    let row = RawRow::decode(&mut buf, meta)?;
+                    Token::Row(row)
+                }
+                Some(TokenType::NbcRow) => {
+                    let meta = metadata.ok_or_else(|| {
+                        ProtocolError::StringEncoding(
+                            #[cfg(feature = "std")]
+                            "NbcRow token requires column metadata".to_string(),
+                            #[cfg(not(feature = "std"))]
+                            "NbcRow token requires column metadata",
+                        )
+                    })?;
+                    let row = NbcRow::decode(&mut buf, meta)?;
+                    Token::NbcRow(row)
+                }
+                Some(TokenType::ReturnValue) => {
+                    let ret_val = ReturnValue::decode(&mut buf)?;
+                    Token::ReturnValue(ret_val)
+                }
+                Some(TokenType::SessionState) => {
+                    let session = SessionState::decode(&mut buf)?;
+                    Token::SessionState(session)
+                }
+                Some(TokenType::ColInfo) | Some(TokenType::TabName) | Some(TokenType::Offset) => {
+                    // These tokens are rarely used and have complex formats.
+                    // Skip them by reading the length and advancing.
+                    if buf.remaining() < 2 {
+                        return Err(ProtocolError::UnexpectedEof);
+                    }
+                    let length = buf.get_u16_le() as usize;
+                    if buf.remaining() < length {
+                        return Err(ProtocolError::IncompletePacket {
+                            expected: length,
+                            actual: buf.remaining(),
+                        });
+                    }
+                    // Skip the data
+                    buf.advance(length);
+                    // #273: advance past the skipped token and iterate. The skip
+                    // path must NOT recurse — a server-controlled flat run of these
+                    // tokens would otherwise add one stack frame per token and
+                    // overflow the stack (remote DoS).
+                    self.position = start_pos + (self.data.len() - start_pos - buf.remaining());
+                    continue;
+                }
+                None => {
+                    return Err(ProtocolError::InvalidTokenType(token_type_byte));
+                }
+            };
+
+            // Update position based on how much was consumed
+            let consumed = self.data.len() - start_pos - buf.remaining();
+            self.position = start_pos + consumed;
+
+            return Ok(Some(token));
         }
-
-        let mut buf = &self.data[self.position..];
-        let start_pos = self.position;
-
-        let token_type_byte = buf.get_u8();
-        let token_type = TokenType::from_u8(token_type_byte);
-
-        let token = match token_type {
-            Some(TokenType::Done) => {
-                let done = Done::decode(&mut buf)?;
-                Token::Done(done)
-            }
-            Some(TokenType::DoneProc) => {
-                let done = DoneProc::decode(&mut buf)?;
-                Token::DoneProc(done)
-            }
-            Some(TokenType::DoneInProc) => {
-                let done = DoneInProc::decode(&mut buf)?;
-                Token::DoneInProc(done)
-            }
-            Some(TokenType::Error) => {
-                let error = ServerError::decode(&mut buf)?;
-                Token::Error(error)
-            }
-            Some(TokenType::Info) => {
-                let info = ServerInfo::decode(&mut buf)?;
-                Token::Info(info)
-            }
-            Some(TokenType::LoginAck) => {
-                let login_ack = LoginAck::decode(&mut buf)?;
-                Token::LoginAck(login_ack)
-            }
-            Some(TokenType::EnvChange) => {
-                let env_change = EnvChange::decode(&mut buf)?;
-                Token::EnvChange(env_change)
-            }
-            Some(TokenType::Order) => {
-                let order = Order::decode(&mut buf)?;
-                Token::Order(order)
-            }
-            Some(TokenType::FeatureExtAck) => {
-                let ack = FeatureExtAck::decode(&mut buf)?;
-                Token::FeatureExtAck(ack)
-            }
-            Some(TokenType::Sspi) => {
-                let sspi = SspiToken::decode(&mut buf)?;
-                Token::Sspi(sspi)
-            }
-            Some(TokenType::FedAuthInfo) => {
-                let info = FedAuthInfo::decode(&mut buf)?;
-                Token::FedAuthInfo(info)
-            }
-            Some(TokenType::ReturnStatus) => {
-                if buf.remaining() < 4 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let status = buf.get_i32_le();
-                Token::ReturnStatus(status)
-            }
-            Some(TokenType::ColMetaData) => {
-                let col_meta = if self.encryption_enabled {
-                    ColMetaData::decode_encrypted(&mut buf)?
-                } else {
-                    ColMetaData::decode(&mut buf)?
-                };
-                Token::ColMetaData(col_meta)
-            }
-            Some(TokenType::Row) => {
-                let meta = metadata.ok_or_else(|| {
-                    ProtocolError::StringEncoding(
-                        #[cfg(feature = "std")]
-                        "Row token requires column metadata".to_string(),
-                        #[cfg(not(feature = "std"))]
-                        "Row token requires column metadata",
-                    )
-                })?;
-                let row = RawRow::decode(&mut buf, meta)?;
-                Token::Row(row)
-            }
-            Some(TokenType::NbcRow) => {
-                let meta = metadata.ok_or_else(|| {
-                    ProtocolError::StringEncoding(
-                        #[cfg(feature = "std")]
-                        "NbcRow token requires column metadata".to_string(),
-                        #[cfg(not(feature = "std"))]
-                        "NbcRow token requires column metadata",
-                    )
-                })?;
-                let row = NbcRow::decode(&mut buf, meta)?;
-                Token::NbcRow(row)
-            }
-            Some(TokenType::ReturnValue) => {
-                let ret_val = ReturnValue::decode(&mut buf)?;
-                Token::ReturnValue(ret_val)
-            }
-            Some(TokenType::SessionState) => {
-                let session = SessionState::decode(&mut buf)?;
-                Token::SessionState(session)
-            }
-            Some(TokenType::ColInfo) | Some(TokenType::TabName) | Some(TokenType::Offset) => {
-                // These tokens are rarely used and have complex formats.
-                // Skip them by reading the length and advancing.
-                if buf.remaining() < 2 {
-                    return Err(ProtocolError::UnexpectedEof);
-                }
-                let length = buf.get_u16_le() as usize;
-                if buf.remaining() < length {
-                    return Err(ProtocolError::IncompletePacket {
-                        expected: length,
-                        actual: buf.remaining(),
-                    });
-                }
-                // Skip the data
-                buf.advance(length);
-                // Recursively get the next token
-                self.position = start_pos + (self.data.len() - start_pos - buf.remaining());
-                return self.next_token_with_metadata(metadata);
-            }
-            None => {
-                return Err(ProtocolError::InvalidTokenType(token_type_byte));
-            }
-        };
-
-        // Update position based on how much was consumed
-        let consumed = self.data.len() - start_pos - buf.remaining();
-        self.position = start_pos + consumed;
-
-        Ok(Some(token))
     }
 
     /// Skip the current token without fully parsing it.
@@ -4278,5 +4283,58 @@ mod tests {
             parser.next_token().unwrap().is_none(),
             "the captured token must be consumed exactly"
         );
+    }
+
+    /// Regression test for #273 (remote DoS via unbounded token-skip recursion).
+    ///
+    /// COLINFO/TABNAME/OFFSET tokens are skipped, and the skip path used to
+    /// self-recurse to fetch the next token — one real stack frame per skipped
+    /// token (Rust guarantees no tail-call elimination). Because
+    /// `Connection::read_message` reassembles every packet into one `Bytes`
+    /// before tokenizing, a server-controlled multi-MB message of these 3-byte
+    /// tokens drove ~10^5–10^6 frames and aborted the process.
+    ///
+    /// This feeds a flat run of 200_000 skip-tokens — far deeper than the
+    /// (~2 MB) test-thread stack could survive by recursion — followed by a
+    /// real DONE. Pre-fix, the recursive parser aborted (SIGABRT) on this
+    /// input. Post-fix it must return that DONE with the whole buffer consumed,
+    /// proving the skip path is bounded-stack and that the input was
+    /// non-degenerate (all 200_000 tokens were actually traversed).
+    #[test]
+    fn skip_tokens_iterate_not_recurse_273() {
+        const SKIP_COUNT: usize = 200_000;
+        let mut buf = BytesMut::with_capacity(SKIP_COUNT * 3 + 13);
+        for _ in 0..SKIP_COUNT {
+            buf.put_u8(TokenType::ColInfo as u8);
+            buf.put_u16_le(0); // zero-length body: 3 bytes total per skip-token
+        }
+        let done = Done {
+            status: DoneStatus {
+                more: false,
+                error: false,
+                in_xact: false,
+                count: true,
+                attn: false,
+                srverror: false,
+            },
+            cur_cmd: 0xABCD,
+            row_count: 99,
+        };
+        done.encode(&mut buf);
+        let total_len = buf.len();
+
+        let mut parser = TokenParser::new(buf.freeze());
+
+        // A specific outcome — the DONE that follows the skip run — not a
+        // generic is_err an unrelated parse failure could also satisfy.
+        let Some(Token::Done(decoded)) = parser.next_token().unwrap() else {
+            panic!("expected the DONE token after the skip run");
+        };
+        assert_eq!(decoded.cur_cmd, 0xABCD);
+        assert_eq!(decoded.row_count, 99);
+
+        // Every skipped token was traversed: proof the input was non-trivial.
+        assert_eq!(parser.position(), total_len);
+        assert!(parser.next_token().unwrap().is_none());
     }
 }
