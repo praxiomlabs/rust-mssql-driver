@@ -212,7 +212,6 @@ pub fn mssql_client::bulk::BulkInsert::take_packets(&mut self) -> alloc::vec::Ve
 pub fn mssql_client::bulk::BulkInsert::total_rows(&self) -> u64
 impl mssql_client::bulk::BulkInsert
 pub fn mssql_client::bulk::BulkInsert::new(alloc::vec::Vec<mssql_client::bulk::BulkColumn>, usize) -> Self
-pub fn mssql_client::bulk::BulkInsert::new_with_server_metadata(alloc::vec::Vec<mssql_client::bulk::BulkColumn>, usize, core::option::Option<bytes::bytes::Bytes>, core::option::Option<&[tds_protocol::token::ColumnData]>) -> Self
 pub fn mssql_client::bulk::BulkInsert::send_row<T: mssql_types::to_sql::ToSql>(&mut self, &[T]) -> core::result::Result<(), mssql_client::error::Error>
 pub fn mssql_client::bulk::BulkInsert::send_row_values(&mut self, &[mssql_types::value::SqlValue]) -> core::result::Result<(), mssql_client::error::Error>
 impl core::marker::Freeze for mssql_client::bulk::BulkInsert
@@ -1123,146 +1122,6 @@ impl<T> typenum::type_operators::Same for mssql_client::encryption::EncryptionCo
 pub type mssql_client::encryption::EncryptionConfig::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::encryption::EncryptionConfig where V: ppv_lite86::types::MultiLane<T>
 pub fn mssql_client::encryption::EncryptionConfig::vzip(self) -> V
-pub struct mssql_client::encryption::ParameterCryptoInfo
-pub mssql_client::encryption::ParameterCryptoInfo::algorithm_id: u8
-pub mssql_client::encryption::ParameterCryptoInfo::cek_ordinal: u16
-pub mssql_client::encryption::ParameterCryptoInfo::encryption_type: tds_protocol::crypto::EncryptionTypeWire
-pub mssql_client::encryption::ParameterCryptoInfo::normalization_rule_version: u8
-impl mssql_client::encryption::ParameterCryptoInfo
-pub fn mssql_client::encryption::ParameterCryptoInfo::new(u16, tds_protocol::crypto::EncryptionTypeWire, u8, u8) -> Self
-impl core::clone::Clone for mssql_client::encryption::ParameterCryptoInfo
-pub fn mssql_client::encryption::ParameterCryptoInfo::clone(&self) -> mssql_client::encryption::ParameterCryptoInfo
-impl core::fmt::Debug for mssql_client::encryption::ParameterCryptoInfo
-pub fn mssql_client::encryption::ParameterCryptoInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for mssql_client::encryption::ParameterCryptoInfo
-impl core::marker::Send for mssql_client::encryption::ParameterCryptoInfo
-impl core::marker::Sync for mssql_client::encryption::ParameterCryptoInfo
-impl core::marker::Unpin for mssql_client::encryption::ParameterCryptoInfo
-impl core::panic::unwind_safe::RefUnwindSafe for mssql_client::encryption::ParameterCryptoInfo
-impl core::panic::unwind_safe::UnwindSafe for mssql_client::encryption::ParameterCryptoInfo
-impl<T, U> core::convert::Into<U> for mssql_client::encryption::ParameterCryptoInfo where U: core::convert::From<T>
-pub fn mssql_client::encryption::ParameterCryptoInfo::into(self) -> U
-impl<T, U> core::convert::TryFrom<U> for mssql_client::encryption::ParameterCryptoInfo where U: core::convert::Into<T>
-pub type mssql_client::encryption::ParameterCryptoInfo::Error = core::convert::Infallible
-pub fn mssql_client::encryption::ParameterCryptoInfo::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
-impl<T, U> core::convert::TryInto<U> for mssql_client::encryption::ParameterCryptoInfo where U: core::convert::TryFrom<T>
-pub type mssql_client::encryption::ParameterCryptoInfo::Error = <U as core::convert::TryFrom<T>>::Error
-pub fn mssql_client::encryption::ParameterCryptoInfo::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
-impl<T> alloc::borrow::ToOwned for mssql_client::encryption::ParameterCryptoInfo where T: core::clone::Clone
-pub type mssql_client::encryption::ParameterCryptoInfo::Owned = T
-pub fn mssql_client::encryption::ParameterCryptoInfo::clone_into(&self, &mut T)
-pub fn mssql_client::encryption::ParameterCryptoInfo::to_owned(&self) -> T
-impl<T> core::any::Any for mssql_client::encryption::ParameterCryptoInfo where T: 'static + ?core::marker::Sized
-pub fn mssql_client::encryption::ParameterCryptoInfo::type_id(&self) -> core::any::TypeId
-impl<T> core::borrow::Borrow<T> for mssql_client::encryption::ParameterCryptoInfo where T: ?core::marker::Sized
-pub fn mssql_client::encryption::ParameterCryptoInfo::borrow(&self) -> &T
-impl<T> core::borrow::BorrowMut<T> for mssql_client::encryption::ParameterCryptoInfo where T: ?core::marker::Sized
-pub fn mssql_client::encryption::ParameterCryptoInfo::borrow_mut(&mut self) -> &mut T
-impl<T> core::clone::CloneToUninit for mssql_client::encryption::ParameterCryptoInfo where T: core::clone::Clone
-pub unsafe fn mssql_client::encryption::ParameterCryptoInfo::clone_to_uninit(&self, *mut u8)
-impl<T> core::convert::From<T> for mssql_client::encryption::ParameterCryptoInfo
-pub fn mssql_client::encryption::ParameterCryptoInfo::from(T) -> T
-impl<T> tracing::instrument::Instrument for mssql_client::encryption::ParameterCryptoInfo
-impl<T> tracing::instrument::WithSubscriber for mssql_client::encryption::ParameterCryptoInfo
-impl<T> typenum::type_operators::Same for mssql_client::encryption::ParameterCryptoInfo
-pub type mssql_client::encryption::ParameterCryptoInfo::Output = T
-impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::encryption::ParameterCryptoInfo where V: ppv_lite86::types::MultiLane<T>
-pub fn mssql_client::encryption::ParameterCryptoInfo::vzip(self) -> V
-pub struct mssql_client::encryption::ParameterEncryptionInfo
-pub mssql_client::encryption::ParameterEncryptionInfo::cek_table: tds_protocol::crypto::CekTable
-pub mssql_client::encryption::ParameterEncryptionInfo::parameters: std::collections::hash::map::HashMap<alloc::string::String, mssql_client::encryption::ParameterCryptoInfo>
-impl mssql_client::encryption::ParameterEncryptionInfo
-pub fn mssql_client::encryption::ParameterEncryptionInfo::add_parameter(&mut self, alloc::string::String, mssql_client::encryption::ParameterCryptoInfo)
-pub fn mssql_client::encryption::ParameterEncryptionInfo::get_parameter(&self, &str) -> core::option::Option<&mssql_client::encryption::ParameterCryptoInfo>
-pub fn mssql_client::encryption::ParameterEncryptionInfo::needs_encryption(&self, &str) -> bool
-pub fn mssql_client::encryption::ParameterEncryptionInfo::new() -> Self
-impl core::clone::Clone for mssql_client::encryption::ParameterEncryptionInfo
-pub fn mssql_client::encryption::ParameterEncryptionInfo::clone(&self) -> mssql_client::encryption::ParameterEncryptionInfo
-impl core::default::Default for mssql_client::encryption::ParameterEncryptionInfo
-pub fn mssql_client::encryption::ParameterEncryptionInfo::default() -> Self
-impl core::fmt::Debug for mssql_client::encryption::ParameterEncryptionInfo
-pub fn mssql_client::encryption::ParameterEncryptionInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for mssql_client::encryption::ParameterEncryptionInfo
-impl core::marker::Send for mssql_client::encryption::ParameterEncryptionInfo
-impl core::marker::Sync for mssql_client::encryption::ParameterEncryptionInfo
-impl core::marker::Unpin for mssql_client::encryption::ParameterEncryptionInfo
-impl core::panic::unwind_safe::RefUnwindSafe for mssql_client::encryption::ParameterEncryptionInfo
-impl core::panic::unwind_safe::UnwindSafe for mssql_client::encryption::ParameterEncryptionInfo
-impl<T, U> core::convert::Into<U> for mssql_client::encryption::ParameterEncryptionInfo where U: core::convert::From<T>
-pub fn mssql_client::encryption::ParameterEncryptionInfo::into(self) -> U
-impl<T, U> core::convert::TryFrom<U> for mssql_client::encryption::ParameterEncryptionInfo where U: core::convert::Into<T>
-pub type mssql_client::encryption::ParameterEncryptionInfo::Error = core::convert::Infallible
-pub fn mssql_client::encryption::ParameterEncryptionInfo::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
-impl<T, U> core::convert::TryInto<U> for mssql_client::encryption::ParameterEncryptionInfo where U: core::convert::TryFrom<T>
-pub type mssql_client::encryption::ParameterEncryptionInfo::Error = <U as core::convert::TryFrom<T>>::Error
-pub fn mssql_client::encryption::ParameterEncryptionInfo::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
-impl<T> alloc::borrow::ToOwned for mssql_client::encryption::ParameterEncryptionInfo where T: core::clone::Clone
-pub type mssql_client::encryption::ParameterEncryptionInfo::Owned = T
-pub fn mssql_client::encryption::ParameterEncryptionInfo::clone_into(&self, &mut T)
-pub fn mssql_client::encryption::ParameterEncryptionInfo::to_owned(&self) -> T
-impl<T> core::any::Any for mssql_client::encryption::ParameterEncryptionInfo where T: 'static + ?core::marker::Sized
-pub fn mssql_client::encryption::ParameterEncryptionInfo::type_id(&self) -> core::any::TypeId
-impl<T> core::borrow::Borrow<T> for mssql_client::encryption::ParameterEncryptionInfo where T: ?core::marker::Sized
-pub fn mssql_client::encryption::ParameterEncryptionInfo::borrow(&self) -> &T
-impl<T> core::borrow::BorrowMut<T> for mssql_client::encryption::ParameterEncryptionInfo where T: ?core::marker::Sized
-pub fn mssql_client::encryption::ParameterEncryptionInfo::borrow_mut(&mut self) -> &mut T
-impl<T> core::clone::CloneToUninit for mssql_client::encryption::ParameterEncryptionInfo where T: core::clone::Clone
-pub unsafe fn mssql_client::encryption::ParameterEncryptionInfo::clone_to_uninit(&self, *mut u8)
-impl<T> core::convert::From<T> for mssql_client::encryption::ParameterEncryptionInfo
-pub fn mssql_client::encryption::ParameterEncryptionInfo::from(T) -> T
-impl<T> tracing::instrument::Instrument for mssql_client::encryption::ParameterEncryptionInfo
-impl<T> tracing::instrument::WithSubscriber for mssql_client::encryption::ParameterEncryptionInfo
-impl<T> typenum::type_operators::Same for mssql_client::encryption::ParameterEncryptionInfo
-pub type mssql_client::encryption::ParameterEncryptionInfo::Output = T
-impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::encryption::ParameterEncryptionInfo where V: ppv_lite86::types::MultiLane<T>
-pub fn mssql_client::encryption::ParameterEncryptionInfo::vzip(self) -> V
-pub struct mssql_client::encryption::ResultSetEncryptionInfo
-pub mssql_client::encryption::ResultSetEncryptionInfo::cek_table: tds_protocol::crypto::CekTable
-pub mssql_client::encryption::ResultSetEncryptionInfo::column_crypto: alloc::vec::Vec<core::option::Option<tds_protocol::crypto::CryptoMetadata>>
-impl mssql_client::encryption::ResultSetEncryptionInfo
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::get_cek_for_column(&self, usize) -> core::option::Option<&tds_protocol::crypto::CekTableEntry>
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::get_encryption_type(&self, usize) -> core::option::Option<tds_protocol::crypto::EncryptionTypeWire>
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::is_column_encrypted(&self, usize) -> bool
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::new(tds_protocol::crypto::CekTable, usize) -> Self
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::set_column_crypto(&mut self, usize, tds_protocol::crypto::CryptoMetadata)
-impl core::clone::Clone for mssql_client::encryption::ResultSetEncryptionInfo
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::clone(&self) -> mssql_client::encryption::ResultSetEncryptionInfo
-impl core::fmt::Debug for mssql_client::encryption::ResultSetEncryptionInfo
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for mssql_client::encryption::ResultSetEncryptionInfo
-impl core::marker::Send for mssql_client::encryption::ResultSetEncryptionInfo
-impl core::marker::Sync for mssql_client::encryption::ResultSetEncryptionInfo
-impl core::marker::Unpin for mssql_client::encryption::ResultSetEncryptionInfo
-impl core::panic::unwind_safe::RefUnwindSafe for mssql_client::encryption::ResultSetEncryptionInfo
-impl core::panic::unwind_safe::UnwindSafe for mssql_client::encryption::ResultSetEncryptionInfo
-impl<T, U> core::convert::Into<U> for mssql_client::encryption::ResultSetEncryptionInfo where U: core::convert::From<T>
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::into(self) -> U
-impl<T, U> core::convert::TryFrom<U> for mssql_client::encryption::ResultSetEncryptionInfo where U: core::convert::Into<T>
-pub type mssql_client::encryption::ResultSetEncryptionInfo::Error = core::convert::Infallible
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
-impl<T, U> core::convert::TryInto<U> for mssql_client::encryption::ResultSetEncryptionInfo where U: core::convert::TryFrom<T>
-pub type mssql_client::encryption::ResultSetEncryptionInfo::Error = <U as core::convert::TryFrom<T>>::Error
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
-impl<T> alloc::borrow::ToOwned for mssql_client::encryption::ResultSetEncryptionInfo where T: core::clone::Clone
-pub type mssql_client::encryption::ResultSetEncryptionInfo::Owned = T
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::clone_into(&self, &mut T)
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::to_owned(&self) -> T
-impl<T> core::any::Any for mssql_client::encryption::ResultSetEncryptionInfo where T: 'static + ?core::marker::Sized
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::type_id(&self) -> core::any::TypeId
-impl<T> core::borrow::Borrow<T> for mssql_client::encryption::ResultSetEncryptionInfo where T: ?core::marker::Sized
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::borrow(&self) -> &T
-impl<T> core::borrow::BorrowMut<T> for mssql_client::encryption::ResultSetEncryptionInfo where T: ?core::marker::Sized
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::borrow_mut(&mut self) -> &mut T
-impl<T> core::clone::CloneToUninit for mssql_client::encryption::ResultSetEncryptionInfo where T: core::clone::Clone
-pub unsafe fn mssql_client::encryption::ResultSetEncryptionInfo::clone_to_uninit(&self, *mut u8)
-impl<T> core::convert::From<T> for mssql_client::encryption::ResultSetEncryptionInfo
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::from(T) -> T
-impl<T> tracing::instrument::Instrument for mssql_client::encryption::ResultSetEncryptionInfo
-impl<T> tracing::instrument::WithSubscriber for mssql_client::encryption::ResultSetEncryptionInfo
-impl<T> typenum::type_operators::Same for mssql_client::encryption::ResultSetEncryptionInfo
-pub type mssql_client::encryption::ResultSetEncryptionInfo::Output = T
-impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::encryption::ResultSetEncryptionInfo where V: ppv_lite86::types::MultiLane<T>
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::vzip(self) -> V
 pub mod mssql_client::error
 #[non_exhaustive] pub enum mssql_client::error::Error
 pub mssql_client::error::Error::Authentication(mssql_auth::error::AuthError)
@@ -2344,42 +2203,11 @@ impl<T> typenum::type_operators::Same for mssql_client::state::StateMarker<S>
 pub type mssql_client::state::StateMarker<S>::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::state::StateMarker<S> where V: ppv_lite86::types::MultiLane<T>
 pub fn mssql_client::state::StateMarker<S>::vzip(self) -> V
-pub struct mssql_client::state::Streaming
-impl mssql_client::state::ConnectionState for mssql_client::state::Streaming
-impl core::marker::Freeze for mssql_client::state::Streaming
-impl core::marker::Send for mssql_client::state::Streaming
-impl core::marker::Sync for mssql_client::state::Streaming
-impl core::marker::Unpin for mssql_client::state::Streaming
-impl core::panic::unwind_safe::RefUnwindSafe for mssql_client::state::Streaming
-impl core::panic::unwind_safe::UnwindSafe for mssql_client::state::Streaming
-impl<T, U> core::convert::Into<U> for mssql_client::state::Streaming where U: core::convert::From<T>
-pub fn mssql_client::state::Streaming::into(self) -> U
-impl<T, U> core::convert::TryFrom<U> for mssql_client::state::Streaming where U: core::convert::Into<T>
-pub type mssql_client::state::Streaming::Error = core::convert::Infallible
-pub fn mssql_client::state::Streaming::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
-impl<T, U> core::convert::TryInto<U> for mssql_client::state::Streaming where U: core::convert::TryFrom<T>
-pub type mssql_client::state::Streaming::Error = <U as core::convert::TryFrom<T>>::Error
-pub fn mssql_client::state::Streaming::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
-impl<T> core::any::Any for mssql_client::state::Streaming where T: 'static + ?core::marker::Sized
-pub fn mssql_client::state::Streaming::type_id(&self) -> core::any::TypeId
-impl<T> core::borrow::Borrow<T> for mssql_client::state::Streaming where T: ?core::marker::Sized
-pub fn mssql_client::state::Streaming::borrow(&self) -> &T
-impl<T> core::borrow::BorrowMut<T> for mssql_client::state::Streaming where T: ?core::marker::Sized
-pub fn mssql_client::state::Streaming::borrow_mut(&mut self) -> &mut T
-impl<T> core::convert::From<T> for mssql_client::state::Streaming
-pub fn mssql_client::state::Streaming::from(T) -> T
-impl<T> tracing::instrument::Instrument for mssql_client::state::Streaming
-impl<T> tracing::instrument::WithSubscriber for mssql_client::state::Streaming
-impl<T> typenum::type_operators::Same for mssql_client::state::Streaming
-pub type mssql_client::state::Streaming::Output = T
-impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::state::Streaming where V: ppv_lite86::types::MultiLane<T>
-pub fn mssql_client::state::Streaming::vzip(self) -> V
 pub trait mssql_client::state::ConnectionState: mssql_client::state::private::Sealed
 impl mssql_client::state::ConnectionState for mssql_client::state::Connected
 impl mssql_client::state::ConnectionState for mssql_client::state::Disconnected
 impl mssql_client::state::ConnectionState for mssql_client::state::InTransaction
 impl mssql_client::state::ConnectionState for mssql_client::state::Ready
-impl mssql_client::state::ConnectionState for mssql_client::state::Streaming
 pub mod mssql_client::stream
 #[non_exhaustive] pub struct mssql_client::stream::ExecuteResult
 pub mssql_client::stream::ExecuteResult::output_params: alloc::vec::Vec<mssql_client::stream::OutputParam>
@@ -3564,7 +3392,6 @@ pub fn mssql_client::bulk::BulkInsert::take_packets(&mut self) -> alloc::vec::Ve
 pub fn mssql_client::bulk::BulkInsert::total_rows(&self) -> u64
 impl mssql_client::bulk::BulkInsert
 pub fn mssql_client::bulk::BulkInsert::new(alloc::vec::Vec<mssql_client::bulk::BulkColumn>, usize) -> Self
-pub fn mssql_client::bulk::BulkInsert::new_with_server_metadata(alloc::vec::Vec<mssql_client::bulk::BulkColumn>, usize, core::option::Option<bytes::bytes::Bytes>, core::option::Option<&[tds_protocol::token::ColumnData]>) -> Self
 pub fn mssql_client::bulk::BulkInsert::send_row<T: mssql_types::to_sql::ToSql>(&mut self, &[T]) -> core::result::Result<(), mssql_client::error::Error>
 pub fn mssql_client::bulk::BulkInsert::send_row_values(&mut self, &[mssql_types::value::SqlValue]) -> core::result::Result<(), mssql_client::error::Error>
 impl core::marker::Freeze for mssql_client::bulk::BulkInsert
@@ -4699,99 +4526,6 @@ impl<T> typenum::type_operators::Same for mssql_client::to_params::ParamList
 pub type mssql_client::to_params::ParamList::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::to_params::ParamList where V: ppv_lite86::types::MultiLane<T>
 pub fn mssql_client::to_params::ParamList::vzip(self) -> V
-pub struct mssql_client::ParameterCryptoInfo
-pub mssql_client::ParameterCryptoInfo::algorithm_id: u8
-pub mssql_client::ParameterCryptoInfo::cek_ordinal: u16
-pub mssql_client::ParameterCryptoInfo::encryption_type: tds_protocol::crypto::EncryptionTypeWire
-pub mssql_client::ParameterCryptoInfo::normalization_rule_version: u8
-impl mssql_client::encryption::ParameterCryptoInfo
-pub fn mssql_client::encryption::ParameterCryptoInfo::new(u16, tds_protocol::crypto::EncryptionTypeWire, u8, u8) -> Self
-impl core::clone::Clone for mssql_client::encryption::ParameterCryptoInfo
-pub fn mssql_client::encryption::ParameterCryptoInfo::clone(&self) -> mssql_client::encryption::ParameterCryptoInfo
-impl core::fmt::Debug for mssql_client::encryption::ParameterCryptoInfo
-pub fn mssql_client::encryption::ParameterCryptoInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for mssql_client::encryption::ParameterCryptoInfo
-impl core::marker::Send for mssql_client::encryption::ParameterCryptoInfo
-impl core::marker::Sync for mssql_client::encryption::ParameterCryptoInfo
-impl core::marker::Unpin for mssql_client::encryption::ParameterCryptoInfo
-impl core::panic::unwind_safe::RefUnwindSafe for mssql_client::encryption::ParameterCryptoInfo
-impl core::panic::unwind_safe::UnwindSafe for mssql_client::encryption::ParameterCryptoInfo
-impl<T, U> core::convert::Into<U> for mssql_client::encryption::ParameterCryptoInfo where U: core::convert::From<T>
-pub fn mssql_client::encryption::ParameterCryptoInfo::into(self) -> U
-impl<T, U> core::convert::TryFrom<U> for mssql_client::encryption::ParameterCryptoInfo where U: core::convert::Into<T>
-pub type mssql_client::encryption::ParameterCryptoInfo::Error = core::convert::Infallible
-pub fn mssql_client::encryption::ParameterCryptoInfo::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
-impl<T, U> core::convert::TryInto<U> for mssql_client::encryption::ParameterCryptoInfo where U: core::convert::TryFrom<T>
-pub type mssql_client::encryption::ParameterCryptoInfo::Error = <U as core::convert::TryFrom<T>>::Error
-pub fn mssql_client::encryption::ParameterCryptoInfo::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
-impl<T> alloc::borrow::ToOwned for mssql_client::encryption::ParameterCryptoInfo where T: core::clone::Clone
-pub type mssql_client::encryption::ParameterCryptoInfo::Owned = T
-pub fn mssql_client::encryption::ParameterCryptoInfo::clone_into(&self, &mut T)
-pub fn mssql_client::encryption::ParameterCryptoInfo::to_owned(&self) -> T
-impl<T> core::any::Any for mssql_client::encryption::ParameterCryptoInfo where T: 'static + ?core::marker::Sized
-pub fn mssql_client::encryption::ParameterCryptoInfo::type_id(&self) -> core::any::TypeId
-impl<T> core::borrow::Borrow<T> for mssql_client::encryption::ParameterCryptoInfo where T: ?core::marker::Sized
-pub fn mssql_client::encryption::ParameterCryptoInfo::borrow(&self) -> &T
-impl<T> core::borrow::BorrowMut<T> for mssql_client::encryption::ParameterCryptoInfo where T: ?core::marker::Sized
-pub fn mssql_client::encryption::ParameterCryptoInfo::borrow_mut(&mut self) -> &mut T
-impl<T> core::clone::CloneToUninit for mssql_client::encryption::ParameterCryptoInfo where T: core::clone::Clone
-pub unsafe fn mssql_client::encryption::ParameterCryptoInfo::clone_to_uninit(&self, *mut u8)
-impl<T> core::convert::From<T> for mssql_client::encryption::ParameterCryptoInfo
-pub fn mssql_client::encryption::ParameterCryptoInfo::from(T) -> T
-impl<T> tracing::instrument::Instrument for mssql_client::encryption::ParameterCryptoInfo
-impl<T> tracing::instrument::WithSubscriber for mssql_client::encryption::ParameterCryptoInfo
-impl<T> typenum::type_operators::Same for mssql_client::encryption::ParameterCryptoInfo
-pub type mssql_client::encryption::ParameterCryptoInfo::Output = T
-impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::encryption::ParameterCryptoInfo where V: ppv_lite86::types::MultiLane<T>
-pub fn mssql_client::encryption::ParameterCryptoInfo::vzip(self) -> V
-pub struct mssql_client::ParameterEncryptionInfo
-pub mssql_client::ParameterEncryptionInfo::cek_table: tds_protocol::crypto::CekTable
-pub mssql_client::ParameterEncryptionInfo::parameters: std::collections::hash::map::HashMap<alloc::string::String, mssql_client::encryption::ParameterCryptoInfo>
-impl mssql_client::encryption::ParameterEncryptionInfo
-pub fn mssql_client::encryption::ParameterEncryptionInfo::add_parameter(&mut self, alloc::string::String, mssql_client::encryption::ParameterCryptoInfo)
-pub fn mssql_client::encryption::ParameterEncryptionInfo::get_parameter(&self, &str) -> core::option::Option<&mssql_client::encryption::ParameterCryptoInfo>
-pub fn mssql_client::encryption::ParameterEncryptionInfo::needs_encryption(&self, &str) -> bool
-pub fn mssql_client::encryption::ParameterEncryptionInfo::new() -> Self
-impl core::clone::Clone for mssql_client::encryption::ParameterEncryptionInfo
-pub fn mssql_client::encryption::ParameterEncryptionInfo::clone(&self) -> mssql_client::encryption::ParameterEncryptionInfo
-impl core::default::Default for mssql_client::encryption::ParameterEncryptionInfo
-pub fn mssql_client::encryption::ParameterEncryptionInfo::default() -> Self
-impl core::fmt::Debug for mssql_client::encryption::ParameterEncryptionInfo
-pub fn mssql_client::encryption::ParameterEncryptionInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for mssql_client::encryption::ParameterEncryptionInfo
-impl core::marker::Send for mssql_client::encryption::ParameterEncryptionInfo
-impl core::marker::Sync for mssql_client::encryption::ParameterEncryptionInfo
-impl core::marker::Unpin for mssql_client::encryption::ParameterEncryptionInfo
-impl core::panic::unwind_safe::RefUnwindSafe for mssql_client::encryption::ParameterEncryptionInfo
-impl core::panic::unwind_safe::UnwindSafe for mssql_client::encryption::ParameterEncryptionInfo
-impl<T, U> core::convert::Into<U> for mssql_client::encryption::ParameterEncryptionInfo where U: core::convert::From<T>
-pub fn mssql_client::encryption::ParameterEncryptionInfo::into(self) -> U
-impl<T, U> core::convert::TryFrom<U> for mssql_client::encryption::ParameterEncryptionInfo where U: core::convert::Into<T>
-pub type mssql_client::encryption::ParameterEncryptionInfo::Error = core::convert::Infallible
-pub fn mssql_client::encryption::ParameterEncryptionInfo::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
-impl<T, U> core::convert::TryInto<U> for mssql_client::encryption::ParameterEncryptionInfo where U: core::convert::TryFrom<T>
-pub type mssql_client::encryption::ParameterEncryptionInfo::Error = <U as core::convert::TryFrom<T>>::Error
-pub fn mssql_client::encryption::ParameterEncryptionInfo::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
-impl<T> alloc::borrow::ToOwned for mssql_client::encryption::ParameterEncryptionInfo where T: core::clone::Clone
-pub type mssql_client::encryption::ParameterEncryptionInfo::Owned = T
-pub fn mssql_client::encryption::ParameterEncryptionInfo::clone_into(&self, &mut T)
-pub fn mssql_client::encryption::ParameterEncryptionInfo::to_owned(&self) -> T
-impl<T> core::any::Any for mssql_client::encryption::ParameterEncryptionInfo where T: 'static + ?core::marker::Sized
-pub fn mssql_client::encryption::ParameterEncryptionInfo::type_id(&self) -> core::any::TypeId
-impl<T> core::borrow::Borrow<T> for mssql_client::encryption::ParameterEncryptionInfo where T: ?core::marker::Sized
-pub fn mssql_client::encryption::ParameterEncryptionInfo::borrow(&self) -> &T
-impl<T> core::borrow::BorrowMut<T> for mssql_client::encryption::ParameterEncryptionInfo where T: ?core::marker::Sized
-pub fn mssql_client::encryption::ParameterEncryptionInfo::borrow_mut(&mut self) -> &mut T
-impl<T> core::clone::CloneToUninit for mssql_client::encryption::ParameterEncryptionInfo where T: core::clone::Clone
-pub unsafe fn mssql_client::encryption::ParameterEncryptionInfo::clone_to_uninit(&self, *mut u8)
-impl<T> core::convert::From<T> for mssql_client::encryption::ParameterEncryptionInfo
-pub fn mssql_client::encryption::ParameterEncryptionInfo::from(T) -> T
-impl<T> tracing::instrument::Instrument for mssql_client::encryption::ParameterEncryptionInfo
-impl<T> tracing::instrument::WithSubscriber for mssql_client::encryption::ParameterEncryptionInfo
-impl<T> typenum::type_operators::Same for mssql_client::encryption::ParameterEncryptionInfo
-pub type mssql_client::encryption::ParameterEncryptionInfo::Output = T
-impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::encryption::ParameterEncryptionInfo where V: ppv_lite86::types::MultiLane<T>
-pub fn mssql_client::encryption::ParameterEncryptionInfo::vzip(self) -> V
 pub struct mssql_client::ProcedureBuilder<'a, S: mssql_client::state::ConnectionState>
 impl<'a, S: mssql_client::state::ConnectionState> mssql_client::procedure::ProcedureBuilder<'a, S>
 pub async fn mssql_client::procedure::ProcedureBuilder<'a, S>::execute(&mut self) -> mssql_client::error::Result<mssql_client::stream::ProcedureResult>
@@ -5058,53 +4792,6 @@ impl<T> typenum::type_operators::Same for mssql_client::stream::ResultSet
 pub type mssql_client::stream::ResultSet::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::stream::ResultSet where V: ppv_lite86::types::MultiLane<T>
 pub fn mssql_client::stream::ResultSet::vzip(self) -> V
-pub struct mssql_client::ResultSetEncryptionInfo
-pub mssql_client::ResultSetEncryptionInfo::cek_table: tds_protocol::crypto::CekTable
-pub mssql_client::ResultSetEncryptionInfo::column_crypto: alloc::vec::Vec<core::option::Option<tds_protocol::crypto::CryptoMetadata>>
-impl mssql_client::encryption::ResultSetEncryptionInfo
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::get_cek_for_column(&self, usize) -> core::option::Option<&tds_protocol::crypto::CekTableEntry>
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::get_encryption_type(&self, usize) -> core::option::Option<tds_protocol::crypto::EncryptionTypeWire>
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::is_column_encrypted(&self, usize) -> bool
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::new(tds_protocol::crypto::CekTable, usize) -> Self
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::set_column_crypto(&mut self, usize, tds_protocol::crypto::CryptoMetadata)
-impl core::clone::Clone for mssql_client::encryption::ResultSetEncryptionInfo
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::clone(&self) -> mssql_client::encryption::ResultSetEncryptionInfo
-impl core::fmt::Debug for mssql_client::encryption::ResultSetEncryptionInfo
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for mssql_client::encryption::ResultSetEncryptionInfo
-impl core::marker::Send for mssql_client::encryption::ResultSetEncryptionInfo
-impl core::marker::Sync for mssql_client::encryption::ResultSetEncryptionInfo
-impl core::marker::Unpin for mssql_client::encryption::ResultSetEncryptionInfo
-impl core::panic::unwind_safe::RefUnwindSafe for mssql_client::encryption::ResultSetEncryptionInfo
-impl core::panic::unwind_safe::UnwindSafe for mssql_client::encryption::ResultSetEncryptionInfo
-impl<T, U> core::convert::Into<U> for mssql_client::encryption::ResultSetEncryptionInfo where U: core::convert::From<T>
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::into(self) -> U
-impl<T, U> core::convert::TryFrom<U> for mssql_client::encryption::ResultSetEncryptionInfo where U: core::convert::Into<T>
-pub type mssql_client::encryption::ResultSetEncryptionInfo::Error = core::convert::Infallible
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
-impl<T, U> core::convert::TryInto<U> for mssql_client::encryption::ResultSetEncryptionInfo where U: core::convert::TryFrom<T>
-pub type mssql_client::encryption::ResultSetEncryptionInfo::Error = <U as core::convert::TryFrom<T>>::Error
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
-impl<T> alloc::borrow::ToOwned for mssql_client::encryption::ResultSetEncryptionInfo where T: core::clone::Clone
-pub type mssql_client::encryption::ResultSetEncryptionInfo::Owned = T
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::clone_into(&self, &mut T)
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::to_owned(&self) -> T
-impl<T> core::any::Any for mssql_client::encryption::ResultSetEncryptionInfo where T: 'static + ?core::marker::Sized
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::type_id(&self) -> core::any::TypeId
-impl<T> core::borrow::Borrow<T> for mssql_client::encryption::ResultSetEncryptionInfo where T: ?core::marker::Sized
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::borrow(&self) -> &T
-impl<T> core::borrow::BorrowMut<T> for mssql_client::encryption::ResultSetEncryptionInfo where T: ?core::marker::Sized
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::borrow_mut(&mut self) -> &mut T
-impl<T> core::clone::CloneToUninit for mssql_client::encryption::ResultSetEncryptionInfo where T: core::clone::Clone
-pub unsafe fn mssql_client::encryption::ResultSetEncryptionInfo::clone_to_uninit(&self, *mut u8)
-impl<T> core::convert::From<T> for mssql_client::encryption::ResultSetEncryptionInfo
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::from(T) -> T
-impl<T> tracing::instrument::Instrument for mssql_client::encryption::ResultSetEncryptionInfo
-impl<T> tracing::instrument::WithSubscriber for mssql_client::encryption::ResultSetEncryptionInfo
-impl<T> typenum::type_operators::Same for mssql_client::encryption::ResultSetEncryptionInfo
-pub type mssql_client::encryption::ResultSetEncryptionInfo::Output = T
-impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::encryption::ResultSetEncryptionInfo where V: ppv_lite86::types::MultiLane<T>
-pub fn mssql_client::encryption::ResultSetEncryptionInfo::vzip(self) -> V
 pub struct mssql_client::RetryPolicy
 pub mssql_client::RetryPolicy::backoff_multiplier: f64
 pub mssql_client::RetryPolicy::initial_backoff: core::time::Duration
@@ -5392,36 +5079,6 @@ impl<T> typenum::type_operators::Same for mssql_client::error::SharedIoError
 pub type mssql_client::error::SharedIoError::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::error::SharedIoError where V: ppv_lite86::types::MultiLane<T>
 pub fn mssql_client::error::SharedIoError::vzip(self) -> V
-pub struct mssql_client::Streaming
-impl mssql_client::state::ConnectionState for mssql_client::state::Streaming
-impl core::marker::Freeze for mssql_client::state::Streaming
-impl core::marker::Send for mssql_client::state::Streaming
-impl core::marker::Sync for mssql_client::state::Streaming
-impl core::marker::Unpin for mssql_client::state::Streaming
-impl core::panic::unwind_safe::RefUnwindSafe for mssql_client::state::Streaming
-impl core::panic::unwind_safe::UnwindSafe for mssql_client::state::Streaming
-impl<T, U> core::convert::Into<U> for mssql_client::state::Streaming where U: core::convert::From<T>
-pub fn mssql_client::state::Streaming::into(self) -> U
-impl<T, U> core::convert::TryFrom<U> for mssql_client::state::Streaming where U: core::convert::Into<T>
-pub type mssql_client::state::Streaming::Error = core::convert::Infallible
-pub fn mssql_client::state::Streaming::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
-impl<T, U> core::convert::TryInto<U> for mssql_client::state::Streaming where U: core::convert::TryFrom<T>
-pub type mssql_client::state::Streaming::Error = <U as core::convert::TryFrom<T>>::Error
-pub fn mssql_client::state::Streaming::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
-impl<T> core::any::Any for mssql_client::state::Streaming where T: 'static + ?core::marker::Sized
-pub fn mssql_client::state::Streaming::type_id(&self) -> core::any::TypeId
-impl<T> core::borrow::Borrow<T> for mssql_client::state::Streaming where T: ?core::marker::Sized
-pub fn mssql_client::state::Streaming::borrow(&self) -> &T
-impl<T> core::borrow::BorrowMut<T> for mssql_client::state::Streaming where T: ?core::marker::Sized
-pub fn mssql_client::state::Streaming::borrow_mut(&mut self) -> &mut T
-impl<T> core::convert::From<T> for mssql_client::state::Streaming
-pub fn mssql_client::state::Streaming::from(T) -> T
-impl<T> tracing::instrument::Instrument for mssql_client::state::Streaming
-impl<T> tracing::instrument::WithSubscriber for mssql_client::state::Streaming
-impl<T> typenum::type_operators::Same for mssql_client::state::Streaming
-pub type mssql_client::state::Streaming::Output = T
-impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::state::Streaming where V: ppv_lite86::types::MultiLane<T>
-pub fn mssql_client::state::Streaming::vzip(self) -> V
 pub struct mssql_client::TimeoutConfig
 pub mssql_client::TimeoutConfig::command_timeout: core::time::Duration
 pub mssql_client::TimeoutConfig::connect_timeout: core::time::Duration
@@ -5655,7 +5312,6 @@ impl mssql_client::state::ConnectionState for mssql_client::state::Connected
 impl mssql_client::state::ConnectionState for mssql_client::state::Disconnected
 impl mssql_client::state::ConnectionState for mssql_client::state::InTransaction
 impl mssql_client::state::ConnectionState for mssql_client::state::Ready
-impl mssql_client::state::ConnectionState for mssql_client::state::Streaming
 pub trait mssql_client::FromRow: core::marker::Sized
 pub fn mssql_client::FromRow::from_row(&mssql_client::row::Row) -> core::result::Result<Self, mssql_client::error::Error>
 pub trait mssql_client::RowIteratorExt: core::iter::traits::iterator::Iterator<Item = core::result::Result<mssql_client::row::Row, mssql_client::error::Error>> + core::marker::Sized
