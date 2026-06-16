@@ -669,79 +669,16 @@ pub fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue>
             }
         }
 
-        // DECIMAL/NUMERIC types (1-byte length prefix)
+        // DECIMAL/NUMERIC types (1-byte length prefix). The mantissa decode and
+        // the 96-bit/scale-28 overflow policy are shared with the secondary
+        // decode stack (`mssql_types::decode`) so the two cannot drift — that
+        // drift was issue #188. Only `scale` is consulted by the shared decoder.
         TypeId::Decimal | TypeId::Numeric | TypeId::DecimalN | TypeId::NumericN => {
-            if buf.remaining() < 1 {
-                return Err(Error::Protocol(
-                    "unexpected EOF reading DECIMAL/NUMERIC length".into(),
-                ));
-            }
-            let len = buf.get_u8() as usize;
-            if len == 0 {
-                SqlValue::Null
-            } else {
-                if buf.remaining() < len {
-                    return Err(Error::Protocol(
-                        "unexpected EOF reading DECIMAL/NUMERIC data".into(),
-                    ));
-                }
-
-                // First byte is sign: 0 = negative, 1 = positive
-                let sign = buf.get_u8();
-                let mantissa_len = len - 1;
-
-                // Read mantissa as little-endian integer (up to 16 bytes for max precision 38)
-                let mut mantissa_bytes = [0u8; 16];
-                for i in 0..mantissa_len.min(16) {
-                    mantissa_bytes[i] = buf.get_u8();
-                }
-                // Skip any excess bytes (shouldn't happen with valid data)
-                for _ in 16..mantissa_len {
-                    buf.get_u8();
-                }
-
-                let mantissa = u128::from_le_bytes(mantissa_bytes);
-                let scale = col.type_info.scale.unwrap_or(0) as u32;
-
-                #[cfg(feature = "decimal")]
-                {
-                    use rust_decimal::Decimal;
-                    // rust_decimal holds 96-bit mantissas with scale <= 28;
-                    // SQL Server NUMERIC goes to 38 digits, so legitimate
-                    // wire values can exceed it. That must be an error, not
-                    // a silent fall back to f64 (~15-16 significant digits):
-                    // a lossy value read, written back, or compared
-                    // downstream corrupts data (issue #157).
-                    let decimal = i128::try_from(mantissa)
-                        .ok()
-                        .and_then(|m| Decimal::try_from_i128_with_scale(m, scale).ok());
-                    match decimal {
-                        Some(mut decimal) => {
-                            if sign == 0 {
-                                decimal.set_sign_negative(true);
-                            }
-                            SqlValue::Decimal(decimal)
-                        }
-                        None => {
-                            return Err(mssql_types::TypeError::InvalidDecimal(format!(
-                                "NUMERIC value (mantissa {mantissa}, scale {scale}) exceeds \
-                                 rust_decimal's 96-bit/scale-28 range; CAST the column to a \
-                                 narrower NUMERIC, FLOAT, or VARCHAR in the query"
-                            ))
-                            .into());
-                        }
-                    }
-                }
-
-                #[cfg(not(feature = "decimal"))]
-                {
-                    // Without the decimal feature, convert to f64
-                    let divisor = 10f64.powi(scale as i32);
-                    let value = (mantissa as f64) / divisor;
-                    let value = if sign == 0 { -value } else { value };
-                    SqlValue::Double(value)
-                }
-            }
+            let type_info = mssql_types::TypeInfo::decimal(
+                col.type_info.precision.unwrap_or(18),
+                col.type_info.scale.unwrap_or(0),
+            );
+            mssql_types::__private::decode_decimal(buf, &type_info)?
         }
 
         // DATETIME/SMALLDATETIME nullable (1-byte length prefix)

@@ -367,6 +367,7 @@ impl Error {
             | Self::InvalidIdentifier(_)
             | Self::Protocol(_)
             | Self::ProtocolError(_)
+            | Self::Type(_)
             | Self::Tls(_)
             | Self::Authentication(_)
             | Self::Cancel(_) => true,

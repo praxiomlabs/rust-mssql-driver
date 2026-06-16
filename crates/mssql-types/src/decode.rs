@@ -206,6 +206,19 @@ impl TypeInfo {
 pub(crate) mod sealed {
     use super::*;
 
+    /// Decode a DECIMAL/NUMERIC value (1-byte length prefix, sign byte,
+    /// little-endian mantissa).
+    ///
+    /// Shared with `mssql-client`'s `column_parser` so the two decode stacks
+    /// cannot drift on the overflow policy (the divergence that caused #188).
+    /// Generic over [`bytes::Buf`] so both `&[u8]` and [`Bytes`] callers reuse it.
+    pub fn decode_decimal<B: Buf>(
+        buf: &mut B,
+        type_info: &TypeInfo,
+    ) -> Result<SqlValue, TypeError> {
+        super::decode_decimal(buf, type_info)
+    }
+
     /// Decode a SQL value based on type information.
     pub fn decode_value(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, TypeError> {
         match type_info.type_id {
@@ -539,7 +552,7 @@ fn decode_guid(buf: &mut Bytes) -> Result<SqlValue, TypeError> {
 }
 
 #[cfg(feature = "decimal")]
-fn decode_decimal(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, TypeError> {
+fn decode_decimal<B: Buf>(buf: &mut B, type_info: &TypeInfo) -> Result<SqlValue, TypeError> {
     use rust_decimal::Decimal;
 
     if buf.remaining() < 1 {
@@ -604,7 +617,7 @@ fn decode_decimal(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, Typ
 }
 
 #[cfg(not(feature = "decimal"))]
-fn decode_decimal(buf: &mut Bytes, _type_info: &TypeInfo) -> Result<SqlValue, TypeError> {
+fn decode_decimal<B: Buf>(buf: &mut B, _type_info: &TypeInfo) -> Result<SqlValue, TypeError> {
     // Skip decimal data and return as string
     if buf.remaining() < 1 {
         return Err(TypeError::BufferTooSmall {
