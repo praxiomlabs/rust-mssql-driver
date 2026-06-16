@@ -296,8 +296,12 @@ async fn numeric_grid() {
         ("NUMERIC(18,9)", "123456789.123456789"),
         ("NUMERIC(38,10)", "1234567890.1234567890"),
         // rust_decimal range boundaries
-        ("NUMERIC(28,0)", "9999999999999999999999999999"), // 28 nines (max magnitude that fits)
-        ("NUMERIC(28,28)", "0.9999999999999999999999999999"), // scale 28 (the AE ceiling)
+        ("NUMERIC(28,0)", "9999999999999999999999999999"), // NUMERIC(28) precision max (28 nines)
+        ("NUMERIC(28,28)", "0.9999999999999999999999999999"), // max scale (28; the AE ceiling)
+        // The actual magnitude ceiling: rust_decimal::Decimal::MAX = 2^96 - 1
+        // (29 digits, ~7.9e28 — larger than 28 nines), which must decode exactly.
+        // The just-past-MAX value is checked in `numeric_overflow_errors`.
+        ("NUMERIC(29,0)", "79228162514264337593543950335"),
     ];
     for (ty, lit) in cases {
         assert_cast_decode(&mut client, ty, lit, dec(lit)).await;
@@ -315,7 +319,9 @@ async fn numeric_grid() {
 async fn numeric_overflow_errors() {
     let mut client = Client::connect(get_test_config()).await.expect("connect");
     let cases = [
-        ("NUMERIC(29,0)", "99999999999999999999999999999"), // 29 nines, exceeds mantissa
+        // Decimal::MAX + 1 (2^96): one past the magnitude ceiling, the exact boundary.
+        ("NUMERIC(29,0)", "79228162514264337593543950336"),
+        ("NUMERIC(29,0)", "99999999999999999999999999999"), // 29 nines, well past the mantissa
         ("NUMERIC(38,0)", "99999999999999999999999999999999999999"), // max NUMERIC magnitude
         ("NUMERIC(38,38)", "0.99999999999999999999999999999999999999"), // scale 38 > 28
     ];
