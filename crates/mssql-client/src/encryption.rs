@@ -77,10 +77,17 @@
 //! not a bare `NaiveDateTime`/`NaiveTime`/`String`: an encrypted column requires
 //! the declared type — precision/scale/length included — to match the column
 //! exactly, which a bare value can't convey, so the server rejects it with
-//! `Operand type clash` (Msg 206) at the describe step. Encrypted `char`/`nchar`
-//! columns must use a `*_BIN2` collation (a SQL Server requirement for
-//! deterministic encryption of character types); `char` is encoded as
-//! Windows-1252. Temporal values are normalized to Always Encrypted's
+//! `Operand type clash` (Msg 206) at the describe step. Encrypted `decimal` is
+//! bounded to `scale ≤ 28` — `rust_decimal` cannot represent more fractional
+//! digits, so `numeric()` rejects a declared `scale > 28` (also `precision`
+//! outside `1..=38` and `scale > precision`) rather than emit a magnitude a
+//! Microsoft client reads at the wrong scale; this is decimal AE support
+//! bounded to `scale ≤ 28`, not full `decimal(38, s)` coverage. Encrypted
+//! `char`/`nchar` columns must use a `*_BIN2` collation (a SQL Server
+//! requirement for deterministic encryption of character types); `char` is
+//! encoded as Windows-1252, and a `char` value containing a character absent
+//! from Windows-1252 (e.g. `中`) is rejected rather than silently substituted
+//! (use `nchar` for non-Latin text). Temporal values are normalized to Always Encrypted's
 //! fixed-width form (time = 5 bytes, datetime2 = 8, datetimeoffset = 10, the
 //! value truncated to the column scale but stored at scale-7 width), matching
 //! `Microsoft.Data.SqlClient` and validated byte-for-byte against it at both
@@ -690,7 +697,21 @@ pub fn normalize_for_encryption(
     if let (Some(mssql_types::EncryptedParamType::Char { .. }), SqlValue::String(s)) =
         (param_type, value)
     {
-        return Ok(encoding_rs::WINDOWS_1252.encode(s).0.into_owned());
+        let (encoded, _, had_errors) = encoding_rs::WINDOWS_1252.encode(s);
+        // A code point absent from Windows-1252 is substituted by encoding_rs
+        // with a numeric character reference (`&#NNNN;`), which is byte garbage
+        // no Microsoft client can read back (.NET stores `?`). Erroring converts
+        // silent Always Encrypted corruption into a clear failure rather than
+        // guessing at a lossy substitution. (`char` columns are Windows-1252
+        // only; use `nchar` for non-Latin text.)
+        if had_errors {
+            return Err(EncryptionError::EncryptionFailed(
+                "char value contains characters not representable in Windows-1252 \
+                 (the char column code page); use nchar for non-Latin text"
+                    .to_string(),
+            ));
+        }
+        return Ok(encoded.into_owned());
     }
     // Typed temporal parameters carry the column scale (the encrypted byte
     // length depends on it), so they're handled from the hint, not the value.
@@ -1198,6 +1219,36 @@ mod tests {
             )
             .unwrap(),
             unhex("0102030405"),
+        );
+    }
+
+    /// A `char` value carrying a code point absent from Windows-1252 must error,
+    /// not silently encode to numeric-character-reference garbage. `encoding_rs`
+    /// substitutes `&#NNNN;` (and sets `had_errors`) for unmappable code points;
+    /// discarding that flag produced ciphertext no Microsoft client could read
+    /// (.NET stores `?` for the same input). Erroring converts silent corruption
+    /// into a clear failure.
+    #[cfg(feature = "always-encrypted")]
+    #[test]
+    fn ae_char_rejects_non_windows_1252() {
+        use mssql_types::EncryptedParamType as E;
+        let r = normalize_for_encryption(
+            &SqlValue::String("中".to_string()),
+            Some(E::Char { length: 10 }),
+        );
+        assert!(
+            r.is_err(),
+            "non-Windows-1252 char must error, got {:?}",
+            r.map(|b| b.iter().map(|x| format!("{x:02x}")).collect::<String>())
+        );
+        // A value fully representable in Windows-1252 still normalizes (é = 0xE9).
+        assert_eq!(
+            normalize_for_encryption(
+                &SqlValue::String("é".to_string()),
+                Some(E::Char { length: 10 })
+            )
+            .unwrap(),
+            vec![0xE9],
         );
     }
 

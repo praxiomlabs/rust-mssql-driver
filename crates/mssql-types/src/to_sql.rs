@@ -346,12 +346,22 @@ pub struct Numeric {
 /// Required when binding to an Always Encrypted `decimal` column, whose declared
 /// `decimal(precision, scale)` must match the column exactly.
 ///
+/// `numeric(value, precision, scale)` **asserts that `value` fits the
+/// `decimal(precision, scale)` domain**, and [`ToSql::to_sql`] enforces that
+/// assertion on every path — encrypted or plaintext (it is the caller's
+/// declared domain, not a property of the connection). It errors when:
+///
+/// - `precision` is outside `1..=38`, or `scale > precision`;
+/// - `scale > 28` — [`rust_decimal::Decimal`] caps its backing scale at 28, so a larger
+///   declared scale cannot be represented and, on the Always Encrypted path,
+///   would emit a magnitude a Microsoft client reads at the wrong scale (e.g.
+///   `0.5` → `0.005`) with no server backstop. The driver's `decimal` Always
+///   Encrypted support is therefore bounded to `scale ≤ 28`;
+/// - the value, after rescaling, has more significant digits than `precision`.
+///
 /// The value is rescaled to `scale`, which **rounds** when the value has more
 /// fractional digits than `scale` (e.g. `numeric(dec!(12.999), 18, 2)` stores
-/// `13.00`). If the rescaled value has more significant digits than `precision`,
-/// [`ToSql::to_sql`] returns an error rather than silently storing a value
-/// outside the column's domain — the server cannot range-check an encrypted
-/// value, so the client enforces it.
+/// `13.00`).
 #[cfg(feature = "decimal")]
 #[must_use]
 pub fn numeric(value: rust_decimal::Decimal, precision: u8, scale: u8) -> Numeric {
@@ -365,6 +375,34 @@ pub fn numeric(value: rust_decimal::Decimal, precision: u8, scale: u8) -> Numeri
 #[cfg(feature = "decimal")]
 impl ToSql for Numeric {
     fn to_sql(&self) -> Result<SqlValue, TypeError> {
+        // Validate the declared `decimal(precision, scale)` domain before
+        // rescaling. `numeric(v, p, s)` asserts that `v` fits `decimal(p, s)`;
+        // this contract holds on both the Always Encrypted path (where the
+        // declaration must match the column and the server cannot range-check
+        // an encrypted value) and the plaintext path (#288). The scale ≤ 28
+        // bound is load-bearing: rust_decimal caps its backing scale at 28, so
+        // a declared scale > 28 would be silently capped by `rescale` and emit
+        // a magnitude a Microsoft client reads at the wrong scale (0.5 → 0.005)
+        // — silent Always Encrypted corruption with no server backstop.
+        if self.precision < 1 || self.precision > 38 {
+            return Err(TypeError::InvalidDecimal(format!(
+                "precision {} is out of range (1–38)",
+                self.precision
+            )));
+        }
+        if self.scale > self.precision {
+            return Err(TypeError::InvalidDecimal(format!(
+                "scale {} exceeds precision {}",
+                self.scale, self.precision
+            )));
+        }
+        if self.scale > 28 {
+            return Err(TypeError::InvalidDecimal(format!(
+                "scale {} is out of range (max 28: rust_decimal cannot represent more fractional digits)",
+                self.scale
+            )));
+        }
+
         let mut value = self.value;
         value.rescale(u32::from(self.scale));
         // The server cannot range-check an encrypted value, so a value that
@@ -810,5 +848,44 @@ mod tests {
 
         // Zero fits any precision.
         assert!(numeric(Decimal::ZERO, 1, 0).to_sql().is_ok());
+    }
+
+    #[cfg(feature = "decimal")]
+    #[test]
+    fn test_numeric_rejects_scale_above_28() {
+        use rust_decimal::Decimal;
+
+        // rust_decimal caps the backing scale at 28. A column declared
+        // decimal(38,30) would have a Microsoft client read the scale-28
+        // magnitude at scale 30 — silently turning 0.5 into 0.005 — with no
+        // server backstop (the parameter declaration is correct; only the
+        // encrypted bytes are wrong). The wrapper must reject scale > 28
+        // rather than emit unreadable ciphertext.
+        assert!(
+            numeric(Decimal::new(5, 1), 38, 30).to_sql().is_err(),
+            "scale > 28 must be rejected (rust_decimal cannot represent it)"
+        );
+        // The 28 boundary is still accepted (rust_decimal can hold it).
+        assert!(numeric(Decimal::new(5, 1), 38, 28).to_sql().is_ok());
+    }
+
+    #[cfg(feature = "decimal")]
+    #[test]
+    fn test_numeric_rejects_out_of_range_precision_and_scale() {
+        use rust_decimal::Decimal;
+
+        // #288: the precision/scale contract is global — `to_sql()` here runs
+        // with no encryption context (the plaintext path), and it still asserts
+        // the caller-declared decimal(p, s) domain. precision must be 1..=38.
+        assert!(numeric(Decimal::ONE, 0, 0).to_sql().is_err(), "precision 0");
+        assert!(
+            numeric(Decimal::ONE, 39, 0).to_sql().is_err(),
+            "precision > 38"
+        );
+        // scale must not exceed precision.
+        assert!(
+            numeric(Decimal::new(1, 2), 1, 2).to_sql().is_err(),
+            "scale > precision"
+        );
     }
 }
