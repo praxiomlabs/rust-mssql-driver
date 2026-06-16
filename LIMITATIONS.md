@@ -246,17 +246,27 @@ Bind a `decimal`/temporal/fixed-width parameter with its typed wrapper, not a ba
 value: an encrypted column requires the declared type — precision/scale/length
 included — to match exactly, so a plain `Decimal`, `NaiveDateTime`/`NaiveTime`, or
 `String` is rejected with `Operand type clash` (Msg 206). `numeric` also rejects,
-client-side, a value whose digits exceed the declared precision (the server cannot
-range-check an encrypted value). Temporal values are normalized to Always
+client-side, a value whose digits exceed the declared precision, plus a declared
+`precision` outside `1..=38`, a `scale > precision`, or a **`scale > 28`** (the
+driver's encrypted `decimal` support is bounded to `scale ≤ 28` — see below);
+the server cannot range-check an encrypted value, so the client enforces the
+domain. Temporal values are normalized to Always
 Encrypted's fixed-width form (`time` = 5 bytes, `datetime2` = 8, `datetimeoffset`
 = 10; the value truncated to the column scale but stored at scale-7 width), matching
 `Microsoft.Data.SqlClient` and validated byte-for-byte against it at both scale 7
 and scale 3.
 
 Constraints on the typed wrappers:
+- Encrypted `decimal` is bounded to **`scale ≤ 28`**: [`rust_decimal`] (the
+  `decimal` feature's backing type) cannot represent more than 28 fractional
+  digits, so `numeric(v, p, s)` rejects `s > 28` rather than emit a magnitude a
+  Microsoft client would read at the wrong scale. A `decimal(38, 30)` encrypted
+  column is therefore not supported by this driver.
 - Encrypted `char`/`nchar` columns must use a `*_BIN2` collation (a SQL Server
   requirement for deterministic encryption of character types); `char` values are
-  encoded in Windows-1252 (other code pages are not supported).
+  encoded in Windows-1252 (other code pages are not supported). A `char` value
+  containing a character absent from Windows-1252 (e.g. `中`) is rejected rather
+  than silently substituted — use `nchar` for non-Latin text.
 - The AE normalized form is not padded to the declared width, so `char`/`binary`
   values read back at their original length, not the column width.
 
