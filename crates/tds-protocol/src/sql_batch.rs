@@ -30,7 +30,7 @@ pub(crate) mod sealed {
     /// # Example
     ///
     /// ```
-    /// use tds_protocol::sql_batch::encode_sql_batch;
+    /// use tds_protocol::__private::encode_sql_batch;
     ///
     /// let sql = "SELECT * FROM users WHERE id = 1";
     /// let payload = encode_sql_batch(sql);
@@ -59,7 +59,7 @@ pub(crate) mod sealed {
     /// # Example
     ///
     /// ```
-    /// use tds_protocol::sql_batch::encode_sql_batch_with_transaction;
+    /// use tds_protocol::__private::encode_sql_batch_with_transaction;
     ///
     /// // Within a transaction with descriptor 0x1234567890ABCDEF
     /// let sql = "INSERT INTO users VALUES (1, 'Alice')";

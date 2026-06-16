@@ -252,7 +252,7 @@ fuzz_target!(|input: FuzzSqlValue| {
         };
 
         // Attempt decode — should not panic
-        let decode_result = mssql_types::decode::decode_value(&mut decode_bytes, &type_info);
+        let decode_result = mssql_types::__private::decode_value(&mut decode_bytes, &type_info);
 
         // If decode succeeded, verify basic invariants
         if let Ok(decoded) = decode_result {

@@ -32,5 +32,5 @@ fuzz_target!(|input: FuzzInput| {
 
     // Try to decode the value
     let mut bytes = Bytes::from(input.data);
-    let _ = mssql_types::decode::decode_value(&mut bytes, &type_info);
+    let _ = mssql_types::__private::decode_value(&mut bytes, &type_info);
 });
