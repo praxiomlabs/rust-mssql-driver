@@ -18,10 +18,12 @@
 //! - **NUMERIC precision/scale grid** — exact decode across the grid, plus the
 //!   overflow boundary: values beyond `rust_decimal`'s range must error, not
 //!   silently degrade (the #157/#188/#196 class).
+//! - **temporal** — DATE / TIME / DATETIME2 / legacy DATETIME / SMALLDATETIME
+//!   across scales and range boundaries, and DATETIMEOFFSET across offsets
+//!   (instant + offset preserved; the DATETIMEOFFSET-UTC class).
 //!
-//! Planned follow-on: temporal types (DATE / TIME / DATETIME2 / DATETIMEOFFSET
-//! at every offset and scale), and an encode-back assertion (parameter
-//! round-trip vs `CAST(... AS VARBINARY)`).
+//! Planned follow-on: an encode-back assertion (parameter round-trip vs the
+//! server's `CAST(... AS VARBINARY)`) to cover the encode direction too.
 //!
 //! Run against a live server:
 //! ```text
@@ -331,4 +333,237 @@ async fn numeric_overflow_errors() {
             "{sql} must error on overflow, but silently decoded {produced:?}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Dimension 4: temporal types (DATE / TIME / DATETIME2 / DATETIMEOFFSET /
+// legacy DATETIME / SMALLDATETIME), across scales and offsets.
+// ---------------------------------------------------------------------------
+
+/// DATETIMEOFFSET must round-trip both the instant **and** the original offset.
+/// chrono's `DateTime` equality only compares the instant, so we compare the
+/// RFC3339 rendering (instant + offset + fractional) — the check that would
+/// catch the DATETIMEOFFSET-UTC bug class (wrong instant) *and* an offset that
+/// got normalized away.
+#[cfg(feature = "chrono")]
+async fn assert_dto(
+    client: &mut Client<Ready>,
+    literal: &str,
+    cast_type: &str,
+    expected_rfc3339: &str,
+) {
+    use chrono::{DateTime, FixedOffset};
+    let sql = format!("SELECT CAST('{literal}' AS {cast_type})");
+    let rows = client
+        .query(&sql, &[])
+        .await
+        .unwrap_or_else(|e| panic!("query failed for {sql}: {e}"));
+    let row = rows
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| panic!("no row for {sql}"))
+        .unwrap_or_else(|e| panic!("row error for {sql}: {e}"));
+    let got: DateTime<FixedOffset> = row
+        .get(0)
+        .unwrap_or_else(|e| panic!("decode failed for {sql}: {e}"));
+    let expected = DateTime::parse_from_rfc3339(expected_rfc3339).expect("valid expected rfc3339");
+    assert_eq!(
+        got.to_rfc3339(),
+        expected.to_rfc3339(),
+        "DATETIMEOFFSET mismatch for {sql}: got {got}, expected {expected}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+#[cfg(feature = "chrono")]
+async fn date_boundaries() {
+    let d = |y, m, dd| chrono::NaiveDate::from_ymd_opt(y, m, dd).expect("valid date");
+    let mut c = Client::connect(get_test_config()).await.expect("connect");
+    assert_cast_decode(&mut c, "DATE", "'0001-01-01'", d(1, 1, 1)).await;
+    assert_cast_decode(&mut c, "DATE", "'9999-12-31'", d(9999, 12, 31)).await;
+    assert_cast_decode(&mut c, "DATE", "'2000-02-29'", d(2000, 2, 29)).await;
+    assert_cast_decode(&mut c, "DATE", "'2023-06-15'", d(2023, 6, 15)).await;
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+#[cfg(feature = "chrono")]
+async fn time_scales() {
+    let t = |h, m, s, n| chrono::NaiveTime::from_hms_nano_opt(h, m, s, n).expect("valid time");
+    let mut c = Client::connect(get_test_config()).await.expect("connect");
+    assert_cast_decode(&mut c, "TIME(0)", "'00:00:00'", t(0, 0, 0, 0)).await;
+    assert_cast_decode(&mut c, "TIME(0)", "'23:59:59'", t(23, 59, 59, 0)).await;
+    assert_cast_decode(
+        &mut c,
+        "TIME(1)",
+        "'12:34:56.1'",
+        t(12, 34, 56, 100_000_000),
+    )
+    .await;
+    assert_cast_decode(
+        &mut c,
+        "TIME(3)",
+        "'12:34:56.123'",
+        t(12, 34, 56, 123_000_000),
+    )
+    .await;
+    assert_cast_decode(
+        &mut c,
+        "TIME(7)",
+        "'12:34:56.1234567'",
+        t(12, 34, 56, 123_456_700),
+    )
+    .await;
+    assert_cast_decode(
+        &mut c,
+        "TIME(7)",
+        "'23:59:59.9999999'",
+        t(23, 59, 59, 999_999_900),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+#[cfg(feature = "chrono")]
+async fn datetime2_scales() {
+    let dt = |y, mo, d, h, mi, s, n| {
+        chrono::NaiveDate::from_ymd_opt(y, mo, d)
+            .expect("valid date")
+            .and_hms_nano_opt(h, mi, s, n)
+            .expect("valid time")
+    };
+    let mut c = Client::connect(get_test_config()).await.expect("connect");
+    assert_cast_decode(
+        &mut c,
+        "DATETIME2(0)",
+        "'2023-06-15 14:30:00'",
+        dt(2023, 6, 15, 14, 30, 0, 0),
+    )
+    .await;
+    assert_cast_decode(
+        &mut c,
+        "DATETIME2(7)",
+        "'0001-01-01 00:00:00'",
+        dt(1, 1, 1, 0, 0, 0, 0),
+    )
+    .await;
+    assert_cast_decode(
+        &mut c,
+        "DATETIME2(7)",
+        "'9999-12-31 23:59:59.9999999'",
+        dt(9999, 12, 31, 23, 59, 59, 999_999_900),
+    )
+    .await;
+    assert_cast_decode(
+        &mut c,
+        "DATETIME2(7)",
+        "'2023-06-15 14:30:00.1234567'",
+        dt(2023, 6, 15, 14, 30, 0, 123_456_700),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+#[cfg(feature = "chrono")]
+async fn legacy_datetime_smalldatetime() {
+    // Whole-second / whole-minute values are exact in these low-resolution types
+    // (DATETIME = 1/300s, SMALLDATETIME = 1 minute), avoiding rounding ambiguity.
+    let dt = |y, mo, d, h, mi, s| {
+        chrono::NaiveDate::from_ymd_opt(y, mo, d)
+            .expect("valid date")
+            .and_hms_opt(h, mi, s)
+            .expect("valid time")
+    };
+    let mut c = Client::connect(get_test_config()).await.expect("connect");
+    // DATETIME range: 1753-01-01 .. 9999-12-31
+    assert_cast_decode(
+        &mut c,
+        "DATETIME",
+        "'2023-06-15 14:30:00'",
+        dt(2023, 6, 15, 14, 30, 0),
+    )
+    .await;
+    assert_cast_decode(
+        &mut c,
+        "DATETIME",
+        "'1753-01-01 00:00:00'",
+        dt(1753, 1, 1, 0, 0, 0),
+    )
+    .await;
+    // SMALLDATETIME range: 1900-01-01 .. 2079-06-06, minute resolution
+    assert_cast_decode(
+        &mut c,
+        "SMALLDATETIME",
+        "'2023-06-15 14:30:00'",
+        dt(2023, 6, 15, 14, 30, 0),
+    )
+    .await;
+    assert_cast_decode(
+        &mut c,
+        "SMALLDATETIME",
+        "'1900-01-01 00:00:00'",
+        dt(1900, 1, 1, 0, 0, 0),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+#[cfg(feature = "chrono")]
+async fn datetimeoffset_offsets() {
+    let mut c = Client::connect(get_test_config()).await.expect("connect");
+    // Offset sweep at scale 7.
+    assert_dto(
+        &mut c,
+        "2023-06-15 14:30:00 +00:00",
+        "DATETIMEOFFSET(7)",
+        "2023-06-15T14:30:00+00:00",
+    )
+    .await;
+    assert_dto(
+        &mut c,
+        "2023-06-15 14:30:00 +05:30",
+        "DATETIMEOFFSET(7)",
+        "2023-06-15T14:30:00+05:30",
+    )
+    .await;
+    assert_dto(
+        &mut c,
+        "2023-06-15 14:30:00 -08:00",
+        "DATETIMEOFFSET(7)",
+        "2023-06-15T14:30:00-08:00",
+    )
+    .await;
+    assert_dto(
+        &mut c,
+        "2023-06-15 14:30:00 +14:00",
+        "DATETIMEOFFSET(7)",
+        "2023-06-15T14:30:00+14:00",
+    )
+    .await;
+    assert_dto(
+        &mut c,
+        "2023-06-15 14:30:00 -12:00",
+        "DATETIMEOFFSET(7)",
+        "2023-06-15T14:30:00-12:00",
+    )
+    .await;
+    // Fractional + offset, and scale 0.
+    assert_dto(
+        &mut c,
+        "2023-06-15 14:30:00.1234567 +05:30",
+        "DATETIMEOFFSET(7)",
+        "2023-06-15T14:30:00.1234567+05:30",
+    )
+    .await;
+    assert_dto(
+        &mut c,
+        "2023-06-15 14:30:00 -08:00",
+        "DATETIMEOFFSET(0)",
+        "2023-06-15T14:30:00-08:00",
+    )
+    .await;
 }
