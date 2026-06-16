@@ -101,8 +101,11 @@ fn encoding_for_lcid(lcid: u32) -> Option<&'static encoding_rs::Encoding> {
 /// Get the Windows code page for an LCID value.
 #[cfg(feature = "encoding")]
 fn code_page_for_lcid(lcid: u32) -> Option<u16> {
-    // Mask for primary language ID (lower 10 bits)
-    const PRIMARY_LANGUAGE_MASK: u32 = 0x3FF;
+    // Mask for the locale ID (lower 16 bits); the high bits carry sort/version
+    // flags, not the locale, so a 10-bit mask collapsed every full LCID and the
+    // arms below (full LCIDs like 0x0411) never matched. Mirrors
+    // `tds_protocol::collation::PRIMARY_LANGUAGE_MASK`.
+    const PRIMARY_LANGUAGE_MASK: u32 = 0xFFFF;
     let primary_lang = lcid & PRIMARY_LANGUAGE_MASK;
 
     match primary_lang {
@@ -231,16 +234,16 @@ pub(crate) mod sealed {
             // GUID
             0x24 => decode_guid(buf),
 
-            // Decimal/Numeric
-            0x6C | 0x6A => decode_decimal(buf, type_info),
+            // Decimal/Numeric (0x6A/0x6C are the N-types; 0x3F is legacy NUMERICTYPE)
+            0x6C | 0x6A | 0x3F => decode_decimal(buf, type_info),
 
             // Date/Time types
             0x28 => decode_date(buf),                      // DATETYPE
             0x29 => decode_time(buf, type_info),           // TIMETYPE
             0x2A => decode_datetime2(buf, type_info),      // DATETIME2TYPE
             0x2B => decode_datetimeoffset(buf, type_info), // DATETIMEOFFSETTYPE
+            0x3A => decode_smalldatetime(buf),             // DATETIM4TYPE (smalldatetime)
             0x3D => decode_datetime(buf),                  // DATETIMETYPE
-            0x3F => decode_smalldatetime(buf),             // SMALLDATETIMETYPE
 
             // XML
             0xF1 => decode_xml(buf),
@@ -1093,6 +1096,78 @@ mod tests {
         let type_info = TypeInfo::int(0x38);
         let result = decode_value(&mut buf, &type_info).unwrap();
         assert_eq!(result, SqlValue::Int(42));
+    }
+
+    // ---- #204: secondary-decode-stack regressions ----
+
+    /// #204 bug 1: type 0x3F is legacy NUMERICTYPE, not SMALLDATETIME. It was
+    /// wrongly dispatched to `decode_smalldatetime`; it must decode as a decimal.
+    #[cfg(feature = "decimal")]
+    #[test]
+    fn legacy_numeric_0x3f_decodes_as_decimal() {
+        // Decimal wire: [len][sign=1 (+)][magnitude LE]; 12345 = 0x3039, scale 2.
+        let mut buf = Bytes::from_static(&[0x03, 0x01, 0x39, 0x30]);
+        let type_info = TypeInfo {
+            type_id: 0x3F,
+            length: None,
+            scale: Some(2),
+            precision: Some(5),
+            collation: None,
+        };
+        let result = decode_value(&mut buf, &type_info).unwrap();
+        assert_eq!(result, SqlValue::Decimal("123.45".parse().unwrap()));
+    }
+
+    /// #204 bug 1 (other half): 0x3A is DATETIM4 (SMALLDATETIME) and previously
+    /// had no arm at all — the smalldatetime decoder was wired to 0x3F instead.
+    #[cfg(feature = "chrono")]
+    #[test]
+    fn smalldatetime_0x3a_decodes() {
+        // Raw 4 bytes: u16 days since 1900-01-01 + u16 minutes. 100 days, 600 min.
+        let mut buf = Bytes::from_static(&[100, 0, 0x58, 0x02]);
+        let type_info = TypeInfo {
+            type_id: 0x3A,
+            length: None,
+            scale: None,
+            precision: None,
+            collation: None,
+        };
+        let result = decode_value(&mut buf, &type_info).unwrap();
+        let expected = chrono::NaiveDate::from_ymd_opt(1900, 1, 1)
+            .unwrap()
+            .checked_add_signed(chrono::Duration::days(100))
+            .unwrap()
+            .and_hms_opt(10, 0, 0)
+            .unwrap();
+        assert_eq!(result, SqlValue::DateTime(expected));
+    }
+
+    /// #204 bug 2: the secondary stack masked the LCID to 10 bits before matching
+    /// full 16-bit LCIDs, so every non-Latin collation collapsed to codepage 1252.
+    /// A Japanese collation must decode cp932. Uses the real `Japanese_CI_AS` lcid
+    /// (sort/version bits set: 0x00D00411) so the mask width genuinely matters —
+    /// pre-fix this decoded the bytes as Windows-1252 garbage.
+    #[cfg(feature = "encoding")]
+    #[test]
+    fn varchar_japanese_collation_decodes_cp932() {
+        use bytes::BufMut;
+        let (cp932, _, had_err) = encoding_rs::SHIFT_JIS.encode("あい");
+        assert!(!had_err, "sample must be representable in cp932");
+        let mut wire = bytes::BytesMut::new();
+        wire.put_u16_le(cp932.len() as u16);
+        wire.put_slice(&cp932);
+        let type_info = TypeInfo {
+            type_id: 0xA7, // BIGVARCHARTYPE
+            length: None,
+            scale: None,
+            precision: None,
+            collation: Some(Collation {
+                lcid: 13632529, // Japanese_CI_AS (0x00D00411)
+                flags: 0,
+            }),
+        };
+        let result = decode_value(&mut wire.freeze(), &type_info).unwrap();
+        assert_eq!(result, SqlValue::String("あい".to_string()));
     }
 
     /// The mixed-endian GUID encoding must round-trip: encode then decode
