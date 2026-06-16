@@ -9,7 +9,7 @@
 //! they only exercise the types a feature happens to use.
 //!
 //! Built incrementally, split by dimension so each slice lands and fails
-//! legibly. Dimensions covered so far:
+//! legibly. Dimensions:
 //!
 //! - **core scalar boundaries** — bit / integer / float (min/max/zero/neg).
 //! - **collation sweep** — VARCHAR across codepages, exercising both the LCID
@@ -21,9 +21,9 @@
 //! - **temporal** — DATE / TIME / DATETIME2 / legacy DATETIME / SMALLDATETIME
 //!   across scales and range boundaries, and DATETIMEOFFSET across offsets
 //!   (instant + offset preserved; the DATETIMEOFFSET-UTC class).
-//!
-//! Planned follow-on: an encode-back assertion (parameter round-trip vs the
-//! server's `CAST(... AS VARBINARY)`) to cover the encode direction too.
+//! - **encode-back** — the encode direction: bind a value as a parameter and
+//!   compare the server's `CAST(@P1 AS VARBINARY)` to the same literal cast to
+//!   the inferred type, so an encode bug shows as a byte mismatch.
 //!
 //! Run against a live server:
 //! ```text
@@ -33,7 +33,7 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use mssql_client::{Client, Config, FromSql, Ready};
+use mssql_client::{Client, Config, FromSql, Ready, ToSql};
 
 /// Build test configuration from the environment, mirroring the other live
 /// integration tests. Targets `master`; `CAST` needs no user database.
@@ -177,6 +177,7 @@ async fn float_values() {
 /// SortId (`sort_id != 0`); the driver maps each to a codepage through a
 /// different table, so the sweep must cover both — and assert which one it hit
 /// so a server/driver change can't silently move an entry off the intended path.
+#[cfg(feature = "encoding")]
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum CollPath {
     Lcid,
@@ -564,6 +565,109 @@ async fn datetimeoffset_offsets() {
         "2023-06-15 14:30:00 -08:00",
         "DATETIMEOFFSET(0)",
         "2023-06-15T14:30:00-08:00",
+    )
+    .await;
+}
+
+// ---------------------------------------------------------------------------
+// Dimension 5: encode-back (parameter encode vs server literal)
+// ---------------------------------------------------------------------------
+
+/// Differential **encode** check: bind `value` as the parameter `@P1`, and have
+/// the server re-emit it as VARBINARY alongside the same literal cast to the
+/// same type. If the driver encoded the parameter correctly, the server decodes
+/// it to exactly the literal's value and the two VARBINARY blobs match. `sql_type`
+/// must be the type the driver infers for `V` (see the encode-type probe), so the
+/// two sides are the same SQL type.
+async fn assert_encode_roundtrip<V>(
+    client: &mut Client<Ready>,
+    value: &V,
+    literal: &str,
+    sql_type: &str,
+) where
+    V: ToSql + Sync,
+{
+    let sql = format!(
+        "SELECT CAST(@P1 AS VARBINARY(8000)), CAST(CAST({literal} AS {sql_type}) AS VARBINARY(8000))"
+    );
+    let rows = client
+        .query(&sql, &[value])
+        .await
+        .unwrap_or_else(|e| panic!("query failed for {sql}: {e}"));
+    let row = rows
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| panic!("no row for {sql}"))
+        .unwrap_or_else(|e| panic!("row error for {sql}: {e}"));
+    let encoded: Vec<u8> = row
+        .get(0)
+        .unwrap_or_else(|e| panic!("decode @P1 bytes for {sql}: {e}"));
+    let expected: Vec<u8> = row
+        .get(1)
+        .unwrap_or_else(|e| panic!("decode literal bytes for {sql}: {e}"));
+    assert_eq!(
+        encoded, expected,
+        "encode mismatch for {sql_type}: driver-encoded @P1 {encoded:02X?} != literal {literal} {expected:02X?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn encode_back_scalars() {
+    let mut c = Client::connect(get_test_config()).await.expect("connect");
+    // integers
+    assert_encode_roundtrip(&mut c, &0i32, "0", "INT").await;
+    assert_encode_roundtrip(&mut c, &(-1i32), "-1", "INT").await;
+    assert_encode_roundtrip(&mut c, &i32::MAX, "2147483647", "INT").await;
+    assert_encode_roundtrip(&mut c, &i32::MIN, "-2147483648", "INT").await;
+    assert_encode_roundtrip(&mut c, &i64::MIN, "-9223372036854775808", "BIGINT").await;
+    assert_encode_roundtrip(&mut c, &i64::MAX, "9223372036854775807", "BIGINT").await;
+    assert_encode_roundtrip(&mut c, &i16::MIN, "-32768", "SMALLINT").await;
+    assert_encode_roundtrip(&mut c, &i16::MAX, "32767", "SMALLINT").await;
+    // bool
+    assert_encode_roundtrip(&mut c, &true, "1", "BIT").await;
+    assert_encode_roundtrip(&mut c, &false, "0", "BIT").await;
+    // floats
+    assert_encode_roundtrip(&mut c, &1.5f64, "1.5", "FLOAT").await;
+    assert_encode_roundtrip(&mut c, &(-1.5f64), "-1.5", "FLOAT").await;
+    assert_encode_roundtrip(&mut c, &1.25f32, "1.25", "REAL").await;
+    // nvarchar (codepage-distinctive char so an encode bug shows)
+    assert_encode_roundtrip(&mut c, &"héllo".to_string(), "N'héllo'", "NVARCHAR(4000)").await;
+    assert_encode_roundtrip(&mut c, &String::new(), "N''", "NVARCHAR(4000)").await;
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+#[cfg(feature = "decimal")]
+async fn encode_back_decimal() {
+    // The driver declares DECIMAL(38, value.scale()); match the literal's scale.
+    let d = |s: &str| s.parse::<rust_decimal::Decimal>().expect("decimal");
+    let mut c = Client::connect(get_test_config()).await.expect("connect");
+    assert_encode_roundtrip(&mut c, &d("123.45"), "123.45", "DECIMAL(38,2)").await;
+    assert_encode_roundtrip(&mut c, &d("-123.45"), "-123.45", "DECIMAL(38,2)").await;
+    assert_encode_roundtrip(&mut c, &d("0"), "0", "DECIMAL(38,0)").await;
+    assert_encode_roundtrip(
+        &mut c,
+        &d("9999999999999999999999999999"),
+        "9999999999999999999999999999",
+        "DECIMAL(38,0)",
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+#[cfg(feature = "uuid")]
+async fn encode_back_uuid() {
+    let g = "12345678-90ab-cdef-1234-567890abcdef"
+        .parse::<uuid::Uuid>()
+        .expect("uuid");
+    let mut c = Client::connect(get_test_config()).await.expect("connect");
+    assert_encode_roundtrip(
+        &mut c,
+        &g,
+        "'12345678-90AB-CDEF-1234-567890ABCDEF'",
+        "UNIQUEIDENTIFIER",
     )
     .await;
 }
