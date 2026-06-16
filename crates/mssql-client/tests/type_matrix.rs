@@ -15,10 +15,13 @@
 //! - **collation sweep** — VARCHAR across codepages, exercising both the LCID
 //!   path (Windows collations, `sort_id == 0`, incl. DBCS) and the SortId path
 //!   (SQL collations, `sort_id != 0`; the #158/#187 class).
+//! - **NUMERIC precision/scale grid** — exact decode across the grid, plus the
+//!   overflow boundary: values beyond `rust_decimal`'s range must error, not
+//!   silently degrade (the #157/#188/#196 class).
 //!
-//! Planned follow-on: NUMERIC precision/scale grid, temporal types (DATE / TIME
-//! / DATETIME2 / DATETIMEOFFSET at every offset and scale), and an encode-back
-//! assertion (parameter round-trip vs `CAST(... AS VARBINARY)`).
+//! Planned follow-on: temporal types (DATE / TIME / DATETIME2 / DATETIMEOFFSET
+//! at every offset and scale), and an encode-back assertion (parameter
+//! round-trip vs `CAST(... AS VARBINARY)`).
 //!
 //! Run against a live server:
 //! ```text
@@ -255,5 +258,77 @@ async fn collation_sweep() {
     let mut client = Client::connect(get_test_config()).await.expect("connect");
     for (collation, sample, path) in cases {
         assert_varchar_collation(&mut client, collation, sample, path).await;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dimension 3: NUMERIC / DECIMAL precision-scale grid
+// ---------------------------------------------------------------------------
+
+/// Parse a decimal literal for the expected side of a NUMERIC assertion.
+#[cfg(feature = "decimal")]
+fn dec(s: &str) -> rust_decimal::Decimal {
+    s.parse()
+        .unwrap_or_else(|e| panic!("bad decimal literal {s}: {e}"))
+}
+
+/// Representable NUMERIC values across the precision/scale grid decode exactly.
+/// `dec(lit)` is the expected value parsed from the same literal the server
+/// casts, so a mismatch is a mantissa/scale decode bug.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+#[cfg(feature = "decimal")]
+async fn numeric_grid() {
+    let mut client = Client::connect(get_test_config()).await.expect("connect");
+    let cases = [
+        ("NUMERIC(1,0)", "0"),
+        ("NUMERIC(1,0)", "9"),
+        ("NUMERIC(1,0)", "-9"),
+        ("NUMERIC(5,2)", "123.45"),
+        ("NUMERIC(5,2)", "-123.45"),
+        ("NUMERIC(5,2)", "0"),
+        ("NUMERIC(10,4)", "123456.7890"),
+        ("NUMERIC(10,4)", "-0.0001"),
+        ("NUMERIC(18,0)", "123456789012345678"),
+        ("NUMERIC(18,9)", "123456789.123456789"),
+        ("NUMERIC(38,10)", "1234567890.1234567890"),
+        // rust_decimal range boundaries
+        ("NUMERIC(28,0)", "9999999999999999999999999999"), // 28 nines (max magnitude that fits)
+        ("NUMERIC(28,28)", "0.9999999999999999999999999999"), // scale 28 (the AE ceiling)
+    ];
+    for (ty, lit) in cases {
+        assert_cast_decode(&mut client, ty, lit, dec(lit)).await;
+    }
+}
+
+/// NUMERIC values beyond `rust_decimal`'s 96-bit / scale-28 range must surface
+/// as an **error**, never a silently-degraded value. This is the
+/// #157/#188/#196 bug class (silent NUMERIC truncation). The error may arise at
+/// query, row, or column-decode time; what matters is that no wrong value is
+/// produced.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+#[cfg(feature = "decimal")]
+async fn numeric_overflow_errors() {
+    let mut client = Client::connect(get_test_config()).await.expect("connect");
+    let cases = [
+        ("NUMERIC(29,0)", "99999999999999999999999999999"), // 29 nines, exceeds mantissa
+        ("NUMERIC(38,0)", "99999999999999999999999999999999999999"), // max NUMERIC magnitude
+        ("NUMERIC(38,38)", "0.99999999999999999999999999999999999999"), // scale 38 > 28
+    ];
+    for (ty, lit) in cases {
+        let sql = format!("SELECT CAST({lit} AS {ty})");
+        let produced = match client.query(&sql, &[]).await {
+            Err(_) => None,
+            Ok(rows) => match rows.into_iter().next() {
+                None => panic!("no row for {sql}"),
+                Some(Err(_)) => None,
+                Some(Ok(row)) => row.get::<rust_decimal::Decimal>(0).ok(),
+            },
+        };
+        assert!(
+            produced.is_none(),
+            "{sql} must error on overflow, but silently decoded {produced:?}"
+        );
     }
 }
