@@ -16,13 +16,13 @@
 //! mutably and returns an iterable result.
 //!
 //! Incremental streaming (`query_stream` / `query_stream_blob`) likewise does
-//! **not** transition into a dedicated state. Rather than the [`Streaming`]
-//! type-state originally sketched, the streams borrow the client mutably
+//! **not** transition into a dedicated state. Rather than a dedicated
+//! streaming type-state, the streams borrow the client mutably
 //! (`&mut Client<S>`) for their lifetime: the borrow checker already enforces
 //! that no other request can run on the connection until the stream is dropped,
 //! and a `&mut` borrow — unlike a consuming state transition — works uniformly
 //! for both [`Ready`] and [`InTransaction`] clients and returns the borrow
-//! automatically. The [`Streaming`] marker is therefore retained but unused.
+//! automatically.
 
 use std::marker::PhantomData;
 
@@ -59,18 +59,10 @@ pub struct Ready;
 /// The transaction must be explicitly committed or rolled back.
 pub struct InTransaction;
 
-/// Connection is actively streaming results.
-///
-/// In this state, the connection is processing a result set.
-/// No other operations can be performed until the stream is
-/// consumed or cancelled.
-pub struct Streaming;
-
 impl ConnectionState for Disconnected {}
 impl ConnectionState for Connected {}
 impl ConnectionState for Ready {}
 impl ConnectionState for InTransaction {}
-impl ConnectionState for Streaming {}
 
 mod private {
     pub trait Sealed {}
@@ -78,7 +70,6 @@ mod private {
     impl Sealed for super::Connected {}
     impl Sealed for super::Ready {}
     impl Sealed for super::InTransaction {}
-    impl Sealed for super::Streaming {}
 }
 
 /// Type-level state transition marker.
