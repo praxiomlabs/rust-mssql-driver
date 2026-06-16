@@ -1710,4 +1710,336 @@ mod live_server {
             "providers must survive Config clones (from_arc bug regression)"
         );
     }
+
+    /// Multi-result-set streaming across an Always Encrypted boundary (#287).
+    ///
+    /// `query_stream` is fed a **two-SELECT batch with different schemas**, the
+    /// second selecting encrypted columns. This is the one path #257 claimed
+    /// "correctness is not the gap" by inspection with no test: on the second
+    /// `ColMetaData`, `RowStream::switch_result_set` rebuilds `columns()` and
+    /// **re-resolves the AE decryptor mid-stream** (from `None` for the plaintext
+    /// first set to a resolved decryptor for the encrypted second set).
+    ///
+    /// Asserts the flat row sequence is correct across the boundary, `columns()`
+    /// updates when the second set's metadata arrives, and the second set's
+    /// encrypted values decrypt to the inserted plaintext.
+    #[tokio::test]
+    #[ignore = "Requires SQL Server with Always Encrypted"]
+    async fn test_multi_result_set_streaming_reresolves_ae_decryptor() {
+        let admin_cfg = match admin_config() {
+            Some(c) => c,
+            None => return,
+        };
+        let mut admin = Client::connect(admin_cfg).await.expect("admin connect");
+
+        let (rsa_key, pem) = fresh_rsa_keypair();
+        let cek = fresh_cek();
+
+        let fx = setup(
+            &mut admin,
+            &cek,
+            &rsa_key,
+            "CREATE TABLE [{TABLE}] ( \
+             Id INT NOT NULL PRIMARY KEY, \
+             EncInt INT ENCRYPTED WITH ( \
+             COLUMN_ENCRYPTION_KEY = [{CEK}], \
+             ENCRYPTION_TYPE = DETERMINISTIC, \
+             ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256' ) NULL, \
+             EncName NVARCHAR(50) COLLATE Latin1_General_BIN2 ENCRYPTED WITH ( \
+             COLUMN_ENCRYPTION_KEY = [{CEK}], \
+             ENCRYPTION_TYPE = DETERMINISTIC, \
+             ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256' ) NULL )",
+        )
+        .await;
+        drop(admin);
+
+        let mut client = Client::connect(encrypted_config(&pem).expect("cfg"))
+            .await
+            .expect("ae connect");
+
+        // Seed one row; the driver encrypts @p2/@p3 client-side.
+        let insert = format!(
+            "INSERT INTO [{}] (Id, EncInt, EncName) VALUES (@p1, @p2, @p3)",
+            fx.table_name
+        );
+        let inserted = client
+            .execute(&insert, &[&1i32, &42i32, &"Ada Lovelace"])
+            .await;
+
+        // A two-statement batch: a plaintext first result set (single INT column
+        // named `marker`) followed by an encrypted second result set (two
+        // columns). No parameters, so `query_stream` issues a plain SQL batch and
+        // the server returns two distinct result sets in one response. The
+        // `WHERE Id = 1` predicate is a literal to keep the batch parameterless.
+        let batch = format!(
+            "SELECT 7 AS marker; \
+             SELECT EncInt, EncName FROM [{}] WHERE Id = 1;",
+            fx.table_name
+        );
+
+        // Capture everything from the stream into owned values before teardown,
+        // so the mutable borrow ends and a failure never leaks server objects.
+        struct Streamed {
+            marker: i32,
+            cols_after_set1: Vec<String>,
+            enc_int: i32,
+            enc_name: String,
+            cols_after_set2: Vec<String>,
+            ended: bool,
+        }
+
+        let streamed: Result<Streamed, String> = if inserted.is_ok() {
+            async {
+                let mut stream = client
+                    .query_stream(&batch, &[])
+                    .await
+                    .map_err(|e| format!("stream: {e}"))?;
+
+                // First result set: the plaintext `marker` row. After it yields,
+                // `columns()` still reflects the first set.
+                let r1 = stream
+                    .try_next()
+                    .await
+                    .map_err(|e| format!("set1 row: {e}"))?
+                    .ok_or_else(|| "expected a first-result-set row".to_string())?;
+                let cols_after_set1: Vec<String> =
+                    stream.columns().iter().map(|c| c.name.clone()).collect();
+                let marker = r1
+                    .get_by_name::<i32>("marker")
+                    .map_err(|e| format!("marker: {e}"))?;
+
+                // Second result set: pulling the next row crosses the boundary —
+                // `switch_result_set` rebuilds `columns()` and re-resolves the AE
+                // decryptor. The encrypted values must decrypt transparently.
+                let r2 = stream
+                    .try_next()
+                    .await
+                    .map_err(|e| format!("set2 row: {e}"))?
+                    .ok_or_else(|| "expected a second-result-set row".to_string())?;
+                let cols_after_set2: Vec<String> =
+                    stream.columns().iter().map(|c| c.name.clone()).collect();
+                let enc_int = r2
+                    .get_by_name::<i32>("EncInt")
+                    .map_err(|e| format!("EncInt decrypt: {e}"))?;
+                let enc_name = r2
+                    .get_by_name::<String>("EncName")
+                    .map_err(|e| format!("EncName decrypt: {e}"))?;
+
+                let ended = stream
+                    .try_next()
+                    .await
+                    .map_err(|e| format!("end: {e}"))?
+                    .is_none();
+
+                Ok(Streamed {
+                    marker,
+                    cols_after_set1,
+                    enc_int,
+                    enc_name,
+                    cols_after_set2,
+                    ended,
+                })
+            }
+            .await
+        } else {
+            Err("seed insert failed".to_string())
+        };
+
+        // Teardown before asserting so a failure never leaks server objects.
+        let mut admin = Client::connect(admin_config().expect("cfg"))
+            .await
+            .expect("admin reconnect");
+        teardown(&mut admin, &fx).await;
+
+        let inserted = inserted.expect("seed INSERT should succeed");
+        assert_eq!(inserted, 1, "exactly one row seeded");
+
+        let s = streamed.expect("multi-result-set stream");
+
+        // Flat row sequence across the boundary.
+        assert_eq!(s.marker, 7, "first result set's plaintext marker");
+        assert_eq!(
+            s.cols_after_set1,
+            vec!["marker".to_string()],
+            "columns() reflects the first (plaintext) result set"
+        );
+
+        // columns() updated on the second ColMetaData.
+        assert_eq!(
+            s.cols_after_set2,
+            vec!["EncInt".to_string(), "EncName".to_string()],
+            "columns() updates to the second result set's schema mid-stream"
+        );
+
+        // Second set decrypts after the mid-stream decryptor re-resolution.
+        assert_eq!(
+            s.enc_int, 42,
+            "encrypted INT in the second set decrypts after re-resolution"
+        );
+        assert_eq!(
+            s.enc_name, "Ada Lovelace",
+            "encrypted NVARCHAR in the second set decrypts after re-resolution"
+        );
+
+        assert!(s.ended, "stream ends after the two flattened result sets");
+    }
+
+    /// Multi-result-set streaming, decryptor-cleared direction (#287).
+    ///
+    /// The mirror of `test_multi_result_set_streaming_reresolves_ae_decryptor`:
+    /// here the **encrypted set comes first** and a **plaintext set second**, so
+    /// `switch_result_set` must clear the decryptor (resolved → `None`) on the
+    /// boundary. The decryptor's encrypted-column map is positional, so a stale
+    /// decryptor would wrongly attempt to decrypt the plaintext second set's
+    /// column 0 — this asserts that does not happen.
+    #[tokio::test]
+    #[ignore = "Requires SQL Server with Always Encrypted"]
+    async fn test_multi_result_set_streaming_clears_ae_decryptor() {
+        let admin_cfg = match admin_config() {
+            Some(c) => c,
+            None => return,
+        };
+        let mut admin = Client::connect(admin_cfg).await.expect("admin connect");
+
+        let (rsa_key, pem) = fresh_rsa_keypair();
+        let cek = fresh_cek();
+
+        let fx = setup(
+            &mut admin,
+            &cek,
+            &rsa_key,
+            "CREATE TABLE [{TABLE}] ( \
+             Id INT NOT NULL PRIMARY KEY, \
+             EncInt INT ENCRYPTED WITH ( \
+             COLUMN_ENCRYPTION_KEY = [{CEK}], \
+             ENCRYPTION_TYPE = DETERMINISTIC, \
+             ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256' ) NULL, \
+             EncName NVARCHAR(50) COLLATE Latin1_General_BIN2 ENCRYPTED WITH ( \
+             COLUMN_ENCRYPTION_KEY = [{CEK}], \
+             ENCRYPTION_TYPE = DETERMINISTIC, \
+             ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256' ) NULL )",
+        )
+        .await;
+        drop(admin);
+
+        let mut client = Client::connect(encrypted_config(&pem).expect("cfg"))
+            .await
+            .expect("ae connect");
+
+        let insert = format!(
+            "INSERT INTO [{}] (Id, EncInt, EncName) VALUES (@p1, @p2, @p3)",
+            fx.table_name
+        );
+        let inserted = client
+            .execute(&insert, &[&1i32, &42i32, &"Ada Lovelace"])
+            .await;
+
+        // Encrypted first result set, plaintext second. The prelude resolves a
+        // decryptor for set 1; crossing into set 2 must clear it.
+        let batch = format!(
+            "SELECT EncInt, EncName FROM [{}] WHERE Id = 1; \
+             SELECT 99 AS plain;",
+            fx.table_name
+        );
+
+        struct Streamed {
+            enc_int: i32,
+            enc_name: String,
+            cols_after_set1: Vec<String>,
+            plain: i32,
+            cols_after_set2: Vec<String>,
+            ended: bool,
+        }
+
+        let streamed: Result<Streamed, String> = if inserted.is_ok() {
+            async {
+                let mut stream = client
+                    .query_stream(&batch, &[])
+                    .await
+                    .map_err(|e| format!("stream: {e}"))?;
+
+                // First result set: encrypted columns decrypt transparently.
+                let r1 = stream
+                    .try_next()
+                    .await
+                    .map_err(|e| format!("set1 row: {e}"))?
+                    .ok_or_else(|| "expected a first-result-set row".to_string())?;
+                let cols_after_set1: Vec<String> =
+                    stream.columns().iter().map(|c| c.name.clone()).collect();
+                let enc_int = r1
+                    .get_by_name::<i32>("EncInt")
+                    .map_err(|e| format!("EncInt decrypt: {e}"))?;
+                let enc_name = r1
+                    .get_by_name::<String>("EncName")
+                    .map_err(|e| format!("EncName decrypt: {e}"))?;
+
+                // Second result set: pulling crosses the boundary; the decryptor
+                // must clear so the plaintext column 0 is not treated as encrypted.
+                let r2 = stream
+                    .try_next()
+                    .await
+                    .map_err(|e| format!("set2 row: {e}"))?
+                    .ok_or_else(|| "expected a second-result-set row".to_string())?;
+                let cols_after_set2: Vec<String> =
+                    stream.columns().iter().map(|c| c.name.clone()).collect();
+                let plain = r2
+                    .get_by_name::<i32>("plain")
+                    .map_err(|e| format!("plain: {e}"))?;
+
+                let ended = stream
+                    .try_next()
+                    .await
+                    .map_err(|e| format!("end: {e}"))?
+                    .is_none();
+
+                Ok(Streamed {
+                    enc_int,
+                    enc_name,
+                    cols_after_set1,
+                    plain,
+                    cols_after_set2,
+                    ended,
+                })
+            }
+            .await
+        } else {
+            Err("seed insert failed".to_string())
+        };
+
+        // Teardown before asserting so a failure never leaks server objects.
+        let mut admin = Client::connect(admin_config().expect("cfg"))
+            .await
+            .expect("admin reconnect");
+        teardown(&mut admin, &fx).await;
+
+        let inserted = inserted.expect("seed INSERT should succeed");
+        assert_eq!(inserted, 1, "exactly one row seeded");
+
+        let s = streamed.expect("multi-result-set stream");
+
+        // First set decrypts.
+        assert_eq!(s.enc_int, 42, "encrypted INT in the first set decrypts");
+        assert_eq!(
+            s.enc_name, "Ada Lovelace",
+            "encrypted NVARCHAR in the first set decrypts"
+        );
+        assert_eq!(
+            s.cols_after_set1,
+            vec!["EncInt".to_string(), "EncName".to_string()],
+            "columns() reflects the first (encrypted) result set"
+        );
+
+        // Second set reads as plaintext after the decryptor is cleared.
+        assert_eq!(
+            s.plain, 99,
+            "plaintext second set reads correctly after the decryptor clears"
+        );
+        assert_eq!(
+            s.cols_after_set2,
+            vec!["plain".to_string()],
+            "columns() updates to the second (plaintext) result set"
+        );
+
+        assert!(s.ended, "stream ends after the two flattened result sets");
+    }
 }
