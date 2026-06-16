@@ -293,8 +293,9 @@ the full rationale.
 | TDS 8.0 | SQL Server 2022+ strict mode | `TdsVersion::V8_0` or `Encrypt=strict` |
 
 **How each version is validated:** SQL Server **2017, 2019, and 2022 are
-CI-verified** — the integration suite runs the full `#[ignore]`d test suite
-against all three on every change. SQL Server **2008–2016** (TDS 7.3A/7.3B) and
+CI-verified** — the integration suite runs the full applicable `#[ignore]`d
+test suite against all three on every change (the 2017 leg excludes
+`test_utf8_varchar_decoding`, since UTF-8 collations are a 2019+ feature). SQL Server **2008–2016** (TDS 7.3A/7.3B) and
 Azure SQL are **validated manually** against real servers, not in CI, so
 regressions on those versions are caught later than on the CI-verified ones.
 
