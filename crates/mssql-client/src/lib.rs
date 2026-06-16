@@ -130,9 +130,7 @@ pub use mssql_types::{Money, Numeric, SmallMoney, numeric};
 pub use procedure::ProcedureBuilder;
 pub use query::in_params;
 pub use row::{Column, Row};
-pub use state::{
-    Connected, ConnectionState, Disconnected, InTransaction, ProtocolState, Ready, Streaming,
-};
+pub use state::{Connected, ConnectionState, Disconnected, InTransaction, ProtocolState, Ready};
 
 /// Internal entry points for the fuzzing harness in `fuzz/`.
 ///
@@ -157,11 +155,7 @@ pub use tvp::{Tvp, TvpColumn, TvpRow, TvpValue};
 pub use filestream::{FileStream, FileStreamAccess, open_options as filestream_options};
 
 // Always Encrypted types
-#[cfg(feature = "always-encrypted")]
-pub use encryption::EncryptionContext;
-pub use encryption::{
-    EncryptionConfig, ParameterCryptoInfo, ParameterEncryptionInfo, ResultSetEncryptionInfo,
-};
+pub use encryption::EncryptionConfig;
 
 // OpenTelemetry instrumentation (available whether or not otel feature is enabled)
 pub use instrumentation::{
@@ -209,12 +203,6 @@ mod auto_trait_tests {
     fn client_connected_is_send_sync() {
         assert_send::<Client<Connected>>();
         assert_sync::<Client<Connected>>();
-    }
-
-    #[test]
-    fn client_streaming_is_send_sync() {
-        assert_send::<Client<Streaming>>();
-        assert_sync::<Client<Streaming>>();
     }
 
     // --- Configuration ---

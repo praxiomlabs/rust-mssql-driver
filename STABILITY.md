@@ -92,7 +92,7 @@ The following APIs are considered stable and covered by semver guarantees:
 | `Error` enum variants | Stable |
 | `Client::open_filestream()` | Stable (`filestream` feature, Windows only) |
 | `FileStream` / `FileStreamAccess` | Stable (`filestream` feature, Windows only) |
-| `EncryptionContext` / `EncryptionConfig` | Stable (`always-encrypted` feature) |
+| `EncryptionConfig` | Stable (`always-encrypted` feature) |
 | `KeyStoreProvider` trait | Stable (`always-encrypted` feature) |
 | `ApplicationIntent` enum | Stable |
 | `Config::application_intent()` | Stable |

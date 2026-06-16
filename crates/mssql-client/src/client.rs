@@ -501,7 +501,7 @@ impl<S: ConnectionState> Client<S> {
     /// Issues the `sp_describe_parameter_encryption` system RPC for the
     /// parameterized statement `tsql` with the parameter declaration `params`
     /// (e.g. `"@id int, @name nvarchar(64)"`), and parses the two result sets
-    /// into a [`ParameterEncryptionInfo`](crate::ParameterEncryptionInfo): the
+    /// into a [`ParameterEncryptionInfo`](crate::encryption::ParameterEncryptionInfo): the
     /// CEK table, plus — for each parameter the server reports as encrypted —
     /// which CEK and whether deterministic or randomized. Parameters the server
     /// reports as plaintext are omitted.
@@ -509,11 +509,11 @@ impl<S: ConnectionState> Client<S> {
     /// This is the first step of Always Encrypted parameter encryption; the
     /// connection must have negotiated it (`Column Encryption Setting=Enabled`).
     #[cfg(feature = "always-encrypted")]
-    pub async fn describe_parameter_encryption(
+    pub(crate) async fn describe_parameter_encryption(
         &mut self,
         tsql: &str,
         params: &str,
-    ) -> Result<crate::ParameterEncryptionInfo> {
+    ) -> Result<crate::encryption::ParameterEncryptionInfo> {
         let tsql_arg = tsql.to_string();
         let params_arg = params.to_string();
         let mut result = self
@@ -522,7 +522,9 @@ impl<S: ConnectionState> Client<S> {
                 &[&tsql_arg, &params_arg],
             )
             .await?;
-        crate::ParameterEncryptionInfo::from_describe_result_sets(&mut result.result_sets)
+        crate::encryption::ParameterEncryptionInfo::from_describe_result_sets(
+            &mut result.result_sets,
+        )
     }
 
     /// Build the `sp_executesql` request for a parameterized statement.
