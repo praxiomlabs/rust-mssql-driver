@@ -26,6 +26,13 @@
 
 use bytes::Buf;
 use mssql_types::SqlValue;
+// Scale primitives shared with the secondary decode stack (`mssql_types::decode`)
+// so the scale→width mapping and the 100ns-interval conversion cannot drift
+// between the two stacks (see #204). `time_bytes_for_scale` is pure scale math,
+// used for frame-length validation even without `chrono`.
+#[cfg(feature = "chrono")]
+use mssql_types::__private::intervals_to_time;
+use mssql_types::__private::time_bytes_for_scale;
 use tds_protocol::token::{ColMetaData, Collation, ColumnData, NbcRow, RawRow};
 use tds_protocol::types::TypeId;
 
@@ -1728,50 +1735,6 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
             Ok(SqlValue::Binary(data))
         }
     }
-}
-
-/// Calculate number of bytes needed for TIME based on scale.
-fn time_bytes_for_scale(scale: u8) -> usize {
-    match scale {
-        0..=2 => 3,
-        3..=4 => 4,
-        5..=7 => 5,
-        _ => 5, // Default to max precision
-    }
-}
-
-/// Convert 100-nanosecond intervals to NaiveTime.
-#[cfg(feature = "chrono")]
-fn intervals_to_time(intervals: u64, scale: u8) -> chrono::NaiveTime {
-    // Scale determines the unit:
-    // scale 0: seconds
-    // scale 1: 100ms
-    // scale 2: 10ms
-    // scale 3: 1ms
-    // scale 4: 100us
-    // scale 5: 10us
-    // scale 6: 1us
-    // scale 7: 100ns
-    // Saturating: `intervals` comes from the wire, and a hostile value must
-    // not overflow-panic in debug builds (saturation lands in the
-    // out-of-range fallback below).
-    let nanos = match scale {
-        0 => intervals.saturating_mul(1_000_000_000),
-        1 => intervals.saturating_mul(100_000_000),
-        2 => intervals.saturating_mul(10_000_000),
-        3 => intervals.saturating_mul(1_000_000),
-        4 => intervals.saturating_mul(100_000),
-        5 => intervals.saturating_mul(10_000),
-        6 => intervals.saturating_mul(1_000),
-        7 => intervals.saturating_mul(100),
-        _ => intervals.saturating_mul(100),
-    };
-
-    let secs = (nanos / 1_000_000_000) as u32;
-    let nano_part = (nanos % 1_000_000_000) as u32;
-
-    chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nano_part)
-        .unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(0, 0, 0).expect("midnight is valid"))
 }
 
 /// Decode 16 GUID bytes from SQL Server mixed-endian wire format to RFC 4122 format.
