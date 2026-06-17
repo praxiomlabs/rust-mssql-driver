@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.18.0...v0.19.0) - 2026-06-17
+
+### Fixed
+
+- *(client)* validate sp_executesql parameter and TVP type identifiers ([#277](https://github.com/praxiomlabs/rust-mssql-driver/pull/277))
+- *(client)* bound SQL_VARIANT NUMERIC payload to the 17-byte maximum ([#204](https://github.com/praxiomlabs/rust-mssql-driver/pull/204))
+- *(client)* [**breaking**] reject non-Windows-1252 char in AE normalization
+- *(tds-protocol)* make the no_std claim true (build for bare-metal)
+- *(protocol)* [**breaking**] reject unknown PRELOGIN encryption bytes instead of defaulting to Off ([#278](https://github.com/praxiomlabs/rust-mssql-driver/pull/278))
+- *(#242)* update doctests and fuzz targets for sealed codec helpers
+- *(protocol)* iterate token-skip path to remove unbounded recursion ([#273](https://github.com/praxiomlabs/rust-mssql-driver/pull/273))
+- *(types)* correct two value-decode bugs in the secondary stack ([#204](https://github.com/praxiomlabs/rust-mssql-driver/pull/204))
+- *(types)* [**breaking**] validate numeric() precision/scale domain (closes #288)
+
+### Other
+
+- *(client)* route the SQL_VARIANT decimal arm through the shared decoder ([#204](https://github.com/praxiomlabs/rust-mssql-driver/pull/204))
+- *(types)* share the temporal scale primitives across both decode stacks ([#204](https://github.com/praxiomlabs/rust-mssql-driver/pull/204))
+- *(types)* share the DECIMAL/NUMERIC decoder across both decode stacks ([#204](https://github.com/praxiomlabs/rust-mssql-driver/pull/204))
+- *(client)* pin the real rust_decimal magnitude boundary in NUMERIC grid ([#203](https://github.com/praxiomlabs/rust-mssql-driver/pull/203))
+- *(client)* add encode-back dimension to type matrix ([#203](https://github.com/praxiomlabs/rust-mssql-driver/pull/203))
+- *(client)* add temporal dimension to type matrix ([#203](https://github.com/praxiomlabs/rust-mssql-driver/pull/203))
+- *(client)* add NUMERIC precision/scale grid to type matrix ([#203](https://github.com/praxiomlabs/rust-mssql-driver/pull/203))
+- *(client)* add collation-sweep dimension to type matrix ([#203](https://github.com/praxiomlabs/rust-mssql-driver/pull/203))
+- *(client)* differential type-matrix suite — core scalar boundaries ([#203](https://github.com/praxiomlabs/rust-mssql-driver/pull/203))
+- *(api)* [**breaking**] move cross-crate wire-codec helpers off the frozen public surface
+- Merge remote-tracking branch 'origin/main' into refactor/issues-285-286-surface-cleanup
+- *(client)* [**breaking**] pub(crate) the Always Encrypted crypto surface ([#285](https://github.com/praxiomlabs/rust-mssql-driver/pull/285))
+- *(client)* [**breaking**] remove dead Streaming type-state ([#286](https://github.com/praxiomlabs/rust-mssql-driver/pull/286))
+- fix #289 no_std std-feature symmetry and 2017 CI-suite wording
+
 ## [0.18.0](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.17.1...v0.18.0) - 2026-06-15
 
 ### Added
