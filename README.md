@@ -26,7 +26,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-mssql-client = "0.18"
+mssql-client = "0.19"
 tokio = { version = "1.48", features = ["full"] }
 ```
 
