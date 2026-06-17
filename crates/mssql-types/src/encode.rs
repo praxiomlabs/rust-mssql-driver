@@ -612,6 +612,7 @@ mod tests {
         assert!(encode_datetime2(dt, &mut buf).is_err());
     }
 
+    #[cfg(feature = "chrono")]
     #[test]
     fn test_encode_date() {
         let mut buf = BytesMut::new();
