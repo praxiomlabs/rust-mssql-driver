@@ -21,12 +21,46 @@ and `git show 91074b6^:.github/workflows/release.yml`).
    bumps — release-plz attributes commits to packages by file path, so a bump
    that only touches the root manifest is invisible to the generated changelog
    (this bit v0.11.0: the lru 0.16→0.17 requirement change was added by hand).
+   Then complete the [pre-release live-server validation](#pre-release-live-server-validation)
+   for the paths the release touches.
 4. **Merging the Release PR is the release.** release-plz publishes the
    8 crates to crates.io in dependency order, and — only after every crate is
    up — creates the `vX.Y.Z` tag and the GitHub Release. (Publish first, tag
    last: a failed publish leaves no tag pointing at a half-released state.)
 
 There is no manual `cargo publish`, no manual tag, no manual CHANGELOG edit.
+
+## Pre-release live-server validation
+
+CI cannot exercise every path: some features need live SQL Server, domain, or
+Azure configuration that Docker CI can't provide, so their integration tests are
+`#[ignore]`d and only the maintainer runs them locally. **A release must not be
+tagged without running the live paths it could affect** — v0.9.0 shipped an
+Always Encrypted bug despite local tests existing, precisely because there was
+no checklist forcing the run.
+
+Before merging the Release PR, diff `git log <last-tag>..main`, run the relevant
+rows below, and **attest in the Release PR review which paths were exercised**
+(when a release touches none — e.g. docs-only or pure-internal — say so
+explicitly). Enforcement is by maintainer discipline, not an automated gate.
+
+The container rows assume the `MSSQL_HOST/PORT/USER/PASSWORD` env and the full
+ignored-suite command from [CLAUDE.md convention 8](CLAUDE.md) (the canonical,
+drift-free source for the exact invocation); the rows below give the
+distinguishing feature/binary filter to scope a single path.
+
+| Path | Scope it with | Needs |
+|------|---------------|-------|
+| **Container suite** — TVP, bulk insert, temporal, collation, decimal, streaming | the full ignored-suite command (CLAUDE.md convention 8) | local SQL Server 2022 (`just sql-server-start`) |
+| **Always Encrypted** (read + write) | `--all-features … -E 'binary(always_encrypted)'` | container provisioned with CMK/CEK (tracked in #86) |
+| **Azure AD / FEDAUTH** (service principal, managed identity) | `cargo nextest run -p mssql-client --features azure-identity --run-ignored ignored-only -E 'binary(azure_sql)'` | live Azure SQL + `AZURE_SQL_TENANT_ID/CLIENT_ID/CLIENT_SECRET` |
+| **Kerberos / integrated auth** | `MSSQL_KERBEROS_HOST=… KRB5CCNAME=… cargo nextest run -p mssql-auth --features integrated-auth --run-ignored ignored-only -E 'binary(kerberos_live)'` | live KDC with `MSSQLSvc/<host>` SPN + a `kinit`'d ticket |
+| **FILESTREAM** (Windows only) | `cargo nextest run -p mssql-client --features filestream --run-ignored ignored-only -E 'binary(windows_filestream)'` | Windows + a FILESTREAM-enabled instance |
+
+The standard pre-push gate (CLAUDE.md convention 8) deliberately **excludes** the
+Azure, Kerberos, and client-cert suites because they need infrastructure neither
+CI nor the local container provides — those are exactly the rows to run by hand
+at release time.
 
 ## Rules that survive automation
 
