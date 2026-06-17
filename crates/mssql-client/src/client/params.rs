@@ -19,6 +19,7 @@ use tds_protocol::tvp::{TvpColumnDef as TvpWireColumnDef, TvpEncoder, TvpWireTyp
 
 use crate::error::{Error, Result};
 use crate::state::ConnectionState;
+use crate::validation::{validate_identifier, validate_qualified_identifier};
 
 use super::Client;
 
@@ -231,6 +232,10 @@ impl<S: ConnectionState> Client<S> {
                 } else {
                     format!("@{}", p.name)
                 };
+                // The name is interpolated verbatim into the `sp_executesql`
+                // `@params` declaration (`build_param_declarations`); validate it
+                // to prevent SQL injection via a crafted parameter name (#277).
+                validate_identifier(&name)?;
                 Self::sql_value_to_rpc_param(&name, &p.value, send_unicode, collation)
             })
             .collect()
@@ -247,6 +252,19 @@ impl<S: ConnectionState> Client<S> {
         tvp_data: &mssql_types::TvpData,
         collation: Option<&tds_protocol::token::Collation>,
     ) -> Result<RpcParam> {
+        // The TVP type name is interpolated verbatim into the `sp_executesql`
+        // `@params` declaration as `{name} READONLY` (`build_param_declarations`);
+        // validate it (schema-qualified `schema.Type` allowed) to prevent SQL
+        // injection via a crafted type name (#277). Delimited/bracketed names
+        // (`[My Type]`) are rejected, consistent with the rest of the driver's
+        // identifier handling.
+        let full_type_name = if tvp_data.schema.is_empty() {
+            tvp_data.type_name.clone()
+        } else {
+            format!("{}.{}", tvp_data.schema, tvp_data.type_name)
+        };
+        validate_qualified_identifier(&full_type_name)?;
+
         // Convert mssql-types column definitions to wire format
         let wire_columns: Vec<TvpWireColumnDef> = tvp_data
             .columns
@@ -294,15 +312,8 @@ impl<S: ConnectionState> Client<S> {
         // Encode end marker
         encoder.encode_end(&mut buf);
 
-        // Build the full TVP type name (schema.TypeName)
-        let full_type_name = if tvp_data.schema.is_empty() {
-            tvp_data.type_name.clone()
-        } else {
-            format!("{}.{}", tvp_data.schema, tvp_data.type_name)
-        };
-
-        // Create RPC param with TVP type info
-        // The type info includes the TVP type name for parameter declarations
+        // Create RPC param with TVP type info. The type info carries the
+        // (already-validated) TVP type name for the parameter declaration.
         let type_info = RpcTypeInfo::tvp(&full_type_name);
 
         Ok(RpcParam {
@@ -616,5 +627,36 @@ mod tests {
             &mut buf,
         )
         .expect_err("nested TVP cell must error");
+    }
+
+    /// #277: a crafted named-parameter name must be rejected before it is
+    /// interpolated into the `sp_executesql` `@params` declaration. A normal
+    /// name still converts.
+    #[test]
+    fn named_param_name_injection_is_rejected() {
+        let malicious = [crate::to_params::NamedParam::new(
+            "p1 int); DROP TABLE users; --",
+            SqlValue::Int(1),
+        )];
+        Client::<Ready>::convert_named_params(&malicious, true, None)
+            .expect_err("a parameter name carrying injection must be rejected");
+
+        let ok = [crate::to_params::NamedParam::new("p1", SqlValue::Int(1))];
+        Client::<Ready>::convert_named_params(&ok, true, None)
+            .expect("a normal parameter name must convert");
+    }
+
+    /// #277: a crafted TVP type name must be rejected before it is interpolated
+    /// as `{name} READONLY`. A schema-qualified name still converts (validation
+    /// runs before encoding, so the empty column set is irrelevant here).
+    #[test]
+    fn tvp_type_name_injection_is_rejected() {
+        let bad = mssql_types::TvpData::new("dbo", "T READONLY); DROP TABLE users; --");
+        Client::<Ready>::encode_tvp_param("@tvp", &bad, None)
+            .expect_err("a TVP type name carrying injection must be rejected");
+
+        let good = mssql_types::TvpData::new("dbo", "IntList");
+        Client::<Ready>::encode_tvp_param("@tvp", &good, None)
+            .expect("a schema-qualified TVP type name must convert");
     }
 }
