@@ -206,6 +206,38 @@ impl TypeInfo {
 pub(crate) mod sealed {
     use super::*;
 
+    /// Decode a DECIMAL/NUMERIC value (1-byte length prefix, sign byte,
+    /// little-endian mantissa).
+    ///
+    /// Shared with `mssql-client`'s `column_parser` so the two decode stacks
+    /// cannot drift on the overflow policy (the divergence that caused #188).
+    /// Generic over [`bytes::Buf`] so both `&[u8]` and [`Bytes`] callers reuse it.
+    pub fn decode_decimal<B: Buf>(
+        buf: &mut B,
+        type_info: &TypeInfo,
+    ) -> Result<SqlValue, TypeError> {
+        super::decode_decimal(buf, type_info)
+    }
+
+    /// Number of TDS wire bytes a scale-`scale` TIME/DATETIME2/DATETIMEOFFSET
+    /// time component occupies.
+    ///
+    /// Shared with `mssql-client`'s `column_parser` so the two decode stacks
+    /// agree on the scale→width mapping (see #204). Pure scale math, so it is
+    /// available without the `chrono` feature (column_parser validates frame
+    /// lengths against it even when `chrono` is off).
+    pub fn time_bytes_for_scale(scale: u8) -> usize {
+        super::time_bytes_for_scale(scale)
+    }
+
+    /// Convert wire 100ns-interval-derived `intervals` (at scale `scale`) into a
+    /// `NaiveTime`, shared with `column_parser` so the scale conversion cannot
+    /// drift (see #204).
+    #[cfg(feature = "chrono")]
+    pub fn intervals_to_time(intervals: u64, scale: u8) -> chrono::NaiveTime {
+        super::intervals_to_time(intervals, scale)
+    }
+
     /// Decode a SQL value based on type information.
     pub fn decode_value(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, TypeError> {
         match type_info.type_id {
@@ -539,7 +571,7 @@ fn decode_guid(buf: &mut Bytes) -> Result<SqlValue, TypeError> {
 }
 
 #[cfg(feature = "decimal")]
-fn decode_decimal(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, TypeError> {
+fn decode_decimal<B: Buf>(buf: &mut B, type_info: &TypeInfo) -> Result<SqlValue, TypeError> {
     use rust_decimal::Decimal;
 
     if buf.remaining() < 1 {
@@ -604,7 +636,7 @@ fn decode_decimal(buf: &mut Bytes, type_info: &TypeInfo) -> Result<SqlValue, Typ
 }
 
 #[cfg(not(feature = "decimal"))]
-fn decode_decimal(buf: &mut Bytes, _type_info: &TypeInfo) -> Result<SqlValue, TypeError> {
+fn decode_decimal<B: Buf>(buf: &mut B, _type_info: &TypeInfo) -> Result<SqlValue, TypeError> {
     // Skip decimal data and return as string
     if buf.remaining() < 1 {
         return Err(TypeError::BufferTooSmall {
@@ -1039,7 +1071,6 @@ pub fn decode_utf16_string(data: &[u8]) -> Result<String, TypeError> {
 }
 
 /// Calculate number of bytes needed for TIME based on scale.
-#[cfg(feature = "chrono")]
 fn time_bytes_for_scale(scale: u8) -> usize {
     match scale {
         0..=2 => 3,

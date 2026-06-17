@@ -26,6 +26,13 @@
 
 use bytes::Buf;
 use mssql_types::SqlValue;
+// Scale primitives shared with the secondary decode stack (`mssql_types::decode`)
+// so the scale→width mapping and the 100ns-interval conversion cannot drift
+// between the two stacks (see #204). `time_bytes_for_scale` is pure scale math,
+// used for frame-length validation even without `chrono`.
+#[cfg(feature = "chrono")]
+use mssql_types::__private::intervals_to_time;
+use mssql_types::__private::time_bytes_for_scale;
 use tds_protocol::token::{ColMetaData, Collation, ColumnData, NbcRow, RawRow};
 use tds_protocol::types::TypeId;
 
@@ -669,79 +676,16 @@ pub fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue>
             }
         }
 
-        // DECIMAL/NUMERIC types (1-byte length prefix)
+        // DECIMAL/NUMERIC types (1-byte length prefix). The mantissa decode and
+        // the 96-bit/scale-28 overflow policy are shared with the secondary
+        // decode stack (`mssql_types::decode`) so the two cannot drift — that
+        // drift was issue #188. Only `scale` is consulted by the shared decoder.
         TypeId::Decimal | TypeId::Numeric | TypeId::DecimalN | TypeId::NumericN => {
-            if buf.remaining() < 1 {
-                return Err(Error::Protocol(
-                    "unexpected EOF reading DECIMAL/NUMERIC length".into(),
-                ));
-            }
-            let len = buf.get_u8() as usize;
-            if len == 0 {
-                SqlValue::Null
-            } else {
-                if buf.remaining() < len {
-                    return Err(Error::Protocol(
-                        "unexpected EOF reading DECIMAL/NUMERIC data".into(),
-                    ));
-                }
-
-                // First byte is sign: 0 = negative, 1 = positive
-                let sign = buf.get_u8();
-                let mantissa_len = len - 1;
-
-                // Read mantissa as little-endian integer (up to 16 bytes for max precision 38)
-                let mut mantissa_bytes = [0u8; 16];
-                for i in 0..mantissa_len.min(16) {
-                    mantissa_bytes[i] = buf.get_u8();
-                }
-                // Skip any excess bytes (shouldn't happen with valid data)
-                for _ in 16..mantissa_len {
-                    buf.get_u8();
-                }
-
-                let mantissa = u128::from_le_bytes(mantissa_bytes);
-                let scale = col.type_info.scale.unwrap_or(0) as u32;
-
-                #[cfg(feature = "decimal")]
-                {
-                    use rust_decimal::Decimal;
-                    // rust_decimal holds 96-bit mantissas with scale <= 28;
-                    // SQL Server NUMERIC goes to 38 digits, so legitimate
-                    // wire values can exceed it. That must be an error, not
-                    // a silent fall back to f64 (~15-16 significant digits):
-                    // a lossy value read, written back, or compared
-                    // downstream corrupts data (issue #157).
-                    let decimal = i128::try_from(mantissa)
-                        .ok()
-                        .and_then(|m| Decimal::try_from_i128_with_scale(m, scale).ok());
-                    match decimal {
-                        Some(mut decimal) => {
-                            if sign == 0 {
-                                decimal.set_sign_negative(true);
-                            }
-                            SqlValue::Decimal(decimal)
-                        }
-                        None => {
-                            return Err(mssql_types::TypeError::InvalidDecimal(format!(
-                                "NUMERIC value (mantissa {mantissa}, scale {scale}) exceeds \
-                                 rust_decimal's 96-bit/scale-28 range; CAST the column to a \
-                                 narrower NUMERIC, FLOAT, or VARCHAR in the query"
-                            ))
-                            .into());
-                        }
-                    }
-                }
-
-                #[cfg(not(feature = "decimal"))]
-                {
-                    // Without the decimal feature, convert to f64
-                    let divisor = 10f64.powi(scale as i32);
-                    let value = (mantissa as f64) / divisor;
-                    let value = if sign == 0 { -value } else { value };
-                    SqlValue::Double(value)
-                }
-            }
+            let type_info = mssql_types::TypeInfo::decimal(
+                col.type_info.precision.unwrap_or(18),
+                col.type_info.scale.unwrap_or(0),
+            );
+            mssql_types::__private::decode_decimal(buf, &type_info)?
         }
 
         // DATETIME/SMALLDATETIME nullable (1-byte length prefix)
@@ -1522,65 +1466,35 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
             }
         }
         0x6A | 0x6C => {
-            // DECIMALN/NUMERICN - 2 prop bytes (precision, scale)
-            let _precision = if prop_count >= 1 { buf.get_u8() } else { 18 };
+            // DECIMALN/NUMERICN - 2 prop bytes (precision, scale). Share the
+            // mantissa decode and the 96-bit/scale-28 overflow policy with the
+            // top-level path and the secondary stack (#204): reframe the variant
+            // payload (`[sign][mantissa]`, `data_len` bytes) as the
+            // `[len][sign][mantissa]` form `decode_decimal` reads, with
+            // `data_len` standing in for the length byte.
+            let precision = if prop_count >= 1 { buf.get_u8() } else { 18 };
             let scale = if prop_count >= 2 { buf.get_u8() } else { 0 };
             buf.advance(prop_count.saturating_sub(2));
 
-            if data_len < 1 {
+            // A valid NUMERIC/DECIMAL payload is at most 17 bytes (sign + 16
+            // mantissa). Anything larger is malformed; skip it and return Null,
+            // preserving the pre-#204 behavior (the old `mantissa_len > 16`
+            // guard) rather than feeding the shared decoder a payload it would
+            // partially decode. This also keeps `data_len` within `u8`, so the
+            // length-prefix reframing below cannot truncate or panic.
+            if data_len > 17 {
+                buf.advance(data_len);
                 return Ok(SqlValue::Null);
             }
 
-            let sign = buf.get_u8();
-            let mantissa_len = data_len - 1;
-
-            if mantissa_len > 16 {
-                // Too large, skip and return null
-                buf.advance(mantissa_len);
-                return Ok(SqlValue::Null);
-            }
-
-            let mut mantissa_bytes = [0u8; 16];
-            for i in 0..mantissa_len.min(16) {
-                mantissa_bytes[i] = buf.get_u8();
-            }
-            let mantissa = u128::from_le_bytes(mantissa_bytes);
-
-            #[cfg(feature = "decimal")]
-            {
-                use rust_decimal::Decimal;
-                // Same overflow class as the top-level DECIMAL branch:
-                // rust_decimal holds 96-bit mantissas with scale <= 28, but a
-                // 16-byte wire mantissa (legitimate 38-digit NUMERIC or
-                // hostile) can exceed that regardless of scale. The old
-                // `scale > 28` guard did not cover an oversized mantissa, so
-                // `from_i128_with_scale` could panic. Fall back to f64 on any
-                // out-of-range value.
-                let decimal = i128::try_from(mantissa)
-                    .ok()
-                    .and_then(|m| Decimal::try_from_i128_with_scale(m, scale as u32).ok());
-                match decimal {
-                    Some(mut decimal) => {
-                        if sign == 0 {
-                            decimal.set_sign_negative(true);
-                        }
-                        Ok(SqlValue::Decimal(decimal))
-                    }
-                    None => Err(mssql_types::TypeError::InvalidDecimal(format!(
-                        "NUMERIC value in sql_variant (mantissa {mantissa}, scale {scale}) \
-                         exceeds rust_decimal's 96-bit/scale-28 range; CAST the column to a \
-                         narrower NUMERIC, FLOAT, or VARCHAR in the query"
-                    ))
-                    .into()),
-                }
-            }
-            #[cfg(not(feature = "decimal"))]
-            {
-                let divisor = 10f64.powi(scale as i32);
-                let value = (mantissa as f64) / divisor;
-                let value = if sign == 0 { -value } else { value };
-                Ok(SqlValue::Double(value))
-            }
+            let type_info = mssql_types::TypeInfo::decimal(precision, scale);
+            let result = {
+                let len_prefix = [data_len as u8];
+                let mut framed = (&len_prefix[..]).chain(&buf[..data_len]);
+                mssql_types::__private::decode_decimal(&mut framed, &type_info)
+            };
+            buf.advance(data_len);
+            result.map_err(Into::into)
         }
         0x24 => {
             // UNIQUEIDENTIFIER (no properties)
@@ -1791,50 +1705,6 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
             Ok(SqlValue::Binary(data))
         }
     }
-}
-
-/// Calculate number of bytes needed for TIME based on scale.
-fn time_bytes_for_scale(scale: u8) -> usize {
-    match scale {
-        0..=2 => 3,
-        3..=4 => 4,
-        5..=7 => 5,
-        _ => 5, // Default to max precision
-    }
-}
-
-/// Convert 100-nanosecond intervals to NaiveTime.
-#[cfg(feature = "chrono")]
-fn intervals_to_time(intervals: u64, scale: u8) -> chrono::NaiveTime {
-    // Scale determines the unit:
-    // scale 0: seconds
-    // scale 1: 100ms
-    // scale 2: 10ms
-    // scale 3: 1ms
-    // scale 4: 100us
-    // scale 5: 10us
-    // scale 6: 1us
-    // scale 7: 100ns
-    // Saturating: `intervals` comes from the wire, and a hostile value must
-    // not overflow-panic in debug builds (saturation lands in the
-    // out-of-range fallback below).
-    let nanos = match scale {
-        0 => intervals.saturating_mul(1_000_000_000),
-        1 => intervals.saturating_mul(100_000_000),
-        2 => intervals.saturating_mul(10_000_000),
-        3 => intervals.saturating_mul(1_000_000),
-        4 => intervals.saturating_mul(100_000),
-        5 => intervals.saturating_mul(10_000),
-        6 => intervals.saturating_mul(1_000),
-        7 => intervals.saturating_mul(100),
-        _ => intervals.saturating_mul(100),
-    };
-
-    let secs = (nanos / 1_000_000_000) as u32;
-    let nano_part = (nanos % 1_000_000_000) as u32;
-
-    chrono::NaiveTime::from_num_seconds_from_midnight_opt(secs, nano_part)
-        .unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(0, 0, 0).expect("midnight is valid"))
 }
 
 /// Decode 16 GUID bytes from SQL Server mixed-endian wire format to RFC 4122 format.
@@ -2201,6 +2071,44 @@ mod tests {
             err.to_string().contains("rust_decimal"),
             "error should explain the range limitation: {err}"
         );
+    }
+
+    /// A valid SQL_VARIANT DECIMALN decodes through the shared decoder (#204):
+    /// 123.45 as NUMERIC(5,2). total_len=7: base_type + prop_count + precision
+    /// + scale + sign(1) + mantissa(2).
+    #[cfg(feature = "decimal")]
+    #[test]
+    fn variant_decimal_decodes_via_shared_decoder() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&7u32.to_le_bytes());
+        data.push(0x6A); // DECIMALN
+        data.push(0x02); // prop_count: precision, scale
+        data.push(5); // precision
+        data.push(2); // scale
+        data.push(0x01); // sign (positive)
+        data.extend_from_slice(&12345u16.to_le_bytes()); // mantissa LE
+        let mut buf: &[u8] = &data;
+        let value = parse_sql_variant(&mut buf).expect("valid NUMERIC must decode");
+        assert_eq!(value, SqlValue::Decimal("123.45".parse().unwrap()));
+    }
+
+    /// A SQL_VARIANT DECIMALN whose payload exceeds the 17-byte NUMERIC maximum
+    /// (sign + 16 mantissa) is malformed: it decodes to Null, not through the
+    /// shared decoder. data_len = 18 (sign + 17 mantissa); total_len = 22.
+    #[test]
+    fn variant_decimal_oversized_payload_is_null() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&22u32.to_le_bytes());
+        data.push(0x6A); // DECIMALN
+        data.push(0x02); // prop_count: precision, scale
+        data.push(38); // precision
+        data.push(0); // scale
+        data.push(0x01); // sign
+        data.extend_from_slice(&[0u8; 17]); // 17 mantissa bytes => data_len 18
+        let mut buf: &[u8] = &data;
+        let value = parse_sql_variant(&mut buf).expect("oversized payload must not error");
+        assert_eq!(value, SqlValue::Null);
+        assert!(buf.is_empty(), "the whole payload must be consumed");
     }
 
     #[cfg(feature = "chrono")]
