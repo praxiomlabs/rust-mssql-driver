@@ -1466,65 +1466,32 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
             }
         }
         0x6A | 0x6C => {
-            // DECIMALN/NUMERICN - 2 prop bytes (precision, scale)
-            let _precision = if prop_count >= 1 { buf.get_u8() } else { 18 };
+            // DECIMALN/NUMERICN - 2 prop bytes (precision, scale). Share the
+            // mantissa decode and the 96-bit/scale-28 overflow policy with the
+            // top-level path and the secondary stack (#204): reframe the variant
+            // payload (`[sign][mantissa]`, `data_len` bytes) as the
+            // `[len][sign][mantissa]` form `decode_decimal` reads, with
+            // `data_len` standing in for the length byte.
+            let precision = if prop_count >= 1 { buf.get_u8() } else { 18 };
             let scale = if prop_count >= 2 { buf.get_u8() } else { 0 };
             buf.advance(prop_count.saturating_sub(2));
 
-            if data_len < 1 {
+            if data_len > u8::MAX as usize {
+                // Not representable as a single-byte length prefix, and far
+                // larger than any real NUMERIC (max 17 bytes); treat as
+                // malformed and skip without panicking.
+                buf.advance(data_len);
                 return Ok(SqlValue::Null);
             }
 
-            let sign = buf.get_u8();
-            let mantissa_len = data_len - 1;
-
-            if mantissa_len > 16 {
-                // Too large, skip and return null
-                buf.advance(mantissa_len);
-                return Ok(SqlValue::Null);
-            }
-
-            let mut mantissa_bytes = [0u8; 16];
-            for i in 0..mantissa_len.min(16) {
-                mantissa_bytes[i] = buf.get_u8();
-            }
-            let mantissa = u128::from_le_bytes(mantissa_bytes);
-
-            #[cfg(feature = "decimal")]
-            {
-                use rust_decimal::Decimal;
-                // Same overflow class as the top-level DECIMAL branch:
-                // rust_decimal holds 96-bit mantissas with scale <= 28, but a
-                // 16-byte wire mantissa (legitimate 38-digit NUMERIC or
-                // hostile) can exceed that regardless of scale. The old
-                // `scale > 28` guard did not cover an oversized mantissa, so
-                // `from_i128_with_scale` could panic. Fall back to f64 on any
-                // out-of-range value.
-                let decimal = i128::try_from(mantissa)
-                    .ok()
-                    .and_then(|m| Decimal::try_from_i128_with_scale(m, scale as u32).ok());
-                match decimal {
-                    Some(mut decimal) => {
-                        if sign == 0 {
-                            decimal.set_sign_negative(true);
-                        }
-                        Ok(SqlValue::Decimal(decimal))
-                    }
-                    None => Err(mssql_types::TypeError::InvalidDecimal(format!(
-                        "NUMERIC value in sql_variant (mantissa {mantissa}, scale {scale}) \
-                         exceeds rust_decimal's 96-bit/scale-28 range; CAST the column to a \
-                         narrower NUMERIC, FLOAT, or VARCHAR in the query"
-                    ))
-                    .into()),
-                }
-            }
-            #[cfg(not(feature = "decimal"))]
-            {
-                let divisor = 10f64.powi(scale as i32);
-                let value = (mantissa as f64) / divisor;
-                let value = if sign == 0 { -value } else { value };
-                Ok(SqlValue::Double(value))
-            }
+            let type_info = mssql_types::TypeInfo::decimal(precision, scale);
+            let result = {
+                let len_prefix = [data_len as u8];
+                let mut framed = (&len_prefix[..]).chain(&buf[..data_len]);
+                mssql_types::__private::decode_decimal(&mut framed, &type_info)
+            };
+            buf.advance(data_len);
+            result.map_err(Into::into)
         }
         0x24 => {
             // UNIQUEIDENTIFIER (no properties)
@@ -2101,6 +2068,25 @@ mod tests {
             err.to_string().contains("rust_decimal"),
             "error should explain the range limitation: {err}"
         );
+    }
+
+    /// A valid SQL_VARIANT DECIMALN decodes through the shared decoder (#204):
+    /// 123.45 as NUMERIC(5,2). total_len=7: base_type + prop_count + precision
+    /// + scale + sign(1) + mantissa(2).
+    #[cfg(feature = "decimal")]
+    #[test]
+    fn variant_decimal_decodes_via_shared_decoder() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&7u32.to_le_bytes());
+        data.push(0x6A); // DECIMALN
+        data.push(0x02); // prop_count: precision, scale
+        data.push(5); // precision
+        data.push(2); // scale
+        data.push(0x01); // sign (positive)
+        data.extend_from_slice(&12345u16.to_le_bytes()); // mantissa LE
+        let mut buf: &[u8] = &data;
+        let value = parse_sql_variant(&mut buf).expect("valid NUMERIC must decode");
+        assert_eq!(value, SqlValue::Decimal("123.45".parse().unwrap()));
     }
 
     #[cfg(feature = "chrono")]
