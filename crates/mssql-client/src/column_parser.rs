@@ -1476,10 +1476,13 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
             let scale = if prop_count >= 2 { buf.get_u8() } else { 0 };
             buf.advance(prop_count.saturating_sub(2));
 
-            if data_len > u8::MAX as usize {
-                // Not representable as a single-byte length prefix, and far
-                // larger than any real NUMERIC (max 17 bytes); treat as
-                // malformed and skip without panicking.
+            // A valid NUMERIC/DECIMAL payload is at most 17 bytes (sign + 16
+            // mantissa). Anything larger is malformed; skip it and return Null,
+            // preserving the pre-#204 behavior (the old `mantissa_len > 16`
+            // guard) rather than feeding the shared decoder a payload it would
+            // partially decode. This also keeps `data_len` within `u8`, so the
+            // length-prefix reframing below cannot truncate or panic.
+            if data_len > 17 {
                 buf.advance(data_len);
                 return Ok(SqlValue::Null);
             }
@@ -2087,6 +2090,25 @@ mod tests {
         let mut buf: &[u8] = &data;
         let value = parse_sql_variant(&mut buf).expect("valid NUMERIC must decode");
         assert_eq!(value, SqlValue::Decimal("123.45".parse().unwrap()));
+    }
+
+    /// A SQL_VARIANT DECIMALN whose payload exceeds the 17-byte NUMERIC maximum
+    /// (sign + 16 mantissa) is malformed: it decodes to Null, not through the
+    /// shared decoder. data_len = 18 (sign + 17 mantissa); total_len = 22.
+    #[test]
+    fn variant_decimal_oversized_payload_is_null() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&22u32.to_le_bytes());
+        data.push(0x6A); // DECIMALN
+        data.push(0x02); // prop_count: precision, scale
+        data.push(38); // precision
+        data.push(0); // scale
+        data.push(0x01); // sign
+        data.extend_from_slice(&[0u8; 17]); // 17 mantissa bytes => data_len 18
+        let mut buf: &[u8] = &data;
+        let value = parse_sql_variant(&mut buf).expect("oversized payload must not error");
+        assert_eq!(value, SqlValue::Null);
+        assert!(buf.is_empty(), "the whole payload must be consumed");
     }
 
     #[cfg(feature = "chrono")]
