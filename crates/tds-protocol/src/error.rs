@@ -31,6 +31,10 @@ pub enum ProtocolError {
     #[error("invalid prelogin option: {0:#x}")]
     InvalidPreloginOption(u8),
 
+    /// Invalid PRELOGIN encryption level byte.
+    #[error("invalid encryption level: {0:#x}")]
+    InvalidEncryptionLevel(u8),
+
     /// Invalid TDS version.
     #[error("invalid TDS version: {0:#x}")]
     InvalidTdsVersion(u32),

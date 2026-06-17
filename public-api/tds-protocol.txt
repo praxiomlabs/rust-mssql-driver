@@ -285,6 +285,7 @@ pub tds_protocol::error::ProtocolError::IncompletePacket
 pub tds_protocol::error::ProtocolError::IncompletePacket::actual: usize
 pub tds_protocol::error::ProtocolError::IncompletePacket::expected: usize
 pub tds_protocol::error::ProtocolError::InvalidDataType(u8)
+pub tds_protocol::error::ProtocolError::InvalidEncryptionLevel(u8)
 pub tds_protocol::error::ProtocolError::InvalidField
 pub tds_protocol::error::ProtocolError::InvalidField::field: &'static str
 pub tds_protocol::error::ProtocolError::InvalidField::value: u32
@@ -900,7 +901,7 @@ pub tds_protocol::prelogin::EncryptionLevel::Off = 0
 pub tds_protocol::prelogin::EncryptionLevel::On = 1
 pub tds_protocol::prelogin::EncryptionLevel::Required = 3
 impl tds_protocol::prelogin::EncryptionLevel
-pub fn tds_protocol::prelogin::EncryptionLevel::from_u8(u8) -> Self
+pub fn tds_protocol::prelogin::EncryptionLevel::from_u8(u8) -> core::result::Result<Self, tds_protocol::error::ProtocolError>
 pub const fn tds_protocol::prelogin::EncryptionLevel::is_required(&self) -> bool
 impl core::clone::Clone for tds_protocol::prelogin::EncryptionLevel
 pub fn tds_protocol::prelogin::EncryptionLevel::clone(&self) -> tds_protocol::prelogin::EncryptionLevel
@@ -3071,7 +3072,7 @@ pub tds_protocol::EncryptionLevel::Off = 0
 pub tds_protocol::EncryptionLevel::On = 1
 pub tds_protocol::EncryptionLevel::Required = 3
 impl tds_protocol::prelogin::EncryptionLevel
-pub fn tds_protocol::prelogin::EncryptionLevel::from_u8(u8) -> Self
+pub fn tds_protocol::prelogin::EncryptionLevel::from_u8(u8) -> core::result::Result<Self, tds_protocol::error::ProtocolError>
 pub const fn tds_protocol::prelogin::EncryptionLevel::is_required(&self) -> bool
 impl core::clone::Clone for tds_protocol::prelogin::EncryptionLevel
 pub fn tds_protocol::prelogin::EncryptionLevel::clone(&self) -> tds_protocol::prelogin::EncryptionLevel
@@ -3462,6 +3463,7 @@ pub tds_protocol::ProtocolError::IncompletePacket
 pub tds_protocol::ProtocolError::IncompletePacket::actual: usize
 pub tds_protocol::ProtocolError::IncompletePacket::expected: usize
 pub tds_protocol::ProtocolError::InvalidDataType(u8)
+pub tds_protocol::ProtocolError::InvalidEncryptionLevel(u8)
 pub tds_protocol::ProtocolError::InvalidField
 pub tds_protocol::ProtocolError::InvalidField::field: &'static str
 pub tds_protocol::ProtocolError::InvalidField::value: u32
