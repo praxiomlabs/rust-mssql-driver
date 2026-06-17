@@ -75,15 +75,21 @@ pub enum EncryptionLevel {
 }
 
 impl EncryptionLevel {
-    /// Create from raw byte value.
-    pub fn from_u8(value: u8) -> Self {
+    /// Create from a raw byte value.
+    ///
+    /// Returns an error for an unrecognized byte rather than defaulting to
+    /// [`Self::Off`]: a garbage or unexpected encryption byte from the server
+    /// must not be silently read as "encryption off", which would mask a
+    /// downgrade or a malformed PRELOGIN response (#278). Mirrors the fallible
+    /// [`PreLoginOption::from_u8`].
+    pub fn from_u8(value: u8) -> Result<Self, ProtocolError> {
         match value {
-            0x00 => Self::Off,
-            0x01 => Self::On,
-            0x02 => Self::NotSupported,
-            0x03 => Self::Required,
-            0x80 => Self::ClientCertAuth,
-            _ => Self::Off,
+            0x00 => Ok(Self::Off),
+            0x01 => Ok(Self::On),
+            0x02 => Ok(Self::NotSupported),
+            0x03 => Ok(Self::Required),
+            0x80 => Ok(Self::ClientCertAuth),
+            _ => Err(ProtocolError::InvalidEncryptionLevel(value)),
         }
     }
 
@@ -407,7 +413,7 @@ impl PreLogin {
                     prelogin.version = TdsVersion::new(version_raw);
                 }
                 PreLoginOption::Encryption if length >= 1 => {
-                    prelogin.encryption = EncryptionLevel::from_u8(data[data_offset]);
+                    prelogin.encryption = EncryptionLevel::from_u8(data[data_offset])?;
                 }
                 PreLoginOption::Mars if length >= 1 => {
                     prelogin.mars = data[data_offset] != 0;
@@ -493,6 +499,33 @@ mod tests {
         );
         let decoded = PreLogin::decode(with.as_ref()).unwrap();
         assert!(decoded.fed_auth_required);
+    }
+
+    /// #278: an unrecognized PRELOGIN encryption byte must make decode fail,
+    /// not be silently read as ENCRYPT_OFF (which would mask a downgrade or a
+    /// malformed PRELOGIN response).
+    #[test]
+    fn test_prelogin_decode_rejects_unknown_encryption_byte() {
+        use bytes::BufMut;
+
+        let mut buf = bytes::BytesMut::new();
+        let header_size: u16 = 6; // one option header (5 bytes) + terminator (1)
+
+        // ENCRYPTION option header (type:1 + offset:2 + length:2)
+        buf.put_u8(PreLoginOption::Encryption as u8);
+        buf.put_u16(header_size); // offset to encryption data
+        buf.put_u16(1); // length
+        // Terminator
+        buf.put_u8(PreLoginOption::Terminator as u8);
+        // Data: an invalid encryption level byte
+        buf.put_u8(0x42);
+
+        let result = PreLogin::decode(buf.freeze().as_ref());
+        assert!(
+            matches!(result, Err(ProtocolError::InvalidEncryptionLevel(0x42))),
+            "an unknown encryption byte must be rejected as \
+             InvalidEncryptionLevel(0x42), not read as Off; got {result:?}"
+        );
     }
 
     #[test]
