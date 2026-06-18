@@ -967,15 +967,15 @@ impl RpcRequest {
     pub fn build_param_declarations(params: &[RpcParam]) -> String {
         params
             .iter()
-            .map(|p| {
+            .enumerate()
+            .map(|(idx, p)| {
                 let name = if p.name.starts_with('@') {
                     p.name.clone()
                 } else if p.name.is_empty() {
-                    // Generate positional name
-                    format!(
-                        "@p{}",
-                        params.iter().position(|x| x.name == p.name).unwrap_or(0) + 1
-                    )
+                    // Generate positional name. Use the parameter's own index;
+                    // `position()` on the empty name always returned the first
+                    // unnamed param, so multiple unnamed params all became @p1.
+                    format!("@p{}", idx + 1)
                 } else {
                     format!("@{}", p.name)
                 };
@@ -1347,6 +1347,21 @@ mod tests {
         let decls = RpcRequest::build_param_declarations(&params);
         assert!(decls.contains("@p1 int"));
         assert!(decls.contains("@name nvarchar"));
+    }
+
+    #[test]
+    fn test_param_declarations_unnamed_are_positional() {
+        // Multiple unnamed params must get distinct positional names. Previously
+        // `position()` on the empty name returned the first index for every
+        // unnamed param, collapsing them all to @p1.
+        let params = vec![
+            RpcParam::int("", 1),
+            RpcParam::int("", 2),
+            RpcParam::int("", 3),
+        ];
+
+        let decls = RpcRequest::build_param_declarations(&params);
+        assert_eq!(decls, "@p1 int, @p2 int, @p3 int");
     }
 
     #[test]
