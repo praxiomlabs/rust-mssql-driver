@@ -806,7 +806,11 @@ pub fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue>
                 {
                     let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1)
                         .expect("epoch 0001-01-01 is valid");
-                    let date = base + chrono::Duration::days(days as i64);
+                    let date = base
+                        .checked_add_signed(chrono::Duration::days(days as i64))
+                        .ok_or_else(|| {
+                            Error::Protocol(format!("date field days out of range: {days}"))
+                        })?;
                     SqlValue::Date(date)
                 }
                 #[cfg(not(feature = "chrono"))]
@@ -884,7 +888,11 @@ pub fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue>
                 {
                     let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1)
                         .expect("epoch 0001-01-01 is valid");
-                    let date = base + chrono::Duration::days(days as i64);
+                    let date = base
+                        .checked_add_signed(chrono::Duration::days(days as i64))
+                        .ok_or_else(|| {
+                            Error::Protocol(format!("date field days out of range: {days}"))
+                        })?;
                     let time = intervals_to_time(intervals, scale);
                     SqlValue::DateTime(date.and_time(time))
                 }
@@ -940,7 +948,11 @@ pub fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue>
                     use chrono::TimeZone;
                     let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1)
                         .expect("epoch 0001-01-01 is valid");
-                    let date = base + chrono::Duration::days(days as i64);
+                    let date = base
+                        .checked_add_signed(chrono::Duration::days(days as i64))
+                        .ok_or_else(|| {
+                            Error::Protocol(format!("date field days out of range: {days}"))
+                        })?;
                     let time = intervals_to_time(intervals, scale);
                     let offset = chrono::FixedOffset::east_opt((offset_minutes as i32) * 60)
                         .unwrap_or_else(|| {
@@ -1534,7 +1546,11 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
                 let days = u32::from_le_bytes(date_bytes);
                 let base =
                     chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
-                let date = base + chrono::Duration::days(days as i64);
+                let date = base
+                    .checked_add_signed(chrono::Duration::days(days as i64))
+                    .ok_or_else(|| {
+                        Error::Protocol(format!("date field days out of range: {days}"))
+                    })?;
                 Ok(SqlValue::Date(date))
             }
             #[cfg(not(feature = "chrono"))]
@@ -1606,7 +1622,11 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
 
                 let base =
                     chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
-                let date = base + chrono::Duration::days(days as i64);
+                let date = base
+                    .checked_add_signed(chrono::Duration::days(days as i64))
+                    .ok_or_else(|| {
+                        Error::Protocol(format!("date field days out of range: {days}"))
+                    })?;
                 let time = intervals_to_time(intervals, scale);
                 Ok(SqlValue::DateTime(date.and_time(time)))
             }
@@ -1650,7 +1670,11 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
                 use chrono::TimeZone;
                 let base =
                     chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
-                let date = base + chrono::Duration::days(days as i64);
+                let date = base
+                    .checked_add_signed(chrono::Duration::days(days as i64))
+                    .ok_or_else(|| {
+                        Error::Protocol(format!("date field days out of range: {days}"))
+                    })?;
                 let time = intervals_to_time(intervals, scale);
                 let offset = chrono::FixedOffset::east_opt((offset_minutes as i32) * 60)
                     .unwrap_or_else(|| {
