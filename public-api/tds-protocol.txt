@@ -896,6 +896,8 @@ pub const tds_protocol::packet::PACKET_HEADER_SIZE: usize
 pub mod tds_protocol::prelogin
 #[non_exhaustive] #[repr(u8)] pub enum tds_protocol::prelogin::EncryptionLevel
 pub tds_protocol::prelogin::EncryptionLevel::ClientCertAuth = 128
+pub tds_protocol::prelogin::EncryptionLevel::ClientCertOn = 129
+pub tds_protocol::prelogin::EncryptionLevel::ClientCertReq = 131
 pub tds_protocol::prelogin::EncryptionLevel::NotSupported = 2
 pub tds_protocol::prelogin::EncryptionLevel::Off = 0
 pub tds_protocol::prelogin::EncryptionLevel::On = 1
@@ -3069,6 +3071,8 @@ impl<T> core::convert::From<T> for tds_protocol::version::TdsVersion
 pub fn tds_protocol::version::TdsVersion::from(T) -> T
 #[non_exhaustive] #[repr(u8)] pub enum tds_protocol::EncryptionLevel
 pub tds_protocol::EncryptionLevel::ClientCertAuth = 128
+pub tds_protocol::EncryptionLevel::ClientCertOn = 129
+pub tds_protocol::EncryptionLevel::ClientCertReq = 131
 pub tds_protocol::EncryptionLevel::NotSupported = 2
 pub tds_protocol::EncryptionLevel::Off = 0
 pub tds_protocol::EncryptionLevel::On = 1
