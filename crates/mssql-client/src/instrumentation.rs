@@ -355,6 +355,27 @@ impl InstrumentationContext {
             .start(&tracer)
     }
 
+    /// Create a stored-procedure call span.
+    ///
+    /// A procedure call has no SQL text, so the procedure name is recorded as
+    /// `db.statement` (it is a validated identifier, not a value, so it is not
+    /// sanitized) and the operation is `EXECUTE`.
+    pub fn procedure_span(&self, proc_name: &str) -> impl Span {
+        let tracer = global::tracer("mssql-client");
+        let mut attrs = self.base_attributes();
+        attrs.push(KeyValue::new(attributes::DB_OPERATION, "EXECUTE"));
+        attrs.push(KeyValue::new(
+            attributes::DB_STATEMENT,
+            proc_name.to_string(),
+        ));
+
+        tracer
+            .span_builder(span_names::EXECUTE)
+            .with_kind(SpanKind::Client)
+            .with_attributes(attrs)
+            .start(&tracer)
+    }
+
     /// Create a transaction span.
     pub fn transaction_span(&self, operation: &str) -> impl Span {
         let tracer = global::tracer("mssql-client");

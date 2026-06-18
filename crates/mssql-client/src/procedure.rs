@@ -217,9 +217,16 @@ impl<'a, S: ConnectionState> ProcedureBuilder<'a, S> {
             rpc = rpc.param(param);
         }
 
+        #[cfg(feature = "otel")]
+        let instrumentation = self.client.instrumentation().clone();
+        #[cfg(feature = "otel")]
+        let mut span = instrumentation.procedure_span(&self.proc_name);
+        #[cfg(feature = "otel")]
+        let timer = crate::instrumentation::OperationTimer::start("EXECUTE");
+
         let deadline = self.client.command_deadline();
         let canceller = self.client.connection_cancel_handle();
-        crate::client::run_with_deadline(
+        let result = crate::client::run_with_deadline(
             async {
                 self.client.send_rpc(&rpc).await?;
                 self.client.read_procedure_result().await
@@ -227,7 +234,22 @@ impl<'a, S: ConnectionState> ProcedureBuilder<'a, S> {
             deadline,
             canceller,
         )
-        .await
+        .await;
+
+        #[cfg(feature = "otel")]
+        match &result {
+            Ok(r) => crate::instrumentation::InstrumentationContext::record_success(
+                &mut span,
+                Some(r.rows_affected),
+            ),
+            Err(e) => crate::instrumentation::InstrumentationContext::record_error(&mut span, e),
+        }
+        #[cfg(feature = "otel")]
+        timer.finish(instrumentation.metrics(), result.is_ok());
+        #[cfg(feature = "otel")]
+        drop(span);
+
+        result
     }
 }
 

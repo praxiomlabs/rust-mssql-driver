@@ -485,9 +485,16 @@ impl<S: ConnectionState> Client<S> {
             rpc = rpc.param(param);
         }
 
+        #[cfg(feature = "otel")]
+        let instrumentation = self.instrumentation.clone();
+        #[cfg(feature = "otel")]
+        let mut span = instrumentation.procedure_span(proc_name);
+        #[cfg(feature = "otel")]
+        let timer = crate::instrumentation::OperationTimer::start("EXECUTE");
+
         let deadline = self.command_deadline();
         let canceller = self.connection_cancel_handle();
-        run_with_deadline(
+        let result = run_with_deadline(
             async {
                 self.send_rpc(&rpc).await?;
                 self.read_procedure_result().await
@@ -495,7 +502,19 @@ impl<S: ConnectionState> Client<S> {
             deadline,
             canceller,
         )
-        .await
+        .await;
+
+        #[cfg(feature = "otel")]
+        match &result {
+            Ok(r) => InstrumentationContext::record_success(&mut span, Some(r.rows_affected)),
+            Err(e) => InstrumentationContext::record_error(&mut span, e),
+        }
+        #[cfg(feature = "otel")]
+        timer.finish(instrumentation.metrics(), result.is_ok());
+        #[cfg(feature = "otel")]
+        drop(span);
+
+        result
     }
 
     /// Ask the server how each parameter of a statement must be encrypted.
@@ -932,16 +951,43 @@ impl<S: ConnectionState> Client<S> {
             "executing query with named parameters"
         );
 
-        if params.is_empty() {
-            self.send_sql_batch(sql).await?;
-        } else {
-            let rpc_params =
-                Self::convert_named_params(params, self.send_unicode(), self.server_collation())?;
-            let rpc = RpcRequest::execute_sql(sql, rpc_params);
-            self.send_rpc(&rpc).await?;
-        }
+        #[cfg(feature = "otel")]
+        let instrumentation = self.instrumentation.clone();
+        #[cfg(feature = "otel")]
+        let mut span = instrumentation.query_span(sql);
+        #[cfg(feature = "otel")]
+        let timer = crate::instrumentation::OperationTimer::start(
+            crate::instrumentation::extract_operation(sql),
+        );
 
-        let resp = self.read_query_response().await?;
+        let result = async {
+            if params.is_empty() {
+                self.send_sql_batch(sql).await?;
+            } else {
+                let rpc_params = Self::convert_named_params(
+                    params,
+                    self.send_unicode(),
+                    self.server_collation(),
+                )?;
+                let rpc = RpcRequest::execute_sql(sql, rpc_params);
+                self.send_rpc(&rpc).await?;
+            }
+
+            self.read_query_response().await
+        }
+        .await;
+
+        #[cfg(feature = "otel")]
+        match &result {
+            Ok(_) => InstrumentationContext::record_success(&mut span, None),
+            Err(e) => InstrumentationContext::record_error(&mut span, e),
+        }
+        #[cfg(feature = "otel")]
+        timer.finish(instrumentation.metrics(), result.is_ok());
+        #[cfg(feature = "otel")]
+        drop(span);
+
+        let resp = result?;
         #[cfg(feature = "always-encrypted")]
         {
             Ok(QueryStream::from_raw(
@@ -996,9 +1042,18 @@ impl<S: ConnectionState> Client<S> {
             "executing statement with named parameters"
         );
 
+        #[cfg(feature = "otel")]
+        let instrumentation = self.instrumentation.clone();
+        #[cfg(feature = "otel")]
+        let mut span = instrumentation.query_span(sql);
+        #[cfg(feature = "otel")]
+        let timer = crate::instrumentation::OperationTimer::start(
+            crate::instrumentation::extract_operation(sql),
+        );
+
         let deadline = self.command_deadline();
         let canceller = self.connection_cancel_handle();
-        run_with_deadline(
+        let result = run_with_deadline(
             async {
                 if params.is_empty() {
                     self.send_sql_batch(sql).await?;
@@ -1017,7 +1072,25 @@ impl<S: ConnectionState> Client<S> {
             deadline,
             canceller,
         )
-        .await
+        .await;
+
+        #[cfg(feature = "otel")]
+        match &result {
+            Ok(rows) => InstrumentationContext::record_success(&mut span, Some(*rows)),
+            Err(e) => InstrumentationContext::record_error(&mut span, e),
+        }
+        #[cfg(feature = "otel")]
+        timer.finish(instrumentation.metrics(), result.is_ok());
+        #[cfg(feature = "otel")]
+        drop(span);
+
+        result
+    }
+
+    /// The connection's OpenTelemetry instrumentation context.
+    #[cfg(feature = "otel")]
+    pub(crate) fn instrumentation(&self) -> &InstrumentationContext {
+        &self.instrumentation
     }
 
     /// Whether string parameters are sent as NVARCHAR (Unicode).
@@ -1497,9 +1570,18 @@ impl Client<Ready> {
             "executing multi-result query"
         );
 
+        #[cfg(feature = "otel")]
+        let instrumentation = self.instrumentation.clone();
+        #[cfg(feature = "otel")]
+        let mut span = instrumentation.query_span(sql);
+        #[cfg(feature = "otel")]
+        let timer = crate::instrumentation::OperationTimer::start(
+            crate::instrumentation::extract_operation(sql),
+        );
+
         let deadline = self.command_deadline();
         let canceller = self.connection_cancel_handle();
-        let result_sets = run_with_deadline(
+        let result = run_with_deadline(
             async {
                 if params.is_empty() {
                     // Simple batch without parameters - use SQL batch
@@ -1516,7 +1598,19 @@ impl Client<Ready> {
             deadline,
             canceller,
         )
-        .await?;
+        .await;
+
+        #[cfg(feature = "otel")]
+        match &result {
+            Ok(_) => InstrumentationContext::record_success(&mut span, None),
+            Err(e) => InstrumentationContext::record_error(&mut span, e),
+        }
+        #[cfg(feature = "otel")]
+        timer.finish(instrumentation.metrics(), result.is_ok());
+        #[cfg(feature = "otel")]
+        drop(span);
+
+        let result_sets = result?;
         Ok(MultiResultStream::new(result_sets))
     }
 
