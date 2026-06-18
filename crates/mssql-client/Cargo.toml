@@ -141,6 +141,7 @@ path = "examples/bulk_insert.rs"
 [[example]]
 name = "derive_macros"
 path = "examples/derive_macros.rs"
+required-features = ["derive"]
 
 [[example]]
 name = "streaming"
@@ -161,6 +162,39 @@ harness = false
 name = "buffered_decode"
 harness = false
 required-features = ["bench"]
+
+# Integration tests that reference feature-gated APIs (type mapping, derive
+# macros, or the TLS error type) unconditionally. Declaring `required-features`
+# lets `cargo test --no-default-features` skip them instead of failing to
+# compile (#329). Each set is the minimal one whose absence breaks compilation;
+# tests not listed here compile feature-free and stay auto-discovered.
+[[test]]
+name = "azure_sql"
+required-features = ["chrono"]
+
+[[test]]
+name = "error_handling"
+required-features = ["tls"]
+
+[[test]]
+name = "bulk_insert"
+required-features = ["chrono", "decimal", "uuid"]
+
+[[test]]
+name = "derive_runtime"
+required-features = ["derive"]
+
+[[test]]
+name = "integration"
+required-features = ["chrono", "decimal", "uuid"]
+
+[[test]]
+name = "protocol_conformance"
+required-features = ["chrono", "uuid"]
+
+[[test]]
+name = "version_compatibility"
+required-features = ["chrono", "decimal"]
 
 [package.metadata.cargo-machete]
 # tokio-test is a dev-dependency for tests
