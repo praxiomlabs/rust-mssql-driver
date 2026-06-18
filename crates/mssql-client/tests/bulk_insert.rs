@@ -2965,3 +2965,108 @@ async fn test_bulk_insert_rejects_image_column_from_server_metadata() {
 
     client.close().await.expect("Failed to close");
 }
+
+// =============================================================================
+// Command-Timeout on the Data-Transfer Path (Issue #206)
+// =============================================================================
+
+/// Issue #206: the bulk-transfer `finish()` data phase runs under
+/// `command_timeout` as a *hard abandon* — an ATTENTION cancel cannot be
+/// interleaved into a partially-sent BulkLoad message, so on expiry the
+/// connection is left mid-request and discarded. The setup round-trips have
+/// live timeout coverage at the shared-plumbing level; this exercises the
+/// distinct `finish()` path.
+///
+/// Choreography: a second connection holds an exclusive lock on the target
+/// table inside an open transaction, so the BulkLoad data phase blocks until
+/// the 1s timeout fires and returns `Error::CommandTimeout`.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_bulk_finish_command_timeout() {
+    use std::time::{Duration, Instant};
+
+    // A permanent table: the exclusive lock must be visible across connections,
+    // and temp (#) tables are session-local.
+    let table = format!("dbo.BulkFinishTimeout_{}", std::process::id());
+
+    // Locker connection: create the table, then hold TABLOCKX for the test's
+    // duration inside an open transaction (HOLDLOCK keeps it past the SELECT).
+    let mut locker = Client::connect(get_test_config().expect("SQL Server config required"))
+        .await
+        .expect("locker connect");
+    locker
+        .execute(
+            &format!(
+                // Nullable column: the without-schema-discovery path emits the
+                // nullable INTN type id, which the server rejects for a NOT NULL
+                // column ("Invalid column type from bcp client"). A NULL column
+                // accepts it, so the data phase proceeds to the insert and
+                // blocks on the held lock — which is the path under test.
+                "IF OBJECT_ID('{table}','U') IS NOT NULL DROP TABLE {table}; \
+                 CREATE TABLE {table} (id INT NULL)"
+            ),
+            &[],
+        )
+        .await
+        .expect("create table");
+    locker
+        .execute("BEGIN TRANSACTION", &[])
+        .await
+        .expect("begin tran");
+    locker
+        .execute(
+            &format!("SELECT * FROM {table} WITH (TABLOCKX, HOLDLOCK)"),
+            &[],
+        )
+        .await
+        .expect("acquire exclusive lock");
+
+    // Victim connection: 1s command timeout. The bulk data phase blocks on the
+    // lock until the timeout abandons the connection.
+    let mut victim_cfg = get_test_config().expect("SQL Server config required");
+    victim_cfg.command_timeout = Duration::from_secs(1);
+    let mut victim = Client::connect(victim_cfg).await.expect("victim connect");
+
+    let builder = BulkInsertBuilder::new(&table)
+        .with_typed_columns(vec![BulkColumn::new("id", "INT", 0).unwrap()]);
+
+    // Skip schema discovery: `bulk_insert()`'s `SELECT TOP 0 *` would itself
+    // block on the exclusive lock and time out during setup. The INSERT BULK
+    // prelude only puts the connection in bulk-load mode (no data lock), so it
+    // succeeds — leaving the BulkLoad data transfer in finish() as the only
+    // thing that blocks.
+    let mut writer = victim
+        .bulk_insert_without_schema_discovery(&builder)
+        .await
+        .expect("INSERT BULK prelude should succeed before the blocking data phase");
+    writer
+        .send_row_values(&[SqlValue::Int(1)])
+        .expect("buffer row");
+
+    let start = Instant::now();
+    let result = writer.finish().await;
+    let elapsed = start.elapsed();
+
+    // The victim was abandoned mid-request; dropping it tears down the session
+    // so its queued bulk load cannot race the cleanup below.
+    drop(victim);
+
+    // Release the lock and drop the table (best-effort; the idempotent guard at
+    // the top of the test reclaims a leftover on the next run).
+    locker.execute("ROLLBACK", &[]).await.ok();
+    locker
+        .execute(&format!("DROP TABLE {table}"), &[])
+        .await
+        .ok();
+    locker.close().await.ok();
+
+    match result {
+        Err(mssql_client::Error::CommandTimeout) => {}
+        Err(other) => panic!("finish() must hit the command timeout, got {other:?}"),
+        Ok(v) => panic!("finish() must time out under the lock, got Ok({v:?})"),
+    }
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "timeout must fire near 1s, not block indefinitely; took {elapsed:?}"
+    );
+}
