@@ -608,585 +608,622 @@ pub fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue>
         }
 
         // Money types (fixed-point with 4 decimal places)
-        TypeId::Money | TypeId::Money4 | TypeId::MoneyN => {
-            let bytes = match col.type_id {
-                TypeId::Money => 8,
-                TypeId::Money4 => 4,
-                TypeId::MoneyN => {
-                    if buf.remaining() < 1 {
-                        return Err(Error::Protocol(
-                            "unexpected EOF reading MoneyN length".into(),
-                        ));
-                    }
-                    buf.get_u8() as usize
-                }
-                // The outer match arm restricts col.type_id to Money | Money4 | MoneyN,
-                // so this branch is unreachable.
-                _ => unreachable!("inner match is bounded by outer Money|Money4|MoneyN arm"),
-            };
-
-            if buf.remaining() < bytes {
-                return Err(Error::Protocol(format!(
-                    "unexpected EOF reading money data ({bytes} bytes)"
-                )));
-            }
-
-            parse_money_value(buf, bytes)?
-        }
+        TypeId::Money | TypeId::Money4 | TypeId::MoneyN => parse_money(buf, col.type_id)?,
 
         // Variable-length nullable types (IntN, FloatN, etc.)
-        TypeId::IntN => {
-            if buf.remaining() < 1 {
-                return Err(Error::Protocol("unexpected EOF reading IntN length".into()));
-            }
-            let len = buf.get_u8();
-            if buf.remaining() < len as usize {
-                return Err(Error::Protocol("unexpected EOF reading IntN data".into()));
-            }
-            match len {
-                0 => SqlValue::Null,
-                1 => SqlValue::TinyInt(buf.get_u8()),
-                2 => SqlValue::SmallInt(buf.get_i16_le()),
-                4 => SqlValue::Int(buf.get_i32_le()),
-                8 => SqlValue::BigInt(buf.get_i64_le()),
-                _ => {
-                    return Err(Error::Protocol(format!("invalid IntN length: {len}")));
-                }
-            }
-        }
-        TypeId::FloatN => {
-            if buf.remaining() < 1 {
-                return Err(Error::Protocol(
-                    "unexpected EOF reading FloatN length".into(),
-                ));
-            }
-            let len = buf.get_u8();
-            if buf.remaining() < len as usize {
-                return Err(Error::Protocol("unexpected EOF reading FloatN data".into()));
-            }
-            match len {
-                0 => SqlValue::Null,
-                4 => SqlValue::Float(buf.get_f32_le()),
-                8 => SqlValue::Double(buf.get_f64_le()),
-                _ => {
-                    return Err(Error::Protocol(format!("invalid FloatN length: {len}")));
-                }
-            }
-        }
-        TypeId::BitN => {
-            if buf.remaining() < 1 {
-                return Err(Error::Protocol("unexpected EOF reading BitN length".into()));
-            }
-            let len = buf.get_u8();
-            if buf.remaining() < len as usize {
-                return Err(Error::Protocol("unexpected EOF reading BitN data".into()));
-            }
-            match len {
-                0 => SqlValue::Null,
-                1 => SqlValue::Bool(buf.get_u8() != 0),
-                _ => {
-                    return Err(Error::Protocol(format!("invalid BitN length: {len}")));
-                }
-            }
-        }
+        TypeId::IntN => parse_intn(buf)?,
+        TypeId::FloatN => parse_floatn(buf)?,
+        TypeId::BitN => parse_bitn(buf)?,
 
-        // DECIMAL/NUMERIC types (1-byte length prefix). The mantissa decode and
-        // the 96-bit/scale-28 overflow policy are shared with the secondary
-        // decode stack (`mssql_types::decode`) so the two cannot drift — that
-        // drift was issue #188. Only `scale` is consulted by the shared decoder.
         TypeId::Decimal | TypeId::Numeric | TypeId::DecimalN | TypeId::NumericN => {
-            let type_info = mssql_types::TypeInfo::decimal(
-                col.type_info.precision.unwrap_or(18),
-                col.type_info.scale.unwrap_or(0),
-            );
-            mssql_types::__private::decode_decimal(buf, &type_info)?
+            parse_decimal(buf, col)?
         }
 
         // DATETIME/SMALLDATETIME nullable (1-byte length prefix)
-        TypeId::DateTimeN => {
-            if buf.remaining() < 1 {
-                return Err(Error::Protocol(
-                    "unexpected EOF reading DateTimeN length".into(),
-                ));
-            }
-            let len = buf.get_u8() as usize;
-            if len == 0 {
-                SqlValue::Null
-            } else if buf.remaining() < len {
-                return Err(Error::Protocol("unexpected EOF reading DateTimeN".into()));
-            } else {
-                match len {
-                    4 => {
-                        // SMALLDATETIME: 2 bytes days + 2 bytes minutes
-                        let days = buf.get_u16_le() as i64;
-                        let minutes = buf.get_u16_le() as u32;
-                        #[cfg(feature = "chrono")]
-                        {
-                            SqlValue::DateTime(smalldatetime_from_wire(days, minutes)?)
-                        }
-                        #[cfg(not(feature = "chrono"))]
-                        {
-                            SqlValue::String(format!("SMALLDATETIME({days},{minutes})"))
-                        }
-                    }
-                    8 => {
-                        // DATETIME: 4 bytes days + 4 bytes 1/300ths of second
-                        let days = buf.get_i32_le() as i64;
-                        let time_300ths = buf.get_u32_le() as u64;
-                        #[cfg(feature = "chrono")]
-                        {
-                            SqlValue::DateTime(datetime_from_wire(days, time_300ths)?)
-                        }
-                        #[cfg(not(feature = "chrono"))]
-                        {
-                            SqlValue::String(format!("DATETIME({days},{time_300ths})"))
-                        }
-                    }
-                    _ => {
-                        return Err(Error::Protocol(format!("invalid DateTimeN length: {len}")));
-                    }
-                }
-            }
-        }
-
+        TypeId::DateTimeN => parse_datetimen(buf)?,
         // Fixed DATETIME (8 bytes)
-        TypeId::DateTime => {
-            if buf.remaining() < 8 {
-                return Err(Error::Protocol("unexpected EOF reading DATETIME".into()));
-            }
-            let days = buf.get_i32_le() as i64;
-            let time_300ths = buf.get_u32_le() as u64;
-            #[cfg(feature = "chrono")]
-            {
-                SqlValue::DateTime(datetime_from_wire(days, time_300ths)?)
-            }
-            #[cfg(not(feature = "chrono"))]
-            {
-                SqlValue::String(format!("DATETIME({days},{time_300ths})"))
-            }
-        }
-
+        TypeId::DateTime => parse_legacy_datetime(buf)?,
         // Fixed SMALLDATETIME (4 bytes)
-        TypeId::DateTime4 => {
-            if buf.remaining() < 4 {
-                return Err(Error::Protocol(
-                    "unexpected EOF reading SMALLDATETIME".into(),
-                ));
-            }
-            let days = buf.get_u16_le() as i64;
-            let minutes = buf.get_u16_le() as u32;
-            #[cfg(feature = "chrono")]
-            {
-                SqlValue::DateTime(smalldatetime_from_wire(days, minutes)?)
-            }
-            #[cfg(not(feature = "chrono"))]
-            {
-                SqlValue::String(format!("SMALLDATETIME({days},{minutes})"))
-            }
-        }
-
+        TypeId::DateTime4 => parse_legacy_smalldatetime(buf)?,
         // DATE (3 bytes, nullable with 1-byte length prefix)
-        TypeId::Date => {
-            if buf.remaining() < 1 {
-                return Err(Error::Protocol("unexpected EOF reading DATE length".into()));
-            }
-            let len = buf.get_u8() as usize;
-            if len == 0 {
-                SqlValue::Null
-            } else if len != 3 {
-                return Err(Error::Protocol(format!("invalid DATE length: {len}")));
-            } else if buf.remaining() < 3 {
-                return Err(Error::Protocol("unexpected EOF reading DATE".into()));
-            } else {
-                // 3 bytes little-endian days since 0001-01-01
-                let days = buf.get_u8() as u32
-                    | ((buf.get_u8() as u32) << 8)
-                    | ((buf.get_u8() as u32) << 16);
-                #[cfg(feature = "chrono")]
-                {
-                    let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1)
-                        .expect("epoch 0001-01-01 is valid");
-                    let date = base
-                        .checked_add_signed(chrono::Duration::days(days as i64))
-                        .ok_or_else(|| {
-                            Error::Protocol(format!("date field days out of range: {days}"))
-                        })?;
-                    SqlValue::Date(date)
-                }
-                #[cfg(not(feature = "chrono"))]
-                {
-                    SqlValue::String(format!("DATE({days})"))
-                }
-            }
-        }
-
+        TypeId::Date => parse_date(buf)?,
         // TIME (variable length with scale, 1-byte length prefix)
-        TypeId::Time => {
-            if buf.remaining() < 1 {
-                return Err(Error::Protocol("unexpected EOF reading TIME length".into()));
-            }
-            let len = buf.get_u8() as usize;
-            if len == 0 {
-                SqlValue::Null
-            } else if buf.remaining() < len {
-                return Err(Error::Protocol("unexpected EOF reading TIME".into()));
-            } else {
-                let mut time_bytes = [0u8; 8];
-                for byte in time_bytes.iter_mut().take(len) {
-                    *byte = buf.get_u8();
-                }
-                let intervals = u64::from_le_bytes(time_bytes);
-                #[cfg(feature = "chrono")]
-                {
-                    let scale = col.type_info.scale.unwrap_or(7);
-                    let time = intervals_to_time(intervals, scale);
-                    SqlValue::Time(time)
-                }
-                #[cfg(not(feature = "chrono"))]
-                {
-                    SqlValue::String(format!("TIME({intervals})"))
-                }
-            }
-        }
-
+        TypeId::Time => parse_time(buf, col)?,
         // DATETIME2 (variable length: TIME bytes + 3 bytes date, 1-byte length prefix)
-        TypeId::DateTime2 => {
-            if buf.remaining() < 1 {
-                return Err(Error::Protocol(
-                    "unexpected EOF reading DATETIME2 length".into(),
-                ));
-            }
-            let len = buf.get_u8() as usize;
-            if len == 0 {
-                SqlValue::Null
-            } else if buf.remaining() < len {
-                return Err(Error::Protocol("unexpected EOF reading DATETIME2".into()));
-            } else {
-                let scale = col.type_info.scale.unwrap_or(7);
-                let time_len = time_bytes_for_scale(scale);
-                // Reads below are driven by scale metadata, not by `len`:
-                // a short declared length must be an error, not a panic.
-                if len < time_len + 3 {
-                    return Err(Error::Protocol(format!(
-                        "DATETIME2 length {len} too short for scale {scale}"
-                    )));
-                }
-
-                // Read time
-                let mut time_bytes = [0u8; 8];
-                for byte in time_bytes.iter_mut().take(time_len) {
-                    *byte = buf.get_u8();
-                }
-                let intervals = u64::from_le_bytes(time_bytes);
-
-                // Read date (3 bytes)
-                let days = buf.get_u8() as u32
-                    | ((buf.get_u8() as u32) << 8)
-                    | ((buf.get_u8() as u32) << 16);
-
-                #[cfg(feature = "chrono")]
-                {
-                    let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1)
-                        .expect("epoch 0001-01-01 is valid");
-                    let date = base
-                        .checked_add_signed(chrono::Duration::days(days as i64))
-                        .ok_or_else(|| {
-                            Error::Protocol(format!("date field days out of range: {days}"))
-                        })?;
-                    let time = intervals_to_time(intervals, scale);
-                    SqlValue::DateTime(date.and_time(time))
-                }
-                #[cfg(not(feature = "chrono"))]
-                {
-                    SqlValue::String(format!("DATETIME2({days},{intervals})"))
-                }
-            }
-        }
-
+        TypeId::DateTime2 => parse_datetime2(buf, col)?,
         // DATETIMEOFFSET (variable length: TIME bytes + 3 bytes date + 2 bytes offset)
-        TypeId::DateTimeOffset => {
-            if buf.remaining() < 1 {
-                return Err(Error::Protocol(
-                    "unexpected EOF reading DATETIMEOFFSET length".into(),
-                ));
-            }
-            let len = buf.get_u8() as usize;
-            if len == 0 {
-                SqlValue::Null
-            } else if buf.remaining() < len {
-                return Err(Error::Protocol(
-                    "unexpected EOF reading DATETIMEOFFSET".into(),
-                ));
-            } else {
-                let scale = col.type_info.scale.unwrap_or(7);
-                let time_len = time_bytes_for_scale(scale);
-                // Reads below are driven by scale metadata, not by `len`:
-                // a short declared length must be an error, not a panic.
-                if len < time_len + 5 {
-                    return Err(Error::Protocol(format!(
-                        "DATETIMEOFFSET length {len} too short for scale {scale}"
-                    )));
-                }
-
-                // Read time
-                let mut time_bytes = [0u8; 8];
-                for byte in time_bytes.iter_mut().take(time_len) {
-                    *byte = buf.get_u8();
-                }
-                let intervals = u64::from_le_bytes(time_bytes);
-
-                // Read date (3 bytes)
-                let days = buf.get_u8() as u32
-                    | ((buf.get_u8() as u32) << 8)
-                    | ((buf.get_u8() as u32) << 16);
-
-                // Read offset in minutes (2 bytes, signed)
-                let offset_minutes = buf.get_i16_le();
-
-                #[cfg(feature = "chrono")]
-                {
-                    use chrono::TimeZone;
-                    let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1)
-                        .expect("epoch 0001-01-01 is valid");
-                    let date = base
-                        .checked_add_signed(chrono::Duration::days(days as i64))
-                        .ok_or_else(|| {
-                            Error::Protocol(format!("date field days out of range: {days}"))
-                        })?;
-                    let time = intervals_to_time(intervals, scale);
-                    let offset = chrono::FixedOffset::east_opt((offset_minutes as i32) * 60)
-                        .unwrap_or_else(|| {
-                            chrono::FixedOffset::east_opt(0).expect("UTC offset 0 is valid")
-                        });
-                    // The wire date/time portion is UTC per MS-TDS §2.2.5.5.1.9;
-                    // attach the offset without shifting the instant.
-                    let datetime = offset.from_utc_datetime(&date.and_time(time));
-                    SqlValue::DateTimeOffset(datetime)
-                }
-                #[cfg(not(feature = "chrono"))]
-                {
-                    SqlValue::String(format!(
-                        "DATETIMEOFFSET({days},{intervals},{offset_minutes})"
-                    ))
-                }
-            }
-        }
+        TypeId::DateTimeOffset => parse_datetimeoffset(buf, col)?,
 
         // TEXT type - always uses PLP encoding (deprecated LOB type)
         TypeId::Text => parse_plp_varchar(buf, col.type_info.collation.as_ref())?,
 
         // Legacy byte-length string types (Char, VarChar) - 1-byte length prefix
-        TypeId::Char | TypeId::VarChar => {
-            if buf.remaining() < 1 {
-                return Err(Error::Protocol(
-                    "unexpected EOF reading legacy varchar length".into(),
-                ));
-            }
-            let len = buf.get_u8();
-            if len == 0xFF {
-                SqlValue::Null
-            } else if len == 0 {
-                SqlValue::String(String::new())
-            } else if buf.remaining() < len as usize {
-                return Err(Error::Protocol(
-                    "unexpected EOF reading legacy varchar data".into(),
-                ));
-            } else {
-                let data = &buf[..len as usize];
-                // Use collation-aware decoding for non-ASCII text
-                let s = decode_varchar_string(data, col.type_info.collation.as_ref());
-                buf.advance(len as usize);
-                SqlValue::String(s)
-            }
-        }
-
+        TypeId::Char | TypeId::VarChar => parse_legacy_varchar(buf, col)?,
         // Variable-length string types (BigVarChar, BigChar)
-        TypeId::BigVarChar | TypeId::BigChar => {
-            // Check if this is a MAX type (uses PLP encoding)
-            if col.type_info.max_length == Some(0xFFFF) {
-                // PLP format: 8-byte total length, then chunks
-                parse_plp_varchar(buf, col.type_info.collation.as_ref())?
-            } else {
-                // 2-byte length prefix for non-MAX types
-                if buf.remaining() < 2 {
-                    return Err(Error::Protocol(
-                        "unexpected EOF reading varchar length".into(),
-                    ));
-                }
-                let len = buf.get_u16_le();
-                if len == 0xFFFF {
-                    SqlValue::Null
-                } else if buf.remaining() < len as usize {
-                    return Err(Error::Protocol(
-                        "unexpected EOF reading varchar data".into(),
-                    ));
-                } else {
-                    let data = &buf[..len as usize];
-                    // Use collation-aware decoding for non-ASCII text
-                    let s = decode_varchar_string(data, col.type_info.collation.as_ref());
-                    buf.advance(len as usize);
-                    SqlValue::String(s)
-                }
-            }
-        }
-
+        TypeId::BigVarChar | TypeId::BigChar => parse_bigvarchar(buf, col)?,
         // NTEXT type - always uses PLP encoding (deprecated LOB type)
         TypeId::NText => parse_plp_nvarchar(buf)?,
-
         // Variable-length Unicode string types (NVarChar, NChar)
-        TypeId::NVarChar | TypeId::NChar => {
-            // Check if this is a MAX type (uses PLP encoding)
-            if col.type_info.max_length == Some(0xFFFF) {
-                // PLP format: 8-byte total length, then chunks
-                parse_plp_nvarchar(buf)?
-            } else {
-                // 2-byte length prefix (in bytes, not chars) for non-MAX types
-                if buf.remaining() < 2 {
-                    return Err(Error::Protocol(
-                        "unexpected EOF reading nvarchar length".into(),
-                    ));
-                }
-                let len = buf.get_u16_le();
-                if len == 0xFFFF {
-                    SqlValue::Null
-                } else if buf.remaining() < len as usize {
-                    return Err(Error::Protocol(
-                        "unexpected EOF reading nvarchar data".into(),
-                    ));
-                } else {
-                    let data = &buf[..len as usize];
-                    // UTF-16LE to String
-                    let utf16: Vec<u16> = data
-                        .chunks_exact(2)
-                        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-                        .collect();
-                    let s = String::from_utf16(&utf16)
-                        .map_err(|_| Error::Protocol("invalid UTF-16 in nvarchar".into()))?;
-                    buf.advance(len as usize);
-                    SqlValue::String(s)
-                }
-            }
-        }
+        TypeId::NVarChar | TypeId::NChar => parse_nvarchar(buf, col)?,
 
         // IMAGE type - always uses PLP encoding (deprecated LOB type)
         TypeId::Image => parse_plp_varbinary(buf)?,
-
         // Legacy byte-length binary types (Binary, VarBinary) - 1-byte length prefix
-        TypeId::Binary | TypeId::VarBinary => {
-            if buf.remaining() < 1 {
-                return Err(Error::Protocol(
-                    "unexpected EOF reading legacy varbinary length".into(),
-                ));
-            }
-            let len = buf.get_u8();
-            if len == 0xFF {
-                SqlValue::Null
-            } else if len == 0 {
-                SqlValue::Binary(bytes::Bytes::new())
-            } else if buf.remaining() < len as usize {
-                return Err(Error::Protocol(
-                    "unexpected EOF reading legacy varbinary data".into(),
-                ));
-            } else {
-                let data = bytes::Bytes::copy_from_slice(&buf[..len as usize]);
-                buf.advance(len as usize);
-                SqlValue::Binary(data)
-            }
-        }
-
+        TypeId::Binary | TypeId::VarBinary => parse_legacy_varbinary(buf)?,
         // Variable-length binary types (BigVarBinary, BigBinary)
-        TypeId::BigVarBinary | TypeId::BigBinary => {
-            // Check if this is a MAX type (uses PLP encoding)
-            if col.type_info.max_length == Some(0xFFFF) {
-                // PLP format: 8-byte total length, then chunks
-                parse_plp_varbinary(buf)?
-            } else {
-                if buf.remaining() < 2 {
-                    return Err(Error::Protocol(
-                        "unexpected EOF reading varbinary length".into(),
-                    ));
-                }
-                let len = buf.get_u16_le();
-                if len == 0xFFFF {
-                    SqlValue::Null
-                } else if buf.remaining() < len as usize {
-                    return Err(Error::Protocol(
-                        "unexpected EOF reading varbinary data".into(),
-                    ));
-                } else {
-                    let data = bytes::Bytes::copy_from_slice(&buf[..len as usize]);
-                    buf.advance(len as usize);
-                    SqlValue::Binary(data)
-                }
-            }
-        }
+        TypeId::BigVarBinary | TypeId::BigBinary => parse_bigvarbinary(buf, col)?,
 
         // XML type - always uses PLP encoding
-        TypeId::Xml => {
-            // Parse as PLP NVARCHAR (XML is UTF-16 encoded in TDS)
-            match parse_plp_nvarchar(buf)? {
-                SqlValue::Null => SqlValue::Null,
-                SqlValue::String(s) => SqlValue::Xml(s),
-                _ => {
-                    return Err(Error::Protocol(
-                        "unexpected value type when parsing XML".into(),
-                    ));
-                }
-            }
-        }
-
+        TypeId::Xml => parse_xml(buf)?,
         // GUID/UniqueIdentifier
-        TypeId::Guid => {
-            if buf.remaining() < 1 {
-                return Err(Error::Protocol("unexpected EOF reading GUID length".into()));
-            }
-            let len = buf.get_u8();
-            if len == 0 {
-                SqlValue::Null
-            } else if len != 16 {
-                return Err(Error::Protocol(format!("invalid GUID length: {len}")));
-            } else if buf.remaining() < 16 {
-                return Err(Error::Protocol("unexpected EOF reading GUID".into()));
-            } else {
-                // SQL Server stores GUIDs in mixed-endian format:
-                // first 3 groups byte-swapped, last 2 groups big-endian.
-                // Swap back to RFC 4122 big-endian format.
-                decode_guid_bytes(buf)
-            }
-        }
-
+        TypeId::Guid => parse_guid(buf)?,
         // SQL_VARIANT - contains embedded type info
         TypeId::Variant => parse_sql_variant(buf)?,
-
         // UDT (User-Defined Type) - uses PLP encoding, return as binary
         TypeId::Udt => parse_plp_varbinary(buf)?,
 
         // Default: treat as binary with 2-byte length prefix
-        _ => {
-            // Try to read as variable-length with 2-byte length
-            if buf.remaining() < 2 {
-                return Err(Error::Protocol(format!(
-                    "unexpected EOF reading {:?}",
-                    col.type_id
-                )));
-            }
-            let len = buf.get_u16_le();
-            if len == 0xFFFF {
-                SqlValue::Null
-            } else if buf.remaining() < len as usize {
-                return Err(Error::Protocol(format!(
-                    "unexpected EOF reading {:?} data",
-                    col.type_id
-                )));
-            } else {
-                let data = bytes::Bytes::copy_from_slice(&buf[..len as usize]);
-                buf.advance(len as usize);
-                SqlValue::Binary(data)
-            }
-        }
+        _ => parse_default_binary(buf, col)?,
     };
 
     Ok(value)
+}
+
+// =============================================================================
+// Per-type value parsers (the arms of `parse_column_value`, extracted for
+// readability and unit-testability — see #309). Each consumes exactly the bytes
+// of one column value from `buf` and returns its `SqlValue`. Behavior is
+// identical to the inlined arms.
+// =============================================================================
+
+/// MONEY / SMALLMONEY / MONEYN — fixed-point with 4 decimal places.
+fn parse_money(buf: &mut &[u8], type_id: TypeId) -> Result<SqlValue> {
+    let bytes = match type_id {
+        TypeId::Money => 8,
+        TypeId::Money4 => 4,
+        TypeId::MoneyN => {
+            if buf.remaining() < 1 {
+                return Err(Error::Protocol(
+                    "unexpected EOF reading MoneyN length".into(),
+                ));
+            }
+            buf.get_u8() as usize
+        }
+        // Caller dispatches only Money | Money4 | MoneyN to this helper.
+        _ => unreachable!("parse_money is only called for Money|Money4|MoneyN"),
+    };
+
+    if buf.remaining() < bytes {
+        return Err(Error::Protocol(format!(
+            "unexpected EOF reading money data ({bytes} bytes)"
+        )));
+    }
+
+    parse_money_value(buf, bytes)
+}
+
+/// INTN — nullable integer with a 1-byte length prefix (0/1/2/4/8).
+fn parse_intn(buf: &mut &[u8]) -> Result<SqlValue> {
+    if buf.remaining() < 1 {
+        return Err(Error::Protocol("unexpected EOF reading IntN length".into()));
+    }
+    let len = buf.get_u8();
+    if buf.remaining() < len as usize {
+        return Err(Error::Protocol("unexpected EOF reading IntN data".into()));
+    }
+    Ok(match len {
+        0 => SqlValue::Null,
+        1 => SqlValue::TinyInt(buf.get_u8()),
+        2 => SqlValue::SmallInt(buf.get_i16_le()),
+        4 => SqlValue::Int(buf.get_i32_le()),
+        8 => SqlValue::BigInt(buf.get_i64_le()),
+        _ => {
+            return Err(Error::Protocol(format!("invalid IntN length: {len}")));
+        }
+    })
+}
+
+/// FLOATN — nullable float with a 1-byte length prefix (0/4/8).
+fn parse_floatn(buf: &mut &[u8]) -> Result<SqlValue> {
+    if buf.remaining() < 1 {
+        return Err(Error::Protocol(
+            "unexpected EOF reading FloatN length".into(),
+        ));
+    }
+    let len = buf.get_u8();
+    if buf.remaining() < len as usize {
+        return Err(Error::Protocol("unexpected EOF reading FloatN data".into()));
+    }
+    Ok(match len {
+        0 => SqlValue::Null,
+        4 => SqlValue::Float(buf.get_f32_le()),
+        8 => SqlValue::Double(buf.get_f64_le()),
+        _ => {
+            return Err(Error::Protocol(format!("invalid FloatN length: {len}")));
+        }
+    })
+}
+
+/// BITN — nullable bit with a 1-byte length prefix (0/1).
+fn parse_bitn(buf: &mut &[u8]) -> Result<SqlValue> {
+    if buf.remaining() < 1 {
+        return Err(Error::Protocol("unexpected EOF reading BitN length".into()));
+    }
+    let len = buf.get_u8();
+    if buf.remaining() < len as usize {
+        return Err(Error::Protocol("unexpected EOF reading BitN data".into()));
+    }
+    Ok(match len {
+        0 => SqlValue::Null,
+        1 => SqlValue::Bool(buf.get_u8() != 0),
+        _ => {
+            return Err(Error::Protocol(format!("invalid BitN length: {len}")));
+        }
+    })
+}
+
+/// DECIMAL / NUMERIC (and the N variants). The mantissa decode and the
+/// 96-bit/scale-28 overflow policy are shared with the secondary decode stack
+/// (`mssql_types::decode`) so the two cannot drift — that drift was issue #188.
+/// Only `scale` is consulted by the shared decoder.
+fn parse_decimal(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue> {
+    let type_info = mssql_types::TypeInfo::decimal(
+        col.type_info.precision.unwrap_or(18),
+        col.type_info.scale.unwrap_or(0),
+    );
+    Ok(mssql_types::__private::decode_decimal(buf, &type_info)?)
+}
+
+/// DATETIMEN — nullable legacy datetime with a 1-byte length prefix (4 or 8).
+fn parse_datetimen(buf: &mut &[u8]) -> Result<SqlValue> {
+    if buf.remaining() < 1 {
+        return Err(Error::Protocol(
+            "unexpected EOF reading DateTimeN length".into(),
+        ));
+    }
+    let len = buf.get_u8() as usize;
+    Ok(if len == 0 {
+        SqlValue::Null
+    } else if buf.remaining() < len {
+        return Err(Error::Protocol("unexpected EOF reading DateTimeN".into()));
+    } else {
+        match len {
+            4 => {
+                // SMALLDATETIME: 2 bytes days + 2 bytes minutes
+                let days = buf.get_u16_le() as i64;
+                let minutes = buf.get_u16_le() as u32;
+                #[cfg(feature = "chrono")]
+                {
+                    SqlValue::DateTime(smalldatetime_from_wire(days, minutes)?)
+                }
+                #[cfg(not(feature = "chrono"))]
+                {
+                    SqlValue::String(format!("SMALLDATETIME({days},{minutes})"))
+                }
+            }
+            8 => {
+                // DATETIME: 4 bytes days + 4 bytes 1/300ths of second
+                let days = buf.get_i32_le() as i64;
+                let time_300ths = buf.get_u32_le() as u64;
+                #[cfg(feature = "chrono")]
+                {
+                    SqlValue::DateTime(datetime_from_wire(days, time_300ths)?)
+                }
+                #[cfg(not(feature = "chrono"))]
+                {
+                    SqlValue::String(format!("DATETIME({days},{time_300ths})"))
+                }
+            }
+            _ => {
+                return Err(Error::Protocol(format!("invalid DateTimeN length: {len}")));
+            }
+        }
+    })
+}
+
+/// DATETIME — fixed 8-byte legacy datetime.
+fn parse_legacy_datetime(buf: &mut &[u8]) -> Result<SqlValue> {
+    if buf.remaining() < 8 {
+        return Err(Error::Protocol("unexpected EOF reading DATETIME".into()));
+    }
+    let days = buf.get_i32_le() as i64;
+    let time_300ths = buf.get_u32_le() as u64;
+    #[cfg(feature = "chrono")]
+    {
+        Ok(SqlValue::DateTime(datetime_from_wire(days, time_300ths)?))
+    }
+    #[cfg(not(feature = "chrono"))]
+    {
+        Ok(SqlValue::String(format!("DATETIME({days},{time_300ths})")))
+    }
+}
+
+/// SMALLDATETIME — fixed 4-byte legacy datetime.
+fn parse_legacy_smalldatetime(buf: &mut &[u8]) -> Result<SqlValue> {
+    if buf.remaining() < 4 {
+        return Err(Error::Protocol(
+            "unexpected EOF reading SMALLDATETIME".into(),
+        ));
+    }
+    let days = buf.get_u16_le() as i64;
+    let minutes = buf.get_u16_le() as u32;
+    #[cfg(feature = "chrono")]
+    {
+        Ok(SqlValue::DateTime(smalldatetime_from_wire(days, minutes)?))
+    }
+    #[cfg(not(feature = "chrono"))]
+    {
+        Ok(SqlValue::String(format!("SMALLDATETIME({days},{minutes})")))
+    }
+}
+
+/// DATE — 3 bytes (days since 0001-01-01), nullable with a 1-byte length prefix.
+fn parse_date(buf: &mut &[u8]) -> Result<SqlValue> {
+    if buf.remaining() < 1 {
+        return Err(Error::Protocol("unexpected EOF reading DATE length".into()));
+    }
+    let len = buf.get_u8() as usize;
+    Ok(if len == 0 {
+        SqlValue::Null
+    } else if len != 3 {
+        return Err(Error::Protocol(format!("invalid DATE length: {len}")));
+    } else if buf.remaining() < 3 {
+        return Err(Error::Protocol("unexpected EOF reading DATE".into()));
+    } else {
+        // 3 bytes little-endian days since 0001-01-01
+        let days =
+            buf.get_u8() as u32 | ((buf.get_u8() as u32) << 8) | ((buf.get_u8() as u32) << 16);
+        #[cfg(feature = "chrono")]
+        {
+            let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
+            let date = base
+                .checked_add_signed(chrono::Duration::days(days as i64))
+                .ok_or_else(|| Error::Protocol(format!("date field days out of range: {days}")))?;
+            SqlValue::Date(date)
+        }
+        #[cfg(not(feature = "chrono"))]
+        {
+            SqlValue::String(format!("DATE({days})"))
+        }
+    })
+}
+
+/// TIME — variable length driven by the column's scale, 1-byte length prefix.
+fn parse_time(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue> {
+    if buf.remaining() < 1 {
+        return Err(Error::Protocol("unexpected EOF reading TIME length".into()));
+    }
+    let len = buf.get_u8() as usize;
+    Ok(if len == 0 {
+        SqlValue::Null
+    } else if buf.remaining() < len {
+        return Err(Error::Protocol("unexpected EOF reading TIME".into()));
+    } else {
+        let mut time_bytes = [0u8; 8];
+        for byte in time_bytes.iter_mut().take(len) {
+            *byte = buf.get_u8();
+        }
+        let intervals = u64::from_le_bytes(time_bytes);
+        #[cfg(feature = "chrono")]
+        {
+            let scale = col.type_info.scale.unwrap_or(7);
+            let time = intervals_to_time(intervals, scale);
+            SqlValue::Time(time)
+        }
+        #[cfg(not(feature = "chrono"))]
+        {
+            let _ = col;
+            SqlValue::String(format!("TIME({intervals})"))
+        }
+    })
+}
+
+/// DATETIME2 — TIME bytes (scale-driven) + 3 date bytes, 1-byte length prefix.
+fn parse_datetime2(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue> {
+    if buf.remaining() < 1 {
+        return Err(Error::Protocol(
+            "unexpected EOF reading DATETIME2 length".into(),
+        ));
+    }
+    let len = buf.get_u8() as usize;
+    Ok(if len == 0 {
+        SqlValue::Null
+    } else if buf.remaining() < len {
+        return Err(Error::Protocol("unexpected EOF reading DATETIME2".into()));
+    } else {
+        let scale = col.type_info.scale.unwrap_or(7);
+        let time_len = time_bytes_for_scale(scale);
+        // Reads below are driven by scale metadata, not by `len`:
+        // a short declared length must be an error, not a panic.
+        if len < time_len + 3 {
+            return Err(Error::Protocol(format!(
+                "DATETIME2 length {len} too short for scale {scale}"
+            )));
+        }
+
+        // Read time
+        let mut time_bytes = [0u8; 8];
+        for byte in time_bytes.iter_mut().take(time_len) {
+            *byte = buf.get_u8();
+        }
+        let intervals = u64::from_le_bytes(time_bytes);
+
+        // Read date (3 bytes)
+        let days =
+            buf.get_u8() as u32 | ((buf.get_u8() as u32) << 8) | ((buf.get_u8() as u32) << 16);
+
+        #[cfg(feature = "chrono")]
+        {
+            let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
+            let date = base
+                .checked_add_signed(chrono::Duration::days(days as i64))
+                .ok_or_else(|| Error::Protocol(format!("date field days out of range: {days}")))?;
+            let time = intervals_to_time(intervals, scale);
+            SqlValue::DateTime(date.and_time(time))
+        }
+        #[cfg(not(feature = "chrono"))]
+        {
+            SqlValue::String(format!("DATETIME2({days},{intervals})"))
+        }
+    })
+}
+
+/// DATETIMEOFFSET — TIME bytes (scale-driven) + 3 date bytes + 2 offset bytes.
+fn parse_datetimeoffset(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue> {
+    if buf.remaining() < 1 {
+        return Err(Error::Protocol(
+            "unexpected EOF reading DATETIMEOFFSET length".into(),
+        ));
+    }
+    let len = buf.get_u8() as usize;
+    Ok(if len == 0 {
+        SqlValue::Null
+    } else if buf.remaining() < len {
+        return Err(Error::Protocol(
+            "unexpected EOF reading DATETIMEOFFSET".into(),
+        ));
+    } else {
+        let scale = col.type_info.scale.unwrap_or(7);
+        let time_len = time_bytes_for_scale(scale);
+        // Reads below are driven by scale metadata, not by `len`:
+        // a short declared length must be an error, not a panic.
+        if len < time_len + 5 {
+            return Err(Error::Protocol(format!(
+                "DATETIMEOFFSET length {len} too short for scale {scale}"
+            )));
+        }
+
+        // Read time
+        let mut time_bytes = [0u8; 8];
+        for byte in time_bytes.iter_mut().take(time_len) {
+            *byte = buf.get_u8();
+        }
+        let intervals = u64::from_le_bytes(time_bytes);
+
+        // Read date (3 bytes)
+        let days =
+            buf.get_u8() as u32 | ((buf.get_u8() as u32) << 8) | ((buf.get_u8() as u32) << 16);
+
+        // Read offset in minutes (2 bytes, signed)
+        let offset_minutes = buf.get_i16_le();
+
+        #[cfg(feature = "chrono")]
+        {
+            use chrono::TimeZone;
+            let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
+            let date = base
+                .checked_add_signed(chrono::Duration::days(days as i64))
+                .ok_or_else(|| Error::Protocol(format!("date field days out of range: {days}")))?;
+            let time = intervals_to_time(intervals, scale);
+            let offset = chrono::FixedOffset::east_opt((offset_minutes as i32) * 60)
+                .unwrap_or_else(|| {
+                    chrono::FixedOffset::east_opt(0).expect("UTC offset 0 is valid")
+                });
+            // The wire date/time portion is UTC per MS-TDS §2.2.5.5.1.9;
+            // attach the offset without shifting the instant.
+            let datetime = offset.from_utc_datetime(&date.and_time(time));
+            SqlValue::DateTimeOffset(datetime)
+        }
+        #[cfg(not(feature = "chrono"))]
+        {
+            SqlValue::String(format!(
+                "DATETIMEOFFSET({days},{intervals},{offset_minutes})"
+            ))
+        }
+    })
+}
+
+/// CHAR / VARCHAR — legacy byte-length strings with a 1-byte length prefix.
+fn parse_legacy_varchar(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue> {
+    if buf.remaining() < 1 {
+        return Err(Error::Protocol(
+            "unexpected EOF reading legacy varchar length".into(),
+        ));
+    }
+    let len = buf.get_u8();
+    Ok(if len == 0xFF {
+        SqlValue::Null
+    } else if len == 0 {
+        SqlValue::String(String::new())
+    } else if buf.remaining() < len as usize {
+        return Err(Error::Protocol(
+            "unexpected EOF reading legacy varchar data".into(),
+        ));
+    } else {
+        let data = &buf[..len as usize];
+        // Use collation-aware decoding for non-ASCII text
+        let s = decode_varchar_string(data, col.type_info.collation.as_ref());
+        buf.advance(len as usize);
+        SqlValue::String(s)
+    })
+}
+
+/// BIGVARCHAR / BIGCHAR — 2-byte length prefix, or PLP for the MAX variant.
+fn parse_bigvarchar(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue> {
+    // Check if this is a MAX type (uses PLP encoding)
+    if col.type_info.max_length == Some(0xFFFF) {
+        // PLP format: 8-byte total length, then chunks
+        return parse_plp_varchar(buf, col.type_info.collation.as_ref());
+    }
+    // 2-byte length prefix for non-MAX types
+    if buf.remaining() < 2 {
+        return Err(Error::Protocol(
+            "unexpected EOF reading varchar length".into(),
+        ));
+    }
+    let len = buf.get_u16_le();
+    Ok(if len == 0xFFFF {
+        SqlValue::Null
+    } else if buf.remaining() < len as usize {
+        return Err(Error::Protocol(
+            "unexpected EOF reading varchar data".into(),
+        ));
+    } else {
+        let data = &buf[..len as usize];
+        // Use collation-aware decoding for non-ASCII text
+        let s = decode_varchar_string(data, col.type_info.collation.as_ref());
+        buf.advance(len as usize);
+        SqlValue::String(s)
+    })
+}
+
+/// NVARCHAR / NCHAR — 2-byte length prefix (bytes), or PLP for the MAX variant.
+fn parse_nvarchar(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue> {
+    // Check if this is a MAX type (uses PLP encoding)
+    if col.type_info.max_length == Some(0xFFFF) {
+        // PLP format: 8-byte total length, then chunks
+        return parse_plp_nvarchar(buf);
+    }
+    // 2-byte length prefix (in bytes, not chars) for non-MAX types
+    if buf.remaining() < 2 {
+        return Err(Error::Protocol(
+            "unexpected EOF reading nvarchar length".into(),
+        ));
+    }
+    let len = buf.get_u16_le();
+    Ok(if len == 0xFFFF {
+        SqlValue::Null
+    } else if buf.remaining() < len as usize {
+        return Err(Error::Protocol(
+            "unexpected EOF reading nvarchar data".into(),
+        ));
+    } else {
+        let data = &buf[..len as usize];
+        // UTF-16LE to String
+        let utf16: Vec<u16> = data
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect();
+        let s = String::from_utf16(&utf16)
+            .map_err(|_| Error::Protocol("invalid UTF-16 in nvarchar".into()))?;
+        buf.advance(len as usize);
+        SqlValue::String(s)
+    })
+}
+
+/// BINARY / VARBINARY — legacy byte-length binary with a 1-byte length prefix.
+fn parse_legacy_varbinary(buf: &mut &[u8]) -> Result<SqlValue> {
+    if buf.remaining() < 1 {
+        return Err(Error::Protocol(
+            "unexpected EOF reading legacy varbinary length".into(),
+        ));
+    }
+    let len = buf.get_u8();
+    Ok(if len == 0xFF {
+        SqlValue::Null
+    } else if len == 0 {
+        SqlValue::Binary(bytes::Bytes::new())
+    } else if buf.remaining() < len as usize {
+        return Err(Error::Protocol(
+            "unexpected EOF reading legacy varbinary data".into(),
+        ));
+    } else {
+        let data = bytes::Bytes::copy_from_slice(&buf[..len as usize]);
+        buf.advance(len as usize);
+        SqlValue::Binary(data)
+    })
+}
+
+/// BIGVARBINARY / BIGBINARY — 2-byte length prefix, or PLP for the MAX variant.
+fn parse_bigvarbinary(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue> {
+    // Check if this is a MAX type (uses PLP encoding)
+    if col.type_info.max_length == Some(0xFFFF) {
+        // PLP format: 8-byte total length, then chunks
+        return parse_plp_varbinary(buf);
+    }
+    if buf.remaining() < 2 {
+        return Err(Error::Protocol(
+            "unexpected EOF reading varbinary length".into(),
+        ));
+    }
+    let len = buf.get_u16_le();
+    Ok(if len == 0xFFFF {
+        SqlValue::Null
+    } else if buf.remaining() < len as usize {
+        return Err(Error::Protocol(
+            "unexpected EOF reading varbinary data".into(),
+        ));
+    } else {
+        let data = bytes::Bytes::copy_from_slice(&buf[..len as usize]);
+        buf.advance(len as usize);
+        SqlValue::Binary(data)
+    })
+}
+
+/// XML — PLP-encoded UTF-16, surfaced as [`SqlValue::Xml`].
+fn parse_xml(buf: &mut &[u8]) -> Result<SqlValue> {
+    // Parse as PLP NVARCHAR (XML is UTF-16 encoded in TDS)
+    match parse_plp_nvarchar(buf)? {
+        SqlValue::Null => Ok(SqlValue::Null),
+        SqlValue::String(s) => Ok(SqlValue::Xml(s)),
+        _ => Err(Error::Protocol(
+            "unexpected value type when parsing XML".into(),
+        )),
+    }
+}
+
+/// UNIQUEIDENTIFIER — 16 bytes in SQL Server mixed-endian, 1-byte length prefix.
+fn parse_guid(buf: &mut &[u8]) -> Result<SqlValue> {
+    if buf.remaining() < 1 {
+        return Err(Error::Protocol("unexpected EOF reading GUID length".into()));
+    }
+    let len = buf.get_u8();
+    Ok(if len == 0 {
+        SqlValue::Null
+    } else if len != 16 {
+        return Err(Error::Protocol(format!("invalid GUID length: {len}")));
+    } else if buf.remaining() < 16 {
+        return Err(Error::Protocol("unexpected EOF reading GUID".into()));
+    } else {
+        // SQL Server stores GUIDs in mixed-endian format:
+        // first 3 groups byte-swapped, last 2 groups big-endian.
+        // Swap back to RFC 4122 big-endian format.
+        decode_guid_bytes(buf)
+    })
+}
+
+/// Fallback: read an unrecognized type as binary with a 2-byte length prefix.
+fn parse_default_binary(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue> {
+    // Try to read as variable-length with 2-byte length
+    if buf.remaining() < 2 {
+        return Err(Error::Protocol(format!(
+            "unexpected EOF reading {:?}",
+            col.type_id
+        )));
+    }
+    let len = buf.get_u16_le();
+    Ok(if len == 0xFFFF {
+        SqlValue::Null
+    } else if buf.remaining() < len as usize {
+        return Err(Error::Protocol(format!(
+            "unexpected EOF reading {:?} data",
+            col.type_id
+        )));
+    } else {
+        let data = bytes::Bytes::copy_from_slice(&buf[..len as usize]);
+        buf.advance(len as usize);
+        SqlValue::Binary(data)
+    })
 }
 
 /// Parse PLP-encoded NVARCHAR(MAX) data.
@@ -1430,98 +1467,10 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
             let v = buf.get_i64_le();
             Ok(SqlValue::BigInt(v))
         }
-        0x6D => {
-            // FLOATN - 1 prop byte (length)
-            let float_len = if prop_count >= 1 { buf.get_u8() } else { 8 };
-            buf.advance(prop_count.saturating_sub(1));
-
-            if float_len == 4 && data_len >= 4 {
-                let v = buf.get_f32_le();
-                Ok(SqlValue::Float(v))
-            } else if data_len >= 8 {
-                let v = buf.get_f64_le();
-                Ok(SqlValue::Double(v))
-            } else {
-                Ok(SqlValue::Null)
-            }
-        }
-        0x6E => {
-            // MONEYN - 1 prop byte (length)
-            let money_len = if prop_count >= 1 { buf.get_u8() } else { 8 };
-            buf.advance(prop_count.saturating_sub(1));
-
-            if money_len == 0 || data_len == 0 {
-                Ok(SqlValue::Null)
-            } else if (money_len == 4 && data_len >= 4) || (money_len == 8 && data_len >= 8) {
-                parse_money_value(buf, money_len as usize)
-            } else {
-                buf.advance(data_len);
-                Ok(SqlValue::Null)
-            }
-        }
-        0x6F => {
-            // DATETIMEN - 1 prop byte (length)
-            #[cfg(feature = "chrono")]
-            let dt_len = if prop_count >= 1 { buf.get_u8() } else { 8 };
-            #[cfg(not(feature = "chrono"))]
-            if prop_count >= 1 {
-                buf.get_u8();
-            }
-            buf.advance(prop_count.saturating_sub(1));
-
-            #[cfg(feature = "chrono")]
-            {
-                if dt_len == 4 && data_len >= 4 {
-                    // SMALLDATETIME
-                    let days = buf.get_u16_le() as i64;
-                    let mins = buf.get_u16_le() as u32;
-                    Ok(SqlValue::DateTime(smalldatetime_from_wire(days, mins)?))
-                } else if data_len >= 8 {
-                    // DATETIME
-                    let days = buf.get_i32_le() as i64;
-                    let ticks = buf.get_u32_le() as u64;
-                    Ok(SqlValue::DateTime(datetime_from_wire(days, ticks)?))
-                } else {
-                    Ok(SqlValue::Null)
-                }
-            }
-            #[cfg(not(feature = "chrono"))]
-            {
-                buf.advance(data_len);
-                Ok(SqlValue::Null)
-            }
-        }
-        0x6A | 0x6C => {
-            // DECIMALN/NUMERICN - 2 prop bytes (precision, scale). Share the
-            // mantissa decode and the 96-bit/scale-28 overflow policy with the
-            // top-level path and the secondary stack (#204): reframe the variant
-            // payload (`[sign][mantissa]`, `data_len` bytes) as the
-            // `[len][sign][mantissa]` form `decode_decimal` reads, with
-            // `data_len` standing in for the length byte.
-            let precision = if prop_count >= 1 { buf.get_u8() } else { 18 };
-            let scale = if prop_count >= 2 { buf.get_u8() } else { 0 };
-            buf.advance(prop_count.saturating_sub(2));
-
-            // A valid NUMERIC/DECIMAL payload is at most 17 bytes (sign + 16
-            // mantissa). Anything larger is malformed; skip it and return Null,
-            // preserving the pre-#204 behavior (the old `mantissa_len > 16`
-            // guard) rather than feeding the shared decoder a payload it would
-            // partially decode. This also keeps `data_len` within `u8`, so the
-            // length-prefix reframing below cannot truncate or panic.
-            if data_len > 17 {
-                buf.advance(data_len);
-                return Ok(SqlValue::Null);
-            }
-
-            let type_info = mssql_types::TypeInfo::decimal(precision, scale);
-            let result = {
-                let len_prefix = [data_len as u8];
-                let mut framed = (&len_prefix[..]).chain(&buf[..data_len]);
-                mssql_types::__private::decode_decimal(&mut framed, &type_info)
-            };
-            buf.advance(data_len);
-            result.map_err(Into::into)
-        }
+        0x6D => variant_floatn(buf, prop_count, data_len),
+        0x6E => variant_moneyn(buf, prop_count, data_len),
+        0x6F => variant_datetimen(buf, prop_count, data_len),
+        0x6A | 0x6C => variant_decimal(buf, prop_count, data_len),
         0x24 => {
             // UNIQUEIDENTIFIER (no properties)
             buf.advance(prop_count);
@@ -1531,203 +1480,12 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
             // SQL Server stores GUIDs in mixed-endian format — swap back to RFC 4122
             Ok(decode_guid_bytes(buf))
         }
-        0x28 => {
-            // DATE (no properties)
-            buf.advance(prop_count);
-            #[cfg(feature = "chrono")]
-            {
-                if data_len < 3 {
-                    return Ok(SqlValue::Null);
-                }
-                let mut date_bytes = [0u8; 4];
-                date_bytes[0] = buf.get_u8();
-                date_bytes[1] = buf.get_u8();
-                date_bytes[2] = buf.get_u8();
-                let days = u32::from_le_bytes(date_bytes);
-                let base =
-                    chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
-                let date = base
-                    .checked_add_signed(chrono::Duration::days(days as i64))
-                    .ok_or_else(|| {
-                        Error::Protocol(format!("date field days out of range: {days}"))
-                    })?;
-                Ok(SqlValue::Date(date))
-            }
-            #[cfg(not(feature = "chrono"))]
-            {
-                buf.advance(data_len);
-                Ok(SqlValue::Null)
-            }
-        }
-        0x29 => {
-            // TIME - 1 prop byte (scale)
-            #[cfg_attr(not(feature = "chrono"), allow(unused_variables))]
-            let scale = if prop_count >= 1 { buf.get_u8() } else { 7 };
-            buf.advance(prop_count.saturating_sub(1));
-
-            #[cfg(feature = "chrono")]
-            {
-                if data_len == 0 {
-                    return Ok(SqlValue::Null);
-                }
-                let time_len = time_bytes_for_scale(scale);
-                if data_len < time_len {
-                    return Ok(SqlValue::Null);
-                }
-                let mut time_bytes = [0u8; 8];
-                for byte in time_bytes.iter_mut().take(time_len) {
-                    *byte = buf.get_u8();
-                }
-                // Consume any remaining data bytes beyond the time portion
-                if data_len > time_len {
-                    buf.advance(data_len - time_len);
-                }
-                let intervals = u64::from_le_bytes(time_bytes);
-                Ok(SqlValue::Time(intervals_to_time(intervals, scale)))
-            }
-            #[cfg(not(feature = "chrono"))]
-            {
-                buf.advance(data_len);
-                Ok(SqlValue::Null)
-            }
-        }
-        0x2A => {
-            // DATETIME2 - 1 prop byte (scale)
-            #[cfg_attr(not(feature = "chrono"), allow(unused_variables))]
-            let scale = if prop_count >= 1 { buf.get_u8() } else { 7 };
-            buf.advance(prop_count.saturating_sub(1));
-
-            #[cfg(feature = "chrono")]
-            {
-                let time_len = time_bytes_for_scale(scale);
-                if data_len < time_len + 3 {
-                    return Ok(SqlValue::Null);
-                }
-
-                let mut time_bytes = [0u8; 8];
-                for byte in time_bytes.iter_mut().take(time_len) {
-                    *byte = buf.get_u8();
-                }
-                let intervals = u64::from_le_bytes(time_bytes);
-
-                let days = buf.get_u8() as u32
-                    | ((buf.get_u8() as u32) << 8)
-                    | ((buf.get_u8() as u32) << 16);
-
-                // Consume any remaining data bytes
-                let consumed = time_len + 3;
-                if data_len > consumed {
-                    buf.advance(data_len - consumed);
-                }
-
-                let base =
-                    chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
-                let date = base
-                    .checked_add_signed(chrono::Duration::days(days as i64))
-                    .ok_or_else(|| {
-                        Error::Protocol(format!("date field days out of range: {days}"))
-                    })?;
-                let time = intervals_to_time(intervals, scale);
-                Ok(SqlValue::DateTime(date.and_time(time)))
-            }
-            #[cfg(not(feature = "chrono"))]
-            {
-                buf.advance(data_len);
-                Ok(SqlValue::Null)
-            }
-        }
-        0x2B => {
-            // DATETIMEOFFSET - 1 prop byte (scale)
-            #[cfg_attr(not(feature = "chrono"), allow(unused_variables))]
-            let scale = if prop_count >= 1 { buf.get_u8() } else { 7 };
-            buf.advance(prop_count.saturating_sub(1));
-
-            #[cfg(feature = "chrono")]
-            {
-                let time_len = time_bytes_for_scale(scale);
-                if data_len < time_len + 3 + 2 {
-                    return Ok(SqlValue::Null);
-                }
-
-                let mut time_bytes = [0u8; 8];
-                for byte in time_bytes.iter_mut().take(time_len) {
-                    *byte = buf.get_u8();
-                }
-                let intervals = u64::from_le_bytes(time_bytes);
-
-                let days = buf.get_u8() as u32
-                    | ((buf.get_u8() as u32) << 8)
-                    | ((buf.get_u8() as u32) << 16);
-
-                let offset_minutes = buf.get_i16_le();
-
-                // Consume any remaining data bytes
-                let consumed = time_len + 3 + 2;
-                if data_len > consumed {
-                    buf.advance(data_len - consumed);
-                }
-
-                use chrono::TimeZone;
-                let base =
-                    chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
-                let date = base
-                    .checked_add_signed(chrono::Duration::days(days as i64))
-                    .ok_or_else(|| {
-                        Error::Protocol(format!("date field days out of range: {days}"))
-                    })?;
-                let time = intervals_to_time(intervals, scale);
-                let offset = chrono::FixedOffset::east_opt((offset_minutes as i32) * 60)
-                    .unwrap_or_else(|| {
-                        chrono::FixedOffset::east_opt(0).expect("UTC offset 0 is valid")
-                    });
-                // The wire date/time portion is UTC per MS-TDS §2.2.5.5.1.9;
-                // attach the offset without shifting the instant.
-                let datetime = offset.from_utc_datetime(&date.and_time(time));
-                Ok(SqlValue::DateTimeOffset(datetime))
-            }
-            #[cfg(not(feature = "chrono"))]
-            {
-                buf.advance(data_len);
-                Ok(SqlValue::Null)
-            }
-        }
-        0xA7 | 0x2F | 0x27 => {
-            // BigVarChar/BigChar/VarChar/Char - 7 prop bytes (collation 5 + maxlen 2)
-            // Parse collation from property bytes (5 bytes: 4 LCID + 1 sort_id)
-            let collation = if prop_count >= 5 && buf.remaining() >= 5 {
-                let lcid = buf.get_u32_le();
-                let sort_id = buf.get_u8();
-                buf.advance(prop_count.saturating_sub(5)); // Skip remaining props (max_length)
-                Some(Collation { lcid, sort_id })
-            } else {
-                buf.advance(prop_count);
-                None
-            };
-            if data_len == 0 {
-                return Ok(SqlValue::String(String::new()));
-            }
-            let data = &buf[..data_len];
-            // Use collation-aware decoding for non-ASCII text
-            let s = decode_varchar_string(data, collation.as_ref());
-            buf.advance(data_len);
-            Ok(SqlValue::String(s))
-        }
-        0xE7 | 0xEF => {
-            // NVarChar/NChar - 7 prop bytes (collation 5 + maxlen 2)
-            buf.advance(prop_count);
-            if data_len == 0 {
-                return Ok(SqlValue::String(String::new()));
-            }
-            // UTF-16LE encoded
-            let utf16: Vec<u16> = buf[..data_len]
-                .chunks_exact(2)
-                .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-                .collect();
-            buf.advance(data_len);
-            let s = String::from_utf16(&utf16)
-                .map_err(|_| Error::Protocol("invalid UTF-16 in SQL_VARIANT nvarchar".into()))?;
-            Ok(SqlValue::String(s))
-        }
+        0x28 => variant_date(buf, prop_count, data_len),
+        0x29 => variant_time(buf, prop_count, data_len),
+        0x2A => variant_datetime2(buf, prop_count, data_len),
+        0x2B => variant_datetimeoffset(buf, prop_count, data_len),
+        0xA7 | 0x2F | 0x27 => variant_varchar(buf, prop_count, data_len),
+        0xE7 | 0xEF => variant_nvarchar(buf, prop_count, data_len),
         0xA5 | 0x2D | 0x25 => {
             // BigVarBinary/BigBinary/Binary/VarBinary - 2 prop bytes (maxlen)
             buf.advance(prop_count);
@@ -1743,6 +1501,299 @@ fn parse_sql_variant(buf: &mut &[u8]) -> Result<SqlValue> {
             Ok(SqlValue::Binary(data))
         }
     }
+}
+
+// =============================================================================
+// Per-base-type SQL_VARIANT value parsers (the arms of `parse_sql_variant`,
+// extracted for readability — see #309). Each receives the variant's property
+// byte count and computed data length, consumes the property bytes and the
+// value, and returns its `SqlValue`. Behavior is identical to the inlined arms.
+// =============================================================================
+
+/// SQL_VARIANT FLOATN — 1 property byte (length).
+fn variant_floatn(buf: &mut &[u8], prop_count: usize, data_len: usize) -> Result<SqlValue> {
+    let float_len = if prop_count >= 1 { buf.get_u8() } else { 8 };
+    buf.advance(prop_count.saturating_sub(1));
+
+    if float_len == 4 && data_len >= 4 {
+        let v = buf.get_f32_le();
+        Ok(SqlValue::Float(v))
+    } else if data_len >= 8 {
+        let v = buf.get_f64_le();
+        Ok(SqlValue::Double(v))
+    } else {
+        Ok(SqlValue::Null)
+    }
+}
+
+/// SQL_VARIANT MONEYN — 1 property byte (length).
+fn variant_moneyn(buf: &mut &[u8], prop_count: usize, data_len: usize) -> Result<SqlValue> {
+    let money_len = if prop_count >= 1 { buf.get_u8() } else { 8 };
+    buf.advance(prop_count.saturating_sub(1));
+
+    if money_len == 0 || data_len == 0 {
+        Ok(SqlValue::Null)
+    } else if (money_len == 4 && data_len >= 4) || (money_len == 8 && data_len >= 8) {
+        parse_money_value(buf, money_len as usize)
+    } else {
+        buf.advance(data_len);
+        Ok(SqlValue::Null)
+    }
+}
+
+/// SQL_VARIANT DATETIMEN — 1 property byte (length).
+fn variant_datetimen(buf: &mut &[u8], prop_count: usize, data_len: usize) -> Result<SqlValue> {
+    #[cfg(feature = "chrono")]
+    let dt_len = if prop_count >= 1 { buf.get_u8() } else { 8 };
+    #[cfg(not(feature = "chrono"))]
+    if prop_count >= 1 {
+        buf.get_u8();
+    }
+    buf.advance(prop_count.saturating_sub(1));
+
+    #[cfg(feature = "chrono")]
+    {
+        if dt_len == 4 && data_len >= 4 {
+            // SMALLDATETIME
+            let days = buf.get_u16_le() as i64;
+            let mins = buf.get_u16_le() as u32;
+            Ok(SqlValue::DateTime(smalldatetime_from_wire(days, mins)?))
+        } else if data_len >= 8 {
+            // DATETIME
+            let days = buf.get_i32_le() as i64;
+            let ticks = buf.get_u32_le() as u64;
+            Ok(SqlValue::DateTime(datetime_from_wire(days, ticks)?))
+        } else {
+            Ok(SqlValue::Null)
+        }
+    }
+    #[cfg(not(feature = "chrono"))]
+    {
+        buf.advance(data_len);
+        Ok(SqlValue::Null)
+    }
+}
+
+/// SQL_VARIANT DECIMALN/NUMERICN — 2 property bytes (precision, scale). Shares
+/// the mantissa decode and the 96-bit/scale-28 overflow policy with the
+/// top-level path and the secondary stack (#204): reframe the variant payload
+/// (`[sign][mantissa]`, `data_len` bytes) as the `[len][sign][mantissa]` form
+/// `decode_decimal` reads, with `data_len` standing in for the length byte.
+fn variant_decimal(buf: &mut &[u8], prop_count: usize, data_len: usize) -> Result<SqlValue> {
+    let precision = if prop_count >= 1 { buf.get_u8() } else { 18 };
+    let scale = if prop_count >= 2 { buf.get_u8() } else { 0 };
+    buf.advance(prop_count.saturating_sub(2));
+
+    // A valid NUMERIC/DECIMAL payload is at most 17 bytes (sign + 16 mantissa).
+    // Anything larger is malformed; skip it and return Null, preserving the
+    // pre-#204 behavior (the old `mantissa_len > 16` guard) rather than feeding
+    // the shared decoder a payload it would partially decode. This also keeps
+    // `data_len` within `u8`, so the length-prefix reframing below cannot
+    // truncate or panic.
+    if data_len > 17 {
+        buf.advance(data_len);
+        return Ok(SqlValue::Null);
+    }
+
+    let type_info = mssql_types::TypeInfo::decimal(precision, scale);
+    let result = {
+        let len_prefix = [data_len as u8];
+        let mut framed = (&len_prefix[..]).chain(&buf[..data_len]);
+        mssql_types::__private::decode_decimal(&mut framed, &type_info)
+    };
+    buf.advance(data_len);
+    result.map_err(Into::into)
+}
+
+/// SQL_VARIANT DATE — no properties.
+fn variant_date(buf: &mut &[u8], prop_count: usize, data_len: usize) -> Result<SqlValue> {
+    buf.advance(prop_count);
+    #[cfg(feature = "chrono")]
+    {
+        if data_len < 3 {
+            return Ok(SqlValue::Null);
+        }
+        let mut date_bytes = [0u8; 4];
+        date_bytes[0] = buf.get_u8();
+        date_bytes[1] = buf.get_u8();
+        date_bytes[2] = buf.get_u8();
+        let days = u32::from_le_bytes(date_bytes);
+        let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
+        let date = base
+            .checked_add_signed(chrono::Duration::days(days as i64))
+            .ok_or_else(|| Error::Protocol(format!("date field days out of range: {days}")))?;
+        Ok(SqlValue::Date(date))
+    }
+    #[cfg(not(feature = "chrono"))]
+    {
+        buf.advance(data_len);
+        Ok(SqlValue::Null)
+    }
+}
+
+/// SQL_VARIANT TIME — 1 property byte (scale).
+fn variant_time(buf: &mut &[u8], prop_count: usize, data_len: usize) -> Result<SqlValue> {
+    #[cfg_attr(not(feature = "chrono"), allow(unused_variables))]
+    let scale = if prop_count >= 1 { buf.get_u8() } else { 7 };
+    buf.advance(prop_count.saturating_sub(1));
+
+    #[cfg(feature = "chrono")]
+    {
+        if data_len == 0 {
+            return Ok(SqlValue::Null);
+        }
+        let time_len = time_bytes_for_scale(scale);
+        if data_len < time_len {
+            return Ok(SqlValue::Null);
+        }
+        let mut time_bytes = [0u8; 8];
+        for byte in time_bytes.iter_mut().take(time_len) {
+            *byte = buf.get_u8();
+        }
+        // Consume any remaining data bytes beyond the time portion
+        if data_len > time_len {
+            buf.advance(data_len - time_len);
+        }
+        let intervals = u64::from_le_bytes(time_bytes);
+        Ok(SqlValue::Time(intervals_to_time(intervals, scale)))
+    }
+    #[cfg(not(feature = "chrono"))]
+    {
+        buf.advance(data_len);
+        Ok(SqlValue::Null)
+    }
+}
+
+/// SQL_VARIANT DATETIME2 — 1 property byte (scale).
+fn variant_datetime2(buf: &mut &[u8], prop_count: usize, data_len: usize) -> Result<SqlValue> {
+    #[cfg_attr(not(feature = "chrono"), allow(unused_variables))]
+    let scale = if prop_count >= 1 { buf.get_u8() } else { 7 };
+    buf.advance(prop_count.saturating_sub(1));
+
+    #[cfg(feature = "chrono")]
+    {
+        let time_len = time_bytes_for_scale(scale);
+        if data_len < time_len + 3 {
+            return Ok(SqlValue::Null);
+        }
+
+        let mut time_bytes = [0u8; 8];
+        for byte in time_bytes.iter_mut().take(time_len) {
+            *byte = buf.get_u8();
+        }
+        let intervals = u64::from_le_bytes(time_bytes);
+
+        let days =
+            buf.get_u8() as u32 | ((buf.get_u8() as u32) << 8) | ((buf.get_u8() as u32) << 16);
+
+        // Consume any remaining data bytes
+        let consumed = time_len + 3;
+        if data_len > consumed {
+            buf.advance(data_len - consumed);
+        }
+
+        let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
+        let date = base
+            .checked_add_signed(chrono::Duration::days(days as i64))
+            .ok_or_else(|| Error::Protocol(format!("date field days out of range: {days}")))?;
+        let time = intervals_to_time(intervals, scale);
+        Ok(SqlValue::DateTime(date.and_time(time)))
+    }
+    #[cfg(not(feature = "chrono"))]
+    {
+        buf.advance(data_len);
+        Ok(SqlValue::Null)
+    }
+}
+
+/// SQL_VARIANT DATETIMEOFFSET — 1 property byte (scale).
+fn variant_datetimeoffset(buf: &mut &[u8], prop_count: usize, data_len: usize) -> Result<SqlValue> {
+    #[cfg_attr(not(feature = "chrono"), allow(unused_variables))]
+    let scale = if prop_count >= 1 { buf.get_u8() } else { 7 };
+    buf.advance(prop_count.saturating_sub(1));
+
+    #[cfg(feature = "chrono")]
+    {
+        let time_len = time_bytes_for_scale(scale);
+        if data_len < time_len + 3 + 2 {
+            return Ok(SqlValue::Null);
+        }
+
+        let mut time_bytes = [0u8; 8];
+        for byte in time_bytes.iter_mut().take(time_len) {
+            *byte = buf.get_u8();
+        }
+        let intervals = u64::from_le_bytes(time_bytes);
+
+        let days =
+            buf.get_u8() as u32 | ((buf.get_u8() as u32) << 8) | ((buf.get_u8() as u32) << 16);
+
+        let offset_minutes = buf.get_i16_le();
+
+        // Consume any remaining data bytes
+        let consumed = time_len + 3 + 2;
+        if data_len > consumed {
+            buf.advance(data_len - consumed);
+        }
+
+        use chrono::TimeZone;
+        let base = chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("epoch 0001-01-01 is valid");
+        let date = base
+            .checked_add_signed(chrono::Duration::days(days as i64))
+            .ok_or_else(|| Error::Protocol(format!("date field days out of range: {days}")))?;
+        let time = intervals_to_time(intervals, scale);
+        let offset = chrono::FixedOffset::east_opt((offset_minutes as i32) * 60)
+            .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).expect("UTC offset 0 is valid"));
+        // The wire date/time portion is UTC per MS-TDS §2.2.5.5.1.9;
+        // attach the offset without shifting the instant.
+        let datetime = offset.from_utc_datetime(&date.and_time(time));
+        Ok(SqlValue::DateTimeOffset(datetime))
+    }
+    #[cfg(not(feature = "chrono"))]
+    {
+        buf.advance(data_len);
+        Ok(SqlValue::Null)
+    }
+}
+
+/// SQL_VARIANT BigVarChar/BigChar/VarChar/Char — 7 property bytes
+/// (collation 5 + max length 2).
+fn variant_varchar(buf: &mut &[u8], prop_count: usize, data_len: usize) -> Result<SqlValue> {
+    // Parse collation from property bytes (5 bytes: 4 LCID + 1 sort_id)
+    let collation = if prop_count >= 5 && buf.remaining() >= 5 {
+        let lcid = buf.get_u32_le();
+        let sort_id = buf.get_u8();
+        buf.advance(prop_count.saturating_sub(5)); // Skip remaining props (max_length)
+        Some(Collation { lcid, sort_id })
+    } else {
+        buf.advance(prop_count);
+        None
+    };
+    if data_len == 0 {
+        return Ok(SqlValue::String(String::new()));
+    }
+    let data = &buf[..data_len];
+    // Use collation-aware decoding for non-ASCII text
+    let s = decode_varchar_string(data, collation.as_ref());
+    buf.advance(data_len);
+    Ok(SqlValue::String(s))
+}
+
+/// SQL_VARIANT NVarChar/NChar — 7 property bytes (collation 5 + max length 2).
+fn variant_nvarchar(buf: &mut &[u8], prop_count: usize, data_len: usize) -> Result<SqlValue> {
+    buf.advance(prop_count);
+    if data_len == 0 {
+        return Ok(SqlValue::String(String::new()));
+    }
+    // UTF-16LE encoded
+    let utf16: Vec<u16> = buf[..data_len]
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect();
+    buf.advance(data_len);
+    let s = String::from_utf16(&utf16)
+        .map_err(|_| Error::Protocol("invalid UTF-16 in SQL_VARIANT nvarchar".into()))?;
+    Ok(SqlValue::String(s))
 }
 
 /// Decode 16 GUID bytes from SQL Server mixed-endian wire format to RFC 4122 format.
