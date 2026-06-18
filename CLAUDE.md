@@ -133,16 +133,29 @@ impl Client<Ready> {
 
 ### Prepared Statement Lifecycle
 
-**Status: designed, not wired.** The LRU cache exists in
-`mssql-client/src/statement_cache.rs` but no query path consults it — every
-parameterized query uses `sp_executesql` (server-side plan cache still gives
-plan reuse). The intended design when wiring lands:
+**Status: wired into the buffered `query` path, opt-in (off by default).** The
+LRU cache (`mssql-client/src/statement_cache.rs`) is consulted only when the
+`statement_cache` config flag is set (`Statement Cache=true` /
+`Config::with_statement_cache(true)`). When off (default), parameterized
+queries use `sp_executesql` (server-side plan cache still gives plan reuse).
+The wired lifecycle (in `Client::send_query_request`):
 
-1. Hash SQL → check LRU cache
-2. Cache miss → `sp_prepare` → store handle
-3. Execute via `sp_execute` with handle
-4. On eviction/close → `sp_unprepare`
-5. Pool returns handle to pool-level cache
+1. Key = param declaration + SQL → check LRU cache (`StatementCache::get`)
+2. Miss → `sp_prepare` (`RpcRequest::prepare`) → read `@handle` from the
+   procedure result → store; **`sp_execute` params are positional/unnamed**
+   (the server binds by position — naming them makes the server reject the
+   stream)
+3. Hit → `sp_execute` with the cached handle
+4. On LRU eviction → `sp_unprepare` the evicted handle (best-effort)
+5. On connection reset (RESETCONNECTION) → clear the cache (server already
+   invalidated the handles)
+
+Scope of this first increment (the rest stays on `sp_executesql`): buffered
+`query` only — not `query_stream`/`query_multiple`/Always Encrypted; no
+pool-level handle cache. Read effectiveness via
+`Client::statement_cache_stats()`. A cold miss costs two round-trips, so the
+cache wins on repeated execution — hence opt-in, to gather real numbers
+(#205).
 
 ### Azure SQL Redirect Handling
 
@@ -312,7 +325,7 @@ Key differences for migrators:
 | External pooling (bb8) | Built-in `Pool` |
 | Runtime agnostic | Tokio-only |
 | `QueryResult` iterator | `query` → buffered `QueryStream` (lazy decode), or `query_stream` → incremental `RowStream` / `query_stream_blob` → `BlobStream` (true socket streaming) |
-| Manual prepared | `sp_executesql` (client cache planned) |
+| Manual prepared | `sp_executesql`; opt-in client cache (`Statement Cache=true`) |
 | Manual Azure redirect | Automatic redirect handling |
 
 ## Commit Standards

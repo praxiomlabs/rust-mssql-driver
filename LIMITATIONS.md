@@ -122,16 +122,27 @@ tokio::spawn(async move {
 
 ### Prepared Statement Cache
 
-**Status:** Not wired — all parameterized queries use `sp_executesql`
+**Status:** Opt-in for the buffered `query` path; off by default
 
-An LRU statement cache exists in the codebase but is not consulted by any
-query path: the driver never issues `sp_prepare`/`sp_execute`. Every
-parameterized query goes through `sp_executesql`, which still benefits from
-SQL Server's server-side plan cache, so repeated queries reuse plans —
-there is just no client-side handle caching yet.
+An LRU statement cache is wired into the buffered
+[`Client::query`](https://docs.rs/mssql-client/latest/mssql_client/struct.Client.html#method.query)
+path behind the off-by-default `statement_cache` config flag
+(`Statement Cache=true` in a connection string, or
+`Config::with_statement_cache(true)`). When enabled, a parameterized query is
+prepared once per connection (`sp_prepare`) and subsequent identical queries
+reuse the handle (`sp_execute`); the cache is cleared when the connection is
+reset (RESETCONNECTION) since that invalidates server-side handles. Read
+effectiveness via `Client::statement_cache_stats()`.
 
-**Workaround:** None needed for plan reuse (`sp_executesql` provides it).
-Client-side handle caching is planned.
+When the flag is off (the default), every parameterized query uses
+`sp_executesql`, which still benefits from SQL Server's server-side plan
+cache.
+
+**Not yet covered (still `sp_executesql`):** `query_stream`, `query_multiple`,
+and Always Encrypted queries; and there is no pool-level handle cache. A cold
+miss costs two round-trips (`sp_prepare` then `sp_execute`), so the cache wins
+only on repeated execution — hence the opt-in flag for gathering real numbers
+before any default-on decision.
 
 ---
 

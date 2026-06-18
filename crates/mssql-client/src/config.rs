@@ -395,6 +395,23 @@ pub struct Config {
     /// Default: `true`
     pub send_string_parameters_as_unicode: bool,
 
+    /// Enable the client-side prepared-statement cache for parameterized
+    /// [`query`](crate::Client::query) calls.
+    ///
+    /// When `true`, a parameterized query is prepared once per connection
+    /// (`sp_prepare`) and subsequent identical queries reuse the handle
+    /// (`sp_execute`), trading a one-time cold-path round-trip for cheaper
+    /// repeated execution. When `false` (default), every parameterized query
+    /// uses `sp_executesql` (the server still reuses plans).
+    ///
+    /// This is an opt-in first increment (the `query` path only; not
+    /// `query_stream`, `query_multiple`, or Always Encrypted, which fall back
+    /// to `sp_executesql`). Set via `Statement Cache=true` in connection
+    /// strings.
+    ///
+    /// Default: `false`
+    pub statement_cache: bool,
+
     /// Always Encrypted configuration.
     ///
     /// When `Some`, the client will negotiate Always Encrypted support with the
@@ -440,6 +457,7 @@ impl Default for Config {
             language: None,
             multi_subnet_failover: false,
             send_string_parameters_as_unicode: true,
+            statement_cache: false,
             #[cfg(feature = "always-encrypted")]
             column_encryption: None,
         }
@@ -696,6 +714,10 @@ impl Config {
                 // --- String parameter encoding ---
                 "sendstringparametersasunicode" | "send string parameters as unicode" => {
                     config.send_string_parameters_as_unicode = parse_conn_bool(&key, value)?;
+                }
+                // --- Prepared-statement cache (opt-in) ---
+                "statement cache" | "statementcache" => {
+                    config.statement_cache = parse_conn_bool(&key, value)?;
                 }
                 // --- Known ADO.NET keywords not supported by this driver ---
                 "failover partner"
@@ -1062,6 +1084,15 @@ impl Config {
     #[must_use]
     pub fn with_port(mut self, port: u16) -> Self {
         self.port = port;
+        self
+    }
+
+    /// Enable or disable the client-side prepared-statement cache.
+    ///
+    /// See [`Config::statement_cache`]. Off by default.
+    #[must_use]
+    pub fn with_statement_cache(mut self, enabled: bool) -> Self {
+        self.statement_cache = enabled;
         self
     }
 
@@ -1914,6 +1945,34 @@ mod tests {
         let result = Config::from_connection_string(
             "Server=localhost;SendStringParametersAsUnicode=banana;",
         );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_statement_cache_default_off() {
+        assert!(!Config::new().statement_cache);
+    }
+
+    #[test]
+    fn test_statement_cache_connection_string() {
+        let config =
+            Config::from_connection_string("Server=localhost;Statement Cache=true;").unwrap();
+        assert!(config.statement_cache);
+
+        let config =
+            Config::from_connection_string("Server=localhost;StatementCache=false;").unwrap();
+        assert!(!config.statement_cache);
+    }
+
+    #[test]
+    fn test_statement_cache_builder() {
+        assert!(Config::new().with_statement_cache(true).statement_cache);
+        assert!(!Config::new().with_statement_cache(false).statement_cache);
+    }
+
+    #[test]
+    fn test_statement_cache_invalid_value() {
+        let result = Config::from_connection_string("Server=localhost;Statement Cache=banana;");
         assert!(result.is_err());
     }
 

@@ -1,11 +1,12 @@
 //! Prepared statement caching with LRU eviction.
 //!
-//! **Status: implemented but not yet wired into the query path.** Queries
-//! currently go through `sp_executesql` (the server still reuses plans), so
-//! this cache is constructed but never consulted; its types are crate-private
-//! until it is wired. The implementation is kept ready for that integration —
-//! hence the `dead_code` allowance below. See LIMITATIONS.md § Prepared
-//! Statement Cache.
+//! **Status: wired into the buffered `query` path behind the off-by-default
+//! [`Config::statement_cache`](crate::Config::statement_cache) flag.** When the
+//! flag is off (the default), parameterized queries use `sp_executesql` and
+//! this cache is never consulted. Some helper methods (`peek`, `remove`,
+//! `hit_ratio`, `reset_stats`, …) are kept for later increments and are not yet
+//! called, hence the `dead_code` allowance below. See LIMITATIONS.md §
+//! Prepared Statement Cache.
 #![allow(dead_code)]
 //!
 //! This module provides automatic caching of prepared statements to improve performance
@@ -242,6 +243,32 @@ impl StatementCache {
         self.hits = 0;
         self.misses = 0;
     }
+
+    /// Take a point-in-time snapshot of the cache statistics.
+    #[must_use]
+    pub fn stats(&self) -> StatementCacheStats {
+        StatementCacheStats {
+            hits: self.hits,
+            misses: self.misses,
+            entries: self.cache.len(),
+        }
+    }
+}
+
+/// A point-in-time snapshot of a connection's prepared-statement cache.
+///
+/// Obtained via [`Client::statement_cache_stats`](crate::Client::statement_cache_stats).
+/// Useful for measuring the cache's effectiveness (the
+/// [`Config::statement_cache`](crate::Config::statement_cache) flag is opt-in
+/// precisely so these numbers can be gathered before defaulting it on).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StatementCacheStats {
+    /// Number of lookups that found a cached handle.
+    pub hits: u64,
+    /// Number of lookups that missed (triggering an `sp_prepare`).
+    pub misses: u64,
+    /// Number of prepared statements currently cached.
+    pub entries: usize,
 }
 
 impl Default for StatementCache {

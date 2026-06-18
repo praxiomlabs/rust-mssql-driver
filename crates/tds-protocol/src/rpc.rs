@@ -1099,14 +1099,22 @@ impl RpcRequest {
     }
 
     /// Create an sp_execute request.
+    ///
+    /// `sp_execute` parameters are positional: the first is the prepared-
+    /// statement handle and the rest are the statement's parameter values in
+    /// order. They are sent unnamed so the server binds them by position rather
+    /// than trying to match a formal parameter by name.
     pub fn execute(handle: i32, params: Vec<RpcParam>) -> Self {
         let mut request = Self::by_id(ProcId::Execute);
 
-        // Handle from sp_prepare
-        request.params.push(RpcParam::int("@handle", handle));
+        // Handle from sp_prepare (positional, unnamed).
+        request.params.push(RpcParam::int("", handle));
 
-        // Add parameters
-        request.params.extend(params);
+        // Statement parameter values, positional (names cleared).
+        for mut param in params {
+            param.name.clear();
+            request.params.push(param);
+        }
 
         request
     }

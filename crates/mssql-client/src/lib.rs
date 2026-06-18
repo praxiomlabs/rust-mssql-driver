@@ -43,9 +43,9 @@ pub mod row;
 pub(crate) mod row_source;
 pub mod row_stream;
 pub mod state;
-// Not yet wired into the query path (queries use sp_executesql); kept
-// crate-private until the cache is actually used, so the public API does not
-// expose types for an unshipped feature. Re-export when it lands.
+// Wired into the buffered `query` path behind the off-by-default
+// `Config::statement_cache` flag. The cache types stay crate-private; only the
+// `StatementCacheStats` snapshot is re-exported (below) for observability.
 pub(crate) mod statement_cache;
 pub mod stream;
 pub mod to_params;
@@ -61,6 +61,7 @@ pub use cancel::CancelHandle;
 pub use client::Client;
 pub use config::{ApplicationIntent, Config, RedirectConfig, RetryPolicy, TimeoutConfig};
 pub use error::{Error, SharedIoError};
+pub use statement_cache::StatementCacheStats;
 // Sub-error types carried by `Error` variants and the `FromSql`/`ToSql` trait
 // return type. Re-exported so downstream crates can name them (e.g. match on
 // `Error::Type(e)`, or write `fn from_sql(..) -> Result<Self, TypeError>`)
