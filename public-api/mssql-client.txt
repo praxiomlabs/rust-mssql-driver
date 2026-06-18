@@ -1543,6 +1543,7 @@ pub fn mssql_client::instrumentation::InstrumentationContext::base_attributes(&s
 pub fn mssql_client::instrumentation::InstrumentationContext::connection_span(&self) -> impl opentelemetry::trace::span::Span
 pub fn mssql_client::instrumentation::InstrumentationContext::metrics(&self) -> &mssql_client::instrumentation::DatabaseMetrics
 pub fn mssql_client::instrumentation::InstrumentationContext::new(alloc::string::String, u16) -> Self
+pub fn mssql_client::instrumentation::InstrumentationContext::procedure_span(&self, &str) -> impl opentelemetry::trace::span::Span
 pub fn mssql_client::instrumentation::InstrumentationContext::query_span(&self, &str) -> impl opentelemetry::trace::span::Span
 pub fn mssql_client::instrumentation::InstrumentationContext::record_error(&mut impl opentelemetry::trace::span::Span, &mssql_client::error::Error)
 pub fn mssql_client::instrumentation::InstrumentationContext::record_success(&mut impl opentelemetry::trace::span::Span, core::option::Option<u64>)
