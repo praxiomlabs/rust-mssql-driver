@@ -55,3 +55,25 @@ changelog_include = [
 ]
 
 # xtask and mssql-testing are `publish = false` and are skipped automatically.
+
+[changelog]
+# Skip merge commits from the generated CHANGELOG. release-plz folds GitHub's
+# own "Merge pull request #N" commits, but a stray local merge (e.g. "Merge
+# remote-tracking branch 'origin/main' into <branch>") slips through into the
+# "Other" section — that happened in v0.19.0. A "^Merge " skip covers both.
+#
+# NOTE: setting commit_parsers REPLACES release-plz's default set entirely (it
+# is not merged), so the Keep-a-Changelog defaults are reproduced in full below
+# with the skip prepended. Every other changelog field (body template, the
+# #NNN→PR-link preprocessor, release-commit folding) is left unset and keeps its
+# release-plz default.
+commit_parsers = [
+  { message = "^Merge ", skip = true },
+  { message = "^feat", group = "added" },
+  { message = "^changed", group = "changed" },
+  { message = "^deprecated", group = "deprecated" },
+  { message = "^removed", group = "removed" },
+  { message = "^fix", group = "fixed" },
+  { message = "^security", group = "security" },
+  { message = ".*", group = "other" },
+]
