@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.2](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.19.1...v0.19.2) - 2026-06-18
+
+### Added
+
+- *(tls)* support OS/platform trust store via native-certs feature ([#314](https://github.com/praxiomlabs/rust-mssql-driver/pull/314))
+
+### Fixed
+
+- *(deps)* disable default-features on internal crate deps ([#305](https://github.com/praxiomlabs/rust-mssql-driver/pull/305))
+- *(types)* harden date construction against overflow panic
+- *(protocol)* model PRELOGIN cert-auth encryption combos 0x81/0x83 ([#308](https://github.com/praxiomlabs/rust-mssql-driver/pull/308))
+- *(protocol)* skip ALTMETADATA/ALTROW instead of hard-erroring ([#275](https://github.com/praxiomlabs/rust-mssql-driver/pull/275))
+
+### Other
+
+- *(client)* decompose parse_column_value & parse_sql_variant ([#309](https://github.com/praxiomlabs/rust-mssql-driver/pull/309))
+- *(client)* live test for the bulk-transfer finish() timeout ([#206](https://github.com/praxiomlabs/rust-mssql-driver/pull/206))
+- *(client)* share column metadata across rows in buffered decode
+- *(client)* add buffered-decode allocation benchmark ([#300](https://github.com/praxiomlabs/rust-mssql-driver/pull/300))
+
 ## [0.19.1](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.19.0...v0.19.1) - 2026-06-18
 
 ### Fixed
