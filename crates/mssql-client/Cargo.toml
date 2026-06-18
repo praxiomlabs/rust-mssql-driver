@@ -34,6 +34,8 @@ otel = [
 zeroize = ["mssql-auth/zeroize"]
 # Internal hooks for the fuzzing harness (fuzz/). Not public API.
 fuzzing = []
+# Internal hooks for the allocation benchmark (benches/). Not public API.
+bench = []
 # Always Encrypted client-side encryption support
 # Activates crypto deps in mssql-auth: aes, cbc, hmac, sha2, rsa, rand, parking_lot
 always-encrypted = ["mssql-auth/always-encrypted", "dep:encoding_rs"]
@@ -142,6 +144,14 @@ path = "examples/collation_encoding.rs"
 [[bench]]
 name = "client"
 harness = false
+
+# Allocation benchmark for the buffered row-decode path (#300). Counts heap
+# allocations via a custom global allocator; no valgrind or extra deps.
+# Run with: cargo bench -p mssql-client --bench buffered_decode --features bench
+[[bench]]
+name = "buffered_decode"
+harness = false
+required-features = ["bench"]
 
 [package.metadata.cargo-machete]
 # tokio-test is a dev-dependency for tests

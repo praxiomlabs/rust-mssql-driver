@@ -141,6 +141,58 @@ pub use state::{Connected, ConnectionState, Disconnected, InTransaction, Protoco
 pub mod __fuzzing {
     pub use crate::column_parser::parse_column_value;
 }
+
+/// Internal entry point for the allocation benchmark in `benches/`.
+///
+/// Enabled only by the `bench` feature; not public API and exempt from all
+/// stability guarantees.
+#[cfg(feature = "bench")]
+#[doc(hidden)]
+#[allow(clippy::expect_used)]
+pub mod __bench {
+    use bytes::Bytes;
+    use tds_protocol::token::{Token, TokenParser};
+
+    use crate::Ready;
+    use crate::client::Client;
+    use crate::row::Row;
+
+    /// Decode a complete buffered query response (one ColMetaData followed by
+    /// ROW tokens) into materialized `Row`s, with no async or socket IO.
+    ///
+    /// Mirrors the buffered read path over the same functions production uses:
+    /// Stage A drives `TokenParser` (as in `read_query_response`) and Stage B
+    /// runs `build_columns` + `convert_raw_row` (as in `QueryStream`). It
+    /// exists only to give the allocation benchmark a deterministic, in-memory
+    /// seam.
+    #[must_use]
+    pub fn decode_buffered_response(bytes: Bytes) -> Vec<Row> {
+        let mut parser = TokenParser::new(bytes);
+        let mut columns = Vec::new();
+        let mut meta = None;
+        let mut rows = Vec::new();
+        while let Some(token) = parser
+            .next_token_with_metadata(meta.as_ref())
+            .expect("benchmark fixture must decode")
+        {
+            match token {
+                Token::ColMetaData(m) => {
+                    columns = Client::<Ready>::build_columns(&m);
+                    meta = Some(m);
+                }
+                Token::Row(raw) => {
+                    let m = meta.as_ref().expect("ColMetaData precedes ROW tokens");
+                    rows.push(
+                        crate::column_parser::convert_raw_row(&raw, m, &columns)
+                            .expect("benchmark row must convert"),
+                    );
+                }
+                _ => {}
+            }
+        }
+        rows
+    }
+}
 pub use blob_stream::BlobStream;
 pub use row_stream::RowStream;
 pub use stream::{
