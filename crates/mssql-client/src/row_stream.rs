@@ -23,6 +23,8 @@
 //! # }
 //! ```
 
+use std::sync::Arc;
+
 use tds_protocol::token::{ColMetaData, Token};
 
 use crate::Client;
@@ -51,7 +53,7 @@ pub struct RowStream<'a, S: ConnectionState = Ready> {
     /// The incremental token decoder over the rolling packet buffer.
     source: RowSource,
     /// Columns for the current result set (rebuilt on each ColMetaData).
-    columns: Vec<Column>,
+    row_meta: Arc<crate::row::ColMetaData>,
     /// Protocol metadata for decoding raw rows of the current result set.
     meta: ColMetaData,
     /// Pre-resolved column decryptor for the current Always Encrypted result set.
@@ -76,7 +78,7 @@ impl<'a, S: ConnectionState> RowStream<'a, S> {
         Self {
             client,
             source,
-            columns,
+            row_meta: Arc::new(crate::row::ColMetaData::new(columns)),
             meta,
             #[cfg(feature = "always-encrypted")]
             decryptor,
@@ -90,7 +92,7 @@ impl<'a, S: ConnectionState> RowStream<'a, S> {
         Self {
             client,
             source: RowSource::new(false),
-            columns: Vec::new(),
+            row_meta: Arc::new(crate::row::ColMetaData::new(Vec::new())),
             meta: ColMetaData::default(),
             #[cfg(feature = "always-encrypted")]
             decryptor: None,
@@ -101,7 +103,7 @@ impl<'a, S: ConnectionState> RowStream<'a, S> {
     /// The columns of the current result set.
     #[must_use]
     pub fn columns(&self) -> &[Column] {
-        &self.columns
+        &self.row_meta.columns
     }
 
     /// Whether the stream has been fully consumed.
@@ -207,7 +209,9 @@ impl<'a, S: ConnectionState> RowStream<'a, S> {
 
     /// Adopt a new result set's metadata mid-stream (multi-statement batch).
     async fn switch_result_set(&mut self, meta: ColMetaData) -> Result<()> {
-        self.columns = Client::<S>::build_columns(&meta);
+        self.row_meta = Arc::new(crate::row::ColMetaData::new(Client::<S>::build_columns(
+            &meta,
+        )));
         #[cfg(feature = "always-encrypted")]
         {
             self.decryptor = self
@@ -227,11 +231,11 @@ impl<'a, S: ConnectionState> RowStream<'a, S> {
             return crate::column_parser::convert_raw_row_decrypted(
                 raw,
                 &self.meta,
-                &self.columns,
+                &self.row_meta,
                 dec,
             );
         }
-        crate::column_parser::convert_raw_row(raw, &self.meta, &self.columns)
+        crate::column_parser::convert_raw_row(raw, &self.meta, &self.row_meta)
     }
 
     /// Decode a null-bitmap-compressed row against the current metadata.
@@ -241,10 +245,10 @@ impl<'a, S: ConnectionState> RowStream<'a, S> {
             return crate::column_parser::convert_nbc_row_decrypted(
                 nbc,
                 &self.meta,
-                &self.columns,
+                &self.row_meta,
                 dec,
             );
         }
-        crate::column_parser::convert_nbc_row(nbc, &self.meta, &self.columns)
+        crate::column_parser::convert_nbc_row(nbc, &self.meta, &self.row_meta)
     }
 }

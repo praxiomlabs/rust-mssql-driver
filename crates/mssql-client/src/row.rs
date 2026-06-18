@@ -333,7 +333,15 @@ impl Row {
     /// This constructor supports existing code that works with `SqlValue` directly.
     /// It's less efficient than the buffer-based approach but maintains compatibility.
     pub fn from_values(columns: Vec<Column>, values: Vec<SqlValue>) -> Self {
-        let metadata = Arc::new(ColMetaData::new(columns));
+        Self::from_values_shared(Arc::new(ColMetaData::new(columns)), values)
+    }
+
+    /// Like [`Row::from_values`], but shares an already-built
+    /// `Arc<ColMetaData>` rather than cloning a `Vec<Column>` and rebuilding
+    /// the metadata for every row. Every row in a result set has identical
+    /// columns, so the decode path builds the metadata once per result set and
+    /// hands each row a cheap `Arc` clone of it (#300).
+    pub(crate) fn from_values_shared(metadata: Arc<ColMetaData>, values: Vec<SqlValue>) -> Self {
         let slices: Arc<[ColumnSlice]> = values
             .iter()
             .enumerate()

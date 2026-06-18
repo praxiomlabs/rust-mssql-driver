@@ -24,6 +24,8 @@
 // `smalldatetime_from_wire` / `datetime_from_wire`).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::needless_range_loop)]
 
+use std::sync::Arc;
+
 use bytes::Buf;
 use mssql_types::SqlValue;
 // Scale primitives shared with the secondary decode stack (`mssql_types::decode`)
@@ -83,7 +85,7 @@ fn datetime_from_wire(days: i64, time_300ths: u64) -> Result<chrono::NaiveDateTi
 pub(crate) fn convert_raw_row(
     raw: &RawRow,
     meta: &ColMetaData,
-    columns: &[crate::row::Column],
+    row_meta: &Arc<crate::row::ColMetaData>,
 ) -> Result<crate::row::Row> {
     let mut values = Vec::with_capacity(meta.columns.len());
     let mut buf = raw.data.as_ref();
@@ -93,7 +95,10 @@ pub(crate) fn convert_raw_row(
         values.push(value);
     }
 
-    Ok(crate::row::Row::from_values(columns.to_vec(), values))
+    Ok(crate::row::Row::from_values_shared(
+        Arc::clone(row_meta),
+        values,
+    ))
 }
 
 /// Convert an NbcRow to a client Row.
@@ -102,7 +107,7 @@ pub(crate) fn convert_raw_row(
 pub(crate) fn convert_nbc_row(
     nbc: &NbcRow,
     meta: &ColMetaData,
-    columns: &[crate::row::Column],
+    row_meta: &Arc<crate::row::ColMetaData>,
 ) -> Result<crate::row::Row> {
     let mut values = Vec::with_capacity(meta.columns.len());
     let mut buf = nbc.data.as_ref();
@@ -116,7 +121,10 @@ pub(crate) fn convert_nbc_row(
         }
     }
 
-    Ok(crate::row::Row::from_values(columns.to_vec(), values))
+    Ok(crate::row::Row::from_values_shared(
+        Arc::clone(row_meta),
+        values,
+    ))
 }
 
 /// Convert a RawRow to a client Row with Always Encrypted decryption.
@@ -131,7 +139,7 @@ pub(crate) fn convert_nbc_row(
 pub(crate) fn convert_raw_row_decrypted(
     raw: &RawRow,
     meta: &ColMetaData,
-    columns: &[crate::row::Column],
+    row_meta: &Arc<crate::row::ColMetaData>,
     decryptor: &crate::column_decryptor::ColumnDecryptor,
 ) -> Result<crate::row::Row> {
     let mut values = Vec::with_capacity(meta.columns.len());
@@ -146,7 +154,10 @@ pub(crate) fn convert_raw_row_decrypted(
         values.push(value);
     }
 
-    Ok(crate::row::Row::from_values(columns.to_vec(), values))
+    Ok(crate::row::Row::from_values_shared(
+        Arc::clone(row_meta),
+        values,
+    ))
 }
 
 /// Convert an NbcRow to a client Row with Always Encrypted decryption.
@@ -156,7 +167,7 @@ pub(crate) fn convert_raw_row_decrypted(
 pub(crate) fn convert_nbc_row_decrypted(
     nbc: &NbcRow,
     meta: &ColMetaData,
-    columns: &[crate::row::Column],
+    row_meta: &Arc<crate::row::ColMetaData>,
     decryptor: &crate::column_decryptor::ColumnDecryptor,
 ) -> Result<crate::row::Row> {
     let mut values = Vec::with_capacity(meta.columns.len());
@@ -175,7 +186,10 @@ pub(crate) fn convert_nbc_row_decrypted(
         }
     }
 
-    Ok(crate::row::Row::from_values(columns.to_vec(), values))
+    Ok(crate::row::Row::from_values_shared(
+        Arc::clone(row_meta),
+        values,
+    ))
 }
 
 /// Decrypt an encrypted column value and re-parse it as the plaintext type.

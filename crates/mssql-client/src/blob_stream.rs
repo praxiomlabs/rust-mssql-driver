@@ -72,7 +72,7 @@ pub struct BlobStream<'a, S: ConnectionState = Ready> {
     /// Metadata for just the leading scalar columns (for row decoding).
     prefix_meta: ColMetaData,
     /// `Column`s for the leading scalar columns.
-    scalar_columns: Vec<Column>,
+    scalar_row_meta: std::sync::Arc<crate::row::ColMetaData>,
     /// Index of the trailing MAX column.
     blob_index: usize,
     /// PLP decoder for the current row's blob; `Some` between `next` and drain.
@@ -103,7 +103,7 @@ impl<'a, S: ConnectionState> BlobStream<'a, S> {
             encryption_enabled,
             meta,
             prefix_meta,
-            scalar_columns,
+            scalar_row_meta: std::sync::Arc::new(crate::row::ColMetaData::new(scalar_columns)),
             blob_index,
             plp: None,
             blob_null: false,
@@ -121,7 +121,7 @@ impl<'a, S: ConnectionState> BlobStream<'a, S> {
     /// trailing MAX column.
     #[must_use]
     pub fn columns(&self) -> &[Column] {
-        &self.scalar_columns
+        &self.scalar_row_meta.columns
     }
 
     /// Advance to the next row, returning its scalar columns.
@@ -230,7 +230,7 @@ impl<'a, S: ConnectionState> BlobStream<'a, S> {
                     let row = crate::column_parser::convert_raw_row(
                         &raw,
                         &self.prefix_meta,
-                        &self.scalar_columns,
+                        &self.scalar_row_meta,
                     )?;
                     self.plp = Some(PlpDecoder::new());
                     self.blob_null = false;
@@ -257,7 +257,7 @@ impl<'a, S: ConnectionState> BlobStream<'a, S> {
                     let row = crate::column_parser::convert_nbc_row(
                         &nbc,
                         &self.prefix_meta,
-                        &self.scalar_columns,
+                        &self.scalar_row_meta,
                     )?;
                     self.blob_null = blob_null;
                     self.plp = if blob_null {
