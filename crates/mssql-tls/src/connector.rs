@@ -231,10 +231,10 @@ impl TlsConnector {
         if config.trust_server_certificate {
             // When trusting all certificates, we still need a root store
             // but we'll use a custom verifier later
-            // For now, add system roots as a fallback
+            // For now, add the bundled webpki (Mozilla) roots as a fallback
             root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         } else if config.root_certificates.is_empty() {
-            // Use system root certificates
+            // Use the bundled webpki (Mozilla) root certificates
             root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         } else {
             // Use custom root certificates
