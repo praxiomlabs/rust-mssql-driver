@@ -174,4 +174,25 @@ mod tests {
         // Even empty SQL has ALL_HEADERS (22 bytes)
         assert_eq!(payload.len(), 22);
     }
+
+    /// Golden wire-byte tripwire (#297) for the transaction-descriptor path.
+    /// These sealed encoders emit TDS wire bytes off the public surface
+    /// (`__private`), invisible to cargo-public-api/semver-checks; locking the
+    /// exact ALL_HEADERS + descriptor + UTF-16LE layout catches silent drift.
+    /// `encode_sql_batch` (zero descriptor) is pinned by `test_encode_sql_batch`.
+    #[test]
+    fn golden_sql_batch_with_transaction_bytes() {
+        let payload = sealed::encode_sql_batch_with_transaction("Hi", 0x1234_5678_90AB_CDEF);
+        assert_eq!(
+            payload.as_ref(),
+            &[
+                22, 0, 0, 0, // ALL_HEADERS TotalLength = 22
+                18, 0, 0, 0, // HeaderLength = 18
+                0x02, 0x00, // HeaderType = transaction descriptor
+                0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12, // descriptor (u64 LE)
+                0x01, 0, 0, 0, // OutstandingRequestCount = 1
+                0x48, 0x00, 0x69, 0x00, // "Hi" UTF-16LE
+            ]
+        );
+    }
 }

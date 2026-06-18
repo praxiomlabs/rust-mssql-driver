@@ -621,4 +621,118 @@ mod tests {
         // Should be 3 bytes representing days since 0001-01-01
         assert_eq!(buf.len(), 3);
     }
+
+    // ========================================================================
+    // Golden wire-byte tripwire (#297)
+    //
+    // These sealed encoders emit TDS wire bytes but live off the public surface
+    // (re-exported only via `__private`), so cargo-public-api and semver-checks
+    // cannot see a signature or behavior change. Locking exact output bytes here
+    // turns any such change into a fast unit-test failure (a signature change
+    // fails to compile; a behavior change fails an assertion) instead of
+    // surfacing only in the live round-trip suite. `encode_datetimeoffset` is
+    // already byte-pinned by `test_datetimeoffset_encodes_utc_instant` above.
+    // ========================================================================
+
+    #[cfg(any(feature = "uuid", feature = "decimal", feature = "chrono"))]
+    fn golden(f: impl FnOnce(&mut BytesMut)) -> Vec<u8> {
+        let mut buf = BytesMut::new();
+        f(&mut buf);
+        buf.to_vec()
+    }
+
+    #[cfg(feature = "uuid")]
+    #[test]
+    fn golden_uuid_wire_bytes() {
+        // Mixed-endian: first 3 groups little-endian, last 8 bytes as-is. No
+        // length prefix (the RPC/TVP framing adds that).
+        let uuid = uuid::Uuid::from_bytes(core::array::from_fn(|i| i as u8));
+        assert_eq!(
+            golden(|b| encode_uuid(uuid, b)),
+            [3, 2, 1, 0, 5, 4, 7, 6, 8, 9, 10, 11, 12, 13, 14, 15]
+        );
+    }
+
+    #[cfg(feature = "decimal")]
+    #[test]
+    fn golden_decimal_and_money_wire_bytes() {
+        use rust_decimal::Decimal;
+
+        // DECIMAL: sign byte (1 = positive, 0 = negative) + 16-byte LE mantissa.
+        assert_eq!(
+            golden(|b| encode_decimal(Decimal::from(12345), b)),
+            [1, 0x39, 0x30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
+        assert_eq!(
+            golden(|b| encode_decimal(Decimal::from(-12345), b)),
+            [0, 0x39, 0x30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
+
+        // MONEY: value * 10_000 as i64, high 32 bits LE then low 32 bits LE.
+        // 1 → 10_000 = 0x2710.
+        assert_eq!(
+            golden(|b| encode_money(Decimal::from(1), b).unwrap()),
+            [0x00, 0x00, 0x00, 0x00, 0x10, 0x27, 0x00, 0x00]
+        );
+
+        // SMALLMONEY: value * 10_000 as i32 LE.
+        assert_eq!(
+            golden(|b| encode_smallmoney(Decimal::from(1), b).unwrap()),
+            [0x10, 0x27, 0x00, 0x00]
+        );
+    }
+
+    #[cfg(feature = "chrono")]
+    #[test]
+    fn golden_chrono_wire_bytes() {
+        let date_epoch = chrono::NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
+        let dt_epoch_1900 = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
+
+        // DATE: 3-byte LE day count since 0001-01-01. epoch+0x123456 days.
+        let date = date_epoch
+            .checked_add_days(chrono::Days::new(0x0012_3456))
+            .unwrap();
+        assert_eq!(
+            golden(|b| encode_date(date, b).unwrap()),
+            [0x56, 0x34, 0x12]
+        );
+
+        // TIME (scale 7 → 5 bytes): 100ns intervals since midnight. 01:00:00 =
+        // 36_000_000_000 intervals = 0x0000_0008_61C4_6800.
+        let one_am = chrono::NaiveTime::from_hms_opt(1, 0, 0).unwrap();
+        assert_eq!(
+            golden(|b| encode_time(one_am, b)),
+            [0x00, 0x68, 0xC4, 0x61, 0x08]
+        );
+
+        // DATETIME (legacy, 8 bytes): days since 1900 (i32 LE) + 1/300s ticks
+        // (u32 LE). epoch1900 + 0x010203 days at midnight → ticks 0.
+        let legacy = dt_epoch_1900
+            .checked_add_days(chrono::Days::new(0x0001_0203))
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        assert_eq!(
+            golden(|b| encode_datetime_legacy(legacy, b)),
+            [0x03, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00]
+        );
+
+        // SMALLDATETIME (4 bytes): days since 1900 (u16 LE) + minutes (u16 LE).
+        let small = dt_epoch_1900
+            .checked_add_days(chrono::Days::new(0x0102))
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        assert_eq!(
+            golden(|b| encode_smalldatetime(small, b).unwrap()),
+            [0x02, 0x01, 0x00, 0x00]
+        );
+
+        // DATETIME2 (scale 7): 5 time bytes (midnight → 0) + 3 date bytes.
+        let dt2 = date.and_hms_opt(0, 0, 0).unwrap();
+        assert_eq!(
+            golden(|b| encode_datetime2(dt2, b).unwrap()),
+            [0x00, 0x00, 0x00, 0x00, 0x00, 0x56, 0x34, 0x12]
+        );
+    }
 }
