@@ -745,6 +745,7 @@ pub async fn mssql_client::client::Client<S>::call_procedure(&mut self, &str, &[
 pub async fn mssql_client::client::Client<S>::execute_named(&mut self, &str, &[mssql_client::to_params::NamedParam]) -> mssql_client::error::Result<u64>
 pub fn mssql_client::client::Client<S>::procedure(&mut self, &str) -> mssql_client::error::Result<mssql_client::procedure::ProcedureBuilder<'_, S>>
 pub async fn mssql_client::client::Client<S>::query_named<'a>(&'a mut self, &str, &[mssql_client::to_params::NamedParam]) -> mssql_client::error::Result<mssql_client::stream::QueryStream<'a>>
+pub fn mssql_client::client::Client<S>::statement_cache_stats(&self) -> mssql_client::StatementCacheStats
 impl<S: mssql_client::state::ConnectionState> core::fmt::Debug for mssql_client::client::Client<S>
 pub fn mssql_client::client::Client<S>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<S> core::marker::Freeze for mssql_client::client::Client<S>
@@ -846,6 +847,7 @@ pub mssql_client::config::Config::port: u16
 pub mssql_client::config::Config::redirect: mssql_client::config::RedirectConfig
 pub mssql_client::config::Config::retry: mssql_client::config::RetryPolicy
 pub mssql_client::config::Config::send_string_parameters_as_unicode: bool
+pub mssql_client::config::Config::statement_cache: bool
 pub mssql_client::config::Config::strict_mode: bool
 pub mssql_client::config::Config::tds_version: tds_protocol::version::TdsVersion
 pub mssql_client::config::Config::timeouts: mssql_client::config::TimeoutConfig
@@ -877,6 +879,7 @@ pub fn mssql_client::config::Config::timeouts(self, mssql_client::config::Timeou
 pub fn mssql_client::config::Config::trust_server_certificate(self, bool) -> Self
 pub fn mssql_client::config::Config::with_host(self, &str) -> Self
 pub fn mssql_client::config::Config::with_port(self, u16) -> Self
+pub fn mssql_client::config::Config::with_statement_cache(self, bool) -> Self
 pub fn mssql_client::config::Config::workstation_id(self, impl core::convert::Into<alloc::string::String>) -> Self
 impl core::clone::Clone for mssql_client::config::Config
 pub fn mssql_client::config::Config::clone(&self) -> mssql_client::config::Config
@@ -3808,6 +3811,7 @@ pub async fn mssql_client::client::Client<S>::call_procedure(&mut self, &str, &[
 pub async fn mssql_client::client::Client<S>::execute_named(&mut self, &str, &[mssql_client::to_params::NamedParam]) -> mssql_client::error::Result<u64>
 pub fn mssql_client::client::Client<S>::procedure(&mut self, &str) -> mssql_client::error::Result<mssql_client::procedure::ProcedureBuilder<'_, S>>
 pub async fn mssql_client::client::Client<S>::query_named<'a>(&'a mut self, &str, &[mssql_client::to_params::NamedParam]) -> mssql_client::error::Result<mssql_client::stream::QueryStream<'a>>
+pub fn mssql_client::client::Client<S>::statement_cache_stats(&self) -> mssql_client::StatementCacheStats
 impl<S: mssql_client::state::ConnectionState> core::fmt::Debug for mssql_client::client::Client<S>
 pub fn mssql_client::client::Client<S>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<S> core::marker::Freeze for mssql_client::client::Client<S>
@@ -3914,6 +3918,7 @@ pub mssql_client::Config::port: u16
 pub mssql_client::Config::redirect: mssql_client::config::RedirectConfig
 pub mssql_client::Config::retry: mssql_client::config::RetryPolicy
 pub mssql_client::Config::send_string_parameters_as_unicode: bool
+pub mssql_client::Config::statement_cache: bool
 pub mssql_client::Config::strict_mode: bool
 pub mssql_client::Config::tds_version: tds_protocol::version::TdsVersion
 pub mssql_client::Config::timeouts: mssql_client::config::TimeoutConfig
@@ -3945,6 +3950,7 @@ pub fn mssql_client::config::Config::timeouts(self, mssql_client::config::Timeou
 pub fn mssql_client::config::Config::trust_server_certificate(self, bool) -> Self
 pub fn mssql_client::config::Config::with_host(self, &str) -> Self
 pub fn mssql_client::config::Config::with_port(self, u16) -> Self
+pub fn mssql_client::config::Config::with_statement_cache(self, bool) -> Self
 pub fn mssql_client::config::Config::workstation_id(self, impl core::convert::Into<alloc::string::String>) -> Self
 impl core::clone::Clone for mssql_client::config::Config
 pub fn mssql_client::config::Config::clone(&self) -> mssql_client::config::Config
@@ -5079,6 +5085,55 @@ impl<T> typenum::type_operators::Same for mssql_client::error::SharedIoError
 pub type mssql_client::error::SharedIoError::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::error::SharedIoError where V: ppv_lite86::types::MultiLane<T>
 pub fn mssql_client::error::SharedIoError::vzip(self) -> V
+pub struct mssql_client::StatementCacheStats
+pub mssql_client::StatementCacheStats::entries: usize
+pub mssql_client::StatementCacheStats::hits: u64
+pub mssql_client::StatementCacheStats::misses: u64
+impl core::clone::Clone for mssql_client::StatementCacheStats
+pub fn mssql_client::StatementCacheStats::clone(&self) -> mssql_client::StatementCacheStats
+impl core::cmp::Eq for mssql_client::StatementCacheStats
+impl core::cmp::PartialEq for mssql_client::StatementCacheStats
+pub fn mssql_client::StatementCacheStats::eq(&self, &mssql_client::StatementCacheStats) -> bool
+impl core::fmt::Debug for mssql_client::StatementCacheStats
+pub fn mssql_client::StatementCacheStats::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for mssql_client::StatementCacheStats
+impl core::marker::StructuralPartialEq for mssql_client::StatementCacheStats
+impl core::marker::Freeze for mssql_client::StatementCacheStats
+impl core::marker::Send for mssql_client::StatementCacheStats
+impl core::marker::Sync for mssql_client::StatementCacheStats
+impl core::marker::Unpin for mssql_client::StatementCacheStats
+impl core::panic::unwind_safe::RefUnwindSafe for mssql_client::StatementCacheStats
+impl core::panic::unwind_safe::UnwindSafe for mssql_client::StatementCacheStats
+impl<Q, K> equivalent::Equivalent<K> for mssql_client::StatementCacheStats where Q: core::cmp::Eq + ?core::marker::Sized, K: core::borrow::Borrow<Q> + ?core::marker::Sized
+pub fn mssql_client::StatementCacheStats::equivalent(&self, &K) -> bool
+impl<T, U> core::convert::Into<U> for mssql_client::StatementCacheStats where U: core::convert::From<T>
+pub fn mssql_client::StatementCacheStats::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_client::StatementCacheStats where U: core::convert::Into<T>
+pub type mssql_client::StatementCacheStats::Error = core::convert::Infallible
+pub fn mssql_client::StatementCacheStats::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_client::StatementCacheStats where U: core::convert::TryFrom<T>
+pub type mssql_client::StatementCacheStats::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_client::StatementCacheStats::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_client::StatementCacheStats where T: core::clone::Clone
+pub type mssql_client::StatementCacheStats::Owned = T
+pub fn mssql_client::StatementCacheStats::clone_into(&self, &mut T)
+pub fn mssql_client::StatementCacheStats::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_client::StatementCacheStats where T: 'static + ?core::marker::Sized
+pub fn mssql_client::StatementCacheStats::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_client::StatementCacheStats where T: ?core::marker::Sized
+pub fn mssql_client::StatementCacheStats::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_client::StatementCacheStats where T: ?core::marker::Sized
+pub fn mssql_client::StatementCacheStats::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_client::StatementCacheStats where T: core::clone::Clone
+pub unsafe fn mssql_client::StatementCacheStats::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_client::StatementCacheStats
+pub fn mssql_client::StatementCacheStats::from(T) -> T
+impl<T> tracing::instrument::Instrument for mssql_client::StatementCacheStats
+impl<T> tracing::instrument::WithSubscriber for mssql_client::StatementCacheStats
+impl<T> typenum::type_operators::Same for mssql_client::StatementCacheStats
+pub type mssql_client::StatementCacheStats::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::StatementCacheStats where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_client::StatementCacheStats::vzip(self) -> V
 pub struct mssql_client::TimeoutConfig
 pub mssql_client::TimeoutConfig::command_timeout: core::time::Duration
 pub mssql_client::TimeoutConfig::connect_timeout: core::time::Duration
