@@ -93,8 +93,12 @@ impl ServerCertVerifier for DangerousServerCertVerifier {
 
 /// Create a secure default TLS client configuration.
 ///
-/// This uses the Mozilla root certificate store for server validation
-/// and requires no client authentication.
+/// Server certificates are validated against the bundled Mozilla root
+/// certificate store, and no client authentication is configured.
+///
+/// With the `native-certs` feature enabled, validation is delegated to the
+/// OS/platform trust store instead, so servers chaining to an enterprise
+/// internal CA installed in the OS store are accepted.
 ///
 /// # Example
 ///
@@ -110,15 +114,27 @@ pub fn default_tls_config() -> Result<ClientConfig, TlsError> {
     // Ensure the crypto provider is installed before using rustls
     ensure_crypto_provider();
 
-    let root_store = RootCertStore {
-        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
-    };
+    #[cfg(feature = "native-certs")]
+    {
+        use rustls_platform_verifier::BuilderVerifierExt;
+        ClientConfig::builder()
+            .with_platform_verifier()
+            .map(|builder| builder.with_no_client_auth())
+            .map_err(|e| {
+                TlsError::Configuration(format!("platform certificate verifier init failed: {e}"))
+            })
+    }
 
-    let config = ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
+    #[cfg(not(feature = "native-certs"))]
+    {
+        let root_store = RootCertStore {
+            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+        };
 
-    Ok(config)
+        Ok(ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth())
+    }
 }
 
 // =============================================================================
@@ -183,12 +199,10 @@ impl TlsConnector {
             return Ok(client_config);
         }
 
-        // Build root certificate store for normal validation
-        let root_store = Self::build_root_store(config)?;
-
-        // Build the client config with proper certificate validation
-        let builder = ClientConfig::builder_with_protocol_versions(&versions)
-            .with_root_certificates(root_store);
+        // Select the server-certificate verifier. With the `native-certs`
+        // feature and no explicit roots, this delegates to the OS/platform
+        // trust store; otherwise it uses the configured (or bundled) roots.
+        let builder = Self::builder_with_verifier(&versions, config)?;
 
         let mut client_config = if let Some(client_auth) = &config.client_auth {
             // Clone the key by matching on the Arc contents
@@ -222,6 +236,34 @@ impl TlsConnector {
         }
 
         Ok(client_config)
+    }
+
+    /// Build a rustls client-config builder with the server-certificate
+    /// verifier installed, positioned for client-auth selection.
+    ///
+    /// With the `native-certs` feature enabled and no explicit
+    /// `root_certificates` configured, server verification is delegated to the
+    /// OS/platform trust store (so enterprise internal CAs are honored).
+    /// Otherwise the configured roots — or the bundled Mozilla roots when none
+    /// are given — are used. Explicit `root_certificates` always take
+    /// precedence over the OS store.
+    fn builder_with_verifier(
+        versions: &[&'static rustls::SupportedProtocolVersion],
+        config: &TlsConfig,
+    ) -> Result<rustls::ConfigBuilder<ClientConfig, rustls::client::WantsClientCert>, TlsError>
+    {
+        let builder = ClientConfig::builder_with_protocol_versions(versions);
+
+        #[cfg(feature = "native-certs")]
+        if config.root_certificates.is_empty() {
+            use rustls_platform_verifier::BuilderVerifierExt;
+            return builder.with_platform_verifier().map_err(|e| {
+                TlsError::Configuration(format!("platform certificate verifier init failed: {e}"))
+            });
+        }
+
+        let root_store = Self::build_root_store(config)?;
+        Ok(builder.with_root_certificates(root_store))
     }
 
     /// Build the root certificate store.
@@ -408,5 +450,39 @@ mod tests {
         let config = TlsConfig::new().strict_mode(true);
         let connector = TlsConnector::new(config).unwrap();
         assert!(connector.is_strict_mode());
+    }
+
+    /// #314: with the `native-certs` feature, the OS/platform trust verifier
+    /// must initialize successfully on the host. These prove the wiring builds
+    /// a usable config; they do NOT exercise end-to-end OS-trust validation
+    /// (that needs a server chaining to an OS-installed internal CA, validated
+    /// manually).
+    #[cfg(feature = "native-certs")]
+    mod native_certs {
+        use super::*;
+
+        #[test]
+        fn default_tls_config_uses_platform_verifier() {
+            setup_crypto_provider();
+            // Construction succeeds → the platform verifier initialized against
+            // the host OS trust store.
+            assert!(default_tls_config().is_ok());
+        }
+
+        #[test]
+        fn connector_with_empty_roots_uses_platform_verifier() {
+            setup_crypto_provider();
+            // Default config has no explicit roots → platform-verifier path.
+            assert!(TlsConnector::new(TlsConfig::default()).is_ok());
+        }
+
+        #[test]
+        fn strict_mode_builds_with_platform_verifier() {
+            setup_crypto_provider();
+            // Strict mode mandates real validation; the platform verifier path
+            // must compose with it.
+            let connector = TlsConnector::new(TlsConfig::new().strict_mode(true)).unwrap();
+            assert!(connector.is_strict_mode());
+        }
     }
 }

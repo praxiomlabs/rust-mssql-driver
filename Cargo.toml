@@ -63,6 +63,10 @@ encoding_rs = "0.8"
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
 rustls-pemfile = "2.2"
 webpki-roots = "1.0"
+# OS/platform trust store (behind the `native-certs` feature). Delegates server
+# certificate verification to the operating system's verifier (Windows CryptoAPI,
+# macOS SecTrust, Linux native-certs) so enterprise internal CAs are honored.
+rustls-platform-verifier = "0.7"
 
 # Certificate handling
 p12 = "0.6"
