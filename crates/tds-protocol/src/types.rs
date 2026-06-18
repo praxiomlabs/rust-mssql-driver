@@ -309,8 +309,10 @@ impl ColumnFlags {
             identity: (flags & 0x0010) != 0,
             computed: (flags & 0x0020) != 0,
             fixed_len_clr_type: (flags & 0x0100) != 0,
-            sparse_column_set: (flags & 0x0200) != 0,
-            encrypted: (flags & 0x0400) != 0,
+            // MS-TDS §2.2.7.4 Flags (LSB order): bit 9 (0x0200) is reserved,
+            // fSparseColumnSet is bit 10 (0x0400), fEncrypted is bit 11 (0x0800).
+            sparse_column_set: (flags & 0x0400) != 0,
+            encrypted: (flags & 0x0800) != 0,
             hidden: (flags & 0x2000) != 0,
             key: (flags & 0x4000) != 0,
             nullable_unknown: (flags & 0x8000) != 0,
@@ -342,10 +344,10 @@ impl ColumnFlags {
             flags |= 0x0100;
         }
         if self.sparse_column_set {
-            flags |= 0x0200;
+            flags |= 0x0400;
         }
         if self.encrypted {
-            flags |= 0x0400;
+            flags |= 0x0800;
         }
         if self.hidden {
             flags |= 0x2000;
@@ -392,5 +394,44 @@ mod tests {
         assert_eq!(flags.nullable, restored.nullable);
         assert_eq!(flags.identity, restored.identity);
         assert_eq!(flags.key, restored.key);
+    }
+
+    #[test]
+    fn test_column_flags_spec_bit_positions() {
+        // MS-TDS §2.2.7.4 Flags, least-significant-bit order. fSparseColumnSet
+        // is bit 10 (0x0400) and fEncrypted is bit 11 (0x0800); bit 9 (0x0200)
+        // is reserved. The encrypted bit MUST match crypto::COLUMN_FLAG_ENCRYPTED.
+        assert_eq!(crate::crypto::COLUMN_FLAG_ENCRYPTED, 0x0800);
+
+        let sparse = ColumnFlags::from_bits(0x0400);
+        assert!(sparse.sparse_column_set);
+        assert!(!sparse.encrypted);
+
+        let encrypted = ColumnFlags::from_bits(0x0800);
+        assert!(encrypted.encrypted);
+        assert!(!encrypted.sparse_column_set);
+
+        // Reserved bit 9 must decode to neither flag.
+        let reserved = ColumnFlags::from_bits(0x0200);
+        assert!(!reserved.sparse_column_set);
+        assert!(!reserved.encrypted);
+
+        // Each flag round-trips to exactly its spec bit.
+        assert_eq!(
+            ColumnFlags {
+                sparse_column_set: true,
+                ..Default::default()
+            }
+            .to_bits(),
+            0x0400
+        );
+        assert_eq!(
+            ColumnFlags {
+                encrypted: true,
+                ..Default::default()
+            }
+            .to_bits(),
+            0x0800
+        );
     }
 }

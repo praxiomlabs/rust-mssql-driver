@@ -2686,8 +2686,7 @@ impl TokenParser {
             | Some(TokenType::Sspi)
             | Some(TokenType::ColInfo)
             | Some(TokenType::TabName)
-            | Some(TokenType::Offset)
-            | Some(TokenType::ReturnValue) => {
+            | Some(TokenType::Offset) => {
                 if self.remaining() < 3 {
                     return Err(ProtocolError::UnexpectedEof);
                 }
@@ -2696,6 +2695,15 @@ impl TokenParser {
                     self.data[self.position + 2],
                 ]) as usize;
                 1 + 2 + length // token type + length prefix + data
+            }
+            // RETURNVALUE has no length prefix (MS-TDS §2.2.7.18): the bytes
+            // after the token type are the 2-byte ParamOrdinal, not a length.
+            // Parse to find its end, mirroring ReturnValue::decode in the main
+            // loop (the length-prefix treatment skipped `1 + 2 + ParamOrdinal`).
+            Some(TokenType::ReturnValue) => {
+                let mut buf = &self.data[self.position + 1..];
+                let _ = ReturnValue::decode(&mut buf)?;
+                self.data.len() - self.position - buf.remaining()
             }
             // Tokens with 4-byte length prefix
             Some(TokenType::SessionState) | Some(TokenType::FedAuthInfo) => {
@@ -4461,6 +4469,44 @@ mod tests {
         // Every skipped token was traversed: proof the input was non-trivial.
         assert_eq!(parser.position(), total_len);
         assert!(parser.next_token().unwrap().is_none());
+    }
+
+    /// `skip_token` must parse a RETURNVALUE to find its end, not treat the
+    /// leading ParamOrdinal as a 2-byte length prefix (issue #281). With the
+    /// old length-prefix treatment it skipped `1 + 2 + ParamOrdinal` bytes,
+    /// landing mid-token and corrupting the rest of the stream.
+    #[test]
+    fn skip_token_returnvalue_advances_to_token_end() {
+        let rv = build_return_value_intn(1, "@result", 0x01, Some(42));
+        let rv_token_len = 1 + rv.len(); // 0xAC type byte + inner fields
+
+        let mut buf = BytesMut::new();
+        buf.put_u8(TokenType::ReturnValue as u8);
+        buf.extend_from_slice(&rv);
+        // A trailing DONE proves the parser realigns exactly after the skip.
+        let done = Done {
+            status: DoneStatus {
+                more: false,
+                error: false,
+                in_xact: false,
+                count: true,
+                attn: false,
+                srverror: false,
+            },
+            cur_cmd: 0x1234,
+            row_count: 7,
+        };
+        done.encode(&mut buf);
+
+        let mut parser = TokenParser::new(buf.freeze());
+        parser.skip_token().unwrap();
+        assert_eq!(parser.position(), rv_token_len);
+
+        let Some(Token::Done(decoded)) = parser.next_token().unwrap() else {
+            panic!("expected the DONE token after skipping the RETURNVALUE");
+        };
+        assert_eq!(decoded.cur_cmd, 0x1234);
+        assert_eq!(decoded.row_count, 7);
     }
 
     /// Build an ALTMETADATA token describing one `SUM` aggregate over an `int`
