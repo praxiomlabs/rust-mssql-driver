@@ -19,10 +19,13 @@ categories = ["database"]
 #   Primary (user-facing): mssql-client (main API), mssql-driver-pool (connection pooling)
 #   Internal (implementation): tds-protocol, mssql-types, mssql-tls, mssql-codec, mssql-auth, mssql-derive
 #   Dev-only (publish = false): mssql-testing
-tds-protocol = { version = "0.19.1", path = "crates/tds-protocol" }
+# default-features = false on the two crates with non-empty defaults (#305) so a
+# downstream `--no-default-features` build can shed their type/encoding features;
+# inheriting members forward what they need via `features = [...]`.
+tds-protocol = { version = "0.19.1", path = "crates/tds-protocol", default-features = false }
 mssql-tls = { version = "0.19.1", path = "crates/mssql-tls" }
 mssql-codec = { version = "0.19.1", path = "crates/mssql-codec" }
-mssql-types = { version = "0.19.1", path = "crates/mssql-types" }
+mssql-types = { version = "0.19.1", path = "crates/mssql-types", default-features = false }
 mssql-auth = { version = "0.19.1", path = "crates/mssql-auth" }
 mssql-driver-pool = { version = "0.19.1", path = "crates/mssql-pool" }
 mssql-client = { version = "0.19.1", path = "crates/mssql-client" }

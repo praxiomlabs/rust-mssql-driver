@@ -13,7 +13,12 @@ categories = ["network-programming", "asynchronous"]
 default = []
 
 [dependencies]
-tds-protocol = { workspace = true }
+# tds-protocol's default features are disabled at the workspace root (#305);
+# forward only `std` here. mssql-codec does not use tds-protocol's
+# `encoding`-gated APIs, so a `--no-default-features` build can drop encoding_rs.
+# `encoding` is still enabled in the default workspace build via mssql-client's
+# `encoding` feature (feature unification).
+tds-protocol = { workspace = true, features = ["std"] }
 bytes = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
