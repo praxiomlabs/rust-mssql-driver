@@ -63,7 +63,12 @@ tls = ["dep:mssql-tls"]
 filestream = ["tokio/fs"]
 
 [dependencies]
-tds-protocol = { workspace = true }
+# tds-protocol and mssql-types disable default features at the workspace root
+# (#305) so a downstream `--no-default-features` build of mssql-client can shed
+# the upstream type/codec features. The needed features are forwarded
+# explicitly: `std` unconditionally here (mssql-client is a std crate), and
+# `encoding`/`chrono`/`uuid`/`decimal`/`json` via mssql-client's own features.
+tds-protocol = { workspace = true, features = ["std"] }
 mssql-tls = { workspace = true, optional = true }
 mssql-codec = { workspace = true }
 mssql-types = { workspace = true }
