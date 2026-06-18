@@ -30,6 +30,11 @@ pub fn read_us_varchar(src: &mut impl Buf) -> Option<String> {
 }
 
 /// Read a UTF-16LE string of specified character length.
+///
+/// Malformed UCS-2 (e.g. an unpaired surrogate) is decoded lossily, with each
+/// invalid unit replaced by U+FFFD, rather than failing. This keeps `None`
+/// meaning unambiguously "not enough bytes in the buffer" so callers do not
+/// conflate a decode failure with end-of-input.
 pub fn read_utf16_string(src: &mut impl Buf, char_count: usize) -> Option<String> {
     let byte_count = char_count * 2;
     if src.remaining() < byte_count {
@@ -41,7 +46,7 @@ pub fn read_utf16_string(src: &mut impl Buf, char_count: usize) -> Option<String
         chars.push(src.get_u16_le());
     }
 
-    String::from_utf16(&chars).ok()
+    Some(String::from_utf16_lossy(&chars))
 }
 
 /// Write a length-prefixed UTF-16LE string (1-byte length).
@@ -91,7 +96,7 @@ pub fn utf16_byte_len(s: &str) -> usize {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use bytes::BytesMut;
@@ -122,5 +127,30 @@ mod tests {
     fn test_utf16_byte_len() {
         assert_eq!(utf16_byte_len("Hello"), 10);
         assert_eq!(utf16_byte_len("世界"), 4);
+    }
+
+    /// An unpaired surrogate is malformed UCS-2. It must decode lossily (to
+    /// U+FFFD) rather than returning `None`, so the result is distinguishable
+    /// from a short buffer (#276).
+    #[test]
+    fn test_utf16_unpaired_surrogate_is_lossy_not_none() {
+        let mut buf = BytesMut::new();
+        buf.put_u16_le(0x0041); // 'A'
+        buf.put_u16_le(0xD800); // lone high surrogate (no following low surrogate)
+        buf.put_u16_le(0x0042); // 'B'
+        let mut cursor = buf.freeze();
+
+        let decoded = read_utf16_string(&mut cursor, 3)
+            .expect("malformed UCS-2 must decode lossily, not return None");
+        assert_eq!(decoded, "A\u{FFFD}B");
+    }
+
+    /// A short buffer is the only remaining `None` case.
+    #[test]
+    fn test_utf16_short_buffer_is_none() {
+        let mut buf = BytesMut::new();
+        buf.put_u16_le(0x0041); // only 1 char of bytes
+        let mut cursor = buf.freeze();
+        assert!(read_utf16_string(&mut cursor, 2).is_none());
     }
 }
