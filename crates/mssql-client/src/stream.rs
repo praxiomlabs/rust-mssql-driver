@@ -34,6 +34,7 @@
 
 use std::collections::VecDeque;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use futures_core::Stream;
@@ -86,7 +87,7 @@ pub(crate) enum PendingRow {
 #[must_use = "streams must be consumed; dropping a stream discards remaining rows"]
 pub struct QueryStream<'a> {
     /// Column metadata for the result set.
-    columns: Vec<Column>,
+    row_meta: Arc<crate::row::ColMetaData>,
     /// Buffered rows (typed or raw) from the response.
     rows: VecDeque<PendingRow>,
     /// Protocol metadata needed to decode raw rows. `None` if every pending
@@ -114,7 +115,7 @@ impl QueryStream<'_> {
     #[cfg(test)]
     pub(crate) fn new(columns: Vec<Column>, rows: Vec<Row>) -> Self {
         Self {
-            columns,
+            row_meta: Arc::new(crate::row::ColMetaData::new(columns)),
             rows: rows.into_iter().map(PendingRow::Parsed).collect(),
             meta: None,
             #[cfg(feature = "always-encrypted")]
@@ -138,7 +139,7 @@ impl QueryStream<'_> {
         >,
     ) -> Self {
         Self {
-            columns,
+            row_meta: Arc::new(crate::row::ColMetaData::new(columns)),
             rows: pending.into(),
             meta: Some(meta),
             #[cfg(feature = "always-encrypted")]
@@ -152,7 +153,7 @@ impl QueryStream<'_> {
     #[allow(dead_code)]
     pub(crate) fn empty() -> Self {
         Self {
-            columns: Vec::new(),
+            row_meta: Arc::new(crate::row::ColMetaData::new(Vec::new())),
             rows: VecDeque::new(),
             meta: None,
             #[cfg(feature = "always-encrypted")]
@@ -165,7 +166,7 @@ impl QueryStream<'_> {
     /// Get the column metadata for this result set.
     #[must_use]
     pub fn columns(&self) -> &[Column] {
-        &self.columns
+        &self.row_meta.columns
     }
 
     /// Check if the stream has finished.
@@ -221,11 +222,11 @@ impl QueryStream<'_> {
                     return crate::column_parser::convert_raw_row_decrypted(
                         &raw,
                         meta,
-                        &self.columns,
+                        &self.row_meta,
                         dec,
                     );
                 }
-                crate::column_parser::convert_raw_row(&raw, meta, &self.columns)
+                crate::column_parser::convert_raw_row(&raw, meta, &self.row_meta)
             }
             PendingRow::Nbc(nbc) => {
                 let meta = self
@@ -237,11 +238,11 @@ impl QueryStream<'_> {
                     return crate::column_parser::convert_nbc_row_decrypted(
                         &nbc,
                         meta,
-                        &self.columns,
+                        &self.row_meta,
                         dec,
                     );
                 }
-                crate::column_parser::convert_nbc_row(&nbc, meta, &self.columns)
+                crate::column_parser::convert_nbc_row(&nbc, meta, &self.row_meta)
             }
         }
     }
@@ -460,7 +461,7 @@ impl ProcedureResult {
 #[must_use]
 pub struct ResultSet {
     /// Column metadata for this result set.
-    columns: Vec<Column>,
+    row_meta: Arc<crate::row::ColMetaData>,
     /// Pending rows — either pre-parsed or raw TDS bytes awaiting decode.
     pending_rows: VecDeque<PendingRow>,
     /// Protocol metadata required to decode raw rows. `None` when every
@@ -482,7 +483,7 @@ impl ResultSet {
     /// (private) to defer row decoding.
     pub fn new(columns: Vec<Column>, rows: Vec<Row>) -> Self {
         Self {
-            columns,
+            row_meta: Arc::new(crate::row::ColMetaData::new(columns)),
             pending_rows: rows.into_iter().map(PendingRow::Parsed).collect(),
             meta: None,
             #[cfg(feature = "always-encrypted")]
@@ -505,7 +506,7 @@ impl ResultSet {
         >,
     ) -> Self {
         Self {
-            columns,
+            row_meta: Arc::new(crate::row::ColMetaData::new(columns)),
             pending_rows: pending.into(),
             meta: Some(meta),
             #[cfg(feature = "always-encrypted")]
@@ -516,7 +517,7 @@ impl ResultSet {
     /// Get the column metadata.
     #[must_use]
     pub fn columns(&self) -> &[Column] {
-        &self.columns
+        &self.row_meta.columns
     }
 
     /// Get the number of rows remaining.
@@ -565,11 +566,11 @@ impl ResultSet {
                     return crate::column_parser::convert_raw_row_decrypted(
                         &raw,
                         meta,
-                        &self.columns,
+                        &self.row_meta,
                         dec,
                     );
                 }
-                crate::column_parser::convert_raw_row(&raw, meta, &self.columns)
+                crate::column_parser::convert_raw_row(&raw, meta, &self.row_meta)
             }
             PendingRow::Nbc(nbc) => {
                 let meta = self
@@ -581,11 +582,11 @@ impl ResultSet {
                     return crate::column_parser::convert_nbc_row_decrypted(
                         &nbc,
                         meta,
-                        &self.columns,
+                        &self.row_meta,
                         dec,
                     );
                 }
-                crate::column_parser::convert_nbc_row(&nbc, meta, &self.columns)
+                crate::column_parser::convert_nbc_row(&nbc, meta, &self.row_meta)
             }
         }
     }
@@ -597,7 +598,7 @@ impl ResultSet {
     /// materializing rows when the caller wants stream-level ergonomics.
     fn into_query_stream<'a>(self) -> QueryStream<'a> {
         QueryStream {
-            columns: self.columns,
+            row_meta: self.row_meta,
             rows: self.pending_rows,
             meta: self.meta,
             #[cfg(feature = "always-encrypted")]

@@ -168,7 +168,7 @@ pub mod __bench {
     #[must_use]
     pub fn decode_buffered_response(bytes: Bytes) -> Vec<Row> {
         let mut parser = TokenParser::new(bytes);
-        let mut columns = Vec::new();
+        let mut row_meta = std::sync::Arc::new(crate::row::ColMetaData::new(Vec::new()));
         let mut meta = None;
         let mut rows = Vec::new();
         while let Some(token) = parser
@@ -177,13 +177,15 @@ pub mod __bench {
         {
             match token {
                 Token::ColMetaData(m) => {
-                    columns = Client::<Ready>::build_columns(&m);
+                    row_meta = std::sync::Arc::new(crate::row::ColMetaData::new(
+                        Client::<Ready>::build_columns(&m),
+                    ));
                     meta = Some(m);
                 }
                 Token::Row(raw) => {
                     let m = meta.as_ref().expect("ColMetaData precedes ROW tokens");
                     rows.push(
-                        crate::column_parser::convert_raw_row(&raw, m, &columns)
+                        crate::column_parser::convert_raw_row(&raw, m, &row_meta)
                             .expect("benchmark row must convert"),
                     );
                 }
