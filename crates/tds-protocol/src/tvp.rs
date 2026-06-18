@@ -1003,4 +1003,78 @@ mod tests {
         assert_eq!(&buf[..2], &(expected.len() as u16).to_le_bytes());
         assert_eq!(&buf[2..], &expected[..]);
     }
+
+    /// Golden wire-byte tripwire (#297). These sealed `encode_tvp_*` encoders
+    /// emit TDS wire bytes but live off the public surface (`__private`), so
+    /// `cargo-public-api` and semver-checks cannot see a signature or behavior
+    /// change. Locking exact output bytes here turns any such change into a
+    /// fast unit-test failure (a signature change fails to compile; a behavior
+    /// change fails an assertion) instead of surfacing only in the live suite.
+    #[test]
+    fn golden_tvp_wire_bytes() {
+        fn bytes(f: impl FnOnce(&mut BytesMut)) -> Vec<u8> {
+            let mut buf = BytesMut::new();
+            f(&mut buf);
+            buf.to_vec()
+        }
+
+        // BIT: 1-byte length + value.
+        assert_eq!(bytes(|b| encode_tvp_bit(true, b)), [0x01, 0x01]);
+        assert_eq!(bytes(|b| encode_tvp_bit(false, b)), [0x01, 0x00]);
+
+        // FLOAT: length + IEEE-754 little-endian. 1.0_f64 / 1.0_f32.
+        assert_eq!(
+            bytes(|b| encode_tvp_float(1.0, 8, b)),
+            [0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x3F]
+        );
+        assert_eq!(
+            bytes(|b| encode_tvp_float(1.0, 4, b)),
+            [0x04, 0x00, 0x00, 0x80, 0x3F]
+        );
+
+        // VARBINARY (non-MAX): 2-byte length + raw bytes.
+        assert_eq!(
+            bytes(|b| encode_tvp_varbinary(&[0xDE, 0xAD, 0xBE, 0xEF], 8000, b)),
+            [0x04, 0x00, 0xDE, 0xAD, 0xBE, 0xEF]
+        );
+
+        // GUID: 1-byte length + mixed-endian (first 3 groups LE, last 8 as-is).
+        let guid: [u8; 16] = core::array::from_fn(|i| i as u8);
+        assert_eq!(
+            bytes(|b| encode_tvp_guid(&guid, b)),
+            [16, 3, 2, 1, 0, 5, 4, 7, 6, 8, 9, 10, 11, 12, 13, 14, 15]
+        );
+
+        // DATE: 3-byte little-endian day count (no length prefix for TVP date).
+        assert_eq!(
+            bytes(|b| encode_tvp_date(0x0001_0203, b)),
+            [0x03, 0x02, 0x01]
+        );
+
+        // TIME (scale 7 → 5 bytes): little-endian interval count.
+        assert_eq!(
+            bytes(|b| encode_tvp_time(0x01_0203_0405, 7, b)),
+            [0x05, 0x05, 0x04, 0x03, 0x02, 0x01]
+        );
+
+        // DATETIME2 (scale 7): length(8) + 5 time bytes + 3 date bytes.
+        assert_eq!(
+            bytes(|b| encode_tvp_datetime2(0x01_0203_0405, 0x0001_0203, 7, b)),
+            [0x08, 0x05, 0x04, 0x03, 0x02, 0x01, 0x03, 0x02, 0x01]
+        );
+
+        // DATETIMEOFFSET (scale 7): length(10) + 5 time + 3 date + 2 offset (LE).
+        assert_eq!(
+            bytes(|b| encode_tvp_datetimeoffset(0x01_0203_0405, 0x0001_0203, 120, 7, b)),
+            [
+                0x0A, 0x05, 0x04, 0x03, 0x02, 0x01, 0x03, 0x02, 0x01, 0x78, 0x00
+            ]
+        );
+
+        // DECIMAL: length(17) + sign + 16-byte little-endian mantissa.
+        assert_eq!(
+            bytes(|b| encode_tvp_decimal(1, 12345, b)),
+            [17, 1, 0x39, 0x30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
+    }
 }
