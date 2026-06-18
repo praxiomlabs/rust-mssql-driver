@@ -11,10 +11,17 @@ categories = ["network-programming", "cryptography"]
 
 [features]
 default = []
+# Verify server certificates against the OS/platform trust store, so servers
+# chaining to an enterprise internal CA installed in the OS store are accepted.
+# Delegates to the platform verifier (revocation + OS policy). Off by default:
+# enabling it changes the trust-anchor set. Active only when no explicit
+# `root_certificates` are configured (explicit roots still take precedence).
+native-certs = ["dep:rustls-platform-verifier"]
 
 [dependencies]
 rustls = { workspace = true }
 webpki-roots = { workspace = true }
+rustls-platform-verifier = { workspace = true, optional = true }
 tokio = { workspace = true }
 tokio-rustls = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }

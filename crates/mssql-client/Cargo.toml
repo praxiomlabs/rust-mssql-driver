@@ -57,6 +57,10 @@ sspi-auth = ["mssql-auth/sspi-auth"]
 # legacy SQL Server instances, or development environments) to reduce binary size and compile time.
 # When disabled, only `Encrypt=no_tls` connections are supported.
 tls = ["dep:mssql-tls"]
+# Verify server certificates against the OS/platform trust store (enterprise
+# internal CAs). Implies `tls`. Off by default — see the mssql-tls `native-certs`
+# feature. Honored only when no explicit root certificates are configured.
+native-certs = ["tls", "mssql-tls/native-certs"]
 # FILESTREAM BLOB access (Windows only)
 # Enables async read/write of SQL Server FILESTREAM data via the Win32 OpenSqlFilestream API.
 # Requires the Microsoft OLE DB Driver for SQL Server (msoledbsql.dll) at runtime.

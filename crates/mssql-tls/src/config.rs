@@ -44,8 +44,11 @@ pub struct TlsConfig {
 
     /// Custom root certificates to trust.
     ///
-    /// If empty, the bundled webpki (Mozilla) root certificates are used. The
-    /// driver does not read the operating system trust store.
+    /// If empty, the bundled webpki (Mozilla) root certificates are used —
+    /// unless the `native-certs` feature is enabled, in which case verification
+    /// is delegated to the OS/platform trust store (so enterprise internal CAs
+    /// installed in the OS store are honored). Setting explicit roots here
+    /// always takes precedence over the OS store.
     pub root_certificates: Vec<CertificateDer<'static>>,
 
     /// Client authentication credentials for mutual TLS (TDS 8.0 client cert auth).

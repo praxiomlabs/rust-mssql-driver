@@ -24,12 +24,21 @@
 //! - Hostname verification
 //! - Custom certificate authority support
 //! - Client certificate authentication (TDS 8.0)
+//! - Optional OS/platform trust store (`native-certs` feature)
 //!
 //! ## Security
 //!
 //! By default, this crate validates server certificates using the Mozilla
 //! root certificate store. The `TrustServerCertificate` option disables
 //! validation but logs a warning - this should only be used for development.
+//!
+//! Enterprise deployments often issue server certificates from an internal CA
+//! that lives in the operating system trust store rather than Mozilla's list.
+//! Enable the `native-certs` feature to delegate validation to the OS/platform
+//! verifier (Windows CryptoAPI, macOS SecTrust, Linux native certs), which
+//! honors those internal CAs along with OS revocation and policy. Explicit
+//! [`TlsConfig::add_root_certificate`] roots always take precedence over the
+//! OS store.
 //!
 //! ```rust,ignore
 //! use mssql_tls::{TlsConfig, TlsConnector, default_tls_config};
