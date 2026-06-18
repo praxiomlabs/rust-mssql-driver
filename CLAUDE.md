@@ -262,8 +262,14 @@ Rules for agents: **never run `cargo publish`, never create version tags, never 
   empty commit has no effect — the marker must touch the affected crate
   (PR #201 used a genuine doc improvement).
 - **Changelog completeness**: release-plz has dropped commits from generated
-  CHANGELOG entries before (#184, v0.13.0). Diff the entries against
-  `git log` since the last tag.
+  CHANGELOG entries before (#184, v0.13.0; recurred in v0.19.0). The
+  **Changelog Completeness** CI job (`scripts/check-changelog-completeness.sh`)
+  now guards this automatically on the Release PR — it diffs the pending
+  `## [X.Y.Z]` section against the published-crate commits in
+  `<last-tag>..main` and fails on any missing entry. Run it locally on a
+  Release PR branch with `bash scripts/check-changelog-completeness.sh`. It is
+  a no-op off a Release PR (self-gates on the top section being ahead of the
+  latest tag), so a red result is a real gap: restore the entries by hand.
 
 `just doc-consistency` (also a CI gate) verifies MSRV references agree across files, CHANGELOG matches the workspace version, deny.toml/audit.toml ignore lists stay in sync, and first-party dependency snippets in README/docs match the workspace version.
 

@@ -648,3 +648,19 @@ jobs:
             exit 1
           fi
           echo "No ignored BREAKING body lines in PR commit range."
+
+  changelog-completeness:
+    name: Changelog Completeness
+    # Release-PR-only: release-plz can silently drop non-merge commits from a
+    # generated CHANGELOG section while bumping the version correctly (issue
+    # #184: PR #170 in v0.13.0; recurred in v0.19.0). This guard diffs the
+    # pending `## [X.Y.Z]` section against the commits the release covers and
+    # fails if a published-crate commit is missing.
+    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-plz-')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Check the pending CHANGELOG section is complete
+        run: bash scripts/check-changelog-completeness.sh "${{ github.event.pull_request.base.sha }}"
