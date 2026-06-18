@@ -81,6 +81,10 @@ pub enum TokenType {
     TabName = 0xA4,
     /// Offset (OFFSET).
     Offset = 0x78,
+    /// Compute (COMPUTE BY) column metadata (ALTMETADATA). Deprecated in TDS 7.4.
+    AltMetaData = 0x88,
+    /// Compute (COMPUTE BY) row data (ALTROW). Deprecated in TDS 7.4.
+    AltRow = 0xD3,
 }
 
 impl TokenType {
@@ -107,6 +111,8 @@ impl TokenType {
             0xA5 => Some(Self::ColInfo),
             0xA4 => Some(Self::TabName),
             0x78 => Some(Self::Offset),
+            0x88 => Some(Self::AltMetaData),
+            0xD3 => Some(Self::AltRow),
             _ => None,
         }
     }
@@ -868,6 +874,57 @@ impl ColMetaData {
             columns,
             cek_table: None,
         })
+    }
+
+    /// Decode an ALTMETADATA (COMPUTE BY) token body, returning the compute Id
+    /// and the column metadata describing the matching ALTROW values.
+    ///
+    /// The token type byte (0x88) must already be consumed. ALTMETADATA was
+    /// deprecated in TDS 7.4, but legacy `COMPUTE BY` queries still emit it. The
+    /// driver parses it only to learn the ALTROW value layout so those rows can
+    /// be consumed and dropped, keeping the token stream byte-aligned.
+    ///
+    /// Wire format (MS-TDS 2.2.7.1):
+    /// `Count(USHORT) Id(USHORT) ByCols(UCHAR) ByCols*ColNum(USHORT) Count*ComputeData`,
+    /// where each `ComputeData` is `Op(BYTE) Operand(USHORT)` followed by a
+    /// column definition identical to COLMETADATA (TableName is never sent for
+    /// COMPUTE, which excludes text/ntext/image columns).
+    fn decode_alt(src: &mut impl Buf) -> Result<(u16, Self), ProtocolError> {
+        // Count (USHORT) + Id (USHORT) + ByCols (UCHAR)
+        if src.remaining() < 5 {
+            return Err(ProtocolError::UnexpectedEof);
+        }
+        let count = src.get_u16_le();
+        let id = src.get_u16_le();
+        let by_cols = src.get_u8() as usize;
+
+        // ColNum: USHORT repeated ByCols times (the grouping columns). Not needed
+        // to parse ALTROW values, but must be consumed to stay byte-aligned.
+        if src.remaining() < by_cols * 2 {
+            return Err(ProtocolError::UnexpectedEof);
+        }
+        for _ in 0..by_cols {
+            let _ = src.get_u16_le();
+        }
+
+        let mut columns = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            // ComputeData prefix: Op (BYTE) + Operand (USHORT).
+            if src.remaining() < 3 {
+                return Err(ProtocolError::UnexpectedEof);
+            }
+            let _op = src.get_u8();
+            let _operand = src.get_u16_le();
+            columns.push(Self::decode_column(src)?);
+        }
+
+        Ok((
+            id,
+            Self {
+                columns,
+                cek_table: None,
+            },
+        ))
     }
 
     /// Decode a single column from the metadata.
@@ -2353,6 +2410,10 @@ pub struct TokenParser {
     /// Whether Always Encrypted was negotiated for this connection.
     /// When true, ColMetaData tokens are parsed with CekTable and per-column CryptoMetadata.
     encryption_enabled: bool,
+    /// COMPUTE BY (ALTMETADATA) column layouts keyed by compute Id, used to
+    /// parse and drop the matching ALTROW tokens. Cleared on each new
+    /// ColMetaData (result-set boundary), where compute Ids become unique again.
+    alt_metadata: Vec<(u16, ColMetaData)>,
 }
 
 impl TokenParser {
@@ -2363,6 +2424,7 @@ impl TokenParser {
             data,
             position: 0,
             encryption_enabled: false,
+            alt_metadata: Vec::new(),
         }
     }
 
@@ -2488,6 +2550,9 @@ impl TokenParser {
                     } else {
                         ColMetaData::decode(&mut buf)?
                     };
+                    // New result set: prior COMPUTE BY layouts no longer apply
+                    // and their Ids may be reused.
+                    self.alt_metadata.clear();
                     Token::ColMetaData(col_meta)
                 }
                 Some(TokenType::Row) => {
@@ -2541,6 +2606,41 @@ impl TokenParser {
                     // path must NOT recurse — a server-controlled flat run of these
                     // tokens would otherwise add one stack frame per token and
                     // overflow the stack (remote DoS).
+                    self.position = start_pos + (self.data.len() - start_pos - buf.remaining());
+                    continue;
+                }
+                Some(TokenType::AltMetaData) => {
+                    // COMPUTE BY metadata (#275). Parse to learn the ALTROW value
+                    // layout, store it keyed by Id, then drop the token — compute
+                    // rows are not surfaced, but their bytes must be consumed so
+                    // the base result set stays parseable.
+                    let (id, alt_meta) = ColMetaData::decode_alt(&mut buf)?;
+                    self.position = start_pos + (self.data.len() - start_pos - buf.remaining());
+                    self.alt_metadata.push((id, alt_meta));
+                    continue;
+                }
+                Some(TokenType::AltRow) => {
+                    // COMPUTE BY row (#275). Parse using the matching ALTMETADATA
+                    // to consume its bytes, then drop it. Like the ColInfo skip
+                    // path, this MUST NOT recurse (remote DoS via a flat token run).
+                    if buf.remaining() < 2 {
+                        return Err(ProtocolError::UnexpectedEof);
+                    }
+                    let id = buf.get_u16_le();
+                    let alt_meta = self
+                        .alt_metadata
+                        .iter()
+                        .find(|(stored_id, _)| *stored_id == id)
+                        .map(|(_, meta)| meta)
+                        .ok_or_else(|| {
+                            ProtocolError::StringEncoding(
+                                #[cfg(feature = "std")]
+                                "ALTROW token without matching ALTMETADATA".to_string(),
+                                #[cfg(not(feature = "std"))]
+                                "ALTROW token without matching ALTMETADATA",
+                            )
+                        })?;
+                    let _ = RawRow::decode(&mut buf, alt_meta)?;
                     self.position = start_pos + (self.data.len() - start_pos - buf.remaining());
                     continue;
                 }
@@ -2615,6 +2715,31 @@ impl TokenParser {
                 // Parse to find end
                 let mut buf = &self.data[self.position + 1..];
                 let _ = FeatureExtAck::decode(&mut buf)?;
+                self.data.len() - self.position - buf.remaining()
+            }
+            // COMPUTE BY metadata (#275) has no length prefix; parse to find its
+            // end, recording the layout so a following ALTROW can be skipped.
+            Some(TokenType::AltMetaData) => {
+                let mut buf = &self.data[self.position + 1..];
+                let (id, alt_meta) = ColMetaData::decode_alt(&mut buf)?;
+                let consumed = self.data.len() - self.position - buf.remaining();
+                self.alt_metadata.push((id, alt_meta));
+                consumed
+            }
+            // COMPUTE BY row (#275); length depends on the matching ALTMETADATA.
+            Some(TokenType::AltRow) => {
+                let mut buf = &self.data[self.position + 1..];
+                if buf.remaining() < 2 {
+                    return Err(ProtocolError::UnexpectedEof);
+                }
+                let id = buf.get_u16_le();
+                let alt_meta = self
+                    .alt_metadata
+                    .iter()
+                    .find(|(stored_id, _)| *stored_id == id)
+                    .map(|(_, meta)| meta)
+                    .ok_or(ProtocolError::InvalidTokenType(token_type_byte))?;
+                let _ = RawRow::decode(&mut buf, alt_meta)?;
                 self.data.len() - self.position - buf.remaining()
             }
             // ColMetaData, Row, NbcRow require context and can't be easily skipped
@@ -4336,5 +4461,109 @@ mod tests {
         // Every skipped token was traversed: proof the input was non-trivial.
         assert_eq!(parser.position(), total_len);
         assert!(parser.next_token().unwrap().is_none());
+    }
+
+    /// Build an ALTMETADATA token describing one `SUM` aggregate over an `int`
+    /// column (empty name), followed by `rows` ALTROW tokens each carrying that
+    /// int value. Mirrors the wire shape of a `COMPUTE BY` result set.
+    fn compute_by_tokens(id: u16, rows: &[i32]) -> BytesMut {
+        let mut buf = BytesMut::new();
+        // ALTMETADATA
+        buf.put_u8(TokenType::AltMetaData as u8);
+        buf.put_u16_le(1); // Count = 1 ComputeData
+        buf.put_u16_le(id); // Id
+        buf.put_u8(1); // ByCols = 1
+        buf.put_u16_le(1); // ColNum[0]
+        buf.put_u8(0x4D); // Op = AOPSUM
+        buf.put_u16_le(1); // Operand (column 1)
+        buf.put_u32_le(0); // UserType (ULONG)
+        buf.put_u16_le(0); // Flags
+        buf.put_u8(TypeId::Int4 as u8); // TYPE_INFO (fixed-length int4)
+        buf.put_u8(0); // ColName: B_VARCHAR length 0
+        // ALTROW(s)
+        for &v in rows {
+            buf.put_u8(TokenType::AltRow as u8);
+            buf.put_u16_le(id); // Id matching the ALTMETADATA
+            buf.put_i32_le(v); // int4 value
+        }
+        buf
+    }
+
+    fn trailing_done(buf: &mut BytesMut) {
+        let done = Done {
+            status: DoneStatus {
+                more: false,
+                error: false,
+                in_xact: false,
+                count: true,
+                attn: false,
+                srverror: false,
+            },
+            cur_cmd: 0xBEEF,
+            row_count: 3,
+        };
+        done.encode(buf);
+    }
+
+    /// #275: a COMPUTE BY result set (ALTMETADATA 0x88 + ALTROW 0xD3) must be
+    /// silently consumed, not hard-error. The DONE following the compute tokens
+    /// must still be delivered, and every byte traversed.
+    #[test]
+    fn compute_by_alt_tokens_skipped_275() {
+        let mut buf = compute_by_tokens(7, &[42, -1]);
+        trailing_done(&mut buf);
+        let total_len = buf.len();
+
+        let mut parser = TokenParser::new(buf.freeze());
+
+        // The first token surfaced is the DONE — both ALTROWs and the
+        // ALTMETADATA were dropped, not returned.
+        let Some(Token::Done(done)) = parser.next_token().unwrap() else {
+            panic!("expected DONE after the COMPUTE BY tokens were skipped");
+        };
+        assert_eq!(done.cur_cmd, 0xBEEF);
+
+        // All alt-token bytes were consumed to reach the DONE.
+        assert_eq!(parser.position(), total_len);
+        assert!(parser.next_token().unwrap().is_none());
+    }
+
+    /// #275: ALTMETADATA must be remembered across calls so a following
+    /// ColMetaData (new result set) clears stale compute Ids.
+    #[test]
+    fn compute_by_alt_metadata_cleared_on_new_colmetadata_275() {
+        let mut buf = compute_by_tokens(7, &[42]);
+        // New result set: a COLMETADATA token clears alt_metadata. Encode an
+        // empty (NO_METADATA) ColMetaData, then reuse Id 7 for a fresh compute.
+        buf.put_u8(TokenType::ColMetaData as u8);
+        buf.put_u16_le(ColMetaData::NO_METADATA);
+        buf.extend_from_slice(&compute_by_tokens(7, &[99]));
+        trailing_done(&mut buf);
+        let total_len = buf.len();
+
+        let mut parser = TokenParser::new(buf.freeze());
+
+        // First surfaced token: the empty ColMetaData (compute tokens dropped).
+        let Some(Token::ColMetaData(_)) = parser.next_token().unwrap() else {
+            panic!("expected ColMetaData between the two compute groups");
+        };
+        // Then the DONE, after the second compute group is also dropped.
+        let Some(Token::Done(_)) = parser.next_token().unwrap() else {
+            panic!("expected DONE after the second COMPUTE BY group");
+        };
+        assert_eq!(parser.position(), total_len);
+    }
+
+    /// #275: an ALTROW with no matching ALTMETADATA cannot be length-decoded;
+    /// it must error cleanly rather than panic or desync.
+    #[test]
+    fn altrow_without_altmetadata_errors_275() {
+        let mut buf = BytesMut::new();
+        buf.put_u8(TokenType::AltRow as u8);
+        buf.put_u16_le(7); // Id with no preceding ALTMETADATA
+        buf.put_i32_le(42);
+
+        let mut parser = TokenParser::new(buf.freeze());
+        assert!(parser.next_token().is_err());
     }
 }

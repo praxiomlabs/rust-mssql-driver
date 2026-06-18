@@ -70,8 +70,19 @@ pub enum EncryptionLevel {
     /// Encryption is required.
     #[default]
     Required = 0x03,
-    /// Client certificate authentication (TDS 8.0+).
+    /// Client certificate authentication, base level off
+    /// (`ENCRYPT_CLIENT_CERT | ENCRYPT_OFF`, TDS 8.0+).
+    ///
+    /// `ENCRYPT_CLIENT_CERT` (0x80) is a flag OR'd onto the base encryption
+    /// level, so it appears combined with on/required as well (see
+    /// [`Self::ClientCertOn`] / [`Self::ClientCertReq`]).
     ClientCertAuth = 0x80,
+    /// Client certificate authentication with encryption on
+    /// (`ENCRYPT_CLIENT_CERT | ENCRYPT_ON`, TDS 8.0+).
+    ClientCertOn = 0x81,
+    /// Client certificate authentication with encryption required
+    /// (`ENCRYPT_CLIENT_CERT | ENCRYPT_REQ`, TDS 8.0+).
+    ClientCertReq = 0x83,
 }
 
 impl EncryptionLevel {
@@ -89,6 +100,8 @@ impl EncryptionLevel {
             0x02 => Ok(Self::NotSupported),
             0x03 => Ok(Self::Required),
             0x80 => Ok(Self::ClientCertAuth),
+            0x81 => Ok(Self::ClientCertOn),
+            0x83 => Ok(Self::ClientCertReq),
             _ => Err(ProtocolError::InvalidEncryptionLevel(value)),
         }
     }
@@ -96,7 +109,17 @@ impl EncryptionLevel {
     /// Check if encryption is required.
     #[must_use]
     pub const fn is_required(&self) -> bool {
-        matches!(self, Self::On | Self::Required | Self::ClientCertAuth)
+        // ClientCertOn/ClientCertReq carry ENCRYPT_ON/ENCRYPT_REQ in the base
+        // bits, so they imply encryption; 0x80 (ClientCertAuth) is the base-off
+        // combo retained for backwards compatibility.
+        matches!(
+            self,
+            Self::On
+                | Self::Required
+                | Self::ClientCertAuth
+                | Self::ClientCertOn
+                | Self::ClientCertReq
+        )
     }
 }
 
@@ -473,6 +496,35 @@ mod tests {
         assert!(EncryptionLevel::On.is_required());
         assert!(!EncryptionLevel::Off.is_required());
         assert!(!EncryptionLevel::NotSupported.is_required());
+    }
+
+    /// #308: `ENCRYPT_CLIENT_CERT` (0x80) is a flag OR'd onto the base level,
+    /// so 0x81 (cert|on) and 0x83 (cert|req) are valid per MS-TDS and must
+    /// decode rather than erroring as `InvalidEncryptionLevel`. The combos that
+    /// carry encryption (0x81/0x83) are `is_required`.
+    #[test]
+    fn test_encryption_level_client_cert_combos_308() {
+        assert_eq!(
+            EncryptionLevel::from_u8(0x80).unwrap(),
+            EncryptionLevel::ClientCertAuth
+        );
+        assert_eq!(
+            EncryptionLevel::from_u8(0x81).unwrap(),
+            EncryptionLevel::ClientCertOn
+        );
+        assert_eq!(
+            EncryptionLevel::from_u8(0x83).unwrap(),
+            EncryptionLevel::ClientCertReq
+        );
+        assert!(EncryptionLevel::ClientCertOn.is_required());
+        assert!(EncryptionLevel::ClientCertReq.is_required());
+
+        // 0x82 has no defined meaning (ENCRYPT_CLIENT_CERT | 0x02 NotSupported)
+        // and must still fail closed.
+        assert!(matches!(
+            EncryptionLevel::from_u8(0x82),
+            Err(ProtocolError::InvalidEncryptionLevel(0x82))
+        ));
     }
 
     /// FEDAUTHREQUIRED (option 0x06) must be emitted with payload 0x01 when
