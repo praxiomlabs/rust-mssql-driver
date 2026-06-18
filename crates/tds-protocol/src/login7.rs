@@ -427,9 +427,15 @@ impl Login7 {
     pub fn encode(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(512);
 
-        // Calculate variable data offsets
-        // Variable data starts after the 94-byte fixed header
-        let mut offset = LOGIN7_HEADER_SIZE as u16;
+        // Calculate variable data offsets.
+        //
+        // Variable data starts after the 94-byte fixed header. Offsets are
+        // accumulated in u32 (not u16) so a >64KB SSPI blob and the fields
+        // that follow it do not wrap; each value is narrowed to the USHORT
+        // wire field at serialization. Per MS-TDS the offset of a zero-length
+        // field is ignored, so narrowing a post-SSPI offset is only observable
+        // for a non-empty field (guarded by debug_assert below).
+        let mut offset: u32 = LOGIN7_HEADER_SIZE as u32;
 
         // Pre-calculate all UTF-16 lengths
         let hostname_len = self.hostname.encode_utf16().count() as u16;
@@ -441,9 +447,21 @@ impl Login7 {
         let library_name_len = self.library_name.encode_utf16().count() as u16;
         let language_len = self.language.encode_utf16().count() as u16;
         let database_len = self.database.encode_utf16().count() as u16;
-        let sspi_len = self.sspi_data.len() as u16;
+        let sspi_len = self.sspi_data.len();
         let attach_db_len = self.attach_db_file.encode_utf16().count() as u16;
         let new_password_len = self.new_password.encode_utf16().count() as u16;
+
+        // SSPI length indirection (MS-TDS §2.2.6.4). When the blob does not fit
+        // the USHORT `cbSSPI`, `cbSSPI` is the 0xFFFF sentinel and the real
+        // length goes in the DWORD `cbSSPILong`. The server reads `cbSSPILong`
+        // only when `cbSSPI == 0xFFFF` (and a `cbSSPILong` of 0 then means "use
+        // 0xFFFF"). Emitting the long form for `len >= 0xFFFF` keeps the
+        // invariant `cbSSPI == 0xFFFF  <=>  cbSSPILong holds the real length`.
+        let (cb_sspi, cb_sspi_long): (u16, u32) = if sspi_len >= 0xFFFF {
+            (0xFFFF, sspi_len as u32)
+        } else {
+            (sspi_len as u16, 0)
+        };
 
         // Build variable data buffer
         let mut var_data = BytesMut::new();
@@ -451,27 +469,27 @@ impl Login7 {
         // Hostname
         let hostname_offset = offset;
         write_utf16_string(&mut var_data, &self.hostname);
-        offset += hostname_len * 2;
+        offset += u32::from(hostname_len) * 2;
 
         // Username
         let username_offset = offset;
         write_utf16_string(&mut var_data, &self.username);
-        offset += username_len * 2;
+        offset += u32::from(username_len) * 2;
 
         // Password (obfuscated)
         let password_offset = offset;
         Self::write_obfuscated_password(&mut var_data, &self.password);
-        offset += password_len * 2;
+        offset += u32::from(password_len) * 2;
 
         // App name
         let app_name_offset = offset;
         write_utf16_string(&mut var_data, &self.app_name);
-        offset += app_name_len * 2;
+        offset += u32::from(app_name_len) * 2;
 
         // Server name
         let server_name_offset = offset;
         write_utf16_string(&mut var_data, &self.server_name);
-        offset += server_name_len * 2;
+        offset += u32::from(server_name_len) * 2;
 
         // Unused / Feature extension pointer.
         //
@@ -494,39 +512,39 @@ impl Login7 {
             // remaining var_data fields are written.
             let feature_data_offset = offset
                 + 4 // the u32 pointer we're about to write
-                + library_name_len * 2
-                + language_len * 2
-                + database_len * 2
-                + sspi_len
-                + attach_db_len * 2
-                + new_password_len * 2;
+                + u32::from(library_name_len) * 2
+                + u32::from(language_len) * 2
+                + u32::from(database_len) * 2
+                + sspi_len as u32
+                + u32::from(attach_db_len) * 2
+                + u32::from(new_password_len) * 2;
             let pointer_offset = offset;
             // Write the u32 that ibExtension will point TO. Its value is the
             // offset of the actual FeatureExt block.
-            var_data.put_u32_le(feature_data_offset as u32);
+            var_data.put_u32_le(feature_data_offset);
             offset += 4;
             pointer_offset
         } else {
             let unused_offset = offset;
             write_utf16_string(&mut var_data, &self.unused);
-            offset += unused_len * 2;
+            offset += u32::from(unused_len) * 2;
             unused_offset
         };
 
         // Library name
         let library_name_offset = offset;
         write_utf16_string(&mut var_data, &self.library_name);
-        offset += library_name_len * 2;
+        offset += u32::from(library_name_len) * 2;
 
         // Language
         let language_offset = offset;
         write_utf16_string(&mut var_data, &self.language);
-        offset += language_len * 2;
+        offset += u32::from(language_len) * 2;
 
         // Database
         let database_offset = offset;
         write_utf16_string(&mut var_data, &self.database);
-        offset += database_len * 2;
+        offset += u32::from(database_len) * 2;
 
         // Client ID (6 bytes)
         // (Already handled in fixed header)
@@ -534,12 +552,12 @@ impl Login7 {
         // SSPI
         let sspi_offset = offset;
         var_data.put_slice(&self.sspi_data);
-        offset += sspi_len;
+        offset += sspi_len as u32;
 
         // Attach DB file
         let attach_db_offset = offset;
         write_utf16_string(&mut var_data, &self.attach_db_file);
-        offset += attach_db_len * 2;
+        offset += u32::from(attach_db_len) * 2;
 
         // Change password
         let new_password_offset = offset;
@@ -548,8 +566,23 @@ impl Login7 {
         }
         #[allow(unused_assignments)]
         {
-            offset += new_password_len * 2;
+            offset += u32::from(new_password_len) * 2;
         }
+
+        // attach_db / change_password follow the SSPI blob, so a >64KB SSPI can
+        // push their offsets past USHORT. Those fields are not wired by the
+        // client (always empty), and the server ignores a zero-length field's
+        // offset, so the USHORT narrowing below is only observable for a
+        // non-empty field — an unsupported combination we refuse to emit
+        // silently.
+        debug_assert!(
+            attach_db_len == 0 || attach_db_offset <= u32::from(u16::MAX),
+            "attach_db offset {attach_db_offset} exceeds USHORT with a non-empty field",
+        );
+        debug_assert!(
+            new_password_len == 0 || new_password_offset <= u32::from(u16::MAX),
+            "change_password offset {new_password_offset} exceeds USHORT with a non-empty field",
+        );
 
         // Feature extensions (if any)
         if self.option_flags3.extension {
@@ -582,15 +615,15 @@ impl Login7 {
         buf.put_u32_le(self.client_lcid); // Client LCID
 
         // Variable length field offsets and lengths
-        buf.put_u16_le(hostname_offset);
+        buf.put_u16_le(hostname_offset as u16);
         buf.put_u16_le(hostname_len);
-        buf.put_u16_le(username_offset);
+        buf.put_u16_le(username_offset as u16);
         buf.put_u16_le(username_len);
-        buf.put_u16_le(password_offset);
+        buf.put_u16_le(password_offset as u16);
         buf.put_u16_le(password_len);
-        buf.put_u16_le(app_name_offset);
+        buf.put_u16_le(app_name_offset as u16);
         buf.put_u16_le(app_name_len);
-        buf.put_u16_le(server_name_offset);
+        buf.put_u16_le(server_name_offset as u16);
         buf.put_u16_le(server_name_len);
 
         // Extension offset (or unused)
@@ -602,25 +635,26 @@ impl Login7 {
             buf.put_u16_le(unused_len);
         }
 
-        buf.put_u16_le(library_name_offset);
+        buf.put_u16_le(library_name_offset as u16);
         buf.put_u16_le(library_name_len);
-        buf.put_u16_le(language_offset);
+        buf.put_u16_le(language_offset as u16);
         buf.put_u16_le(language_len);
-        buf.put_u16_le(database_offset);
+        buf.put_u16_le(database_offset as u16);
         buf.put_u16_le(database_len);
 
         // Client ID (6 bytes)
         buf.put_slice(&self.client_id);
 
-        buf.put_u16_le(sspi_offset);
-        buf.put_u16_le(sspi_len);
-        buf.put_u16_le(attach_db_offset);
+        buf.put_u16_le(sspi_offset as u16);
+        buf.put_u16_le(cb_sspi);
+        buf.put_u16_le(attach_db_offset as u16);
         buf.put_u16_le(attach_db_len);
-        buf.put_u16_le(new_password_offset);
+        buf.put_u16_le(new_password_offset as u16);
         buf.put_u16_le(new_password_len);
 
-        // SSPI Long (4 bytes, for SSPI > 65535 bytes)
-        buf.put_u32_le(0);
+        // SSPI Long (DWORD): the real SSPI length when cbSSPI is the 0xFFFF
+        // sentinel, otherwise 0. See the cb_sspi/cb_sspi_long computation above.
+        buf.put_u32_le(cb_sspi_long);
 
         // Append variable data
         buf.put_slice(&var_data);
@@ -836,6 +870,128 @@ mod tests {
             ib_extension < feature_ext_offset,
             "ibExtension ({ib_extension}) must point at the u32 pointer, \
              which lives before FeatureExt data ({feature_ext_offset})"
+        );
+    }
+
+    /// MS-TDS §2.2.6.4: a small SSPI blob is carried inline in the USHORT
+    /// `cbSSPI`, with the DWORD `cbSSPILong` left 0. Pins the offset/length
+    /// table layout for the SSPI fields (sspi_offset@78, cbSSPI@80,
+    /// cbSSPILong@90 — see `encode`).
+    #[test]
+    fn test_login7_sspi_small_inline() {
+        let sspi = vec![0xABu8; 200];
+        let e = Login7::new().with_integrated_auth(sspi.clone()).encode();
+
+        let sspi_offset = u16::from_le_bytes([e[78], e[79]]) as usize;
+        let cb_sspi = u16::from_le_bytes([e[80], e[81]]);
+        let cb_sspi_long = u32::from_le_bytes([e[90], e[91], e[92], e[93]]);
+
+        assert_eq!(cb_sspi, 200, "small SSPI length goes inline in cbSSPI");
+        assert_eq!(
+            cb_sspi_long, 0,
+            "cbSSPILong is unused for a small SSPI blob"
+        );
+        assert_eq!(
+            &e[sspi_offset..sspi_offset + 200],
+            &sspi[..],
+            "SSPI bytes round-trip at sspi_offset"
+        );
+    }
+
+    /// MS-TDS §2.2.6.4: when the SSPI blob exceeds the USHORT `cbSSPI`, `cbSSPI`
+    /// MUST be the 0xFFFF sentinel and the real length goes in the DWORD
+    /// `cbSSPILong`. Also a regression for the variable-data offset arithmetic:
+    /// the FeatureExt pointer must resolve PAST a >64KB blob (offsets were
+    /// previously accumulated in u16 and wrapped around).
+    #[test]
+    fn test_login7_sspi_long_indirection() {
+        let sspi = vec![0x5Au8; 70_000];
+        let e = Login7::new()
+            .with_integrated_auth(sspi.clone())
+            .with_feature(FeatureExtension {
+                feature_id: FeatureId::ColumnEncryption,
+                data: Bytes::from_static(&[0x01]),
+            })
+            .encode();
+
+        let sspi_offset = u16::from_le_bytes([e[78], e[79]]) as usize;
+        let cb_sspi = u16::from_le_bytes([e[80], e[81]]);
+        let cb_sspi_long = u32::from_le_bytes([e[90], e[91], e[92], e[93]]);
+
+        assert_eq!(
+            cb_sspi, 0xFFFF,
+            "cbSSPI must be the 0xFFFF sentinel for a >USHORT SSPI blob"
+        );
+        assert_eq!(
+            cb_sspi_long, 70_000,
+            "cbSSPILong carries the real SSPI length"
+        );
+        assert_eq!(
+            &e[sspi_offset..sspi_offset + 70_000],
+            &sspi[..],
+            "large SSPI bytes round-trip at sspi_offset"
+        );
+
+        // The LOGIN7 Length field accounts for the full blob.
+        let total = u32::from_le_bytes([e[0], e[1], e[2], e[3]]) as usize;
+        assert_eq!(total, e.len(), "Length field matches encoded size");
+
+        // FeatureExt pointer indirection must resolve past the 70KB blob.
+        const EXTENSION_SLOT: usize = 36 + 5 * 4;
+        let ib_extension = u16::from_le_bytes([e[EXTENSION_SLOT], e[EXTENSION_SLOT + 1]]) as usize;
+        let feature_ext_offset = u32::from_le_bytes([
+            e[ib_extension],
+            e[ib_extension + 1],
+            e[ib_extension + 2],
+            e[ib_extension + 3],
+        ]) as usize;
+        assert!(
+            feature_ext_offset > 70_000,
+            "FeatureExt block must land past the SSPI blob (offset {feature_ext_offset})"
+        );
+        assert_eq!(
+            e[feature_ext_offset], 0x04,
+            "FeatureExt block starts with the ColumnEncryption id"
+        );
+        assert_eq!(
+            e[feature_ext_offset + 5],
+            0x01,
+            "ColumnEncryption version byte"
+        );
+        assert_eq!(e[feature_ext_offset + 6], 0xFF, "FeatureExt terminator");
+    }
+
+    /// The cbSSPI/cbSSPILong boundary: 0xFFFE stays inline; 0xFFFF switches to
+    /// the long form so that `cbSSPI == 0xFFFF` unambiguously means "read
+    /// cbSSPILong".
+    #[test]
+    fn test_login7_sspi_length_boundary() {
+        let e = Login7::new()
+            .with_integrated_auth(vec![0u8; 0xFFFE])
+            .encode();
+        assert_eq!(
+            u16::from_le_bytes([e[80], e[81]]),
+            0xFFFE,
+            "0xFFFE stays inline"
+        );
+        assert_eq!(
+            u32::from_le_bytes([e[90], e[91], e[92], e[93]]),
+            0,
+            "cbSSPILong unused at 0xFFFE"
+        );
+
+        let e = Login7::new()
+            .with_integrated_auth(vec![0u8; 0xFFFF])
+            .encode();
+        assert_eq!(
+            u16::from_le_bytes([e[80], e[81]]),
+            0xFFFF,
+            "0xFFFF switches to the sentinel"
+        );
+        assert_eq!(
+            u32::from_le_bytes([e[90], e[91], e[92], e[93]]),
+            0xFFFF,
+            "cbSSPILong carries the real length at the boundary"
         );
     }
 
