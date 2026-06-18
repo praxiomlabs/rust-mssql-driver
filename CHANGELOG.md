@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.1](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.19.0...v0.19.1) - 2026-06-18
+
+### Fixed
+
+- *(protocol)* decode malformed UCS-2 lossily instead of as a false EOF
+- *(protocol)* support SSPI blobs larger than 64KB in LOGIN7
+- *(types)* gate test_encode_date behind the chrono feature ([#302](https://github.com/praxiomlabs/rust-mssql-driver/pull/302))
+
+### Other
+
+- *(tls)* correct false 'system root' certificate claims
+
 ## [0.19.0](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.18.0...v0.19.0) - 2026-06-17
 
 ### Fixed
