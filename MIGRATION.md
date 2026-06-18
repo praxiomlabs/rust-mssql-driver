@@ -10,7 +10,7 @@ This guide helps you migrate from [tiberius](https://github.com/prisma/tiberius)
 | Type-state | No | Yes (compile-time safety) |
 | Connection pooling | External (bb8/deadpool) | Built-in |
 | TDS 8.0 strict | Not supported | Yes |
-| Prepared statements | Manual | `sp_executesql` (client-side cache planned) |
+| Prepared statements | Manual | `sp_executesql`; opt-in client-side cache (`Statement Cache=true`) |
 | Azure redirects | Manual handling | Automatic |
 | Result streaming | Stream (incremental) | Buffered `query` (sync iterator) + incremental `query_stream` / `query_stream_blob` |
 | Transaction safety | Runtime checks | Compile-time checks |
@@ -393,10 +393,11 @@ for user_id in user_ids {
 ### rust-mssql-driver
 
 ```rust
-// Same model as Tiberius today: each parameterized execution goes through
-// sp_executesql. SQL Server's server-side plan cache reuses the plan across
-// calls; client-side handle caching (sp_prepare/sp_execute) is planned but
-// not yet wired (see LIMITATIONS.md).
+// By default each parameterized execution goes through sp_executesql, with
+// SQL Server's server-side plan cache reusing the plan across calls. Opt into
+// client-side handle caching (sp_prepare/sp_execute, per connection) with
+// `Statement Cache=true` or `Config::with_statement_cache(true)` — see
+// LIMITATIONS.md for the scope of this first increment.
 for user_id in user_ids {
     let mut stream = client.query(
         "SELECT * FROM users WHERE id = @p1",
@@ -576,4 +577,4 @@ let client = tx.commit().await?;  // Capture the returned client
 | `execute("BEGIN TRANSACTION")` | `begin_transaction()` |
 | `execute("COMMIT")` | `commit()` → returns client |
 | Manual Azure redirect | Automatic |
-| `sp_executesql` plan reuse | `sp_executesql` plan reuse (client-side handle cache not yet wired) |
+| `sp_executesql` plan reuse | `sp_executesql` plan reuse (+ opt-in client-side handle cache via `Statement Cache=true`) |

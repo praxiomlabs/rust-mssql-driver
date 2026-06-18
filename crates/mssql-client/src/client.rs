@@ -345,6 +345,9 @@ impl<S: ConnectionState> Client<S> {
         let reset = self.needs_reset;
         if reset {
             self.needs_reset = false; // Clear flag before sending
+            // RESETCONNECTION invalidates all server-side prepared handles, so
+            // drop the cache (no sp_unprepare needed — the server released them).
+            let _ = self.statement_cache.clear();
             tracing::debug!("sending SQL batch with RESETCONNECTION flag");
         }
 
@@ -389,6 +392,9 @@ impl<S: ConnectionState> Client<S> {
         let reset = self.needs_reset;
         if reset {
             self.needs_reset = false; // Clear flag before sending
+            // RESETCONNECTION invalidates all server-side prepared handles, so
+            // drop the cache (no sp_unprepare needed — the server released them).
+            let _ = self.statement_cache.clear();
             tracing::debug!("sending RPC with RESETCONNECTION flag");
         }
 
@@ -566,6 +572,87 @@ impl<S: ConnectionState> Client<S> {
         let rpc_params =
             Self::convert_params(params, self.send_unicode(), self.server_collation())?;
         Ok(RpcRequest::execute_sql(sql, rpc_params))
+    }
+
+    /// Send a parameterized `query` request, consulting the prepared-statement
+    /// cache when [`Config::statement_cache`](crate::Config::statement_cache)
+    /// is enabled. Leaves the execution response ready for the caller's
+    /// `read_query_response`.
+    ///
+    /// Falls back to the default path (SQL batch for no params, `sp_executesql`
+    /// otherwise) when the cache is disabled, the query has no parameters, or
+    /// Always Encrypted is active (prepared + AE parameter encryption is out of
+    /// scope for this first increment).
+    async fn send_query_request(
+        &mut self,
+        sql: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<()> {
+        #[cfg(feature = "always-encrypted")]
+        let ae_active = self.encryption_context.is_some();
+        #[cfg(not(feature = "always-encrypted"))]
+        let ae_active = false;
+
+        if !self.config.statement_cache || params.is_empty() || ae_active {
+            if params.is_empty() {
+                self.send_sql_batch(sql).await?;
+            } else {
+                let rpc = self.build_parameterized_rpc(sql, params).await?;
+                self.send_rpc(&rpc).await?;
+            }
+            return Ok(());
+        }
+
+        let rpc_params =
+            Self::convert_params(params, self.send_unicode(), self.server_collation())?;
+        // Key on the parameter declaration + SQL: a cached handle is only valid
+        // for the exact prepared parameter types, so two calls with the same
+        // SQL but different param types must not share a handle.
+        let key = format!(
+            "{}\u{1}{sql}",
+            RpcRequest::build_param_declarations(&rpc_params)
+        );
+
+        if let Some(handle) = self.statement_cache.get(&key) {
+            let rpc = RpcRequest::execute(handle, rpc_params);
+            self.send_rpc(&rpc).await?;
+        } else {
+            // Miss: sp_prepare for a handle, then sp_execute. The caller's
+            // read_query_response reads the execute (row) response.
+            let prepare = RpcRequest::prepare(sql, &rpc_params);
+            self.send_rpc(&prepare).await?;
+            let prepared = self.read_procedure_result().await?;
+            let handle = Self::prepare_handle(&prepared)?;
+
+            if let Some(evicted) = self
+                .statement_cache
+                .insert(crate::statement_cache::PreparedStatement::new(handle, key))
+            {
+                // Release the evicted server-side handle. Best-effort: a failed
+                // sp_unprepare leaks one handle until connection reset, never
+                // corrupts data.
+                let unprepare = RpcRequest::unprepare(evicted.handle());
+                self.send_rpc(&unprepare).await?;
+                let _ = self.read_procedure_result().await?;
+            }
+
+            let rpc = RpcRequest::execute(handle, rpc_params);
+            self.send_rpc(&rpc).await?;
+        }
+        Ok(())
+    }
+
+    /// Extract the statement handle from an `sp_prepare` response — the
+    /// `@handle` OUTPUT parameter, surfaced as a RETURNVALUE / output param.
+    fn prepare_handle(result: &crate::stream::ProcedureResult) -> Result<i32> {
+        result
+            .output_params
+            .iter()
+            .find_map(|p| match &p.value {
+                mssql_types::SqlValue::Int(h) => Some(*h),
+                _ => None,
+            })
+            .ok_or_else(|| Error::Protocol("sp_prepare returned no statement handle".into()))
     }
 
     /// Encrypt the Always Encrypted parameters of a statement, then build its
@@ -1093,6 +1180,17 @@ impl<S: ConnectionState> Client<S> {
         &self.instrumentation
     }
 
+    /// Snapshot this connection's prepared-statement cache statistics.
+    ///
+    /// Reflects activity since the connection was established (or its last
+    /// reset). Meaningful only when
+    /// [`Config::statement_cache`](crate::Config::statement_cache) is enabled;
+    /// otherwise the cache is never consulted and all counts stay zero.
+    #[must_use]
+    pub fn statement_cache_stats(&self) -> crate::StatementCacheStats {
+        self.statement_cache.stats()
+    }
+
     /// Whether string parameters are sent as NVARCHAR (Unicode).
     pub(crate) fn send_unicode(&self) -> bool {
         self.config.send_string_parameters_as_unicode
@@ -1377,14 +1475,9 @@ impl Client<Ready> {
         let canceller = self.cancel_handle();
         let result = run_with_deadline(
             async {
-                if params.is_empty() {
-                    // Simple query without parameters - use SQL batch
-                    self.send_sql_batch(sql).await?;
-                } else {
-                    // Parameterized query - sp_executesql (encrypts Always Encrypted params).
-                    let rpc = self.build_parameterized_rpc(sql, params).await?;
-                    self.send_rpc(&rpc).await?;
-                }
+                // Sends via the prepared-statement cache when enabled, else the
+                // SQL batch / sp_executesql default.
+                self.send_query_request(sql, params).await?;
 
                 // Read complete response including columns and rows
                 self.read_query_response().await
@@ -2041,14 +2134,9 @@ impl Client<InTransaction> {
         let canceller = self.cancel_handle();
         let result = run_with_deadline(
             async {
-                if params.is_empty() {
-                    // Simple query without parameters - use SQL batch
-                    self.send_sql_batch(sql).await?;
-                } else {
-                    // Parameterized query - sp_executesql (encrypts Always Encrypted params).
-                    let rpc = self.build_parameterized_rpc(sql, params).await?;
-                    self.send_rpc(&rpc).await?;
-                }
+                // Sends via the prepared-statement cache when enabled, else the
+                // SQL batch / sp_executesql default.
+                self.send_query_request(sql, params).await?;
 
                 // Read complete response including columns and rows
                 self.read_query_response().await
