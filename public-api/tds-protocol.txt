@@ -1616,6 +1616,8 @@ pub unsafe fn tds_protocol::token::Token::clone_to_uninit(&self, *mut u8)
 impl<T> core::convert::From<T> for tds_protocol::token::Token
 pub fn tds_protocol::token::Token::from(T) -> T
 #[non_exhaustive] #[repr(u8)] pub enum tds_protocol::token::TokenType
+pub tds_protocol::token::TokenType::AltMetaData = 136
+pub tds_protocol::token::TokenType::AltRow = 211
 pub tds_protocol::token::TokenType::ColInfo = 165
 pub tds_protocol::token::TokenType::ColMetaData = 129
 pub tds_protocol::token::TokenType::Done = 253
@@ -3561,6 +3563,8 @@ pub unsafe fn tds_protocol::token::Token::clone_to_uninit(&self, *mut u8)
 impl<T> core::convert::From<T> for tds_protocol::token::Token
 pub fn tds_protocol::token::Token::from(T) -> T
 #[non_exhaustive] #[repr(u8)] pub enum tds_protocol::TokenType
+pub tds_protocol::TokenType::AltMetaData = 136
+pub tds_protocol::TokenType::AltRow = 211
 pub tds_protocol::TokenType::ColInfo = 165
 pub tds_protocol::TokenType::ColMetaData = 129
 pub tds_protocol::TokenType::Done = 253
