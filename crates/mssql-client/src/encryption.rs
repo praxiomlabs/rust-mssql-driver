@@ -799,6 +799,10 @@ mod tests {
     /// with the same CEK must reproduce them byte-for-byte — proving the
     /// normalized layout matches the real .NET client (notably INT -> 8 LE bytes,
     /// which is the layout a naive implementation would get wrong).
+    ///
+    /// These references' provenance is reproducible: `tools/ae-fixture-gen/`
+    /// decrypts each one with the real Microsoft.Data.SqlClient AEAD binary
+    /// (MAC-authenticating it) and confirms the recovered normalized form (#299).
     #[cfg(feature = "always-encrypted")]
     #[test]
     fn ae_normalization_matches_dotnet() {
