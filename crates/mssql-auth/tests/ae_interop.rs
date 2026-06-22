@@ -9,14 +9,14 @@
 //! with data encrypted by .NET/SSMS/JDBC. Self-roundtrip tests cannot catch
 //! a derivation that is internally consistent but non-conformant.
 //!
-//! The blob was additionally cross-checked out-of-band against Microsoft's
-//! shipped binary — Microsoft.Data.SqlClient 5.2.2
-//! (`SqlAeadAes256CbcHmac256Algorithm`, invoked via reflection) produced the
-//! same bytes for this CEK/plaintext and decrypted it back. That harness is not
-//! committed, so the in-repo guarantee rests on the transcription above; the
-//! reflection check is a manual, out-of-band confirmation. End-to-end
-//! validation against a live server (the wire-metadata path) is tracked in
-//! issue #87.
+//! The blob is additionally verified against Microsoft's shipped binary:
+//! Microsoft.Data.SqlClient 5.2.2 (`SqlAeadAes256CbcHmac256Algorithm`, invoked
+//! by reflection) produces these exact bytes for this CEK/plaintext and decrypts
+//! them back. That check is now a committed, reproducible harness
+//! (`tools/ae-fixture-gen/`, run with `dotnet run --project tools/ae-fixture-gen`),
+//! so byte-identity to Microsoft's binary is reproducible in-repo rather than a
+//! one-off manual confirmation (issue #299). End-to-end validation against a
+//! live server (the wire-metadata path) is tracked in issue #87.
 
 #![cfg(feature = "always-encrypted")]
 #![allow(clippy::expect_used)]
