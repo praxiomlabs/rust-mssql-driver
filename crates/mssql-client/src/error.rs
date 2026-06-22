@@ -183,10 +183,6 @@ pub enum Error {
     #[error("invalid identifier: {0}")]
     InvalidIdentifier(String),
 
-    /// Connection pool exhausted.
-    #[error("connection pool exhausted")]
-    PoolExhausted,
-
     /// Query cancellation error.
     #[error("query cancellation failed: {0}")]
     Cancel(String),
@@ -297,7 +293,6 @@ impl Error {
             | Self::ConnectionClosed
             | Self::Connection(_)
             | Self::Routing { .. }
-            | Self::PoolExhausted
             | Self::Io(_) => true,
             Self::Server { number, .. } => Self::is_transient_server_error(*number),
             _ => false,
@@ -526,7 +521,6 @@ mod tests {
         );
         assert!(Error::CommandTimeout.is_transient());
         assert!(Error::ConnectionClosed.is_transient());
-        assert!(Error::PoolExhausted.is_transient());
         assert!(
             Error::Routing {
                 host: "test".into(),
