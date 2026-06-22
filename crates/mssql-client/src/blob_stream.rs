@@ -8,14 +8,19 @@
 //! into the row.
 //!
 //! [`BlobStream`] decodes each row's **leading scalar columns** into a [`Row`]
-//! (they are small), then exposes the **trailing MAX column** as a chunk stream
-//! pulled from the connection on demand via the `PlpDecoder`. Peak memory is
-//! one packet plus one PLP chunk.
+//! (they are small), then exposes the **trailing MAX column(s)** as chunk
+//! streams pulled from the connection on demand via the `PlpDecoder`. Peak
+//! memory is one packet plus one PLP chunk.
 //!
-//! Because TDS sends columns inline and sequentially, the MAX column must be the
-//! **last** column (anything after it could not be decoded until the BLOB was
-//! consumed). The blob of one row must be consumed before the next row; calling
-//! [`BlobStream::next`] auto-drains an unconsumed blob so the wire stays aligned.
+//! Because TDS sends columns inline and sequentially, the MAX column(s) must be
+//! **trailing** — every column must precede them (a scalar column after a BLOB
+//! could not be decoded until that BLOB was consumed).
+//! [`Client::query_stream_blob`](crate::Client::query_stream_blob) targets the
+//! single-trailing-MAX case; [`Client::query_stream_rows`](crate::Client::query_stream_rows)
+//! generalizes it to a run of trailing MAX columns, iterated with
+//! [`BlobStream::next_blob`]. The blob(s) of one row must be consumed before the
+//! next row; calling [`BlobStream::next`] auto-drains any unconsumed blob so the
+//! wire stays aligned.
 //!
 //! ```no_run
 //! # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
@@ -67,35 +72,67 @@ pub struct BlobStream<'a, S: ConnectionState = Ready> {
     /// END_OF_MESSAGE seen — no more packets will arrive.
     eom: bool,
     encryption_enabled: bool,
-    /// Full result-set metadata (all columns, including the trailing MAX one).
+    /// Full result-set metadata (all columns, including the trailing MAX ones).
     meta: ColMetaData,
     /// Metadata for just the leading scalar columns (for row decoding).
     prefix_meta: ColMetaData,
     /// `Column`s for the leading scalar columns.
     scalar_row_meta: std::sync::Arc<crate::row::ColMetaData>,
-    /// Index of the trailing MAX column.
-    blob_index: usize,
-    /// PLP decoder for the current row's blob; `Some` between `next` and drain.
+    /// `Column`s for the trailing MAX columns, in wire order.
+    blob_row_meta: std::sync::Arc<crate::row::ColMetaData>,
+    /// Index of the first trailing MAX column; the scalar prefix is `0..first_blob`.
+    first_blob: usize,
+    /// Number of trailing MAX columns (1 for `query_stream_blob`).
+    blob_count: usize,
+    /// Index (within the trailing run, `0..blob_count`) of the next blob to
+    /// position; reset to 0 at the start of each row.
+    next_blob_idx: usize,
+    /// The blob currently positioned for reading (within the trailing run), or
+    /// `None` before the first is positioned / after the row is exhausted.
+    current_blob_idx: Option<usize>,
+    /// When the current row arrived as an NBCROW, its null bitmap (so each
+    /// trailing blob's nullness can be looked up); `None` for a plain ROW.
+    current_nbc: Option<NbcRow>,
+    /// Whether `next` should auto-position the first trailing blob. True for the
+    /// single-blob `query_stream_blob` path (preserves its API: the blob is
+    /// ready to read after `next`); false for the multi-blob `query_stream_rows`
+    /// path (the caller drives blobs explicitly via [`next_blob`](Self::next_blob)).
+    auto_position_first: bool,
+    /// PLP decoder for the current blob; `Some` while a non-NULL blob is being read.
     plp: Option<PlpDecoder>,
-    /// The current row's blob is NULL (an NBCROW omitted its value).
+    /// The current blob is NULL (an NBCROW omitted its value).
     blob_null: bool,
     finished: bool,
 }
 
 impl<'a, S: ConnectionState> BlobStream<'a, S> {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         client: &'a mut Client<S>,
         buf: Bytes,
         eom: bool,
         encryption_enabled: bool,
         meta: ColMetaData,
-        blob_index: usize,
+        first_blob: usize,
+        blob_count: usize,
+        auto_position_first: bool,
     ) -> Self {
         let prefix_meta = ColMetaData {
-            columns: meta.columns.iter().take(blob_index).cloned().collect(),
+            columns: meta.columns.iter().take(first_blob).cloned().collect(),
+            cek_table: meta.cek_table.clone(),
+        };
+        let blob_meta = ColMetaData {
+            columns: meta
+                .columns
+                .iter()
+                .skip(first_blob)
+                .take(blob_count)
+                .cloned()
+                .collect(),
             cek_table: meta.cek_table.clone(),
         };
         let scalar_columns = Client::<S>::build_columns(&prefix_meta);
+        let blob_columns = Client::<S>::build_columns(&blob_meta);
         Self {
             client,
             buf,
@@ -104,7 +141,15 @@ impl<'a, S: ConnectionState> BlobStream<'a, S> {
             meta,
             prefix_meta,
             scalar_row_meta: std::sync::Arc::new(crate::row::ColMetaData::new(scalar_columns)),
-            blob_index,
+            blob_row_meta: std::sync::Arc::new(crate::row::ColMetaData::new(blob_columns)),
+            first_blob,
+            blob_count,
+            // Start as if the previous row were fully consumed, so the first
+            // `next` does not try to drain a nonexistent prior row.
+            next_blob_idx: blob_count,
+            current_blob_idx: None,
+            current_nbc: None,
+            auto_position_first,
             plp: None,
             blob_null: false,
             finished: true, // set false once construction succeeds below
@@ -117,22 +162,42 @@ impl<'a, S: ConnectionState> BlobStream<'a, S> {
         self
     }
 
-    /// The leading (scalar) columns of the result set — everything except the
-    /// trailing MAX column.
+    /// The leading (scalar) columns of the result set — everything before the
+    /// trailing MAX column(s).
     #[must_use]
     pub fn columns(&self) -> &[Column] {
         &self.scalar_row_meta.columns
     }
 
+    /// The trailing MAX (blob) columns of the result set, in wire order.
+    ///
+    /// For a [`query_stream_blob`](crate::Client::query_stream_blob) stream this
+    /// is a single column; for
+    /// [`query_stream_rows`](crate::Client::query_stream_rows) it is the run of
+    /// trailing MAX columns, in the order [`next_blob`](Self::next_blob) visits
+    /// them.
+    #[must_use]
+    pub fn blob_columns(&self) -> &[Column] {
+        &self.blob_row_meta.columns
+    }
+
+    /// The column metadata of the currently positioned blob, or `None` before
+    /// the first blob of a row is positioned (or after the row is exhausted).
+    #[must_use]
+    pub fn current_blob_column(&self) -> Option<&Column> {
+        self.current_blob_idx
+            .and_then(|j| self.blob_row_meta.columns.get(j))
+    }
+
     /// Advance to the next row, returning its scalar columns.
     ///
-    /// Auto-drains the previous row's blob if it was not fully read, so the wire
+    /// Auto-drains any unread trailing blob(s) of the previous row, so the wire
     /// stays aligned. Returns `Ok(None)` at end of stream (connection clean).
     pub async fn next(&mut self) -> Result<Option<Row>> {
         if self.finished {
             return Ok(None);
         }
-        self.drain_current_blob().await?;
+        self.drain_to_row_end().await?;
 
         loop {
             if self.buf.is_empty() {
@@ -156,7 +221,49 @@ impl<'a, S: ConnectionState> BlobStream<'a, S> {
         }
     }
 
-    /// Read the next chunk of the current row's blob, or `None` when it is fully
+    /// Advance to the next trailing MAX column of the current row, returning
+    /// `true` while one is positioned and `false` once the row's blobs are
+    /// exhausted.
+    ///
+    /// Auto-drains the previously positioned blob (if not fully read) before
+    /// advancing, so the wire stays aligned. After this returns `true`, read the
+    /// blob with [`read_chunk`](Self::read_chunk) / [`copy_blob_to`](Self::copy_blob_to)
+    /// and inspect it with [`current_blob_column`](Self::current_blob_column) /
+    /// [`blob_is_null`](Self::blob_is_null) / [`blob_len`](Self::blob_len).
+    ///
+    /// This is the iteration primitive for
+    /// [`query_stream_rows`](crate::Client::query_stream_rows):
+    ///
+    /// ```no_run
+    /// # async fn ex(client: &mut mssql_client::Client<mssql_client::Ready>) -> Result<(), mssql_client::Error> {
+    /// # let mut sink: Vec<u8> = Vec::new();
+    /// let mut stream = client
+    ///     .query_stream_rows("SELECT id, doc1, doc2 FROM files", &[])
+    ///     .await?;
+    /// while let Some(row) = stream.next().await? {
+    ///     let id: i32 = row.get_by_name("id")?;
+    ///     let _ = id;
+    ///     while stream.next_blob().await? {
+    ///         stream.copy_blob_to(&mut sink).await?; // each trailing MAX column
+    ///     }
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn next_blob(&mut self) -> Result<bool> {
+        if self.finished {
+            return Ok(false);
+        }
+        self.drain_current_blob().await?;
+        if self.next_blob_idx >= self.blob_count {
+            self.current_blob_idx = None;
+            return Ok(false);
+        }
+        self.position_next_blob();
+        Ok(true)
+    }
+
+    /// Read the next chunk of the current blob, or `None` when it is fully
     /// read (or NULL). Reads more packets from the socket as needed.
     ///
     /// Chunks are **raw bytes**, not decoded text. For an `NVARCHAR(MAX)` /
@@ -223,7 +330,7 @@ impl<'a, S: ConnectionState> BlobStream<'a, S> {
             let mut view: &[u8] = &self.buf[..];
             let before = view.len();
             view.advance(1); // ROW token byte
-            match RawRow::decode_prefix(&mut view, &self.meta, self.blob_index) {
+            match RawRow::decode_prefix(&mut view, &self.meta, self.first_blob) {
                 Ok(raw) => {
                     let consumed = before - view.len();
                     self.buf.advance(consumed);
@@ -232,8 +339,7 @@ impl<'a, S: ConnectionState> BlobStream<'a, S> {
                         &self.prefix_meta,
                         &self.scalar_row_meta,
                     )?;
-                    self.plp = Some(PlpDecoder::new());
-                    self.blob_null = false;
+                    self.begin_row(None);
                     return Ok(row);
                 }
                 Err(ProtocolError::UnexpectedEof) if !self.eom => {
@@ -249,22 +355,16 @@ impl<'a, S: ConnectionState> BlobStream<'a, S> {
             let mut view: &[u8] = &self.buf[..];
             let before = view.len();
             view.advance(1); // NBCROW token byte
-            match NbcRow::decode_prefix(&mut view, &self.meta, self.blob_index) {
+            match NbcRow::decode_prefix(&mut view, &self.meta, self.first_blob) {
                 Ok(nbc) => {
                     let consumed = before - view.len();
                     self.buf.advance(consumed);
-                    let blob_null = nbc.is_null(self.blob_index);
                     let row = crate::column_parser::convert_nbc_row(
                         &nbc,
                         &self.prefix_meta,
                         &self.scalar_row_meta,
                     )?;
-                    self.blob_null = blob_null;
-                    self.plp = if blob_null {
-                        None
-                    } else {
-                        Some(PlpDecoder::new())
-                    };
+                    self.begin_row(Some(nbc));
                     return Ok(row);
                 }
                 Err(ProtocolError::UnexpectedEof) if !self.eom => {
@@ -319,7 +419,7 @@ impl<'a, S: ConnectionState> BlobStream<'a, S> {
             }
             Token::Error(e) => Err(server_token_to_error(&e)),
             Token::ColMetaData(_) => Err(Error::Protocol(
-                "query_stream_blob does not support multiple result sets".to_string(),
+                "blob streaming does not support multiple result sets".to_string(),
             )),
             Token::EnvChange(ref e) => {
                 // Keep the transaction descriptor in sync with raw
@@ -333,13 +433,59 @@ impl<'a, S: ConnectionState> BlobStream<'a, S> {
         }
     }
 
+    /// Reset per-row blob state after decoding a row's scalar prefix, optionally
+    /// auto-positioning the first trailing blob (for the single-blob path).
+    fn begin_row(&mut self, nbc: Option<NbcRow>) {
+        self.current_nbc = nbc;
+        self.next_blob_idx = 0;
+        self.current_blob_idx = None;
+        self.plp = None;
+        self.blob_null = false;
+        if self.auto_position_first {
+            self.position_next_blob();
+        }
+    }
+
+    /// Position the next trailing blob (sync; no socket IO). Sets up its PLP
+    /// decoder, or marks it NULL when an NBCROW omitted its value.
+    fn position_next_blob(&mut self) {
+        let j = self.next_blob_idx;
+        self.next_blob_idx += 1;
+        self.current_blob_idx = Some(j);
+        let col_idx = self.first_blob + j;
+        let is_null = self
+            .current_nbc
+            .as_ref()
+            .is_some_and(|n| n.is_null(col_idx));
+        self.blob_null = is_null;
+        self.plp = if is_null {
+            None
+        } else {
+            Some(PlpDecoder::new())
+        };
+    }
+
+    /// Drain the currently positioned blob off the wire (if not fully read).
     async fn drain_current_blob(&mut self) -> Result<()> {
         if self.plp.is_some() && !self.blob_null {
             while self.read_chunk().await?.is_some() {}
         }
         self.plp = None;
-        self.blob_null = false;
         Ok(())
+    }
+
+    /// Consume every remaining trailing blob of the current row off the wire, so
+    /// the next ROW/NBCROW token is reachable. Drains the positioned blob, then
+    /// positions and drains each not-yet-visited trailing blob in turn.
+    async fn drain_to_row_end(&mut self) -> Result<()> {
+        loop {
+            self.drain_current_blob().await?;
+            if self.next_blob_idx >= self.blob_count {
+                self.current_blob_idx = None;
+                return Ok(());
+            }
+            self.position_next_blob();
+        }
     }
 
     /// Pull one packet onto the rolling buffer. Returns `false` at EOF.

@@ -85,19 +85,25 @@ committed or rolled back.
 
 ---
 
-### Large Object (LOB) Streaming — `query_stream_blob()`
+### Large Object (LOB) Streaming — `query_stream_blob()` / `query_stream_rows()`
 
-**Status:** Supported for a row's trailing MAX column.
+**Status:** Supported for a row's trailing MAX column(s).
 
 A row's trailing `VARBINARY(MAX)` / `NVARCHAR(MAX)` / `VARCHAR(MAX)` / `XML`
 column can be sub-streamed from the socket with **`query_stream_blob()`**
 (`stream.copy_blob_to(&mut writer).await?`), so a multi-GB cell is read in
-bounded memory rather than materialized. The MAX column must be the last
-column, and Always Encrypted result sets are not yet supported on this path.
+bounded memory rather than materialized. For result sets with **more than one**
+trailing MAX column, **`query_stream_rows()`** streams each in turn — iterate a
+row's trailing MAX columns with `while stream.next_blob().await? { … }`.
+
+The MAX column(s) must be **trailing**: a non-MAX column may not follow a MAX
+column (interleaved MAX columns are rejected with a clear error — supporting
+them needs a resumable per-column decoder, tracked in #258). Always Encrypted
+result sets are not yet supported on either path.
 
 For the buffered `query()` path, a MAX cell is fully buffered; chunk via SQL
 (`SUBSTRING`) or store large binary data externally if you cannot use
-`query_stream_blob()`.
+`query_stream_blob()` / `query_stream_rows()`.
 
 ---
 

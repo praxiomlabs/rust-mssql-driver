@@ -141,3 +141,44 @@ async fn blob_streaming_bounds_peak_memory() {
          this to ~one chunk, not the whole 30 MB cell"
     );
 }
+
+/// A row with *two* ~15 MB `VARBINARY(MAX)` columns streamed in sequence via
+/// [`Client::query_stream_rows`] must keep peak heap far below either cell —
+/// proving the multi-blob path streams each trailing column from the socket
+/// rather than materializing it. The buffered path would hold ~30 MB.
+#[tokio::test]
+#[ignore = "Requires a live SQL Server"]
+async fn multi_blob_streaming_bounds_peak_memory() {
+    let Some(cfg) = config() else {
+        return;
+    };
+    let mut client = Client::connect(cfg).await.expect("connect");
+
+    const TWO_BIG_BLOBS: &str = "SELECT 1 AS id, \
+        CAST(REPLICATE(CAST('A' AS VARCHAR(MAX)), 15000000) AS VARBINARY(MAX)) AS doc1, \
+        CAST(REPLICATE(CAST('B' AS VARCHAR(MAX)), 15000000) AS VARBINARY(MAX)) AS doc2";
+
+    let baseline = LIVE.load(Ordering::Relaxed);
+    PEAK.store(baseline, Ordering::Relaxed);
+
+    let mut stream = client
+        .query_stream_rows(TWO_BIG_BLOBS, &[])
+        .await
+        .expect("stream");
+    let _ = stream.next().await.expect("next").expect("one row");
+    let mut sink = tokio::io::sink();
+    let mut total = 0u64;
+    while stream.next_blob().await.expect("next_blob") {
+        total += stream.copy_blob_to(&mut sink).await.expect("copy blob");
+    }
+
+    let peak_delta = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
+    eprintln!("total_blob_bytes={total} peak_delta={peak_delta} bytes");
+
+    assert_eq!(total, 30_000_000, "expected two 15 MB blobs");
+    assert!(
+        peak_delta < 2_000_000,
+        "peak heap delta was {peak_delta} bytes — multi-blob streaming should \
+         bound this to ~one chunk, not a whole 15 MB cell"
+    );
+}

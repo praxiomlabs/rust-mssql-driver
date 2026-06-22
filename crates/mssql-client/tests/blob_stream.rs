@@ -254,3 +254,205 @@ async fn blob_stream_rejects_non_trailing_max() {
         "expected Protocol error for non-trailing MAX column"
     );
 }
+
+// ---------------------------------------------------------------------------
+// query_stream_rows: multiple trailing MAX columns per row (#258)
+// ---------------------------------------------------------------------------
+
+/// Two trailing VARBINARY(MAX) columns, both streamed per row via `next_blob`.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn stream_rows_two_trailing_blobs() {
+    let Some(cfg) = get_test_config() else {
+        return;
+    };
+    let mut client = Client::connect(cfg).await.expect("connect");
+
+    // doc1 = 30000 bytes of 'A', doc2 = 50000 bytes of 'B'.
+    const SQL: &str = "SELECT 7 AS id, \
+        CAST(REPLICATE(CAST('A' AS VARCHAR(MAX)), 30000) AS VARBINARY(MAX)) AS doc1, \
+        CAST(REPLICATE(CAST('B' AS VARCHAR(MAX)), 50000) AS VARBINARY(MAX)) AS doc2";
+
+    let mut stream = client.query_stream_rows(SQL, &[]).await.expect("stream");
+    // The trailing MAX columns are reported in wire order.
+    let blob_names: Vec<String> = stream
+        .blob_columns()
+        .iter()
+        .map(|c| c.name.clone())
+        .collect();
+    assert_eq!(blob_names, vec!["doc1".to_string(), "doc2".to_string()]);
+
+    let row = stream.next().await.expect("next").expect("one row");
+    assert_eq!(row.get_by_name::<i32>("id").unwrap(), 7);
+
+    let mut collected: Vec<(String, Vec<u8>)> = Vec::new();
+    while stream.next_blob().await.expect("next_blob") {
+        let name = stream
+            .current_blob_column()
+            .expect("blob column")
+            .name
+            .clone();
+        let mut sink: Vec<u8> = Vec::new();
+        stream.copy_blob_to(&mut sink).await.expect("copy blob");
+        collected.push((name, sink));
+    }
+
+    assert_eq!(collected.len(), 2);
+    assert_eq!(collected[0].0, "doc1");
+    assert_eq!(collected[0].1.len(), 30_000);
+    assert!(collected[0].1.iter().all(|&b| b == 0x41));
+    assert_eq!(collected[1].0, "doc2");
+    assert_eq!(collected[1].1.len(), 50_000);
+    assert!(collected[1].1.iter().all(|&b| b == 0x42));
+
+    assert!(stream.next().await.expect("next").is_none());
+}
+
+/// A NULL blob between two non-NULL blobs (NBCROW path): the null one yields no
+/// chunks and does not desynchronize the following blob.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn stream_rows_null_blob_among_blobs() {
+    let Some(cfg) = get_test_config() else {
+        return;
+    };
+    let mut client = Client::connect(cfg).await.expect("connect");
+
+    const SQL: &str = "SELECT 1 AS id, \
+        CAST(REPLICATE(CAST('A' AS VARCHAR(MAX)), 20000) AS VARBINARY(MAX)) AS doc1, \
+        CAST(NULL AS VARBINARY(MAX)) AS doc2, \
+        CAST(REPLICATE(CAST('C' AS VARCHAR(MAX)), 20000) AS VARBINARY(MAX)) AS doc3";
+
+    let mut stream = client.query_stream_rows(SQL, &[]).await.expect("stream");
+    let _ = stream.next().await.expect("next").expect("one row");
+
+    // doc1: non-null
+    assert!(stream.next_blob().await.expect("next_blob"));
+    assert!(!stream.blob_is_null());
+    let mut b1 = Vec::new();
+    while let Some(c) = stream.read_chunk().await.expect("chunk") {
+        b1.extend_from_slice(&c);
+    }
+    assert_eq!(b1.len(), 20_000);
+    assert!(b1.iter().all(|&b| b == 0x41));
+
+    // doc2: NULL
+    assert!(stream.next_blob().await.expect("next_blob"));
+    assert!(stream.blob_is_null());
+    assert!(stream.read_chunk().await.expect("chunk").is_none());
+
+    // doc3: non-null, must be intact after the NULL blob
+    assert!(stream.next_blob().await.expect("next_blob"));
+    assert!(!stream.blob_is_null());
+    let mut b3 = Vec::new();
+    while let Some(c) = stream.read_chunk().await.expect("chunk") {
+        b3.extend_from_slice(&c);
+    }
+    assert_eq!(b3.len(), 20_000);
+    assert!(b3.iter().all(|&b| b == 0x43));
+
+    // No more blobs, no more rows.
+    assert!(!stream.next_blob().await.expect("next_blob"));
+    assert!(stream.next().await.expect("next").is_none());
+}
+
+/// Advancing rows without reading the trailing blobs auto-drains all of them;
+/// subsequent rows and the connection stay intact.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn stream_rows_auto_drain_unread_blobs() {
+    let Some(cfg) = get_test_config() else {
+        return;
+    };
+    let mut client = Client::connect(cfg).await.expect("connect");
+
+    const SQL: &str = "SELECT n AS id, \
+        CAST(REPLICATE(CAST('A' AS VARCHAR(MAX)), 40000) AS VARBINARY(MAX)) AS doc1, \
+        CAST(REPLICATE(CAST('B' AS VARCHAR(MAX)), 40000) AS VARBINARY(MAX)) AS doc2 \
+        FROM (VALUES (1), (2), (3)) v(n)";
+
+    let mut stream = client.query_stream_rows(SQL, &[]).await.expect("stream");
+    let mut ids = Vec::new();
+    // Read no blobs at all — next() must drain both trailing blobs per row.
+    while let Some(row) = stream.next().await.expect("next") {
+        ids.push(row.get_by_name::<i32>("id").unwrap());
+    }
+    assert_eq!(ids, vec![1, 2, 3]);
+
+    // Partially-read case: read only the first blob of a fresh stream, then advance.
+    let mut stream = client.query_stream_rows(SQL, &[]).await.expect("stream");
+    let _ = stream.next().await.expect("next").expect("row 1");
+    assert!(stream.next_blob().await.expect("next_blob"));
+    let _ = stream.read_chunk().await.expect("chunk"); // one chunk of doc1, leave doc2 untouched
+    // Advancing must drain the rest of doc1 AND all of doc2.
+    let mut rest = Vec::new();
+    while let Some(row) = stream.next().await.expect("next") {
+        rest.push(row.get_by_name::<i32>("id").unwrap());
+    }
+    assert_eq!(rest, vec![2, 3]);
+
+    // Connection must be clean afterwards.
+    let rows = client
+        .query("SELECT 99 AS v", &[])
+        .await
+        .expect("reuse")
+        .collect_all()
+        .await
+        .expect("collect");
+    assert_eq!(rows[0].get_by_name::<i32>("v").unwrap(), 99);
+}
+
+/// `query_stream_rows` rejects an interleaved layout (a scalar column after a
+/// MAX column).
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn stream_rows_rejects_scalar_after_blob() {
+    let Some(cfg) = get_test_config() else {
+        return;
+    };
+    let mut client = Client::connect(cfg).await.expect("connect");
+    let result = client
+        .query_stream_rows("SELECT CAST('x' AS VARCHAR(MAX)) AS doc, 1 AS id", &[])
+        .await;
+    assert!(
+        matches!(result, Err(Error::Protocol(_))),
+        "expected Protocol error for a scalar column after a MAX column"
+    );
+}
+
+/// `query_stream_rows` works on a `Client<InTransaction>`.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn stream_rows_within_transaction() {
+    let Some(cfg) = get_test_config() else {
+        return;
+    };
+    let client = Client::connect(cfg).await.expect("connect");
+    let mut tx = client.begin_transaction().await.expect("begin");
+
+    const SQL: &str = "SELECT 1 AS id, \
+        CAST(REPLICATE(CAST('A' AS VARCHAR(MAX)), 10000) AS VARBINARY(MAX)) AS doc1, \
+        CAST(REPLICATE(CAST('B' AS VARCHAR(MAX)), 10000) AS VARBINARY(MAX)) AS doc2";
+
+    {
+        let mut stream = tx.query_stream_rows(SQL, &[]).await.expect("stream in tx");
+        let _ = stream.next().await.expect("next").expect("one row");
+        let mut total = 0u64;
+        while stream.next_blob().await.expect("next_blob") {
+            let mut sink: Vec<u8> = Vec::new();
+            total += stream.copy_blob_to(&mut sink).await.expect("copy blob");
+        }
+        assert_eq!(total, 20_000);
+        assert!(stream.next().await.expect("next").is_none());
+    }
+
+    let mut client = tx.commit().await.expect("commit");
+    let rows = client
+        .query("SELECT 29 AS v", &[])
+        .await
+        .expect("reuse after commit")
+        .collect_all()
+        .await
+        .expect("collect");
+    assert_eq!(rows[0].get_by_name::<i32>("v").unwrap(), 29);
+}

@@ -1299,6 +1299,52 @@ impl<S: ConnectionState> Client<S> {
         sql: &str,
         params: &[&(dyn crate::ToSql + Sync)],
     ) -> Result<crate::blob_stream::BlobStream<'a, S>> {
+        let (meta, buf, eom, encryption_enabled) = self.open_blob_stream(sql, params).await?;
+        let first_blob = Self::validate_blob_result_set(&meta)?;
+        Ok(crate::blob_stream::BlobStream::new(
+            self,
+            buf,
+            eom,
+            encryption_enabled,
+            meta,
+            first_blob,
+            // Single trailing MAX column; auto-position it so the existing
+            // `next` → `copy_blob_to` flow works without an explicit `next_blob`.
+            1,
+            true,
+        ))
+    }
+
+    /// Shared implementation behind `query_stream_rows` for both `Ready` and
+    /// `InTransaction`.
+    pub(crate) async fn query_stream_rows_inner<'a>(
+        &'a mut self,
+        sql: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<crate::blob_stream::BlobStream<'a, S>> {
+        let (meta, buf, eom, encryption_enabled) = self.open_blob_stream(sql, params).await?;
+        let (first_blob, blob_count) = Self::validate_blob_rows_result_set(&meta)?;
+        Ok(crate::blob_stream::BlobStream::new(
+            self,
+            buf,
+            eom,
+            encryption_enabled,
+            meta,
+            first_blob,
+            blob_count,
+            // Caller drives blobs explicitly via `next_blob`.
+            false,
+        ))
+    }
+
+    /// Send the query and pull tokens until the first `ColMetaData`, returning
+    /// the result-set metadata plus the unconsumed post-metadata wire bytes.
+    /// Shared by the single-blob and multi-blob streaming paths.
+    async fn open_blob_stream(
+        &mut self,
+        sql: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<(tds_protocol::token::ColMetaData, bytes::Bytes, bool, bool)> {
         use crate::client::response::server_token_to_error;
         use crate::row_source::{Pull, RowSource};
         use tds_protocol::token::Token;
@@ -1321,16 +1367,8 @@ impl<S: ConnectionState> Client<S> {
         loop {
             match source.pull()? {
                 Pull::Token(Token::ColMetaData(meta)) => {
-                    let blob_index = Self::validate_blob_result_set(&meta)?;
                     let (buf, eom) = source.into_parts();
-                    return Ok(crate::blob_stream::BlobStream::new(
-                        self,
-                        buf,
-                        eom,
-                        encryption_enabled,
-                        meta,
-                        blob_index,
-                    ));
+                    return Ok((meta, buf, eom, encryption_enabled));
                 }
                 Pull::Token(Token::Error(err)) => {
                     self.in_flight = false;
@@ -1339,7 +1377,7 @@ impl<S: ConnectionState> Client<S> {
                 Pull::Token(Token::Done(_)) => {
                     self.in_flight = false;
                     return Err(Error::Protocol(
-                        "query_stream_blob: query produced no result set".to_string(),
+                        "blob streaming: query produced no result set".to_string(),
                     ));
                 }
                 Pull::Token(_) => {}
@@ -1353,7 +1391,7 @@ impl<S: ConnectionState> Client<S> {
                 Pull::End => {
                     self.in_flight = false;
                     return Err(Error::Protocol(
-                        "query_stream_blob: query produced no result set".to_string(),
+                        "blob streaming: query produced no result set".to_string(),
                     ));
                 }
             }
@@ -1387,6 +1425,48 @@ impl<S: ConnectionState> Client<S> {
                 "query_stream_blob: result set has more than one MAX column".to_string(),
             )),
         }
+    }
+
+    /// Validate that a result set is shaped for [`query_stream_rows`] and return
+    /// `(first_blob_index, blob_count)` — the start and length of the trailing
+    /// run of MAX columns.
+    ///
+    /// Requires at least one MAX column and that every MAX column be trailing
+    /// (no scalar column may follow a MAX column). The interleaved case (a
+    /// scalar column after a MAX column) is rejected — supporting it needs a
+    /// resumable per-column decoder (tracked in #258).
+    fn validate_blob_rows_result_set(
+        meta: &tds_protocol::token::ColMetaData,
+    ) -> Result<(usize, usize)> {
+        if meta.cek_table.is_some() {
+            return Err(Error::Protocol(
+                "query_stream_rows does not support Always Encrypted result sets".to_string(),
+            ));
+        }
+        let first_blob = meta
+            .columns
+            .iter()
+            .position(crate::blob_stream::is_plp_max)
+            .ok_or_else(|| {
+                Error::Protocol(
+                    "query_stream_rows: result set has no MAX column — use query_stream"
+                        .to_string(),
+                )
+            })?;
+        // Every column from the first MAX column onward must itself be a MAX
+        // column; a scalar column after a blob cannot be decoded until the blob
+        // is consumed.
+        if !meta.columns[first_blob..]
+            .iter()
+            .all(crate::blob_stream::is_plp_max)
+        {
+            return Err(Error::Protocol(
+                "query_stream_rows: a non-MAX column follows a MAX column; interleaved MAX \
+                 columns are not supported (the MAX columns must be trailing)"
+                    .to_string(),
+            ));
+        }
+        Ok((first_blob, meta.columns.len() - first_blob))
     }
 }
 
@@ -1580,6 +1660,36 @@ impl Client<Ready> {
         params: &[&(dyn crate::ToSql + Sync)],
     ) -> Result<crate::blob_stream::BlobStream<'a, Ready>> {
         self.query_stream_blob_inner(sql, params).await
+    }
+
+    /// Execute a query and stream a row's **trailing MAX columns** from the
+    /// network — the multi-column generalization of
+    /// [`query_stream_blob`](Self::query_stream_blob).
+    ///
+    /// For result sets whose trailing columns are one or more MAX types
+    /// (`VARBINARY(MAX)`, `NVARCHAR(MAX)`, `VARCHAR(MAX)`, `XML`), this decodes
+    /// the leading scalar columns eagerly into the per-row [`Row`](crate::Row)
+    /// and streams each trailing MAX column's bytes incrementally from the
+    /// socket, in bounded memory. The returned
+    /// [`BlobStream`](crate::BlobStream) yields scalar rows via
+    /// [`next`](crate::BlobStream::next); within each row, iterate the trailing
+    /// MAX columns with [`next_blob`](crate::BlobStream::next_blob), reading each
+    /// with [`copy_blob_to`](crate::BlobStream::copy_blob_to) /
+    /// [`read_chunk`](crate::BlobStream::read_chunk). Also available on
+    /// `Client<InTransaction>`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the result set has no trailing MAX column, has a
+    /// non-MAX column after a MAX column (interleaved MAX columns are not
+    /// supported — the MAX columns must be trailing), or uses Always Encrypted
+    /// (not yet supported on this path).
+    pub async fn query_stream_rows<'a>(
+        &'a mut self,
+        sql: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<crate::blob_stream::BlobStream<'a, Ready>> {
+        self.query_stream_rows_inner(sql, params).await
     }
 
     /// Execute a query with a specific timeout.
@@ -2206,6 +2316,19 @@ impl Client<InTransaction> {
         self.query_stream_blob_inner(sql, params).await
     }
 
+    /// Stream a row's trailing MAX columns from the network within the
+    /// transaction.
+    ///
+    /// See [`Client<Ready>::query_stream_rows`] for semantics and constraints;
+    /// the only difference is that the query runs inside the open transaction.
+    pub async fn query_stream_rows<'a>(
+        &'a mut self,
+        sql: &str,
+        params: &[&(dyn crate::ToSql + Sync)],
+    ) -> Result<crate::blob_stream::BlobStream<'a, InTransaction>> {
+        self.query_stream_rows_inner(sql, params).await
+    }
+
     /// Execute a statement within the transaction.
     ///
     /// Returns the number of affected rows.
@@ -2558,5 +2681,90 @@ impl<S: ConnectionState> std::fmt::Debug for Client<S> {
             .field("port", &self.config.port)
             .field("database", &self.config.database)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod blob_result_set_validation_tests {
+    use tds_protocol::token::{ColMetaData, ColumnData, TypeInfo};
+    use tds_protocol::types::TypeId;
+
+    use super::{Client, Ready};
+    use crate::error::Error;
+
+    /// A scalar (non-MAX) column.
+    fn scalar(name: &str) -> ColumnData {
+        col(name, TypeId::Int4, None)
+    }
+
+    /// A MAX (PLP) column: `max_length == 0xFFFF` marks the MAX variant.
+    fn blob(name: &str) -> ColumnData {
+        col(name, TypeId::BigVarBinary, Some(0xFFFF))
+    }
+
+    fn col(name: &str, type_id: TypeId, max_length: Option<u32>) -> ColumnData {
+        ColumnData {
+            name: name.to_string(),
+            type_id,
+            col_type: 0,
+            flags: 0,
+            user_type: 0,
+            type_info: TypeInfo {
+                max_length,
+                ..Default::default()
+            },
+            crypto_metadata: None,
+        }
+    }
+
+    fn meta(columns: Vec<ColumnData>) -> ColMetaData {
+        ColMetaData {
+            columns,
+            cek_table: None,
+        }
+    }
+
+    fn validate(columns: Vec<ColumnData>) -> Result<(usize, usize), Error> {
+        Client::<Ready>::validate_blob_rows_result_set(&meta(columns))
+    }
+
+    #[test]
+    fn single_trailing_blob() {
+        assert_eq!(validate(vec![scalar("id"), blob("doc")]).unwrap(), (1, 1));
+    }
+
+    #[test]
+    fn multiple_trailing_blobs() {
+        assert_eq!(
+            validate(vec![scalar("id"), blob("doc1"), blob("doc2")]).unwrap(),
+            (1, 2)
+        );
+    }
+
+    #[test]
+    fn all_columns_blobs() {
+        assert_eq!(validate(vec![blob("a"), blob("b")]).unwrap(), (0, 2));
+    }
+
+    #[test]
+    fn no_max_column_is_rejected() {
+        assert!(matches!(
+            validate(vec![scalar("id"), scalar("j")]),
+            Err(Error::Protocol(_))
+        ));
+    }
+
+    #[test]
+    fn scalar_after_blob_is_rejected() {
+        // Interleaved MAX columns are out of scope: a scalar after a blob.
+        assert!(matches!(
+            validate(vec![scalar("id"), blob("doc"), scalar("trailing")]),
+            Err(Error::Protocol(_))
+        ));
+        // ...even when more blobs follow the interloping scalar.
+        assert!(matches!(
+            validate(vec![blob("doc1"), scalar("mid"), blob("doc2")]),
+            Err(Error::Protocol(_))
+        ));
     }
 }
