@@ -32,7 +32,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
-use mssql_client::{Client, Config as ClientConfig, DatabaseMetrics, Ready};
+use mssql_client::{Client, Config as ClientConfig, DatabaseMetrics, InTransaction, Ready};
 use parking_lot::Mutex;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::timeout;
@@ -1224,6 +1224,90 @@ impl PooledConnection {
             .execute(sql, params)
             .await
             .map_err(PoolError::Connection)
+    }
+
+    /// Run a closure inside a database transaction, keeping the connection in
+    /// the pool.
+    ///
+    /// Begins a transaction, hands the closure a [`Client<InTransaction>`] for
+    /// queries and statements, then **commits if the closure returns `Ok`** and
+    /// **rolls back if it returns `Err`**. Either way the underlying connection
+    /// is returned to the pool when this `PooledConnection` is dropped — unlike
+    /// [`detach`](Self::detach), which removes it from the pool. This is the
+    /// scoped transaction API that lets a pooled connection run a typed
+    /// transaction without detaching.
+    ///
+    /// The closure returns `Result<T, PoolError>`, so `?` works directly on the
+    /// transaction's `query`/`execute` calls — their [`mssql_client::Error`]
+    /// converts into [`PoolError`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PoolError`] if the connection was detached, if beginning,
+    /// committing, or rolling back the transaction fails, or if the closure
+    /// returns an error (after the rollback is attempted). If begin / commit /
+    /// rollback fails, the connection is dropped rather than returned to the
+    /// pool, and the pool replaces it on the next checkout.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn ex(pool: &mssql_driver_pool::Pool) -> Result<(), mssql_driver_pool::PoolError> {
+    /// let mut conn = pool.get().await?;
+    /// let affected = conn
+    ///     .with_transaction(async |tx| {
+    ///         tx.execute(
+    ///             "UPDATE accounts SET balance = balance - @p1 WHERE id = @p2",
+    ///             &[&10i32, &1i32],
+    ///         )
+    ///         .await?;
+    ///         tx.execute(
+    ///             "UPDATE accounts SET balance = balance + @p1 WHERE id = @p2",
+    ///             &[&10i32, &2i32],
+    ///         )
+    ///         .await?;
+    ///         Ok(())
+    ///     })
+    ///     .await?;
+    /// # let _ = affected;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn with_transaction<F, T>(&mut self, f: F) -> Result<T, PoolError>
+    where
+        F: AsyncFnOnce(&mut Client<InTransaction>) -> Result<T, PoolError>,
+    {
+        let client = self.client.take().ok_or_else(|| {
+            PoolError::ConnectionCreation("connection detached or invalid".to_string())
+        })?;
+
+        // begin_transaction consumes the client; on failure it is gone, so the
+        // connection is not returned to the pool (the pool replaces it).
+        let mut tx = client.begin_transaction().await?;
+
+        match f(&mut tx).await {
+            Ok(value) => {
+                // Commit and return the now-Ready client to the pool. A commit
+                // failure leaves the connection dropped (suspect state).
+                self.client = Some(tx.commit().await?);
+                Ok(value)
+            }
+            Err(err) => {
+                // Roll back the closure's failure, best-effort: a rollback
+                // failure means the connection is in an unknown state, so drop
+                // it rather than return it to the pool.
+                match tx.rollback().await {
+                    Ok(client) => self.client = Some(client),
+                    Err(rollback_err) => {
+                        tracing::warn!(
+                            error = %rollback_err,
+                            "transaction rollback failed; dropping connection rather than returning it to the pool"
+                        );
+                    }
+                }
+                Err(err)
+            }
+        }
     }
 }
 

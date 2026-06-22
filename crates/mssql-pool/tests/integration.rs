@@ -1263,3 +1263,106 @@ async fn test_reaper_does_not_inflate_max_connections() {
 
     pool.close().await;
 }
+
+// =============================================================================
+// Scoped transaction API (#280)
+// =============================================================================
+
+/// `with_transaction` commits on `Ok` and rolls back on `Err`, and the
+/// connection stays usable and returns to the pool either way.
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_pool_with_transaction_commit_and_rollback() {
+    let client_config = get_test_config().expect("SQL Server config required");
+    let pool = Pool::builder()
+        .client_config(client_config)
+        .max_connections(2)
+        .build()
+        .await
+        .expect("Failed to create pool");
+
+    let mut conn = pool.get().await.expect("get connection");
+
+    // A connection-scoped temp table created OUTSIDE the transaction, so a
+    // rollback undoes the in-transaction INSERT but not the table itself.
+    conn.execute("CREATE TABLE #t280 (v INT)", &[])
+        .await
+        .expect("create temp table");
+
+    // Commit path: the inserted row survives.
+    conn.with_transaction(async |tx| {
+        tx.execute("INSERT INTO #t280 (v) VALUES (1)", &[]).await?;
+        Ok(())
+    })
+    .await
+    .expect("committed transaction");
+
+    // Rollback path: the closure errors, so its INSERT is undone.
+    let rolled_back = conn
+        .with_transaction(async |tx| {
+            tx.execute("INSERT INTO #t280 (v) VALUES (2)", &[]).await?;
+            Err::<(), _>(PoolError::ConnectionCreation(
+                "intentional abort".to_string(),
+            ))
+        })
+        .await;
+    assert!(rolled_back.is_err(), "closure error must surface");
+
+    // The connection is still usable (returned to `self` after each tx): only
+    // the committed row remains.
+    let rows = conn
+        .query("SELECT COUNT(*) AS n FROM #t280", &[])
+        .await
+        .expect("count query");
+    let counts: Vec<i32> = rows
+        .filter_map(|r| r.ok())
+        .map(|r| r.get(0).unwrap())
+        .collect();
+    assert_eq!(counts, vec![1], "only the committed row should remain");
+
+    // Returns to the pool on drop.
+    drop(conn);
+    let status = pool.status();
+    assert_eq!(status.in_use, 0);
+    assert_eq!(status.available, 1);
+
+    pool.close().await;
+}
+
+/// A connection used via `with_transaction` is the same one reused from the
+/// pool afterward (it was not detached).
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_pool_with_transaction_keeps_connection_poolable() {
+    let client_config = get_test_config().expect("SQL Server config required");
+    let pool = Pool::builder()
+        .client_config(client_config)
+        .max_connections(1)
+        .build()
+        .await
+        .expect("Failed to create pool");
+
+    let mut conn = pool.get().await.expect("get connection");
+    let id_before = conn.metadata().id;
+    let value = conn
+        .with_transaction(async |tx| {
+            let rows = tx.query("SELECT 7 AS v", &[]).await?;
+            let v: Vec<i32> = rows
+                .filter_map(|r| r.ok())
+                .map(|r| r.get(0).unwrap())
+                .collect();
+            Ok(v[0])
+        })
+        .await
+        .expect("transaction");
+    assert_eq!(value, 7);
+    drop(conn);
+
+    // With max_connections=1, the next checkout must reuse the same connection,
+    // proving `with_transaction` returned it to the pool rather than detaching.
+    let conn2 = pool.get().await.expect("reuse connection");
+    assert_eq!(conn2.metadata().id, id_before, "connection must be reused");
+    drop(conn2);
+
+    pool.close().await;
+}
