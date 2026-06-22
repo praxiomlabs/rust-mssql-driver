@@ -39,6 +39,7 @@ fuzz_target!(|input: FuzzInput| {
         crypto_metadata: None,
     };
     let mut buf: &[u8] = &input.data;
-    // Any Ok/Err is fine; panics are findings.
-    let _ = mssql_client::__fuzzing::parse_column_value(&mut buf, &col);
+    // Any Ok/Err is fine; panics are findings. `None` = copy path: the fuzz
+    // input is a bare slice, not a tail of a backing `Bytes`.
+    let _ = mssql_client::__fuzzing::parse_column_value(&mut buf, &col, None);
 });

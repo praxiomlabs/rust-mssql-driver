@@ -301,7 +301,7 @@ impl<S: ConnectionState> Client<S> {
                     };
                     let mut buf = ret_val.value.as_ref();
                     if let Ok(mssql_types::SqlValue::Int(h)) =
-                        crate::column_parser::parse_column_value(&mut buf, &col_data)
+                        crate::column_parser::parse_column_value(&mut buf, &col_data, None)
                     {
                         prepared_handle = Some(h);
                     }
@@ -634,7 +634,8 @@ impl<S: ConnectionState> Client<S> {
                         crypto_metadata: None,
                     };
                     let mut buf = ret_val.value.as_ref();
-                    let sql_value = crate::column_parser::parse_column_value(&mut buf, &col_data)?;
+                    let sql_value =
+                        crate::column_parser::parse_column_value(&mut buf, &col_data, None)?;
 
                     result.output_params.push(crate::stream::OutputParam {
                         name: ret_val.param_name,
