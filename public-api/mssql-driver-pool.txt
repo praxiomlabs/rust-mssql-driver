@@ -539,6 +539,7 @@ pub fn mssql_driver_pool::pool::PooledConnection::detach(self) -> core::option::
 pub async fn mssql_driver_pool::pool::PooledConnection::execute(&mut self, &str, &[&(dyn mssql_types::to_sql::ToSql + core::marker::Sync)]) -> core::result::Result<u64, mssql_driver_pool::error::PoolError>
 pub fn mssql_driver_pool::pool::PooledConnection::metadata(&self) -> &mssql_driver_pool::lifecycle::ConnectionMetadata
 pub async fn mssql_driver_pool::pool::PooledConnection::query<'a>(&'a mut self, &str, &[&(dyn mssql_types::to_sql::ToSql + core::marker::Sync)]) -> core::result::Result<mssql_client::stream::QueryStream<'a>, mssql_driver_pool::error::PoolError>
+pub async fn mssql_driver_pool::pool::PooledConnection::with_transaction<F, T>(&mut self, F) -> core::result::Result<T, mssql_driver_pool::error::PoolError> where F: core::ops::async_function::AsyncFnOnce(&mut mssql_client::client::Client<mssql_client::state::InTransaction>) -> core::result::Result<T, mssql_driver_pool::error::PoolError>
 impl core::ops::drop::Drop for mssql_driver_pool::pool::PooledConnection
 pub fn mssql_driver_pool::pool::PooledConnection::drop(&mut self)
 impl core::marker::Freeze for mssql_driver_pool::pool::PooledConnection
@@ -1100,6 +1101,7 @@ pub fn mssql_driver_pool::pool::PooledConnection::detach(self) -> core::option::
 pub async fn mssql_driver_pool::pool::PooledConnection::execute(&mut self, &str, &[&(dyn mssql_types::to_sql::ToSql + core::marker::Sync)]) -> core::result::Result<u64, mssql_driver_pool::error::PoolError>
 pub fn mssql_driver_pool::pool::PooledConnection::metadata(&self) -> &mssql_driver_pool::lifecycle::ConnectionMetadata
 pub async fn mssql_driver_pool::pool::PooledConnection::query<'a>(&'a mut self, &str, &[&(dyn mssql_types::to_sql::ToSql + core::marker::Sync)]) -> core::result::Result<mssql_client::stream::QueryStream<'a>, mssql_driver_pool::error::PoolError>
+pub async fn mssql_driver_pool::pool::PooledConnection::with_transaction<F, T>(&mut self, F) -> core::result::Result<T, mssql_driver_pool::error::PoolError> where F: core::ops::async_function::AsyncFnOnce(&mut mssql_client::client::Client<mssql_client::state::InTransaction>) -> core::result::Result<T, mssql_driver_pool::error::PoolError>
 impl core::ops::drop::Drop for mssql_driver_pool::pool::PooledConnection
 pub fn mssql_driver_pool::pool::PooledConnection::drop(&mut self)
 impl core::marker::Freeze for mssql_driver_pool::pool::PooledConnection
