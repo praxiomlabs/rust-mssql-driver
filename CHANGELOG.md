@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.3](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.19.2...v0.19.3) - 2026-06-22
+
+### Added
+
+- *(client)* sp_prepexec on cold cache miss — one round-trip, not two ([#205](https://github.com/praxiomlabs/rust-mssql-driver/pull/205))
+- *(client)* stream multiple trailing MAX columns via query_stream_rows ([#258](https://github.com/praxiomlabs/rust-mssql-driver/pull/258))
+- *(client)* opt-in client-side prepared-statement cache ([#205](https://github.com/praxiomlabs/rust-mssql-driver/pull/205))
+- *(client)* instrument procedure/named/multi paths with spans and metrics
+- *(pool)* scoped with_transaction on PooledConnection ([#280](https://github.com/praxiomlabs/rust-mssql-driver/pull/280))
+
+### Fixed
+
+- *(protocol)* correct three inert wire-layer bugs
+
+### Other
+
+- *(client)* slice VARBINARY from the row's Bytes instead of copying ([#323](https://github.com/praxiomlabs/rust-mssql-driver/pull/323))
+- *(client)* decode NVARCHAR into a capacity-reserved String ([#323](https://github.com/praxiomlabs/rust-mssql-driver/pull/323))
+- *(ae)* verify AE normalization references against the real .NET binary ([#299](https://github.com/praxiomlabs/rust-mssql-driver/pull/299))
+- *(client)* drop needless return / inline format arg in no-default-features build
+- *(client)* gate feature-dependent test/example targets with required-features ([#329](https://github.com/praxiomlabs/rust-mssql-driver/pull/329))
+- *(protocol)* golden wire-byte tripwire for sealed encoders
+- *(ae)* commit reproducible Microsoft.Data.SqlClient fixture harness ([#299](https://github.com/praxiomlabs/rust-mssql-driver/pull/299))
+
 ## [0.19.2](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.19.1...v0.19.2) - 2026-06-18
 
 ### Added
