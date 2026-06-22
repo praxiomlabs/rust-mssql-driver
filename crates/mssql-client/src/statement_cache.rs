@@ -105,6 +105,10 @@ pub struct StatementCache {
     hits: u64,
     /// Total number of cache misses (for metrics).
     misses: u64,
+    /// Key of an in-flight `sp_prepexec` whose handle has not yet been read off
+    /// the response. Set by the send path on a cold miss, consumed by the read
+    /// path once the `@handle` RETURNVALUE arrives. See [`set_pending`](Self::set_pending).
+    pending_prepare: Option<String>,
 }
 
 impl StatementCache {
@@ -121,6 +125,7 @@ impl StatementCache {
             max_size,
             hits: 0,
             misses: 0,
+            pending_prepare: None,
         }
     }
 
@@ -145,6 +150,21 @@ impl StatementCache {
             tracing::trace!(sql = sql, "statement cache miss");
             None
         }
+    }
+
+    /// Record the cache key of an in-flight `sp_prepexec` whose handle will be
+    /// read off the execution response. Pass `None` on a cache hit (no handle
+    /// to capture) so a prior miss's key cannot linger.
+    ///
+    /// Internal plumbing for the cold-miss cache path — not part of the public
+    /// API.
+    pub(crate) fn set_pending(&mut self, key: Option<String>) {
+        self.pending_prepare = key;
+    }
+
+    /// Take the in-flight `sp_prepexec` key, if any, clearing it.
+    pub(crate) fn take_pending(&mut self) -> Option<String> {
+        self.pending_prepare.take()
     }
 
     /// Peek at a prepared statement without updating LRU order.

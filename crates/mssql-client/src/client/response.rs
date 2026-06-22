@@ -185,6 +185,11 @@ impl<S: ConnectionState> Client<S> {
         let mut columns: Vec<crate::row::Column> = Vec::new();
         let mut pending_rows: Vec<crate::stream::PendingRow> = Vec::new();
         let mut protocol_metadata: Option<ColMetaData> = None;
+        // sp_prepexec (cold-miss cache path) returns the prepared-statement
+        // handle via its `@handle` OUTPUT parameter, which arrives as a
+        // RETURNVALUE token after the rows. Capture it for the post-read cache
+        // store; `None` for every other query.
+        let mut prepared_handle: Option<i32> = None;
         #[cfg(feature = "always-encrypted")]
         let mut current_decryptor: Option<
             std::sync::Arc<crate::column_decryptor::ColumnDecryptor>,
@@ -276,9 +281,38 @@ impl<S: ConnectionState> Client<S> {
                     // to properly update the transaction descriptor.
                     Self::process_transaction_env_change(&env, &mut self.transaction_descriptor);
                 }
+                Token::ReturnValue(ret_val) if prepared_handle.is_none() => {
+                    // sp_prepexec's `@handle` OUTPUT parameter. Decode it with the
+                    // same parser used for column values (mirrors the procedure
+                    // reader). A non-INT or undecodable value leaves the handle
+                    // uncaptured, so the statement is simply re-prepared next time.
+                    use tds_protocol::token::ColumnData;
+                    use tds_protocol::types::TypeId;
+
+                    let type_id = TypeId::from_u8(ret_val.col_type).unwrap_or(TypeId::Null);
+                    let col_data = ColumnData {
+                        name: String::new(),
+                        type_id,
+                        col_type: ret_val.col_type,
+                        flags: ret_val.flags,
+                        user_type: ret_val.user_type,
+                        type_info: ret_val.type_info.clone(),
+                        crypto_metadata: None,
+                    };
+                    let mut buf = ret_val.value.as_ref();
+                    if let Ok(mssql_types::SqlValue::Int(h)) =
+                        crate::column_parser::parse_column_value(&mut buf, &col_data)
+                    {
+                        prepared_handle = Some(h);
+                    }
+                }
                 _ => {}
             }
         }
+
+        // Cold-miss cache path: if an sp_prepexec is pending, cache its handle
+        // (and release any LRU-evicted server handle). No-op otherwise.
+        self.store_pending_prepared_handle(prepared_handle).await?;
 
         tracing::debug!(
             columns = columns.len(),

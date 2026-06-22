@@ -1119,6 +1119,39 @@ impl RpcRequest {
         request
     }
 
+    /// Create an sp_prepexec request: prepare and execute in a single call.
+    ///
+    /// Combines [`prepare`](Self::prepare) and [`execute`](Self::execute) into
+    /// one round-trip: the server compiles the statement, returns its handle via
+    /// the `@handle` OUTPUT parameter (surfaced as a RETURNVALUE token), and
+    /// executes it. The statement parameter values are positional/unnamed, like
+    /// `sp_execute`. Unlike `sp_prepare`, `sp_prepexec` takes no `@options`.
+    pub fn prepexec(sql: &str, params: Vec<RpcParam>) -> Self {
+        let mut request = Self::by_id(ProcId::PrepExec);
+
+        // OUT: handle (INT)
+        request
+            .params
+            .push(RpcParam::null("@handle", TypeInfo::int()).as_output());
+
+        // Param declarations (built before `params` is consumed below).
+        let declarations = Self::build_param_declarations(&params);
+        request
+            .params
+            .push(RpcParam::nvarchar("@params", &declarations));
+
+        // SQL statement
+        request.params.push(RpcParam::nvarchar("@stmt", sql));
+
+        // Statement parameter values, positional (names cleared), like sp_execute.
+        for mut param in params {
+            param.name.clear();
+            request.params.push(param);
+        }
+
+        request
+    }
+
     /// Create an sp_unprepare request.
     pub fn unprepare(handle: i32) -> Self {
         let mut request = Self::by_id(ProcId::Unprepare);
@@ -1406,6 +1439,25 @@ mod tests {
 
         assert_eq!(rpc.proc_id, Some(ProcId::Unprepare));
         assert_eq!(rpc.params.len(), 1); // just the handle
+    }
+
+    #[test]
+    fn test_prepexec_request() {
+        let rpc = RpcRequest::prepexec(
+            "SELECT * FROM users WHERE id = @p1",
+            vec![RpcParam::int("@p1", 42)],
+        );
+
+        assert_eq!(rpc.proc_id, Some(ProcId::PrepExec));
+        // handle (output), @params, @stmt, then one positional value param.
+        assert_eq!(rpc.params.len(), 4);
+        assert!(rpc.params[0].flags.by_ref); // @handle is OUTPUT
+        assert_eq!(rpc.params[1].name, "@params");
+        assert_eq!(rpc.params[2].name, "@stmt");
+        // sp_prepexec, like sp_execute, binds value parameters positionally —
+        // their names must be cleared so the server does not reject the stream.
+        assert!(rpc.params[3].name.is_empty());
+        // Unlike sp_prepare, sp_prepexec carries no trailing @options parameter.
     }
 
     #[test]
