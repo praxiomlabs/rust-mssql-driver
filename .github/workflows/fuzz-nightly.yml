@@ -23,7 +23,7 @@ jobs:
     # 12 targets x 300s plus build time; cap well below the 6h default.
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
         with:
