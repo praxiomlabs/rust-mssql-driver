@@ -91,7 +91,7 @@ pub(crate) fn convert_raw_row(
     let mut buf = raw.data.as_ref();
 
     for col in &meta.columns {
-        let value = parse_column_value(&mut buf, col)?;
+        let value = parse_column_value(&mut buf, col, Some(&raw.data))?;
         values.push(value);
     }
 
@@ -116,7 +116,7 @@ pub(crate) fn convert_nbc_row(
         if nbc.is_null(i) {
             values.push(mssql_types::SqlValue::Null);
         } else {
-            let value = parse_column_value(&mut buf, col)?;
+            let value = parse_column_value(&mut buf, col, Some(&nbc.data))?;
             values.push(value);
         }
     }
@@ -149,7 +149,7 @@ pub(crate) fn convert_raw_row_decrypted(
         let value = if decryptor.is_encrypted(i) {
             decrypt_column(&mut buf, col, decryptor, i)?
         } else {
-            parse_column_value(&mut buf, col)?
+            parse_column_value(&mut buf, col, Some(&raw.data))?
         };
         values.push(value);
     }
@@ -180,7 +180,7 @@ pub(crate) fn convert_nbc_row_decrypted(
             let value = if decryptor.is_encrypted(i) {
                 decrypt_column(&mut buf, col, decryptor, i)?
             } else {
-                parse_column_value(&mut buf, col)?
+                parse_column_value(&mut buf, col, Some(&nbc.data))?
             };
             values.push(value);
         }
@@ -552,7 +552,36 @@ fn parse_money_value(buf: &mut &[u8], bytes: usize) -> Result<SqlValue> {
 /// Parse a single column value from a buffer based on column metadata.
 // `pub` for the `__fuzzing` re-export; the module itself is `pub(crate)`,
 // so this stays crate-private unless the `fuzzing` feature is enabled.
-pub fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue> {
+/// Take `len` bytes of binary data from `buf`, advancing it.
+///
+/// When `src` is `Some` (and `buf` is a tail subslice of it — the case on the
+/// buffered row-decode path, where `buf` started as `src.as_ref()` and only ever
+/// advances forward), this slices `src` zero-copy (a refcount bump) instead of
+/// copying the bytes into a fresh `Bytes`. When `src` is `None` it copies, which
+/// is always correct regardless of where `buf` points.
+fn take_binary(buf: &mut &[u8], len: usize, src: Option<&bytes::Bytes>) -> bytes::Bytes {
+    let data = match src {
+        Some(src) => {
+            let off = src.len() - buf.len();
+            debug_assert!(
+                core::ptr::eq(src[off..].as_ptr(), buf.as_ptr()),
+                "take_binary zero-copy: buf must be a tail subslice of src"
+            );
+            src.slice(off..off + len)
+        }
+        None => bytes::Bytes::copy_from_slice(&buf[..len]),
+    };
+    buf.advance(len);
+    data
+}
+
+/// Parse one column value from `buf`. `src` is the row's backing `Bytes` (when
+/// available) so binary cells can slice it zero-copy; pass `None` to force copies.
+pub fn parse_column_value(
+    buf: &mut &[u8],
+    col: &ColumnData,
+    src: Option<&bytes::Bytes>,
+) -> Result<SqlValue> {
     let value = match col.type_id {
         // Fixed-length null type
         TypeId::Null => SqlValue::Null,
@@ -649,9 +678,9 @@ pub fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue>
         // IMAGE type - always uses PLP encoding (deprecated LOB type)
         TypeId::Image => parse_plp_varbinary(buf)?,
         // Legacy byte-length binary types (Binary, VarBinary) - 1-byte length prefix
-        TypeId::Binary | TypeId::VarBinary => parse_legacy_varbinary(buf)?,
+        TypeId::Binary | TypeId::VarBinary => parse_legacy_varbinary(buf, src)?,
         // Variable-length binary types (BigVarBinary, BigBinary)
-        TypeId::BigVarBinary | TypeId::BigBinary => parse_bigvarbinary(buf, col)?,
+        TypeId::BigVarBinary | TypeId::BigBinary => parse_bigvarbinary(buf, col, src)?,
 
         // XML type - always uses PLP encoding
         TypeId::Xml => parse_xml(buf)?,
@@ -663,7 +692,7 @@ pub fn parse_column_value(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue>
         TypeId::Udt => parse_plp_varbinary(buf)?,
 
         // Default: treat as binary with 2-byte length prefix
-        _ => parse_default_binary(buf, col)?,
+        _ => parse_default_binary(buf, col, src)?,
     };
 
     Ok(value)
@@ -1125,7 +1154,7 @@ fn parse_nvarchar(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue> {
 }
 
 /// BINARY / VARBINARY — legacy byte-length binary with a 1-byte length prefix.
-fn parse_legacy_varbinary(buf: &mut &[u8]) -> Result<SqlValue> {
+fn parse_legacy_varbinary(buf: &mut &[u8], src: Option<&bytes::Bytes>) -> Result<SqlValue> {
     if buf.remaining() < 1 {
         return Err(Error::Protocol(
             "unexpected EOF reading legacy varbinary length".into(),
@@ -1141,14 +1170,16 @@ fn parse_legacy_varbinary(buf: &mut &[u8]) -> Result<SqlValue> {
             "unexpected EOF reading legacy varbinary data".into(),
         ));
     } else {
-        let data = bytes::Bytes::copy_from_slice(&buf[..len as usize]);
-        buf.advance(len as usize);
-        SqlValue::Binary(data)
+        SqlValue::Binary(take_binary(buf, len as usize, src))
     })
 }
 
 /// BIGVARBINARY / BIGBINARY — 2-byte length prefix, or PLP for the MAX variant.
-fn parse_bigvarbinary(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue> {
+fn parse_bigvarbinary(
+    buf: &mut &[u8],
+    col: &ColumnData,
+    src: Option<&bytes::Bytes>,
+) -> Result<SqlValue> {
     // Check if this is a MAX type (uses PLP encoding)
     if col.type_info.max_length == Some(0xFFFF) {
         // PLP format: 8-byte total length, then chunks
@@ -1167,9 +1198,7 @@ fn parse_bigvarbinary(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue> {
             "unexpected EOF reading varbinary data".into(),
         ));
     } else {
-        let data = bytes::Bytes::copy_from_slice(&buf[..len as usize]);
-        buf.advance(len as usize);
-        SqlValue::Binary(data)
+        SqlValue::Binary(take_binary(buf, len as usize, src))
     })
 }
 
@@ -1206,7 +1235,11 @@ fn parse_guid(buf: &mut &[u8]) -> Result<SqlValue> {
 }
 
 /// Fallback: read an unrecognized type as binary with a 2-byte length prefix.
-fn parse_default_binary(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue> {
+fn parse_default_binary(
+    buf: &mut &[u8],
+    col: &ColumnData,
+    src: Option<&bytes::Bytes>,
+) -> Result<SqlValue> {
     // Try to read as variable-length with 2-byte length
     if buf.remaining() < 2 {
         return Err(Error::Protocol(format!(
@@ -1223,9 +1256,7 @@ fn parse_default_binary(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue> {
             col.type_id
         )));
     } else {
-        let data = bytes::Bytes::copy_from_slice(&buf[..len as usize]);
-        buf.advance(len as usize);
-        SqlValue::Binary(data)
+        SqlValue::Binary(take_binary(buf, len as usize, src))
     })
 }
 
@@ -2041,13 +2072,13 @@ mod tests {
         let data = [4u8, 0x00, 0x00, 0xFF, 0xFF];
         let col = datetime_col(TypeId::DateTimeN, 0x6F, Some(4));
         let mut buf: &[u8] = &data;
-        assert!(parse_column_value(&mut buf, &col).is_err());
+        assert!(parse_column_value(&mut buf, &col, None).is_err());
 
         // Fixed SMALLDATETIME (DateTime4): same payload, no length prefix
         let data = [0x00, 0x00, 0xFF, 0xFF];
         let col = datetime_col(TypeId::DateTime4, 0x3A, None);
         let mut buf: &[u8] = &data;
-        assert!(parse_column_value(&mut buf, &col).is_err());
+        assert!(parse_column_value(&mut buf, &col, None).is_err());
     }
 
     #[cfg(feature = "chrono")]
@@ -2059,7 +2090,7 @@ mod tests {
         data.extend_from_slice(&0u32.to_le_bytes());
         let col = datetime_col(TypeId::DateTimeN, 0x6F, Some(8));
         let mut buf: &[u8] = &data;
-        assert!(parse_column_value(&mut buf, &col).is_err());
+        assert!(parse_column_value(&mut buf, &col, None).is_err());
 
         // Fixed DATETIME: days=i32::MIN
         let mut data = Vec::new();
@@ -2067,7 +2098,7 @@ mod tests {
         data.extend_from_slice(&0u32.to_le_bytes());
         let col = datetime_col(TypeId::DateTime, 0x3D, None);
         let mut buf: &[u8] = &data;
-        assert!(parse_column_value(&mut buf, &col).is_err());
+        assert!(parse_column_value(&mut buf, &col, None).is_err());
     }
 
     #[cfg(feature = "chrono")]
@@ -2079,7 +2110,7 @@ mod tests {
         data.extend_from_slice(&u32::MAX.to_le_bytes());
         let col = datetime_col(TypeId::DateTimeN, 0x6F, Some(8));
         let mut buf: &[u8] = &data;
-        assert!(parse_column_value(&mut buf, &col).is_err());
+        assert!(parse_column_value(&mut buf, &col, None).is_err());
     }
 
     #[cfg(feature = "chrono")]
@@ -2096,7 +2127,7 @@ mod tests {
             let col = datetime_col(type_id, col_type, Some(len as u32));
             let mut buf: &[u8] = &data;
             assert!(
-                parse_column_value(&mut buf, &col).is_err(),
+                parse_column_value(&mut buf, &col, None).is_err(),
                 "{type_id:?} must error on truncated payload"
             );
         }
@@ -2112,14 +2143,14 @@ mod tests {
         let mut col = datetime_col(TypeId::DateTime2, 0x2A, None);
         col.type_info.scale = Some(7);
         let mut buf: &[u8] = &data;
-        assert!(parse_column_value(&mut buf, &col).is_err());
+        assert!(parse_column_value(&mut buf, &col, None).is_err());
 
         // Same for DATETIMEOFFSET (time_len + 5)
         let data = [1u8, 0xAA];
         let mut col = datetime_col(TypeId::DateTimeOffset, 0x2B, None);
         col.type_info.scale = Some(7);
         let mut buf: &[u8] = &data;
-        assert!(parse_column_value(&mut buf, &col).is_err());
+        assert!(parse_column_value(&mut buf, &col, None).is_err());
     }
 
     #[cfg(feature = "chrono")]
@@ -2251,14 +2282,14 @@ mod tests {
         let mut buf: &[u8] = &raw_data;
 
         // Parse column 0 (NVarChar)
-        let value0 = parse_column_value(&mut buf, &col0).unwrap();
+        let value0 = parse_column_value(&mut buf, &col0, None).unwrap();
         match value0 {
             SqlValue::String(s) => assert_eq!(s, "World"),
             _ => panic!("expected String, got {value0:?}"),
         }
 
         // Parse column 1 (IntN)
-        let value1 = parse_column_value(&mut buf, &col1).unwrap();
+        let value1 = parse_column_value(&mut buf, &col1, None).unwrap();
         match value1 {
             SqlValue::Int(i) => assert_eq!(i, 42),
             _ => panic!("expected Int, got {value1:?}"),
@@ -2325,19 +2356,19 @@ mod tests {
         let mut buf: &[u8] = &data;
 
         // Parse all 4 columns
-        let v0 = parse_column_value(&mut buf, &col0).unwrap();
+        let v0 = parse_column_value(&mut buf, &col0, None).unwrap();
         assert!(matches!(v0, SqlValue::Null), "col0 should be Null");
 
-        let v1 = parse_column_value(&mut buf, &col1).unwrap();
+        let v1 = parse_column_value(&mut buf, &col1, None).unwrap();
         assert!(matches!(v1, SqlValue::Int(123)), "col1 should be 123");
 
-        let v2 = parse_column_value(&mut buf, &col2).unwrap();
+        let v2 = parse_column_value(&mut buf, &col2, None).unwrap();
         match v2 {
             SqlValue::String(s) => assert_eq!(s, "Test"),
             _ => panic!("col2 should be 'Test'"),
         }
 
-        let v3 = parse_column_value(&mut buf, &col3).unwrap();
+        let v3 = parse_column_value(&mut buf, &col3, None).unwrap();
         assert!(matches!(v3, SqlValue::Null), "col3 should be Null");
 
         // Buffer should be fully consumed
@@ -2392,13 +2423,13 @@ mod tests {
 
         let mut buf: &[u8] = &data;
 
-        let v0 = parse_column_value(&mut buf, &col0).unwrap();
+        let v0 = parse_column_value(&mut buf, &col0, None).unwrap();
         match v0 {
             SqlValue::String(s) => assert_eq!(s, test_str),
             _ => panic!("expected String"),
         }
 
-        let v1 = parse_column_value(&mut buf, &col1).unwrap();
+        let v1 = parse_column_value(&mut buf, &col1, None).unwrap();
         match v1 {
             SqlValue::BigInt(i) => assert_eq!(i, 9999999999),
             _ => panic!("expected BigInt"),
