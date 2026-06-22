@@ -1326,6 +1326,7 @@ pub fn tds_protocol::rpc::RpcRequest::execute_sql(&str, alloc::vec::Vec<tds_prot
 pub fn tds_protocol::rpc::RpcRequest::named(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn tds_protocol::rpc::RpcRequest::param(self, tds_protocol::rpc::RpcParam) -> Self
 pub fn tds_protocol::rpc::RpcRequest::prepare(&str, &[tds_protocol::rpc::RpcParam]) -> Self
+pub fn tds_protocol::rpc::RpcRequest::prepexec(&str, alloc::vec::Vec<tds_protocol::rpc::RpcParam>) -> Self
 pub fn tds_protocol::rpc::RpcRequest::unprepare(i32) -> Self
 pub fn tds_protocol::rpc::RpcRequest::with_options(self, tds_protocol::rpc::RpcOptionFlags) -> Self
 impl core::clone::Clone for tds_protocol::rpc::RpcRequest
@@ -5318,6 +5319,7 @@ pub fn tds_protocol::rpc::RpcRequest::execute_sql(&str, alloc::vec::Vec<tds_prot
 pub fn tds_protocol::rpc::RpcRequest::named(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn tds_protocol::rpc::RpcRequest::param(self, tds_protocol::rpc::RpcParam) -> Self
 pub fn tds_protocol::rpc::RpcRequest::prepare(&str, &[tds_protocol::rpc::RpcParam]) -> Self
+pub fn tds_protocol::rpc::RpcRequest::prepexec(&str, alloc::vec::Vec<tds_protocol::rpc::RpcParam>) -> Self
 pub fn tds_protocol::rpc::RpcRequest::unprepare(i32) -> Self
 pub fn tds_protocol::rpc::RpcRequest::with_options(self, tds_protocol::rpc::RpcOptionFlags) -> Self
 impl core::clone::Clone for tds_protocol::rpc::RpcRequest

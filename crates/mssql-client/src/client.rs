@@ -614,45 +614,53 @@ impl<S: ConnectionState> Client<S> {
         );
 
         if let Some(handle) = self.statement_cache.get(&key) {
+            // Hit: sp_execute the cached handle. Clear any stale pending key
+            // (e.g. from a prior request whose read aborted) so the read path
+            // does not try to capture a handle from this response.
+            self.statement_cache.set_pending(None);
             let rpc = RpcRequest::execute(handle, rpc_params);
             self.send_rpc(&rpc).await?;
         } else {
-            // Miss: sp_prepare for a handle, then sp_execute. The caller's
-            // read_query_response reads the execute (row) response.
-            let prepare = RpcRequest::prepare(sql, &rpc_params);
-            self.send_rpc(&prepare).await?;
-            let prepared = self.read_procedure_result().await?;
-            let handle = Self::prepare_handle(&prepared)?;
-
-            if let Some(evicted) = self
-                .statement_cache
-                .insert(crate::statement_cache::PreparedStatement::new(handle, key))
-            {
-                // Release the evicted server-side handle. Best-effort: a failed
-                // sp_unprepare leaks one handle until connection reset, never
-                // corrupts data.
-                let unprepare = RpcRequest::unprepare(evicted.handle());
-                self.send_rpc(&unprepare).await?;
-                let _ = self.read_procedure_result().await?;
-            }
-
-            let rpc = RpcRequest::execute(handle, rpc_params);
+            // Miss: sp_prepexec prepares and executes in ONE round-trip. The
+            // caller's read_query_response reads the row response and captures
+            // the `@handle` RETURNVALUE, then stores it under `key` (see
+            // `store_pending_prepared_handle`).
+            self.statement_cache.set_pending(Some(key));
+            let rpc = RpcRequest::prepexec(sql, rpc_params);
             self.send_rpc(&rpc).await?;
         }
         Ok(())
     }
 
-    /// Extract the statement handle from an `sp_prepare` response — the
-    /// `@handle` OUTPUT parameter, surfaced as a RETURNVALUE / output param.
-    fn prepare_handle(result: &crate::stream::ProcedureResult) -> Result<i32> {
-        result
-            .output_params
-            .iter()
-            .find_map(|p| match &p.value {
-                mssql_types::SqlValue::Int(h) => Some(*h),
-                _ => None,
-            })
-            .ok_or_else(|| Error::Protocol("sp_prepare returned no statement handle".into()))
+    /// Store the handle captured from an `sp_prepexec` execution response under
+    /// the pending cache key (set by [`send_query_request`](Self::send_query_request)
+    /// on a cold miss), releasing any LRU-evicted server-side handle.
+    ///
+    /// Called by `read_query_response` after it has read the row response and
+    /// the trailing `@handle` RETURNVALUE. A no-op when no prepexec is pending.
+    /// Eviction `sp_unprepare` is best-effort: a failure leaks one handle until
+    /// connection reset, never corrupts data.
+    pub(super) async fn store_pending_prepared_handle(
+        &mut self,
+        handle: Option<i32>,
+    ) -> Result<()> {
+        let Some(key) = self.statement_cache.take_pending() else {
+            return Ok(());
+        };
+        let Some(handle) = handle else {
+            // No @handle came back (unexpected for sp_prepexec): leave the
+            // statement uncached so the next call simply re-prepares.
+            return Ok(());
+        };
+        if let Some(evicted) = self
+            .statement_cache
+            .insert(crate::statement_cache::PreparedStatement::new(handle, key))
+        {
+            let unprepare = RpcRequest::unprepare(evicted.handle());
+            self.send_rpc(&unprepare).await?;
+            let _ = self.read_procedure_result().await?;
+        }
+        Ok(())
     }
 
     /// Encrypt the Always Encrypted parameters of a statement, then build its
