@@ -163,11 +163,11 @@ impl Client<Disconnected> {
                 // observer. Azure SQL always requires TLS anyway.
                 #[cfg(not(feature = "tls"))]
                 {
-                    return Err(Error::Config(
+                    Err(Error::Config(
                         "Azure AD / Entra (FEDAUTH) authentication requires TLS: \
                          enable the 'tls' feature."
                             .into(),
-                    ));
+                    ))
                 }
                 #[cfg(feature = "tls")]
                 {
@@ -1014,9 +1014,8 @@ impl Client<Disconnected> {
         let server_encryption = prelogin_response.encryption;
         if server_encryption != EncryptionLevel::NotSupported {
             return Err(Error::Config(format!(
-                "Server requires encryption (level: {:?}) but TLS feature is disabled. \
-                     Either enable the 'tls' feature or configure the server to allow unencrypted connections.",
-                server_encryption
+                "Server requires encryption (level: {server_encryption:?}) but TLS feature is disabled. \
+                     Either enable the 'tls' feature or configure the server to allow unencrypted connections."
             )));
         }
 
