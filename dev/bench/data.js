@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781772914625,
+  "lastUpdate": 1782091593826,
   "repoUrl": "https://github.com/praxiomlabs/rust-mssql-driver",
   "entries": {
     "Rust Benchmarks": [
@@ -56159,6 +56159,366 @@ window.BENCHMARK_DATA = {
             "name": "sql_batch_encode/large",
             "value": 2568,
             "range": "± 153",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "jkindrix@gmail.com",
+            "name": "Justin Kindrix",
+            "username": "jkindrix"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e5db69870c2f5fc1d58da7bf817192a0e5aef499",
+          "message": "Merge pull request #336 from praxiomlabs/feat/issue-258-streaming-row-cursor\n\nfeat(client): stream multiple trailing MAX columns via query_stream_rows (#258)",
+          "timestamp": "2026-06-21T20:15:20-05:00",
+          "tree_id": "337f62d1bad9eac3c2cd9e0e97a17ffc258c3184",
+          "url": "https://github.com/praxiomlabs/rust-mssql-driver/commit/e5db69870c2f5fc1d58da7bf817192a0e5aef499"
+        },
+        "date": 1782091592419,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "connection_string/simple",
+            "value": 910,
+            "range": "± 27",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "connection_string/with_port",
+            "value": 960,
+            "range": "± 16",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "connection_string/with_instance",
+            "value": 1025,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "connection_string/azure_full",
+            "value": 1886,
+            "range": "± 36",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/i32_from_int",
+            "value": 9,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/i64_from_bigint",
+            "value": 9,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/string_from_string",
+            "value": 22,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/option_i32_some",
+            "value": 5,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/option_i32_none",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/f64_from_double",
+            "value": 9,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/bool_from_bool",
+            "value": 12,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arc_bytes/clone_small",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arc_bytes/clone_medium",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arc_bytes/clone_large",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arc_bytes/slice_medium",
+            "value": 6,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "config_builder/minimal",
+            "value": 89,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "config_builder/full",
+            "value": 116,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_int",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_bigint",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_string",
+            "value": 14,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_null",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/null_check_iter",
+            "value": 0,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/is_null_check",
+            "value": 0,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_encode/short",
+            "value": 78,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_encode/medium",
+            "value": 544,
+            "range": "± 23",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_encode/long",
+            "value": 3576,
+            "range": "± 81",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_encode/unicode",
+            "value": 251,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_decode/short",
+            "value": 42,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_decode/medium",
+            "value": 151,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "utf16_decode/long",
+            "value": 728,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/i32",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/i64",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/f64",
+            "value": 7,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/bool",
+            "value": 7,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/String",
+            "value": 38,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/str",
+            "value": 26,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/Option_i32_Some",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "to_sql/Option_i32_None",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/i32",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/i64",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/f64",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/bool",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/String",
+            "value": 24,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/Option_i32_Some",
+            "value": 7,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "from_sql/Option_i32_None",
+            "value": 5,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_int",
+            "value": 4,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_string",
+            "value": 14,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/create_null",
+            "value": 3,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_value/is_null_check",
+            "value": 0,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "packet_header_encode",
+            "value": 48,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "packet_header_decode",
+            "value": 11,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "prelogin_encode",
+            "value": 156,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "prelogin_decode",
+            "value": 68,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_batch_encode/simple",
+            "value": 96,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_batch_encode/medium",
+            "value": 1040,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "sql_batch_encode/large",
+            "value": 2444,
+            "range": "± 19",
             "unit": "ns/iter"
           }
         ]
