@@ -1109,13 +1109,16 @@ fn parse_nvarchar(buf: &mut &[u8], col: &ColumnData) -> Result<SqlValue> {
         ));
     } else {
         let data = &buf[..len as usize];
-        // UTF-16LE to String
-        let utf16: Vec<u16> = data
-            .chunks_exact(2)
-            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-            .collect();
-        let s = String::from_utf16(&utf16)
-            .map_err(|_| Error::Protocol("invalid UTF-16 in nvarchar".into()))?;
+        // UTF-16LE to String, decoded directly into a capacity-reserved String:
+        // no Vec<u16> intermediate and no realloc-growth churn (each is a heap
+        // allocation per cell). Char count <= code-unit count = len/2.
+        let mut s = String::with_capacity(len as usize / 2);
+        for unit in char::decode_utf16(
+            data.chunks_exact(2)
+                .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]])),
+        ) {
+            s.push(unit.map_err(|_| Error::Protocol("invalid UTF-16 in nvarchar".into()))?);
+        }
         buf.advance(len as usize);
         SqlValue::String(s)
     })
