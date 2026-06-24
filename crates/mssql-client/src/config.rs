@@ -44,7 +44,7 @@
 //! | `User Id` | `UID`, `User` | (empty) | SQL Server login username. Reinterpreted by `Authentication` (see below). |
 //! | `Password` | `PWD` | (empty) | SQL Server login password. Reinterpreted by `Authentication` (see below). |
 //! | `Database` | `Initial Catalog` | none | Target database. |
-//! | `Authentication` | — | none | Authentication method (ADO.NET `SqlAuthenticationMethod`; spaced forms like `Active Directory Service Principal` also accepted). `SqlPassword`: SQL authentication (the default). `ActiveDirectoryServicePrincipal`: Azure AD service principal — `User Id=<client-id>@<tenant-id>`, `Password=<client secret>`; requires the `azure-identity` feature. `ActiveDirectoryManagedIdentity` (alias `ActiveDirectoryMSI`): Azure managed identity — optional `User Id=<client-id>` selects a user-assigned identity; requires the `azure-identity` feature. Azure AD methods log in via the FEDAUTH SecurityToken workflow and require an encrypted connection. Certificate-based service principals have no connection-string keyword (matching ADO.NET, which configures them programmatically) — construct [`Credentials::certificate`](mssql_auth::Credentials::certificate) and pass it to [`Config::credentials`] with the `cert-auth` feature. The interactive Entra values (`ActiveDirectoryPassword`, `ActiveDirectoryInteractive`, `ActiveDirectoryDeviceCodeFlow`, `ActiveDirectoryDefault`) are recognized but not implemented as built-in flows — `azure_identity` does not ship those credentials. For these scenarios, acquire the token yourself (MSAL, the `oauth2` crate, `az account get-access-token`, or any broker) and pass it as [`Credentials::azure_token`](mssql_auth::Credentials::azure_token), which logs in over the same FEDAUTH SecurityToken path (this mirrors .NET's `SqlConnection.AccessToken`). |
+//! | `Authentication` | — | none | Authentication method (ADO.NET `SqlAuthenticationMethod`; spaced forms like `Active Directory Service Principal` also accepted). `SqlPassword`: SQL authentication (the default). `ActiveDirectoryServicePrincipal`: Azure AD service principal — `User Id=<client-id>@<tenant-id>`, `Password=<client secret>`; requires the `azure-identity` feature. `ActiveDirectoryManagedIdentity` (alias `ActiveDirectoryMSI`): Azure managed identity — optional `User Id=<client-id>` selects a user-assigned identity; requires the `azure-identity` feature. `ActiveDirectoryDefault`: a credential chain (managed identity, then the signed-in `az`/`azd` CLI session); requires the `azure-identity` feature. Azure AD methods log in via the FEDAUTH SecurityToken workflow and require an encrypted connection. Certificate-based service principals have no connection-string keyword (matching ADO.NET, which configures them programmatically) — construct [`Credentials::certificate`](mssql_auth::Credentials::certificate) and pass it to [`Config::credentials`] with the `cert-auth` feature. The interactive Entra values (`ActiveDirectoryPassword`, `ActiveDirectoryInteractive`, `ActiveDirectoryDeviceCodeFlow`) are recognized but not implemented as built-in flows — `azure_identity` does not ship those credentials. For these scenarios, acquire the token yourself (MSAL, the `oauth2` crate, `az account get-access-token`, or any broker) and pass it as [`Credentials::azure_token`](mssql_auth::Credentials::azure_token), which logs in over the same FEDAUTH SecurityToken path (this mirrors .NET's `SqlConnection.AccessToken`). |
 //!
 //! ### Security
 //!
@@ -854,24 +854,39 @@ impl Config {
                     };
                 }
             }
+            "activedirectorydefault" => {
+                #[cfg(not(feature = "azure-identity"))]
+                return Err(crate::error::Error::Config(format!(
+                    "Authentication={method} requires the 'azure-identity' feature. \
+                     Enable it in your Cargo.toml: \
+                     mssql-client = {{ features = [\"azure-identity\"] }}"
+                )));
+                #[cfg(feature = "azure-identity")]
+                {
+                    // Default credential chain: managed identity, then the
+                    // signed-in az/azd CLI session. Token acquired at connect.
+                    self.credentials = Credentials::AzureDefault;
+                }
+            }
             "activedirectorypassword"
             | "activedirectoryintegrated"
             | "activedirectoryinteractive"
-            | "activedirectorydefault"
             | "activedirectorydevicecodeflow" => {
                 return Err(crate::error::Error::Config(format!(
-                    "Authentication value '{method}' is not supported. Supported values: \
-                     SqlPassword, ActiveDirectoryServicePrincipal, \
-                     ActiveDirectoryManagedIdentity (alias ActiveDirectoryMSI). The remaining \
-                     ADAL/MSAL workflows are tracked in \
-                     https://github.com/praxiomlabs/rust-mssql-driver/issues/155"
+                    "Authentication value '{method}' is not supported: azure_identity does \
+                     not ship the interactive / username-password / device-code credentials. \
+                     Acquire the token yourself and pass it via Credentials::azure_token. \
+                     Built-in Authentication values: SqlPassword, \
+                     ActiveDirectoryServicePrincipal, ActiveDirectoryManagedIdentity \
+                     (alias ActiveDirectoryMSI), ActiveDirectoryDefault"
                 )));
             }
             other => {
                 return Err(crate::error::Error::Config(format!(
                     "invalid Authentication value: '{other}'. Supported values: \
                      SqlPassword, ActiveDirectoryServicePrincipal, \
-                     ActiveDirectoryManagedIdentity (alias ActiveDirectoryMSI)"
+                     ActiveDirectoryManagedIdentity (alias ActiveDirectoryMSI), \
+                     ActiveDirectoryDefault"
                 )));
             }
         }
@@ -1188,6 +1203,28 @@ impl Config {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "azure-identity")]
+    #[test]
+    fn test_authentication_active_directory_default() {
+        let config = Config::from_connection_string(
+            "Server=db.example.com;Database=app;Authentication=ActiveDirectoryDefault;",
+        )
+        .unwrap();
+        assert!(matches!(
+            config.credentials,
+            mssql_auth::Credentials::AzureDefault
+        ));
+        // Spaced ADO.NET form should parse identically.
+        let spaced = Config::from_connection_string(
+            "Server=db.example.com;Authentication=Active Directory Default;",
+        )
+        .unwrap();
+        assert!(matches!(
+            spaced.credentials,
+            mssql_auth::Credentials::AzureDefault
+        ));
+    }
 
     #[test]
     fn test_connection_string_parsing() {

@@ -250,6 +250,14 @@ impl Client<Disconnected> {
         match &config.credentials {
             mssql_auth::Credentials::AzureAccessToken { token } => Ok(Some(token.to_string())),
             #[cfg(feature = "azure-identity")]
+            mssql_auth::Credentials::AzureDefault => {
+                let auth = mssql_auth::DefaultAzureAuth::new()?;
+                tracing::debug!(
+                    "acquiring Azure SQL access token via the default credential chain"
+                );
+                Ok(Some(auth.get_token().await?))
+            }
+            #[cfg(feature = "azure-identity")]
             mssql_auth::Credentials::AzureManagedIdentity { client_id } => {
                 let auth = match client_id {
                     Some(id) => {
@@ -1878,6 +1886,25 @@ mod fed_auth_login_tests {
         assert!(
             msg.contains("failed to read certificate") && msg.contains("app.pfx"),
             "error should name the unreadable certificate file, got: {msg}"
+        );
+    }
+
+    #[cfg(all(feature = "azure-identity", feature = "tls"))]
+    #[test]
+    fn azure_default_credential_validation() {
+        // The default credential chain is Entra-backed FEDAUTH: accepted over
+        // TLS, rejected over plaintext.
+        let ok = Config::new().credentials(mssql_auth::Credentials::azure_default());
+        assert!(Client::<Disconnected>::validate_credential_support(&ok).is_ok());
+
+        let bad = Config::new()
+            .credentials(mssql_auth::Credentials::azure_default())
+            .no_tls(true);
+        let err = Client::<Disconnected>::validate_credential_support(&bad)
+            .expect_err("default-chain FEDAUTH over no_tls must be rejected");
+        assert!(
+            err.to_string().contains("no_tls"),
+            "error should explain the plaintext rejection, got: {err}"
         );
     }
 }

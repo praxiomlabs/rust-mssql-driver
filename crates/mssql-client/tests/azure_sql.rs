@@ -712,3 +712,39 @@ async fn test_azure_ad_managed_identity_login() {
 
     client.close().await.expect("Close failed");
 }
+
+/// End-to-end FEDAUTH login with the default credential chain
+/// (`Authentication=ActiveDirectoryDefault`). Off Azure compute, managed
+/// identity fails fast and the chain falls through to the signed-in `az`/`azd`
+/// CLI session (DeveloperToolsCredential). Run with a live `az login` whose
+/// principal has been granted DB access.
+#[cfg(feature = "azure-identity")]
+#[tokio::test]
+#[ignore = "Requires Azure SQL Database and a managed identity or signed-in az/azd CLI session"]
+async fn test_azure_ad_default_credential_login() {
+    use mssql_client::Client;
+
+    let (host, database) = get_azure_host_db().expect("AZURE_SQL_HOST/DATABASE required");
+
+    let config = Config::new()
+        .host(host)
+        .database(database)
+        .credentials(mssql_client::Credentials::azure_default());
+
+    let mut client = Client::connect(config)
+        .await
+        .expect("default-chain FEDAUTH login failed");
+
+    let (principal, auth_type) = current_principal(&mut client).await;
+    println!("default-chain login: principal={principal}, auth_type={auth_type}");
+    // Which leg wins determines the principal: managed identity yields a
+    // contained EXTERNAL user, while the az/azd CLI leg yields whatever dev
+    // identity is signed in (an Entra admin maps to dbo, auth_type NONE). So
+    // assert only that an Entra login succeeded and resolved a principal.
+    assert!(
+        !principal.is_empty(),
+        "default-chain login must acquire a token and resolve an Entra principal (SUSER_SNAME)"
+    );
+
+    client.close().await.expect("Close failed");
+}
