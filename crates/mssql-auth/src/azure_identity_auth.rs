@@ -44,8 +44,8 @@ use std::time::Duration;
 
 use azure_core::credentials::TokenCredential;
 use azure_identity::{
-    ClientSecretCredential, ManagedIdentityCredential, ManagedIdentityCredentialOptions,
-    UserAssignedId,
+    ClientSecretCredential, DeveloperToolsCredential, ManagedIdentityCredential,
+    ManagedIdentityCredentialOptions, UserAssignedId,
 };
 
 use crate::AzureAdAuth;
@@ -54,6 +54,61 @@ use crate::provider::{AuthData, AuthMethod};
 
 /// The Azure SQL Database scope for token requests.
 const AZURE_SQL_SCOPE: &str = "https://database.windows.net/.default";
+
+/// Default Azure credential chain for `Authentication=ActiveDirectoryDefault`.
+///
+/// Tries each credential in order and returns the first token acquired:
+/// 1. [`ManagedIdentityCredential`] — for code running on Azure compute.
+/// 2. [`DeveloperToolsCredential`] — the signed-in `az` / `azd` CLI session,
+///    for local development.
+///
+/// `azure_identity` 1.0 ships no aggregate `DefaultAzureCredential`, so this is
+/// a minimal hand-rolled chain over the two credential types that cover the
+/// common production and local-development cases. The environment /
+/// service-principal case is served by the explicit
+/// [`ServicePrincipalAuth`] credential.
+#[derive(Clone)]
+pub struct DefaultAzureAuth {
+    sources: Vec<Arc<dyn TokenCredential>>,
+}
+
+impl DefaultAzureAuth {
+    /// Create the default credential chain (managed identity → developer tooling).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if either underlying credential cannot be constructed.
+    pub fn new() -> Result<Self, AuthError> {
+        let managed_identity: Arc<dyn TokenCredential> = ManagedIdentityCredential::new(None)
+            .map_err(|e| AuthError::AzureIdentity(e.to_string()))?;
+        let developer_tools: Arc<dyn TokenCredential> = DeveloperToolsCredential::new(None)
+            .map_err(|e| AuthError::AzureIdentity(e.to_string()))?;
+        Ok(Self {
+            sources: vec![managed_identity, developer_tools],
+        })
+    }
+
+    /// Get an access token for Azure SQL Database from the first credential in
+    /// the chain that succeeds.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no credential in the chain can acquire a token.
+    pub async fn get_token(&self) -> Result<String, AuthError> {
+        let mut last_err: Option<String> = None;
+        for source in &self.sources {
+            match source.get_token(&[AZURE_SQL_SCOPE], None).await {
+                Ok(token) => return Ok(token.token.secret().to_string()),
+                Err(e) => last_err = Some(e.to_string()),
+            }
+        }
+        Err(AuthError::AzureIdentity(format!(
+            "the default credential chain (managed identity, then developer tooling) \
+             could not acquire a token: {}",
+            last_err.as_deref().unwrap_or("no credentials in chain")
+        )))
+    }
+}
 
 /// Managed Identity authentication provider.
 ///

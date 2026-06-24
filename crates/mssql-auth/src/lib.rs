@@ -133,7 +133,7 @@ pub use credentials::{SecretString, SecureCredentials};
 
 // Azure Identity authentication (with azure-identity feature)
 #[cfg(feature = "azure-identity")]
-pub use azure_identity_auth::{ManagedIdentityAuth, ServicePrincipalAuth};
+pub use azure_identity_auth::{DefaultAzureAuth, ManagedIdentityAuth, ServicePrincipalAuth};
 
 // Integrated authentication (Kerberos/GSSAPI - with integrated-auth feature)
 #[cfg(feature = "integrated-auth")]

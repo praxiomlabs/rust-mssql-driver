@@ -48,6 +48,11 @@ pub enum Credentials {
         client_secret: Cow<'static, str>,
     },
 
+    /// Azure default credential chain (managed identity, then the signed-in
+    /// `az` / `azd` CLI session). Maps to `Authentication=ActiveDirectoryDefault`.
+    #[cfg(feature = "azure-identity")]
+    AzureDefault,
+
     /// Integrated Windows Authentication (Kerberos/NTLM).
     #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
     Integrated,
@@ -101,6 +106,17 @@ impl Credentials {
         Self::Integrated
     }
 
+    /// Create Azure default-credential-chain credentials
+    /// (`Authentication=ActiveDirectoryDefault`): managed identity, then the
+    /// signed-in `az` / `azd` CLI session.
+    ///
+    /// Requires the `azure-identity` feature.
+    #[cfg(feature = "azure-identity")]
+    #[must_use]
+    pub fn azure_default() -> Self {
+        Self::AzureDefault
+    }
+
     /// Create client-certificate (Azure AD service principal) credentials.
     ///
     /// `cert_path` points at a PKCS#12 (`.pfx`) file, or a PEM file containing
@@ -136,7 +152,9 @@ impl Credentials {
         match self {
             Self::AzureAccessToken { .. } => true,
             #[cfg(feature = "azure-identity")]
-            Self::AzureManagedIdentity { .. } | Self::AzureServicePrincipal { .. } => true,
+            Self::AzureManagedIdentity { .. }
+            | Self::AzureServicePrincipal { .. }
+            | Self::AzureDefault => true,
             _ => false,
         }
     }
@@ -151,6 +169,8 @@ impl Credentials {
             Self::AzureManagedIdentity { .. } => "Azure Managed Identity",
             #[cfg(feature = "azure-identity")]
             Self::AzureServicePrincipal { .. } => "Azure Service Principal",
+            #[cfg(feature = "azure-identity")]
+            Self::AzureDefault => "Azure Default Credential Chain",
             #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
             Self::Integrated => "Integrated Authentication",
             #[cfg(feature = "cert-auth")]
@@ -188,6 +208,8 @@ impl std::fmt::Debug for Credentials {
                 .field("client_id", client_id)
                 .field("client_secret", &"[REDACTED]")
                 .finish(),
+            #[cfg(feature = "azure-identity")]
+            Self::AzureDefault => f.debug_struct("AzureDefault").finish(),
             #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
             Self::Integrated => f.debug_struct("Integrated").finish(),
             #[cfg(feature = "cert-auth")]
@@ -300,6 +322,8 @@ enum SecureCredentialKind {
         client_id: String,
         client_secret: SecretString,
     },
+    #[cfg(feature = "azure-identity")]
+    AzureDefault,
     #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
     Integrated,
     #[cfg(feature = "cert-auth")]
@@ -361,6 +385,8 @@ impl SecureCredentials {
             SecureCredentialKind::AzureManagedIdentity { .. } => "Azure Managed Identity",
             #[cfg(feature = "azure-identity")]
             SecureCredentialKind::AzureServicePrincipal { .. } => "Azure Service Principal",
+            #[cfg(feature = "azure-identity")]
+            SecureCredentialKind::AzureDefault => "Azure Default Credential Chain",
             #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
             SecureCredentialKind::Integrated => "Integrated Authentication",
             #[cfg(feature = "cert-auth")]
@@ -441,6 +467,10 @@ impl std::fmt::Debug for SecureCredentials {
                 .field("client_id", client_id)
                 .field("client_secret", &"[REDACTED]")
                 .finish(),
+            #[cfg(feature = "azure-identity")]
+            SecureCredentialKind::AzureDefault => {
+                f.debug_struct("SecureCredentials::AzureDefault").finish()
+            }
             #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
             SecureCredentialKind::Integrated => {
                 f.debug_struct("SecureCredentials::Integrated").finish()
@@ -490,6 +520,10 @@ impl From<Credentials> for SecureCredentials {
                     client_id: client_id.into_owned(),
                     client_secret: SecretString::new(client_secret.into_owned()),
                 },
+            },
+            #[cfg(feature = "azure-identity")]
+            Credentials::AzureDefault => SecureCredentials {
+                kind: SecureCredentialKind::AzureDefault,
             },
             #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
             Credentials::Integrated => SecureCredentials {
@@ -591,6 +625,17 @@ mod tests {
         assert!(debug.contains("/path/app.pfx"));
         assert!(!debug.contains("pw"));
         assert!(debug.contains("REDACTED"));
+    }
+
+    #[cfg(feature = "azure-identity")]
+    #[test]
+    fn test_credentials_azure_default() {
+        let creds = Credentials::azure_default();
+        assert!(creds.is_azure_ad());
+        assert!(!creds.is_sql_auth());
+        assert!(matches!(creds, Credentials::AzureDefault));
+        assert_eq!(creds.method_name(), "Azure Default Credential Chain");
+        assert_eq!(format!("{creds:?}"), "AzureDefault");
     }
 
     #[cfg(feature = "zeroize")]

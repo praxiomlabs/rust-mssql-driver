@@ -251,6 +251,51 @@ impl<V, T> ppv_lite86::types::VZip<V> for mssql_auth::azure_ad::AzureAdAuth wher
 pub fn mssql_auth::azure_ad::AzureAdAuth::vzip(self) -> V
 pub fn mssql_auth::azure_ad::build_security_token_feature_data(&str, bool) -> bytes::bytes::Bytes
 pub mod mssql_auth::azure_identity_auth
+pub struct mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl mssql_auth::azure_identity_auth::DefaultAzureAuth
+pub async fn mssql_auth::azure_identity_auth::DefaultAzureAuth::get_token(&self) -> core::result::Result<alloc::string::String, mssql_auth::error::AuthError>
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::new() -> core::result::Result<Self, mssql_auth::error::AuthError>
+impl core::clone::Clone for mssql_auth::azure_identity_auth::DefaultAzureAuth
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::clone(&self) -> mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl core::marker::Freeze for mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl core::marker::Send for mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl core::marker::Sync for mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl core::marker::Unpin for mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl !core::panic::unwind_safe::RefUnwindSafe for mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl !core::panic::unwind_safe::UnwindSafe for mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl<T, U> core::convert::Into<U> for mssql_auth::azure_identity_auth::DefaultAzureAuth where U: core::convert::From<T>
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_auth::azure_identity_auth::DefaultAzureAuth where U: core::convert::Into<T>
+pub type mssql_auth::azure_identity_auth::DefaultAzureAuth::Error = core::convert::Infallible
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_auth::azure_identity_auth::DefaultAzureAuth where U: core::convert::TryFrom<T>
+pub type mssql_auth::azure_identity_auth::DefaultAzureAuth::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_auth::azure_identity_auth::DefaultAzureAuth where T: core::clone::Clone
+pub type mssql_auth::azure_identity_auth::DefaultAzureAuth::Owned = T
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::clone_into(&self, &mut T)
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_auth::azure_identity_auth::DefaultAzureAuth where T: 'static + ?core::marker::Sized
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_auth::azure_identity_auth::DefaultAzureAuth where T: ?core::marker::Sized
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_auth::azure_identity_auth::DefaultAzureAuth where T: ?core::marker::Sized
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_auth::azure_identity_auth::DefaultAzureAuth where T: core::clone::Clone
+pub unsafe fn mssql_auth::azure_identity_auth::DefaultAzureAuth::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_auth::azure_identity_auth::DefaultAzureAuth
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::from(T) -> T
+impl<T> dyn_clone::DynClone for mssql_auth::azure_identity_auth::DefaultAzureAuth where T: core::clone::Clone
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_auth::azure_identity_auth::DefaultAzureAuth where T: ?core::marker::Sized
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl<T> tracing::instrument::WithSubscriber for mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl<T> typenum::type_operators::Same for mssql_auth::azure_identity_auth::DefaultAzureAuth
+pub type mssql_auth::azure_identity_auth::DefaultAzureAuth::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_auth::azure_identity_auth::DefaultAzureAuth where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::vzip(self) -> V
 pub struct mssql_auth::azure_identity_auth::ManagedIdentityAuth
 impl mssql_auth::azure_identity_auth::ManagedIdentityAuth
 pub async fn mssql_auth::azure_identity_auth::ManagedIdentityAuth::get_token(&self) -> core::result::Result<alloc::string::String, mssql_auth::error::AuthError>
@@ -523,6 +568,7 @@ pub mod mssql_auth::credentials
 #[non_exhaustive] pub enum mssql_auth::credentials::Credentials
 pub mssql_auth::credentials::Credentials::AzureAccessToken
 pub mssql_auth::credentials::Credentials::AzureAccessToken::token: alloc::borrow::Cow<'static, str>
+pub mssql_auth::credentials::Credentials::AzureDefault
 pub mssql_auth::credentials::Credentials::AzureManagedIdentity
 pub mssql_auth::credentials::Credentials::AzureManagedIdentity::client_id: core::option::Option<alloc::borrow::Cow<'static, str>>
 pub mssql_auth::credentials::Credentials::AzureServicePrincipal
@@ -539,6 +585,7 @@ pub mssql_auth::credentials::Credentials::SqlServer
 pub mssql_auth::credentials::Credentials::SqlServer::password: alloc::borrow::Cow<'static, str>
 pub mssql_auth::credentials::Credentials::SqlServer::username: alloc::borrow::Cow<'static, str>
 impl mssql_auth::credentials::Credentials
+pub fn mssql_auth::credentials::Credentials::azure_default() -> Self
 pub fn mssql_auth::credentials::Credentials::azure_token(impl core::convert::Into<alloc::borrow::Cow<'static, str>>) -> Self
 pub fn mssql_auth::credentials::Credentials::certificate(impl core::convert::Into<alloc::borrow::Cow<'static, str>>, impl core::convert::Into<alloc::borrow::Cow<'static, str>>, impl core::convert::Into<alloc::borrow::Cow<'static, str>>, core::option::Option<alloc::borrow::Cow<'static, str>>) -> Self
 pub fn mssql_auth::credentials::Credentials::integrated() -> Self
@@ -1768,6 +1815,7 @@ pub fn mssql_auth::provider::AuthMethod::vzip(self) -> V
 #[non_exhaustive] pub enum mssql_auth::Credentials
 pub mssql_auth::Credentials::AzureAccessToken
 pub mssql_auth::Credentials::AzureAccessToken::token: alloc::borrow::Cow<'static, str>
+pub mssql_auth::Credentials::AzureDefault
 pub mssql_auth::Credentials::AzureManagedIdentity
 pub mssql_auth::Credentials::AzureManagedIdentity::client_id: core::option::Option<alloc::borrow::Cow<'static, str>>
 pub mssql_auth::Credentials::AzureServicePrincipal
@@ -1784,6 +1832,7 @@ pub mssql_auth::Credentials::SqlServer
 pub mssql_auth::Credentials::SqlServer::password: alloc::borrow::Cow<'static, str>
 pub mssql_auth::Credentials::SqlServer::username: alloc::borrow::Cow<'static, str>
 impl mssql_auth::credentials::Credentials
+pub fn mssql_auth::credentials::Credentials::azure_default() -> Self
 pub fn mssql_auth::credentials::Credentials::azure_token(impl core::convert::Into<alloc::borrow::Cow<'static, str>>) -> Self
 pub fn mssql_auth::credentials::Credentials::certificate(impl core::convert::Into<alloc::borrow::Cow<'static, str>>, impl core::convert::Into<alloc::borrow::Cow<'static, str>>, impl core::convert::Into<alloc::borrow::Cow<'static, str>>, core::option::Option<alloc::borrow::Cow<'static, str>>) -> Self
 pub fn mssql_auth::credentials::Credentials::integrated() -> Self
@@ -2439,6 +2488,51 @@ impl<T> typenum::type_operators::Same for mssql_auth::encryption::ColumnEncrypti
 pub type mssql_auth::encryption::ColumnEncryptionInfo::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for mssql_auth::encryption::ColumnEncryptionInfo where V: ppv_lite86::types::MultiLane<T>
 pub fn mssql_auth::encryption::ColumnEncryptionInfo::vzip(self) -> V
+pub struct mssql_auth::DefaultAzureAuth
+impl mssql_auth::azure_identity_auth::DefaultAzureAuth
+pub async fn mssql_auth::azure_identity_auth::DefaultAzureAuth::get_token(&self) -> core::result::Result<alloc::string::String, mssql_auth::error::AuthError>
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::new() -> core::result::Result<Self, mssql_auth::error::AuthError>
+impl core::clone::Clone for mssql_auth::azure_identity_auth::DefaultAzureAuth
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::clone(&self) -> mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl core::marker::Freeze for mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl core::marker::Send for mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl core::marker::Sync for mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl core::marker::Unpin for mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl !core::panic::unwind_safe::RefUnwindSafe for mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl !core::panic::unwind_safe::UnwindSafe for mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl<T, U> core::convert::Into<U> for mssql_auth::azure_identity_auth::DefaultAzureAuth where U: core::convert::From<T>
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for mssql_auth::azure_identity_auth::DefaultAzureAuth where U: core::convert::Into<T>
+pub type mssql_auth::azure_identity_auth::DefaultAzureAuth::Error = core::convert::Infallible
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for mssql_auth::azure_identity_auth::DefaultAzureAuth where U: core::convert::TryFrom<T>
+pub type mssql_auth::azure_identity_auth::DefaultAzureAuth::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for mssql_auth::azure_identity_auth::DefaultAzureAuth where T: core::clone::Clone
+pub type mssql_auth::azure_identity_auth::DefaultAzureAuth::Owned = T
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::clone_into(&self, &mut T)
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::to_owned(&self) -> T
+impl<T> core::any::Any for mssql_auth::azure_identity_auth::DefaultAzureAuth where T: 'static + ?core::marker::Sized
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for mssql_auth::azure_identity_auth::DefaultAzureAuth where T: ?core::marker::Sized
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for mssql_auth::azure_identity_auth::DefaultAzureAuth where T: ?core::marker::Sized
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for mssql_auth::azure_identity_auth::DefaultAzureAuth where T: core::clone::Clone
+pub unsafe fn mssql_auth::azure_identity_auth::DefaultAzureAuth::clone_to_uninit(&self, *mut u8)
+impl<T> core::convert::From<T> for mssql_auth::azure_identity_auth::DefaultAzureAuth
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::from(T) -> T
+impl<T> dyn_clone::DynClone for mssql_auth::azure_identity_auth::DefaultAzureAuth where T: core::clone::Clone
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::__clone_box(&self, dyn_clone::sealed::Private) -> *mut ()
+impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_auth::azure_identity_auth::DefaultAzureAuth where T: ?core::marker::Sized
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
+impl<T> tracing::instrument::Instrument for mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl<T> tracing::instrument::WithSubscriber for mssql_auth::azure_identity_auth::DefaultAzureAuth
+impl<T> typenum::type_operators::Same for mssql_auth::azure_identity_auth::DefaultAzureAuth
+pub type mssql_auth::azure_identity_auth::DefaultAzureAuth::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for mssql_auth::azure_identity_auth::DefaultAzureAuth where V: ppv_lite86::types::MultiLane<T>
+pub fn mssql_auth::azure_identity_auth::DefaultAzureAuth::vzip(self) -> V
 #[non_exhaustive] pub struct mssql_auth::EncryptedValue
 pub mssql_auth::EncryptedValue::cek_id: u32
 pub mssql_auth::EncryptedValue::ciphertext: alloc::vec::Vec<u8>
