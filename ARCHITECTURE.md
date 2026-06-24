@@ -238,7 +238,8 @@ pub enum Token {
 | Azure AD / Entra ID Token | Pure Rust | Default |
 | Managed Identity (Azure VM/Container) | Pure Rust + HTTP | `azure-identity` |
 | Service Principal | Pure Rust + HTTP | `azure-identity` |
-| Certificate-based | Pure Rust | `cert-auth` |
+| Certificate-based (Entra) | Pure Rust + HTTP | `cert-auth` |
+| Default credential chain | Pure Rust + HTTP | `azure-identity` |
 | Integrated Auth (Kerberos) | `gssapi` bindings | `integrated-auth` |
 | Integrated Auth (NTLM) | `sspi` bindings (Windows) | `integrated-auth` |
 
@@ -354,7 +355,7 @@ Server=tcp:hostname,port;Database=dbname;User Id=user;Password=pass;Encrypt=stri
 | `Password` | `PWD` | SQL authentication password |
 | `Encrypt` | | `true`, `false`, `strict`, `no_tls` |
 | `TrustServerCertificate` | | Skip certificate validation |
-| `Authentication` | | `SqlPassword`, `ActiveDirectoryServicePrincipal` (`User Id=<client-id>@<tenant-id>`), `ActiveDirectoryManagedIdentity` / `ActiveDirectoryMSI` — Azure AD values use the FEDAUTH SecurityToken workflow and require the `azure-identity` feature (#155 Phase 1). `ActiveDirectoryPassword` and the other ADAL/MSAL workflows remain unsupported (#155 Phase 2) |
+| `Authentication` | | `SqlPassword`, `ActiveDirectoryServicePrincipal` (`User Id=<client-id>@<tenant-id>`), `ActiveDirectoryManagedIdentity` / `ActiveDirectoryMSI`, `ActiveDirectoryDefault` (managed identity → `az`/`azd` CLI chain) — Azure AD values use the FEDAUTH SecurityToken workflow and require the `azure-identity` feature. Certificate credentials are programmatic-only (`Credentials::certificate`, `cert-auth` feature). The interactive flows (`ActiveDirectoryPassword` / `Interactive` / `DeviceCodeFlow`) are not built in — `azure_identity` ships no such credentials; pass a pre-acquired token via `Credentials::azure_token` |
 | `Application Name` | | Application identifier |
 | `Connect Timeout` | | Connection timeout in seconds |
 | `Command Timeout` | | Default command timeout |

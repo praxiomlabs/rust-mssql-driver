@@ -53,7 +53,7 @@ distinguishing feature/binary filter to scope a single path.
 |------|---------------|-------|
 | **Container suite** — TVP, bulk insert, temporal, collation, decimal, streaming | the full ignored-suite command (CLAUDE.md convention 8) | local SQL Server 2022 (`just sql-server-start`) |
 | **Always Encrypted** (read + write) | `--all-features … -E 'binary(always_encrypted)'` | container provisioned with CMK/CEK (tracked in #86) |
-| **Azure AD / FEDAUTH** (service principal, managed identity) | `cargo nextest run -p mssql-client --features azure-identity --run-ignored ignored-only -E 'binary(azure_sql)'` | live Azure SQL + `AZURE_SQL_TENANT_ID/CLIENT_ID/CLIENT_SECRET` |
+| **Azure AD / FEDAUTH** (service principal, managed identity, certificate, default chain) | `cargo nextest run -p mssql-client --features azure-identity,cert-auth --run-ignored ignored-only -E 'binary(azure_sql)'` | live Azure SQL + `AZURE_SQL_TENANT_ID/CLIENT_ID/CLIENT_SECRET` (+ `AZURE_SQL_CLIENT_CERTIFICATE_PATH` for cert; managed-identity test needs Azure compute) |
 | **Kerberos / integrated auth** | `MSSQL_KERBEROS_HOST=… KRB5CCNAME=… cargo nextest run -p mssql-auth --features integrated-auth --run-ignored ignored-only -E 'binary(kerberos_live)'` | live KDC with `MSSQLSvc/<host>` SPN + a `kinit`'d ticket |
 | **FILESTREAM** (Windows only) | `cargo nextest run -p mssql-client --features filestream --run-ignored ignored-only -E 'binary(windows_filestream)'` | Windows + a FILESTREAM-enabled instance |
 

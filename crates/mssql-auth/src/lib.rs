@@ -16,6 +16,7 @@
 //! | Integrated (Kerberos) | `integrated-auth` | ✅ Implemented | GSSAPI/Kerberos (Linux/macOS) |
 //! | Windows SSPI | `sspi-auth` | ✅ Implemented | Native Windows SSPI |
 //! | Certificate | `cert-auth` | ✅ Implemented | Entra service principal w/ X.509 cert |
+//! | Default chain | `azure-identity` | ✅ Implemented | Managed identity → `az`/`azd` CLI session |
 //!
 //! `CertificateAuth` acquires a token from Microsoft Entra using an X.509
 //! client certificate; `mssql-client` wires `Credentials::Certificate` through
@@ -25,8 +26,10 @@
 //!
 //! The Azure AD methods use the FEDAUTH SecurityToken workflow: the token is
 //! acquired client-side and sent in the LOGIN7 FEDAUTH feature extension
-//! (see [`azure_ad::build_security_token_feature_data`]). The ADAL/MSAL
-//! workflow (server-directed acquisition via FEDAUTHINFO) is #155 Phase 2.
+//! (see [`azure_ad::build_security_token_feature_data`]). The interactive
+//! Entra flows (`ActiveDirectoryPassword`/`Interactive`/`DeviceCodeFlow`) are
+//! not built in — `azure_identity` ships no such credentials; acquire the
+//! token yourself and pass it as a pre-acquired access token.
 //!
 //! ## Authentication Tiers
 //!
@@ -41,6 +44,7 @@
 //!
 //! - `ManagedIdentityAuth` - Azure VM/Container identity
 //! - `ServicePrincipalAuth` - Client ID + Secret
+//! - `DefaultAzureAuth` - default chain (managed identity → `az`/`azd` CLI session)
 //!
 //! ### Tier 3 (Enterprise - `integrated-auth` or `sspi-auth` feature) ✅ Implemented
 //!
