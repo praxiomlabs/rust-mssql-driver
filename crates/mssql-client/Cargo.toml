@@ -12,7 +12,7 @@ categories = ["database", "asynchronous"]
 [package.metadata.docs.rs]
 # docs.rs builds on Linux x86_64. Excluded: sspi-auth (Windows-only) and
 # integrated-auth (libgssapi system library not guaranteed on docs.rs).
-features = ["otel", "json", "always-encrypted", "azure-identity", "zeroize", "encoding", "tls", "chrono", "uuid", "decimal", "filestream"]
+features = ["otel", "json", "always-encrypted", "azure-identity", "cert-auth", "zeroize", "encoding", "tls", "chrono", "uuid", "decimal", "filestream"]
 
 [features]
 default = ["chrono", "uuid", "decimal", "encoding", "tls", "derive"]
@@ -48,6 +48,9 @@ encoding = ["tds-protocol/encoding", "mssql-types/encoding"]
 # work without this feature. Note: pulls OpenSSL transitively via the Azure SDK
 # (see the trade-off note in ARCHITECTURE.md ADR-003).
 azure-identity = ["mssql-auth/azure-identity"]
+# Client-certificate Azure AD (Entra service principal) token acquisition for
+# FEDAUTH logins. The certificate authenticates to Entra (not TDS-level mTLS).
+cert-auth = ["mssql-auth/cert-auth"]
 # Integrated authentication (Kerberos/SPNEGO) - Linux/macOS
 integrated-auth = ["mssql-auth/integrated-auth"]
 # Windows SSPI integrated authentication

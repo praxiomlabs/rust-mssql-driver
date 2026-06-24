@@ -15,12 +15,13 @@
 //! | Service Principal | `azure-identity` | ✅ Implemented | App credentials |
 //! | Integrated (Kerberos) | `integrated-auth` | ✅ Implemented | GSSAPI/Kerberos (Linux/macOS) |
 //! | Windows SSPI | `sspi-auth` | ✅ Implemented | Native Windows SSPI |
-//! | Certificate | `cert-auth` | ⚠️ Token acquisition only¹ | Client certificate (mTLS) |
+//! | Certificate | `cert-auth` | ✅ Implemented | Entra service principal w/ X.509 cert |
 //!
-//! ¹ `CertificateAuth` acquires tokens, but `mssql-client` does not yet wire
-//! certificate credentials into the login sequence; `Client::connect` rejects
-//! them with a clear error. Tracked in
-//! [#155](https://github.com/praxiomlabs/rust-mssql-driver/issues/155).
+//! `CertificateAuth` acquires a token from Microsoft Entra using an X.509
+//! client certificate; `mssql-client` wires `Credentials::Certificate` through
+//! the FEDAUTH SecurityToken login. This authenticates to Entra — it is NOT
+//! TDS-level mutual TLS (SQL Server does not accept client certificates at the
+//! protocol level).
 //!
 //! The Azure AD methods use the FEDAUTH SecurityToken workflow: the token is
 //! acquired client-side and sent in the LOGIN7 FEDAUTH feature extension
@@ -46,9 +47,10 @@
 //! - `IntegratedAuth` - Kerberos (Linux/macOS via GSSAPI)
 //! - `SspiAuth` - Windows SSPI (native Windows, cross-platform via sspi-rs)
 //!
-//! ### Tier 4 (Certificate - `cert-auth` feature) ⚠️ login wiring pending (#155)
+//! ### Tier 4 (Certificate - `cert-auth` feature) ✅ Implemented
 //!
-//! - `CertificateAuth` - Client certificate authentication (mTLS)
+//! - `CertificateAuth` - Entra service principal authentication with an X.509
+//!   certificate (authenticates to Entra, not TDS-level mTLS)
 //!
 //! ## Secure Credential Handling
 //!

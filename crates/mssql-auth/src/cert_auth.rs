@@ -142,18 +142,21 @@ impl CertificateAuth {
         use azure_identity::ClientCertificateCredentialOptions;
         use base64::Engine;
 
-        // The certificate should be base64-encoded PKCS#12
-        // If it's raw bytes, encode it first
+        // azure_identity expects RAW DER PKCS#12 bytes (it calls
+        // `Pkcs12::from_der`). Accept either raw DER or a base64-encoded
+        // wrapper and hand azure_identity the decoded DER.
         let cert_bytes = certificate.as_ref();
-        let cert_b64 = if cert_bytes.starts_with(b"MII") || is_base64(cert_bytes) {
-            // Already looks like base64
-            String::from_utf8_lossy(cert_bytes).to_string()
+        let der: Vec<u8> = if is_base64(cert_bytes) {
+            base64::engine::general_purpose::STANDARD
+                .decode(cert_bytes)
+                .map_err(|e| {
+                    AuthError::Certificate(format!("base64-decoding the certificate failed: {e}"))
+                })?
         } else {
-            // Raw PKCS#12 bytes - encode to base64
-            base64::engine::general_purpose::STANDARD.encode(cert_bytes)
+            cert_bytes.to_vec()
         };
 
-        let cert_secret = azure_core::credentials::SecretBytes::new(cert_b64.into_bytes());
+        let cert_secret = azure_core::credentials::SecretBytes::new(der);
 
         // Create options with password if provided
         // Note: send_certificate_chain is now controlled by AZURE_CLIENT_SEND_CERTIFICATE_CHAIN env var

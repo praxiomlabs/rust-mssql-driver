@@ -52,12 +52,23 @@ pub enum Credentials {
     #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
     Integrated,
 
-    /// Client certificate authentication.
+    /// Client certificate authentication (Azure AD service principal with an
+    /// X.509 certificate).
+    ///
+    /// The certificate authenticates to Microsoft Entra, which issues the
+    /// access token used for the FEDAUTH login. This is NOT TDS-level mutual
+    /// TLS — SQL Server does not accept client certificates at the protocol
+    /// level.
     #[cfg(feature = "cert-auth")]
     Certificate {
-        /// Path to certificate file.
+        /// Azure AD tenant ID.
+        tenant_id: Cow<'static, str>,
+        /// Application (client) ID of the service principal.
+        client_id: Cow<'static, str>,
+        /// Path to the certificate file: PKCS#12 (`.pfx`), or a PEM file
+        /// containing both the certificate and its private key.
         cert_path: Cow<'static, str>,
-        /// Optional password for encrypted certificates.
+        /// Optional password protecting the certificate's private key.
         password: Option<Cow<'static, str>>,
     },
 }
@@ -88,6 +99,28 @@ impl Credentials {
     #[must_use]
     pub fn integrated() -> Self {
         Self::Integrated
+    }
+
+    /// Create client-certificate (Azure AD service principal) credentials.
+    ///
+    /// `cert_path` points at a PKCS#12 (`.pfx`) file, or a PEM file containing
+    /// both the certificate and its private key. The certificate authenticates
+    /// to Microsoft Entra, which issues the access token used for login.
+    ///
+    /// Requires the `cert-auth` feature.
+    #[cfg(feature = "cert-auth")]
+    pub fn certificate(
+        tenant_id: impl Into<Cow<'static, str>>,
+        client_id: impl Into<Cow<'static, str>>,
+        cert_path: impl Into<Cow<'static, str>>,
+        password: Option<Cow<'static, str>>,
+    ) -> Self {
+        Self::Certificate {
+            tenant_id: tenant_id.into(),
+            client_id: client_id.into(),
+            cert_path: cert_path.into(),
+            password,
+        }
     }
 
     /// Check if these credentials use SQL authentication.
@@ -158,8 +191,15 @@ impl std::fmt::Debug for Credentials {
             #[cfg(any(feature = "integrated-auth", feature = "sspi-auth"))]
             Self::Integrated => f.debug_struct("Integrated").finish(),
             #[cfg(feature = "cert-auth")]
-            Self::Certificate { cert_path, .. } => f
+            Self::Certificate {
+                tenant_id,
+                client_id,
+                cert_path,
+                ..
+            } => f
                 .debug_struct("Certificate")
+                .field("tenant_id", tenant_id)
+                .field("client_id", client_id)
                 .field("cert_path", cert_path)
                 .field("password", &"[REDACTED]")
                 .finish(),
@@ -264,6 +304,8 @@ enum SecureCredentialKind {
     Integrated,
     #[cfg(feature = "cert-auth")]
     Certificate {
+        tenant_id: String,
+        client_id: String,
         cert_path: String,
         password: Option<SecretString>,
     },
@@ -404,8 +446,15 @@ impl std::fmt::Debug for SecureCredentials {
                 f.debug_struct("SecureCredentials::Integrated").finish()
             }
             #[cfg(feature = "cert-auth")]
-            SecureCredentialKind::Certificate { cert_path, .. } => f
+            SecureCredentialKind::Certificate {
+                tenant_id,
+                client_id,
+                cert_path,
+                ..
+            } => f
                 .debug_struct("SecureCredentials::Certificate")
+                .field("tenant_id", tenant_id)
+                .field("client_id", client_id)
                 .field("cert_path", cert_path)
                 .field("password", &"[REDACTED]")
                 .finish(),
@@ -448,10 +497,14 @@ impl From<Credentials> for SecureCredentials {
             },
             #[cfg(feature = "cert-auth")]
             Credentials::Certificate {
+                tenant_id,
+                client_id,
                 cert_path,
                 password,
             } => SecureCredentials {
                 kind: SecureCredentialKind::Certificate {
+                    tenant_id: tenant_id.into_owned(),
+                    client_id: client_id.into_owned(),
                     cert_path: cert_path.into_owned(),
                     password: password.map(|p| SecretString::new(p.into_owned())),
                 },
@@ -506,6 +559,37 @@ mod tests {
         let creds = Credentials::azure_token("supersecrettoken");
         let debug = format!("{creds:?}");
         assert!(!debug.contains("supersecrettoken"));
+        assert!(debug.contains("REDACTED"));
+    }
+
+    #[cfg(feature = "cert-auth")]
+    #[test]
+    fn test_credentials_certificate_constructor_and_debug() {
+        let creds =
+            Credentials::certificate("tenant-1", "client-1", "/path/app.pfx", Some("pw".into()));
+        assert!(!creds.is_sql_auth());
+        // Certificate auth is Entra-backed but `is_azure_ad()` reports the
+        // pre-acquired/MI/SP token variants only; cert is handled explicitly
+        // in the client's FEDAUTH validation.
+        assert!(!creds.is_azure_ad());
+        assert_eq!(creds.method_name(), "Certificate Authentication");
+        match &creds {
+            Credentials::Certificate {
+                tenant_id,
+                client_id,
+                cert_path,
+                ..
+            } => {
+                assert_eq!(tenant_id.as_ref(), "tenant-1");
+                assert_eq!(client_id.as_ref(), "client-1");
+                assert_eq!(cert_path.as_ref(), "/path/app.pfx");
+            }
+            _ => panic!("Expected Certificate variant"),
+        }
+        let debug = format!("{creds:?}");
+        assert!(debug.contains("tenant-1"));
+        assert!(debug.contains("/path/app.pfx"));
+        assert!(!debug.contains("pw"));
         assert!(debug.contains("REDACTED"));
     }
 
