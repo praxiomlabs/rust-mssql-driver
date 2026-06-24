@@ -167,13 +167,20 @@ method below is **validated against live Azure SQL**:
 | Default chain | `Authentication=ActiveDirectoryDefault` — managed identity → signed-in `az`/`azd` CLI | `azure-identity` |
 | Certificate | programmatic only: `Credentials::certificate(tenant, client, cert_path, password)` (X.509 → Entra; not TDS mutual TLS) | `cert-auth` |
 
-```rust
-// Managed identity, via a connection string:
-let config = Config::from_connection_string(
-    "Server=myserver.database.windows.net;Database=mydb;\
-     Authentication=ActiveDirectoryManagedIdentity;Encrypt=mandatory",
-)?;
-let mut client = Client::connect(config).await?;
+```rust,no_run
+use mssql_client::{Client, Config};
+
+#[tokio::main]
+async fn main() -> Result<(), mssql_client::Error> {
+    // Managed identity, via a connection string:
+    let config = Config::from_connection_string(
+        "Server=myserver.database.windows.net;Database=mydb;\
+         Authentication=ActiveDirectoryManagedIdentity;Encrypt=mandatory",
+    )?;
+    let mut client = Client::connect(config).await?;
+    client.close().await?;
+    Ok(())
+}
 ```
 
 The **interactive** Entra flows (`ActiveDirectoryPassword` / `Interactive` /
