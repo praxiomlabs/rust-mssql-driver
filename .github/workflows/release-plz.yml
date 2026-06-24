@@ -18,12 +18,17 @@
 #     do NOT trigger CI workflows — the Release PR would sit with zero checks
 #     and could never satisfy required status checks. An App (vs a PAT) has no
 #     expiry, avoiding the v0.7.0-style silent-token-death failure mode.
-#   - CARGO_REGISTRY_TOKEN authenticates the crates.io publish. The planned
-#     follow-up (after the first release-plz-driven release is verified) is to
-#     switch to crates.io Trusted Publishing (OIDC) via
-#     rust-lang/crates-io-auth-action and delete the token secret — at which
-#     point the `release` job gains `permissions: id-token: write` and drops the
-#     CARGO_REGISTRY_TOKEN env.
+#   - The crates.io publish authenticates via Trusted Publishing (OIDC): the
+#     release job has `permissions: id-token: write`, and
+#     rust-lang/crates-io-auth-action mints a short-lived (30 min) token that
+#     release-plz consumes through CARGO_REGISTRY_TOKEN. All 8 published crates
+#     are registered as trusted publishers for this repo + release-plz.yml, so
+#     one token covers the whole lockstep publish. The auth step runs BEFORE any
+#     publish, so a misconfiguration fails fast with zero crates published.
+#     During transition the CARGO_REGISTRY_TOKEN secret is retained as a manual
+#     fallback; delete it once a Trusted-Publishing release is verified green.
+#     The release-pr job still uses the token secret (registry reads only, no
+#     publish) — a separate follow-up.
 
 name: Release-plz
 
@@ -43,6 +48,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: read
+      id-token: write # OIDC token exchange for crates.io Trusted Publishing
     steps:
       - name: Generate GitHub App token
         id: app-token
@@ -68,13 +74,16 @@ jobs:
       # builds and tests every commit on stable in the test matrix.
       - name: Use stable toolchain despite the MSRV pin
         run: echo "RUSTUP_TOOLCHAIN=stable" >> "$GITHUB_ENV"
+      - name: Authenticate to crates.io via Trusted Publishing (OIDC)
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
       - name: Run release-plz
         uses: release-plz/action@v0.5.130
         with:
           command: release
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
   release-plz-pr:
     name: Release-plz PR
