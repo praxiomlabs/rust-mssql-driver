@@ -433,7 +433,7 @@ fn test_authentication_sql_password_keeps_sql_credentials() {
 }
 
 #[test]
-fn test_authentication_unsupported_ad_value_errors_with_tracking_issue() {
+fn test_authentication_unsupported_ad_value_errors_with_token_guidance() {
     let err = Config::from_connection_string(
         "Server=s;User Id=u;Password=p;Authentication=ActiveDirectoryPassword",
     )
@@ -442,8 +442,8 @@ fn test_authentication_unsupported_ad_value_errors_with_tracking_issue() {
     let msg = err.to_string();
     assert!(msg.contains("not supported"), "{msg}");
     assert!(
-        msg.contains("155"),
-        "should reference the tracking issue: {msg}"
+        msg.contains("azure_token"),
+        "should point to the bring-your-own-token escape hatch: {msg}"
     );
 }
 
