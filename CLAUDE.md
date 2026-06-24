@@ -386,7 +386,7 @@ When making changes here, remember:
 
 7. **Use issue/PR templates.** They ask the right questions. If you're opening an issue or PR, fill out the template completely — it helps the human reviewer and it helps future AI sessions parse the intent.
 
-8. **Run the full local CI mirror before every push; never trust a subset.** `cargo check` and unit tests do not catch the `-D warnings`-class failures CI rejects. This repo's gate is reproduced by `just ci-all` (fmt + clippy `--all-features --all-targets -D warnings` + nextest all-features + `cargo doc -D warnings` + examples). `ci-all` does NOT compose three gates CI enforces (spell-check, feature-flag validation, and the live suite), so the real pre-push command is:
+8. **Run the full local CI mirror before every push; never trust a subset.** `cargo check` and unit tests do not catch the `-D warnings`-class failures CI rejects. This repo's gate is reproduced by `just ci-all` (fmt + clippy `--all-features --all-targets -D warnings` + nextest all-features + **doctests (`cargo test --doc --workspace --all-features`)** + `cargo doc -D warnings` + examples). Note: nextest does NOT run doctests, so the `doctest-all` step is what catches broken examples — including the README, which the `doc-tests` crate compiles via `include_str!` (a scoped `cargo test --doc -p <crate>` silently skips it). `ci-all` does NOT compose three gates CI enforces (spell-check, feature-flag validation, and the live suite), so the real pre-push command is:
 
    ```bash
    just ci-all && just typos && just check-feature-flags && \
