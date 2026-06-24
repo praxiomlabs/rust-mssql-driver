@@ -679,6 +679,15 @@ nextest-locked-all:
     printf '{{green}}[OK]{{reset}}   All tests passed\n'
 
 [group('test')]
+[doc("Run doctests, ALL features (nextest does NOT run them; matches CI's `cargo test --doc` step)")]
+doctest-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    printf '\n{{bold}}{{blue}}══════ Running Doctests (all features) ══════{{reset}}\n\n'
+    {{cargo}} test --doc --workspace --all-features --locked
+    printf '{{green}}[OK]{{reset}}   All doctests passed\n'
+
+[group('test')]
 [doc("Run Miri tests for unsafe code detection (requires nightly)")]
 miri:
     #!/usr/bin/env bash
@@ -1236,7 +1245,7 @@ ci: fmt-check clippy nextest-locked doc-check examples
 
 [group('ci')]
 [doc("CI pipeline with ALL features (matches GitHub Actions on Linux)")]
-ci-all: fmt-check clippy-all nextest-locked-all doc-check-all examples-all
+ci-all: fmt-check clippy-all nextest-locked-all doctest-all doc-check-all examples-all
     #!/usr/bin/env bash
     set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ CI Pipeline Complete (all features) ══════{{reset}}\n\n'
