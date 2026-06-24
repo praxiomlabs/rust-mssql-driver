@@ -1,4 +1,4 @@
-# AE fixture provenance harness (#299)
+# AE fixture provenance harness (#299, #86)
 
 A tiny .NET console app that drives the **real `Microsoft.Data.SqlClient`
 binary** to give the driver's Always Encrypted "byte-exact vs
@@ -50,15 +50,35 @@ The pinned `Microsoft.Data.SqlClient` version is in
 `ae_interop.rs` provenance note refers to). Bump it deliberately and re-run; a
 passing run after a bump extends the provenance to that version.
 
-## What this does NOT do (remaining gap → #86)
+## Live mode — regenerate from Microsoft's live normalizer (#86)
 
-It **verifies** the reference ciphertexts against the real AEAD binary; it does
-not **regenerate the normalized forms from Microsoft's own normalizer**. That is
-not achievable offline: MS's scalar AE normalization is woven into the TDS
-parameter-writing path, not a standalone reflectable API (the
-`Microsoft.Data.SqlClient.Server.*Normalizer` classes are the order-preserving
-UDT normalizers — they bit-flip for sortability and differ). Regenerating from
-scratch needs a live AE-configured SQL Server (a CMK/CEK + an encrypted-column
-INSERT), which is issue #86's territory. The temporal forms
-(`ae_normalization_matches_dotnet_temporal`) are asserted directly as normalized
-bytes in the Rust tests and are not re-verified here.
+The offline checks above *verify* pre-captured references but cannot *regenerate*
+the normalized forms from Microsoft's own normalizer — its scalar AE
+normalization is woven into the TDS parameter-write path, not a reflectable API.
+Live mode closes that gap against a real SQL Server:
+
+```bash
+just sql-server-start   # local SQL Server 2022 — Always Encrypted is supported in all editions
+MSSQL_PASSWORD='YourStrong@Passw0rd' dotnet run --project tools/ae-fixture-gen -- live
+```
+
+(env: `AE_LIVE_HOST` (default `localhost,1433`), `MSSQL_USER` (`sa`), `MSSQL_PASSWORD`.)
+
+It provisions CMK/CEK + an encrypted table, inserts each raw value through the
+real `Microsoft.Data.SqlClient` client-side encryption (which runs MS's
+normalizer, then AEAD-encrypts), reads the ciphertext back over a plain
+connection, and:
+
+- byte-compares it to the committed reference ciphertext for the scalar types
+  (under the same CEKs); and
+- decrypts it to recover Microsoft's normalized form and compares to the
+  committed form for **every** type — including the temporal (`time` /
+  `datetime2` / `datetimeoffset` at scales 7 and 3, legacy `datetime`,
+  `smalldatetime`) and fixed-width (`char` / `nchar` / `binary`) forms the
+  offline check cannot reach.
+
+No certificate / Key Vault provisioning is needed: SQL Server stores the
+encrypted CEK opaquely (it has no CMK to validate it) and a custom in-process
+key store provider is trusted to unwrap it — so a stub provider returning a
+fixed CEK, paired with a dummy `ENCRYPTED_VALUE`, drives the real client-side
+path. Exit `0` = every form reproduced by the live normalizer; `1` = drift.

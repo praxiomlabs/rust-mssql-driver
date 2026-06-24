@@ -19,13 +19,25 @@
 // possible offline (its scalar AE normalization is woven into the TDS parameter
 // path, not a standalone reflectable API — the Server.*Normalizer classes are
 // the order-preserving UDT normalizers, which bit-flip and differ). That needs a
-// live AE-configured server (issue #86). This harness verifies the references
-// against the real AEAD binary, which is the offline-achievable provenance.
+// live AE-configured server — see `Live.cs` / `dotnet run -- live` (issue #86).
+// These offline checks verify the references against the real AEAD binary, which
+// is the offline-achievable provenance.
 //
 // Exit 0 = every check passed against the real binary; 1 = drift.
 using System;
 using System.Reflection;
 using System.Text;
+
+// Live mode (issue #86): drive Microsoft's AE normalizer against a live SQL
+// Server. Run with `dotnet run -- live` (env: AE_LIVE_HOST, MSSQL_USER,
+// MSSQL_PASSWORD). Default (no args) is the offline fixture-verification check.
+if (args.Length > 0 && args[0] == "live")
+{
+    string srv = Environment.GetEnvironmentVariable("AE_LIVE_HOST") ?? "localhost,1433";
+    string usr = Environment.GetEnvironmentVariable("MSSQL_USER") ?? "sa";
+    string pwd = Environment.GetEnvironmentVariable("MSSQL_PASSWORD") ?? "YourStrong@Passw0rd";
+    return Live.Run(srv, usr, pwd);
+}
 
 var asm = typeof(Microsoft.Data.SqlClient.SqlConnection).Assembly;
 var keyType = asm.GetType("Microsoft.Data.SqlClient.SqlAeadAes256CbcHmac256EncryptionKey")!;
