@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.19.3...v0.20.0) - 2026-06-24
+
+### Added
+
+- *(auth)* implement Authentication=ActiveDirectoryDefault via a credential chain ([#357](https://github.com/praxiomlabs/rust-mssql-driver/pull/357))
+- *(auth)* [**breaking**] wire client-certificate credentials into the FEDAUTH login ([#155](https://github.com/praxiomlabs/rust-mssql-driver/pull/155))
+
+### Fixed
+
+- *(auth)* hand azure_identity raw DER PKCS#12, not base64 ([#155](https://github.com/praxiomlabs/rust-mssql-driver/pull/155))
+
+### Other
+
+- *(config)* unsupported AD value points to the token escape hatch, not a tracking issue ([#357](https://github.com/praxiomlabs/rust-mssql-driver/pull/357))
+- *(config)* document the access-token escape hatch for interactive Entra auth
+- *(client)* [**breaking**] remove dead Error::PoolExhausted and the Transaction stub ([#281](https://github.com/praxiomlabs/rust-mssql-driver/pull/281))
+- reflect the live-validated Entra auth set; remove stale FEDAUTH-Phase-2 claims
+
 ## [0.19.3](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.19.2...v0.19.3) - 2026-06-22
 
 ### Added
