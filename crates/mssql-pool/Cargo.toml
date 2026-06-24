@@ -19,6 +19,8 @@ default = []
 # Azure Managed Identity / Service Principal token acquisition for Azure AD
 # (FEDAUTH) logins; each pooled connection acquires a fresh token.
 azure-identity = ["mssql-client/azure-identity"]
+# Client-certificate Azure AD (Entra service principal) auth for FEDAUTH logins.
+cert-auth = ["mssql-client/cert-auth"]
 # Integrated authentication (Kerberos/SPNEGO) - Linux/macOS
 integrated-auth = ["mssql-client/integrated-auth"]
 # Windows SSPI integrated authentication

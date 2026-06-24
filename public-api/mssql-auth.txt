@@ -531,13 +531,16 @@ pub mssql_auth::credentials::Credentials::AzureServicePrincipal::client_secret: 
 pub mssql_auth::credentials::Credentials::AzureServicePrincipal::tenant_id: alloc::borrow::Cow<'static, str>
 pub mssql_auth::credentials::Credentials::Certificate
 pub mssql_auth::credentials::Credentials::Certificate::cert_path: alloc::borrow::Cow<'static, str>
+pub mssql_auth::credentials::Credentials::Certificate::client_id: alloc::borrow::Cow<'static, str>
 pub mssql_auth::credentials::Credentials::Certificate::password: core::option::Option<alloc::borrow::Cow<'static, str>>
+pub mssql_auth::credentials::Credentials::Certificate::tenant_id: alloc::borrow::Cow<'static, str>
 pub mssql_auth::credentials::Credentials::Integrated
 pub mssql_auth::credentials::Credentials::SqlServer
 pub mssql_auth::credentials::Credentials::SqlServer::password: alloc::borrow::Cow<'static, str>
 pub mssql_auth::credentials::Credentials::SqlServer::username: alloc::borrow::Cow<'static, str>
 impl mssql_auth::credentials::Credentials
 pub fn mssql_auth::credentials::Credentials::azure_token(impl core::convert::Into<alloc::borrow::Cow<'static, str>>) -> Self
+pub fn mssql_auth::credentials::Credentials::certificate(impl core::convert::Into<alloc::borrow::Cow<'static, str>>, impl core::convert::Into<alloc::borrow::Cow<'static, str>>, impl core::convert::Into<alloc::borrow::Cow<'static, str>>, core::option::Option<alloc::borrow::Cow<'static, str>>) -> Self
 pub fn mssql_auth::credentials::Credentials::integrated() -> Self
 pub fn mssql_auth::credentials::Credentials::is_azure_ad(&self) -> bool
 pub fn mssql_auth::credentials::Credentials::is_sql_auth(&self) -> bool
@@ -1773,13 +1776,16 @@ pub mssql_auth::Credentials::AzureServicePrincipal::client_secret: alloc::borrow
 pub mssql_auth::Credentials::AzureServicePrincipal::tenant_id: alloc::borrow::Cow<'static, str>
 pub mssql_auth::Credentials::Certificate
 pub mssql_auth::Credentials::Certificate::cert_path: alloc::borrow::Cow<'static, str>
+pub mssql_auth::Credentials::Certificate::client_id: alloc::borrow::Cow<'static, str>
 pub mssql_auth::Credentials::Certificate::password: core::option::Option<alloc::borrow::Cow<'static, str>>
+pub mssql_auth::Credentials::Certificate::tenant_id: alloc::borrow::Cow<'static, str>
 pub mssql_auth::Credentials::Integrated
 pub mssql_auth::Credentials::SqlServer
 pub mssql_auth::Credentials::SqlServer::password: alloc::borrow::Cow<'static, str>
 pub mssql_auth::Credentials::SqlServer::username: alloc::borrow::Cow<'static, str>
 impl mssql_auth::credentials::Credentials
 pub fn mssql_auth::credentials::Credentials::azure_token(impl core::convert::Into<alloc::borrow::Cow<'static, str>>) -> Self
+pub fn mssql_auth::credentials::Credentials::certificate(impl core::convert::Into<alloc::borrow::Cow<'static, str>>, impl core::convert::Into<alloc::borrow::Cow<'static, str>>, impl core::convert::Into<alloc::borrow::Cow<'static, str>>, core::option::Option<alloc::borrow::Cow<'static, str>>) -> Self
 pub fn mssql_auth::credentials::Credentials::integrated() -> Self
 pub fn mssql_auth::credentials::Credentials::is_azure_ad(&self) -> bool
 pub fn mssql_auth::credentials::Credentials::is_sql_auth(&self) -> bool

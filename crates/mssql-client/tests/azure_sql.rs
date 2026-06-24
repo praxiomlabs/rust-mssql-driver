@@ -554,6 +554,69 @@ async fn test_azure_ad_service_principal_login() {
     client.close().await.expect("Close failed");
 }
 
+/// Certificate fixture from the environment: a path to a PKCS#12 (`.pfx`) or a
+/// combined PEM (certificate + private key), plus an optional password.
+#[cfg(all(feature = "cert-auth", feature = "azure-identity"))]
+fn get_azure_cert_env() -> Option<(String, Option<String>)> {
+    let cert_path = std::env::var("AZURE_SQL_CLIENT_CERTIFICATE_PATH")
+        .or_else(|_| std::env::var("AZURE_CLIENT_CERTIFICATE_PATH"))
+        .ok()?;
+    let password = std::env::var("AZURE_SQL_CLIENT_CERTIFICATE_PASSWORD")
+        .or_else(|_| std::env::var("AZURE_CLIENT_CERTIFICATE_PASSWORD"))
+        .ok();
+    Some((cert_path, password))
+}
+
+/// End-to-end FEDAUTH login with certificate credentials: the driver reads the
+/// certificate, signs an assertion to acquire a token from Entra ID, and sends
+/// it in the LOGIN7 FEDAUTH feature extension (SecurityToken workflow). Mirrors
+/// the service-principal test; the certificate replaces the client secret.
+#[cfg(all(feature = "cert-auth", feature = "azure-identity"))]
+#[tokio::test]
+#[ignore = "Requires Azure SQL Database and an Entra service principal with a certificate"]
+async fn test_azure_ad_certificate_login() {
+    use mssql_client::Client;
+
+    // Certificate auth needs tenant + client id but no client secret.
+    let tenant_id = std::env::var("AZURE_SQL_TENANT_ID")
+        .or_else(|_| std::env::var("AZURE_TENANT_ID"))
+        .expect("AZURE_SQL_TENANT_ID required");
+    let client_id = std::env::var("AZURE_SQL_CLIENT_ID")
+        .or_else(|_| std::env::var("AZURE_CLIENT_ID"))
+        .expect("AZURE_SQL_CLIENT_ID required");
+    let (cert_path, cert_password) =
+        get_azure_cert_env().expect("AZURE_SQL_CLIENT_CERTIFICATE_PATH required");
+    let (host, database) = get_azure_host_db().expect("AZURE_SQL_HOST/DATABASE required");
+
+    let config = Config::new().host(host).database(database).credentials(
+        mssql_client::Credentials::certificate(
+            tenant_id,
+            client_id.clone(),
+            cert_path,
+            cert_password.map(Into::into),
+        ),
+    );
+
+    let mut client = Client::connect(config)
+        .await
+        .expect("certificate FEDAUTH login failed");
+
+    let (principal, auth_type) = current_principal(&mut client).await;
+    println!("certificate login: principal={principal}, auth_type={auth_type}");
+    assert!(
+        principal
+            .to_lowercase()
+            .starts_with(&client_id.to_lowercase()),
+        "SUSER_SNAME() ({principal}) must identify the service principal ({client_id})"
+    );
+    assert_eq!(
+        auth_type, "EXTERNAL",
+        "certificate service principal must authenticate as an EXTERNAL (Entra) principal"
+    );
+
+    client.close().await.expect("Close failed");
+}
+
 /// Pre-acquired token path: acquire via mssql-auth's ServicePrincipalAuth,
 /// then log in with Credentials::AzureAccessToken (Tier 1 — what users with
 /// their own token plumbing do).

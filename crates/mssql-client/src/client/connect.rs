@@ -198,12 +198,42 @@ impl Client<Disconnected> {
                     Ok(())
                 }
             }
-            // Remaining credential types (client certificate) cannot complete
-            // a login yet: certificate-acquired tokens are not wired into the
-            // login sequence. Tracked in issue #155.
+            // Client certificate auth is Entra-backed FEDAUTH (the certificate
+            // authenticates to Entra, which issues the bearer token), so it is
+            // subject to the same transport rules as the other FEDAUTH paths.
+            #[cfg(feature = "cert-auth")]
+            mssql_auth::Credentials::Certificate { .. } => {
+                #[cfg(not(feature = "tls"))]
+                {
+                    Err(Error::Config(
+                        "client certificate (FEDAUTH) authentication requires TLS: \
+                         enable the 'tls' feature."
+                            .into(),
+                    ))
+                }
+                #[cfg(feature = "tls")]
+                {
+                    if config.no_tls {
+                        return Err(Error::Config(
+                            "client certificate (FEDAUTH) authentication cannot be combined \
+                             with Encrypt=no_tls: the access token would be sent in \
+                             plaintext. Use Encrypt=mandatory or Encrypt=strict."
+                                .into(),
+                        ));
+                    }
+                    if !config.strict_mode && !config.tds_version.supports_fed_auth() {
+                        return Err(Error::Config(format!(
+                            "client certificate (FEDAUTH) authentication requires TDS 7.4 \
+                             or later (configured: {})",
+                            config.tds_version
+                        )));
+                    }
+                    Ok(())
+                }
+            }
+            // Any other credential type is unsupported by Client::connect.
             _ => Err(Error::Config(
-                "client certificate (FEDAUTH) authentication is not yet supported \
-                 (tracked in https://github.com/praxiomlabs/rust-mssql-driver/issues/155). \
+                "this credential type is not supported by Client::connect. \
                  Use SQL Server, integrated, or Azure AD / Entra authentication."
                     .into(),
             )),
@@ -244,6 +274,45 @@ impl Client<Disconnected> {
                 tracing::debug!(
                     client_id = %client_id,
                     "acquiring Azure SQL access token via service principal"
+                );
+                Ok(Some(auth.get_token().await?))
+            }
+            #[cfg(feature = "cert-auth")]
+            mssql_auth::Credentials::Certificate {
+                tenant_id,
+                client_id,
+                cert_path,
+                password,
+            } => {
+                let cert_bytes = std::fs::read(cert_path.as_ref()).map_err(|e| {
+                    Error::Config(format!(
+                        "client certificate authentication: failed to read certificate \
+                         file '{cert_path}': {e}"
+                    ))
+                })?;
+                let password = password.as_deref();
+                // Auto-detect format: a PEM file (certificate + private key in
+                // one file) carries `-----BEGIN` armor; a PKCS#12 `.pfx` is
+                // binary DER. For PEM the same bytes hold both cert and key.
+                let auth = if cert_bytes.windows(10).any(|w| w == b"-----BEGIN") {
+                    mssql_auth::CertificateAuth::from_pem(
+                        tenant_id.as_ref(),
+                        client_id.to_string(),
+                        &cert_bytes,
+                        &cert_bytes,
+                        password,
+                    )?
+                } else {
+                    mssql_auth::CertificateAuth::new(
+                        tenant_id.as_ref(),
+                        client_id.to_string(),
+                        &cert_bytes,
+                        password,
+                    )?
+                };
+                tracing::debug!(
+                    client_id = %client_id,
+                    "acquiring Azure SQL access token via client certificate"
                 );
                 Ok(Some(auth.get_token().await?))
             }
@@ -1762,6 +1831,53 @@ mod fed_auth_login_tests {
             reassembled,
             encoded.as_ref(),
             "reassembled packet payloads must equal the LOGIN7 encoding"
+        );
+    }
+
+    #[cfg(feature = "cert-auth")]
+    fn cert_config() -> Config {
+        Config::new().credentials(mssql_auth::Credentials::certificate(
+            "tenant-1",
+            "client-1",
+            "/nonexistent/app.pfx",
+            None,
+        ))
+    }
+
+    #[cfg(feature = "cert-auth")]
+    #[test]
+    fn cert_auth_is_accepted_by_credential_validation_over_tls() {
+        // Default config is TLS-encrypted; certificate FEDAUTH must validate.
+        let config = cert_config();
+        assert!(Client::<Disconnected>::validate_credential_support(&config).is_ok());
+    }
+
+    #[cfg(all(feature = "cert-auth", feature = "tls"))]
+    #[test]
+    fn cert_auth_is_rejected_over_plaintext() {
+        // The Entra bearer token must never be sent without TLS.
+        let config = cert_config().no_tls(true);
+        let err = Client::<Disconnected>::validate_credential_support(&config)
+            .expect_err("certificate FEDAUTH over no_tls must be rejected");
+        assert!(
+            err.to_string().contains("no_tls"),
+            "error should explain the plaintext rejection, got: {err}"
+        );
+    }
+
+    #[cfg(feature = "cert-auth")]
+    #[tokio::test]
+    async fn cert_auth_token_resolution_reports_missing_cert_file() {
+        // Token acquisition reads the certificate before any network I/O, so a
+        // missing file surfaces as a clear config error (offline-testable).
+        let config = cert_config();
+        let err = Client::<Disconnected>::resolve_fed_auth_token(&config)
+            .await
+            .expect_err("a missing certificate file must error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("failed to read certificate") && msg.contains("app.pfx"),
+            "error should name the unreadable certificate file, got: {msg}"
         );
     }
 }
