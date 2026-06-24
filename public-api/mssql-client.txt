@@ -1272,7 +1272,6 @@ pub mssql_client::error::Error::Io(mssql_client::error::SharedIoError)
 pub mssql_client::error::Error::LoginTimeout
 pub mssql_client::error::Error::LoginTimeout::host: alloc::string::String
 pub mssql_client::error::Error::LoginTimeout::port: u16
-pub mssql_client::error::Error::PoolExhausted
 pub mssql_client::error::Error::Protocol(alloc::string::String)
 pub mssql_client::error::Error::ProtocolError(tds_protocol::error::ProtocolError)
 pub mssql_client::error::Error::Query(alloc::string::String)
@@ -2885,41 +2884,6 @@ impl<T> typenum::type_operators::Same for mssql_client::transaction::SavePoint
 pub type mssql_client::transaction::SavePoint::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::transaction::SavePoint where V: ppv_lite86::types::MultiLane<T>
 pub fn mssql_client::transaction::SavePoint::vzip(self) -> V
-pub struct mssql_client::transaction::Transaction<'a>
-impl mssql_client::transaction::Transaction<'_>
-pub fn mssql_client::transaction::Transaction<'_>::isolation_level(&self) -> mssql_client::transaction::IsolationLevel
-impl<'a> core::marker::Freeze for mssql_client::transaction::Transaction<'a>
-impl<'a> core::marker::Send for mssql_client::transaction::Transaction<'a>
-impl<'a> core::marker::Sync for mssql_client::transaction::Transaction<'a>
-impl<'a> core::marker::Unpin for mssql_client::transaction::Transaction<'a>
-impl<'a> core::panic::unwind_safe::RefUnwindSafe for mssql_client::transaction::Transaction<'a>
-impl<'a> core::panic::unwind_safe::UnwindSafe for mssql_client::transaction::Transaction<'a>
-impl<T, U> core::convert::Into<U> for mssql_client::transaction::Transaction<'a> where U: core::convert::From<T>
-pub fn mssql_client::transaction::Transaction<'a>::into(self) -> U
-impl<T, U> core::convert::TryFrom<U> for mssql_client::transaction::Transaction<'a> where U: core::convert::Into<T>
-pub type mssql_client::transaction::Transaction<'a>::Error = core::convert::Infallible
-pub fn mssql_client::transaction::Transaction<'a>::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
-impl<T, U> core::convert::TryInto<U> for mssql_client::transaction::Transaction<'a> where U: core::convert::TryFrom<T>
-pub type mssql_client::transaction::Transaction<'a>::Error = <U as core::convert::TryFrom<T>>::Error
-pub fn mssql_client::transaction::Transaction<'a>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
-impl<T> core::any::Any for mssql_client::transaction::Transaction<'a> where T: 'static + ?core::marker::Sized
-pub fn mssql_client::transaction::Transaction<'a>::type_id(&self) -> core::any::TypeId
-impl<T> core::borrow::Borrow<T> for mssql_client::transaction::Transaction<'a> where T: ?core::marker::Sized
-pub fn mssql_client::transaction::Transaction<'a>::borrow(&self) -> &T
-impl<T> core::borrow::BorrowMut<T> for mssql_client::transaction::Transaction<'a> where T: ?core::marker::Sized
-pub fn mssql_client::transaction::Transaction<'a>::borrow_mut(&mut self) -> &mut T
-impl<T> core::convert::From<T> for mssql_client::transaction::Transaction<'a>
-pub fn mssql_client::transaction::Transaction<'a>::from(T) -> T
-impl<T> opentelemetry::context::future_ext::FutureExt for mssql_client::transaction::Transaction<'a>
-impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_client::transaction::Transaction<'a> where T: ?core::marker::Sized
-pub fn mssql_client::transaction::Transaction<'a>::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
-pub fn mssql_client::transaction::Transaction<'a>::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
-impl<T> tracing::instrument::Instrument for mssql_client::transaction::Transaction<'a>
-impl<T> tracing::instrument::WithSubscriber for mssql_client::transaction::Transaction<'a>
-impl<T> typenum::type_operators::Same for mssql_client::transaction::Transaction<'a>
-pub type mssql_client::transaction::Transaction<'a>::Output = T
-impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::transaction::Transaction<'a> where V: ppv_lite86::types::MultiLane<T>
-pub fn mssql_client::transaction::Transaction<'a>::vzip(self) -> V
 pub mod mssql_client::tvp
 pub struct mssql_client::tvp::TvpColumn
 pub mssql_client::tvp::TvpColumn::name: alloc::string::String
@@ -3229,7 +3193,6 @@ pub mssql_client::Error::Io(mssql_client::error::SharedIoError)
 pub mssql_client::Error::LoginTimeout
 pub mssql_client::Error::LoginTimeout::host: alloc::string::String
 pub mssql_client::Error::LoginTimeout::port: u16
-pub mssql_client::Error::PoolExhausted
 pub mssql_client::Error::Protocol(alloc::string::String)
 pub mssql_client::Error::ProtocolError(tds_protocol::error::ProtocolError)
 pub mssql_client::Error::Query(alloc::string::String)
@@ -5554,41 +5517,6 @@ impl<T> typenum::type_operators::Same for mssql_client::config::TimeoutConfig
 pub type mssql_client::config::TimeoutConfig::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::config::TimeoutConfig where V: ppv_lite86::types::MultiLane<T>
 pub fn mssql_client::config::TimeoutConfig::vzip(self) -> V
-pub struct mssql_client::Transaction<'a>
-impl mssql_client::transaction::Transaction<'_>
-pub fn mssql_client::transaction::Transaction<'_>::isolation_level(&self) -> mssql_client::transaction::IsolationLevel
-impl<'a> core::marker::Freeze for mssql_client::transaction::Transaction<'a>
-impl<'a> core::marker::Send for mssql_client::transaction::Transaction<'a>
-impl<'a> core::marker::Sync for mssql_client::transaction::Transaction<'a>
-impl<'a> core::marker::Unpin for mssql_client::transaction::Transaction<'a>
-impl<'a> core::panic::unwind_safe::RefUnwindSafe for mssql_client::transaction::Transaction<'a>
-impl<'a> core::panic::unwind_safe::UnwindSafe for mssql_client::transaction::Transaction<'a>
-impl<T, U> core::convert::Into<U> for mssql_client::transaction::Transaction<'a> where U: core::convert::From<T>
-pub fn mssql_client::transaction::Transaction<'a>::into(self) -> U
-impl<T, U> core::convert::TryFrom<U> for mssql_client::transaction::Transaction<'a> where U: core::convert::Into<T>
-pub type mssql_client::transaction::Transaction<'a>::Error = core::convert::Infallible
-pub fn mssql_client::transaction::Transaction<'a>::try_from(U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
-impl<T, U> core::convert::TryInto<U> for mssql_client::transaction::Transaction<'a> where U: core::convert::TryFrom<T>
-pub type mssql_client::transaction::Transaction<'a>::Error = <U as core::convert::TryFrom<T>>::Error
-pub fn mssql_client::transaction::Transaction<'a>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
-impl<T> core::any::Any for mssql_client::transaction::Transaction<'a> where T: 'static + ?core::marker::Sized
-pub fn mssql_client::transaction::Transaction<'a>::type_id(&self) -> core::any::TypeId
-impl<T> core::borrow::Borrow<T> for mssql_client::transaction::Transaction<'a> where T: ?core::marker::Sized
-pub fn mssql_client::transaction::Transaction<'a>::borrow(&self) -> &T
-impl<T> core::borrow::BorrowMut<T> for mssql_client::transaction::Transaction<'a> where T: ?core::marker::Sized
-pub fn mssql_client::transaction::Transaction<'a>::borrow_mut(&mut self) -> &mut T
-impl<T> core::convert::From<T> for mssql_client::transaction::Transaction<'a>
-pub fn mssql_client::transaction::Transaction<'a>::from(T) -> T
-impl<T> opentelemetry::context::future_ext::FutureExt for mssql_client::transaction::Transaction<'a>
-impl<T> tower_http::follow_redirect::policy::PolicyExt for mssql_client::transaction::Transaction<'a> where T: ?core::marker::Sized
-pub fn mssql_client::transaction::Transaction<'a>::and<P, B, E>(self, P) -> tower_http::follow_redirect::policy::and::And<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
-pub fn mssql_client::transaction::Transaction<'a>::or<P, B, E>(self, P) -> tower_http::follow_redirect::policy::or::Or<T, P> where T: tower_http::follow_redirect::policy::Policy<B, E>, P: tower_http::follow_redirect::policy::Policy<B, E>
-impl<T> tracing::instrument::Instrument for mssql_client::transaction::Transaction<'a>
-impl<T> tracing::instrument::WithSubscriber for mssql_client::transaction::Transaction<'a>
-impl<T> typenum::type_operators::Same for mssql_client::transaction::Transaction<'a>
-pub type mssql_client::transaction::Transaction<'a>::Output = T
-impl<V, T> ppv_lite86::types::VZip<V> for mssql_client::transaction::Transaction<'a> where V: ppv_lite86::types::MultiLane<T>
-pub fn mssql_client::transaction::Transaction<'a>::vzip(self) -> V
 pub struct mssql_client::TvpColumn
 pub mssql_client::TvpColumn::name: alloc::string::String
 pub mssql_client::TvpColumn::ordinal: usize

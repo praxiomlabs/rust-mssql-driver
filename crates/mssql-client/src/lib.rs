@@ -202,7 +202,7 @@ pub use stream::{
     ExecuteResult, MultiResultStream, OutputParam, ProcedureResult, QueryStream, ResultSet,
 };
 pub use to_params::{NamedParam, ParamList, ToParams};
-pub use transaction::{IsolationLevel, SavePoint, Transaction};
+pub use transaction::{IsolationLevel, SavePoint};
 pub use tvp::{Tvp, TvpColumn, TvpRow, TvpValue};
 
 // FILESTREAM support (Windows only)

@@ -1,7 +1,7 @@
 //! Transaction support.
 //!
-//! This module provides transaction isolation levels, savepoint support,
-//! and transaction abstractions for SQL Server.
+//! This module provides transaction isolation levels and savepoint support
+//! for SQL Server.
 
 /// Transaction isolation level.
 ///
@@ -110,42 +110,6 @@ impl SavePoint {
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
-    }
-}
-
-/// A database transaction abstraction.
-///
-/// This is a higher-level transaction wrapper that can be used
-/// with closure-based APIs or as a standalone type.
-#[must_use = "a transaction must be committed or rolled back"]
-pub struct Transaction<'a> {
-    isolation_level: IsolationLevel,
-    _marker: std::marker::PhantomData<&'a ()>,
-}
-
-impl Transaction<'_> {
-    /// Create a new transaction with default isolation level.
-    #[allow(dead_code)] // Used when transaction begin is implemented
-    pub(crate) fn new() -> Self {
-        Self {
-            isolation_level: IsolationLevel::default(),
-            _marker: std::marker::PhantomData,
-        }
-    }
-
-    /// Create a new transaction with specified isolation level.
-    #[allow(dead_code)] // Used when transaction begin is implemented
-    pub(crate) fn with_isolation_level(level: IsolationLevel) -> Self {
-        Self {
-            isolation_level: level,
-            _marker: std::marker::PhantomData,
-        }
-    }
-
-    /// Get the isolation level of this transaction.
-    #[must_use]
-    pub fn isolation_level(&self) -> IsolationLevel {
-        self.isolation_level
     }
 }
 

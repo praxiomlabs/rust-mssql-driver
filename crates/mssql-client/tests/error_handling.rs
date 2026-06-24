@@ -161,14 +161,6 @@ fn test_invalid_identifier_display() {
 }
 
 #[test]
-fn test_pool_exhausted_display() {
-    assert_eq!(
-        Error::PoolExhausted.to_string(),
-        "connection pool exhausted"
-    );
-}
-
-#[test]
 fn test_cancel_error_display() {
     let err = Error::Cancel("connection not found".into());
     let msg = err.to_string();
@@ -318,7 +310,6 @@ fn test_non_server_error_has_no_class() {
     );
     assert!(Error::Query("test".into()).class().is_none());
     assert!(Error::Config("test".into()).class().is_none());
-    assert!(Error::PoolExhausted.class().is_none());
 }
 
 // =============================================================================
@@ -549,7 +540,6 @@ fn test_all_error_variants_are_debug() {
         Error::TooManyRedirects { max: 1 },
         Error::from(std::io::Error::other("test")),
         Error::InvalidIdentifier("test".into()),
-        Error::PoolExhausted,
         Error::Cancel("test".into()),
         Error::Cancelled,
     ];
@@ -698,7 +688,6 @@ fn test_every_variant_classified() {
             },
             "transient",
         ),
-        (Error::PoolExhausted, "transient"),
         (Error::from(std::io::Error::other("test")), "transient"),
         (Error::InvalidIdentifier("test".into()), "terminal"),
         (Error::Cancel("test".into()), "terminal"),
