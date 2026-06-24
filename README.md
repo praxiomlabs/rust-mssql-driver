@@ -152,6 +152,43 @@ for result in rows {
 }
 ```
 
+## Authentication
+
+SQL authentication works out of the box. Azure AD / Entra logins use the TDS
+FEDAUTH SecurityToken workflow and require an encrypted connection. Every
+method below is **validated against live Azure SQL**:
+
+| Method | How | Feature |
+|--------|-----|---------|
+| SQL Server | `User Id` / `Password`, or `Credentials::sql_server(...)` | default |
+| Pre-acquired Entra token | `Credentials::azure_token(...)` | default |
+| Service Principal | `Authentication=ActiveDirectoryServicePrincipal` (`User Id=<client-id>@<tenant-id>`, `Password=<secret>`) | `azure-identity` |
+| Managed Identity | `Authentication=ActiveDirectoryManagedIdentity` | `azure-identity` |
+| Default chain | `Authentication=ActiveDirectoryDefault` — managed identity → signed-in `az`/`azd` CLI | `azure-identity` |
+| Certificate | programmatic only: `Credentials::certificate(tenant, client, cert_path, password)` (X.509 → Entra; not TDS mutual TLS) | `cert-auth` |
+
+```rust,no_run
+use mssql_client::{Client, Config};
+
+#[tokio::main]
+async fn main() -> Result<(), mssql_client::Error> {
+    // Managed identity, via a connection string:
+    let config = Config::from_connection_string(
+        "Server=myserver.database.windows.net;Database=mydb;\
+         Authentication=ActiveDirectoryManagedIdentity;Encrypt=mandatory",
+    )?;
+    let mut client = Client::connect(config).await?;
+    client.close().await?;
+    Ok(())
+}
+```
+
+The **interactive** Entra flows (`ActiveDirectoryPassword` / `Interactive` /
+`DeviceCodeFlow`) are not built in — `azure_identity` ships no such
+credentials. Acquire the token yourself (MSAL, the `oauth2` crate,
+`az account get-access-token`, or any broker) and pass it via
+`Credentials::azure_token`, exactly like .NET's `SqlConnection.AccessToken`.
+
 ## Feature Flags
 
 | Feature | Default | Description |
@@ -162,7 +199,7 @@ for result in rows {
 | `encoding` | Yes | Collation-aware VARCHAR decoding |
 | `json` | No | JSON type support via serde_json |
 | `tls` | Yes | TLS/SSL encryption via rustls (disable for `Encrypt=no_tls` environments) |
-| `azure-identity` | No | Azure AD / Entra logins with Managed Identity or Service Principal credentials (pre-acquired tokens work without it) |
+| `azure-identity` | No | Azure AD / Entra logins via Managed Identity, Service Principal, or the default credential chain (pre-acquired tokens work without it) |
 | `otel` | No | OpenTelemetry tracing and metrics |
 | `zeroize` | No | Secure credential wiping |
 | `filestream` | No | FILESTREAM BLOB access (Windows only, requires OLE DB Driver) |

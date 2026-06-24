@@ -23,6 +23,7 @@ This crate provides various authentication methods for SQL Server, isolated from
 |--------|-------------|
 | Managed Identity | Azure VM/Container identity |
 | Service Principal | Client ID + Secret |
+| Default chain | Managed identity → signed-in `az`/`azd` CLI session |
 
 ### Tier 3: Enterprise/Legacy (`integrated-auth` feature)
 
@@ -30,6 +31,12 @@ This crate provides various authentication methods for SQL Server, isolated from
 |--------|-------------|
 | Kerberos | Linux/macOS via GSSAPI |
 | NTLM/Kerberos | Windows via SSPI |
+
+### Tier 4: Certificate (`cert-auth` feature)
+
+| Method | Description |
+|--------|-------------|
+| Certificate | Entra service principal via X.509 (authenticates to Entra, not TDS-level mutual TLS) |
 
 ## Usage
 
@@ -80,7 +87,7 @@ This automatically zeroes sensitive data from memory when credentials are droppe
 - Never log credentials or access tokens
 - Use `zeroize` feature in production for sensitive environments
 - Prefer Managed Identity over Service Principal when possible
-- Client certificates provide mutual TLS authentication
+- Client certificates authenticate an Entra service principal via X.509 (the cert authenticates to Entra; this is NOT TDS-level mutual TLS)
 
 ## License
 

@@ -19,7 +19,7 @@ For supported features, see [README.md](README.md).
 | Data Types | HIERARCHYID | Use `.ToString()` |
 | Data Types | CLR UDTs | Cast to VARBINARY |
 | Performance | Prepared statement cache (not wired) | `sp_executesql` server plan cache |
-| Auth | Certificate auth and ADAL/MSAL workflows (FEDAUTH Phase 2) | Azure AD token / service principal / managed identity, SQL auth, or NTLM |
+| Auth | Interactive Entra flows (`ActiveDirectoryPassword`/`Interactive`/`DeviceCodeFlow`) | Acquire the token yourself and pass `Credentials::azure_token` (SP, managed identity, certificate, and the default chain are all built in) |
 | Auth | Kerberos untested against live KDC | SQL auth or NTLM |
 | Platforms | SQL Server 2005 and earlier | Upgrade to SQL Server 2008+ |
 | Platforms | 32-bit systems | Use 64-bit |
@@ -152,34 +152,38 @@ before any default-on decision.
 
 ---
 
-### Certificate Authentication and ADAL/MSAL Workflows (FEDAUTH Phase 2)
+### Interactive Entra Flows (`ActiveDirectoryPassword` / `Interactive` / `DeviceCodeFlow`)
 
-**Status:** Azure AD logins implemented (SecurityToken workflow);
-certificate credentials and server-directed token acquisition not wired
+**Status:** All non-interactive Entra logins are implemented and validated
+against live Azure SQL; only the interactive flows are not built in.
 
-Azure AD / Entra credentials — pre-acquired access tokens, Managed
-Identity, and Service Principals — complete logins via the LOGIN7 FEDAUTH
-feature extension (SecurityToken workflow: the token is acquired
-client-side before login; validated against live Azure SQL).
+Azure AD / Entra credentials log in via the LOGIN7 FEDAUTH feature extension
+(SecurityToken workflow: the token is acquired client-side before login). The
+following are implemented and **live-validated against Azure SQL**:
 
-Still unwired:
+- **Pre-acquired access token** (`Credentials::azure_token`)
+- **Service Principal** (`azure-identity`)
+- **Managed Identity** (`azure-identity`)
+- **Client certificate** (`cert-auth`) — an X.509 certificate authenticating
+  an Entra service principal (this authenticates to Entra; it is NOT TDS-level
+  mutual TLS)
+- **Default credential chain** (`Authentication=ActiveDirectoryDefault`,
+  `Credentials::azure_default`) — managed identity, then the signed-in
+  `az`/`azd` CLI session
 
-- **Client certificate credentials** (`cert-auth`): token acquisition
-  works, but `Client::connect` rejects the credential type with a clear
-  configuration error.
-- **ADAL/MSAL workflows** (`Authentication=ActiveDirectoryPassword`,
-  `ActiveDirectoryInteractive`, …): these need the FEDAUTHINFO
-  round-trip in which the server directs token acquisition; the
-  connection-string parser rejects them with a pointer to the tracking
-  issue.
+Not built in: the **interactive** flows
+(`Authentication=ActiveDirectoryPassword`, `ActiveDirectoryInteractive`,
+`ActiveDirectoryDeviceCodeFlow`). `azure_identity` 1.0 ships no
+username-password / device-code / interactive-browser credentials
+(UsernamePassword is declined upstream on security grounds; the others are
+unprioritized with no ETA). The connection-string parser errors on these
+values with a pointer to the workaround below.
 
-Both are tracked in
-[#155](https://github.com/praxiomlabs/rust-mssql-driver/issues/155)
-(Phase 2).
-
-**Workaround:** a service principal secret or a pre-acquired token covers
-most certificate-credential scenarios; SQL authentication works on every
-Azure SQL tier.
+**Workaround:** acquire the token yourself with any flow (MSAL, the `oauth2`
+crate, `az account get-access-token`, or any broker) and pass it as
+`Credentials::azure_token`, which logs in over the same FEDAUTH path — exactly
+how modern .NET handles these (`SqlConnection.AccessToken`). SQL authentication
+also works on every Azure SQL tier.
 
 ---
 
