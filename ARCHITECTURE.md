@@ -39,11 +39,10 @@ This project aims to build the definitive Microsoft SQL Server driver for the Ru
 
 ### 1.2 Competitive Positioning
 
-| Driver | Weakness This Project Addresses |
-|--------|--------------------------------|
-| `tiberius` | Runtime-agnostic design compromises, TDS 8.0 as afterthought, `tokio_util::compat` overhead |
-| `odbc` crate | FFI overhead, deployment complexity, platform-specific installation |
-| Native `FreeTDS` | No async support, C memory safety concerns, manual resource management |
+See the [README](README.md) and [MIGRATION.md](MIGRATION.md) for how this driver
+compares to `tiberius` and other options. In brief: Tokio-native (no
+runtime-agnostic compatibility layer), TDS 8.0 strict support, and built-in
+pooling and transactions.
 
 ### 1.3 Non-Goals (Explicit Exclusions)
 
@@ -1735,225 +1734,34 @@ skip = [
 
 ### 6.2 CI Pipeline
 
-```yaml
-# .github/workflows/ci.yml
-name: CI
+The CI pipeline is defined in [`.github/workflows/`](.github/workflows/) and
+mirrored locally by `just ci-all`. The full gate list (cross-platform matrix,
+live integration across SQL Server 2017/2019/2022, Miri, fuzzing,
+public-API/semver, supply-chain, and the commit-hygiene gates) is documented in
+CLAUDE.md. It is not reproduced here to avoid drift.
 
-on: [push, pull_request]
+### 6.3 Fuzz Testing
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@nextest
-      - run: cargo nextest run --all-features
-      
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - run: cargo fmt --check
-      - run: cargo clippy --all-features -- -D warnings
-      
-  deny:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v1
-      
-  miri:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: miri
-      - run: cargo miri test -p tds-protocol
-      
-  fuzz:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-      - run: cargo install cargo-fuzz
-      - run: cargo fuzz run parse_packet -- -max_total_time=300
-      
-  semver:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: obi1kenobi/cargo-semver-checks-action@v2
-        
-  integration:
-    runs-on: ubuntu-latest
-    services:
-      mssql:
-        image: mcr.microsoft.com/mssql/server:2022-latest
-        env:
-          ACCEPT_EULA: Y
-          SA_PASSWORD: YourStrong@Passw0rd
-        ports:
-          - 1433:1433
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo nextest run --features integration-tests
-```
-
-### 6.3 Fuzz Testing Targets
-
-```rust
-// fuzz/fuzz_targets/parse_packet.rs
-#![no_main]
-use libfuzzer_sys::fuzz_target;
-use tds_protocol::packet::PacketHeader;
-
-fuzz_target!(|data: &[u8]| {
-    let _ = PacketHeader::parse(data);
-});
-
-// fuzz/fuzz_targets/parse_token.rs
-#![no_main]
-use libfuzzer_sys::fuzz_target;
-use tds_protocol::token::Token;
-
-fuzz_target!(|data: &[u8]| {
-    let _ = Token::parse(data);
-});
-
-// fuzz/fuzz_targets/connection_string.rs
-#![no_main]
-use libfuzzer_sys::fuzz_target;
-use mssql_client::Config;
-
-fuzz_target!(|data: &[u8]| {
-    if let Ok(s) = std::str::from_utf8(data) {
-        let _ = s.parse::<Config>();
-    }
-});
-```
+Fuzz targets live in [`fuzz/fuzz_targets/`](fuzz/) (wire parsers, token stream,
+connection-string parser). They run per-PR as a smoke job and on a nightly
+long-budget schedule (`fuzz-nightly.yml`).
 
 ### 6.4 Benchmarking
 
-```rust
-// benches/query_benchmark.rs
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
-use mssql_client::Client;
-use tokio::runtime::Runtime;
-
-fn query_benchmark(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
-    let client = rt.block_on(async {
-        let config = Config::from_connection_string("Server=localhost;...").unwrap();
-        Client::connect(config).await.unwrap()
-    });
-    
-    let mut group = c.benchmark_group("query");
-    
-    for rows in [100, 1000, 10000, 100000] {
-        group.bench_with_input(
-            BenchmarkId::new("select_rows", rows),
-            &rows,
-            |b, &rows| {
-                b.to_async(&rt).iter(|| async {
-                    let sql = format!("SELECT TOP {} * FROM test_data", rows);
-                    let mut stream = client.query(&sql, &[]).await.unwrap();
-                    let mut count = 0;
-                    while let Some(_) = stream.next() {
-                        count += 1;
-                    }
-                    count
-                });
-            },
-        );
-    }
-    
-    group.finish();
-}
-
-criterion_group!(benches, query_benchmark);
-criterion_main!(benches);
-```
+Criterion benches live in `benches/`; performance-regression detection runs via
+`benchmarks.yml`.
 
 ### 6.5 Documentation Standards
 
-**Required Documentation:**
-- All public items must have doc comments
-- Examples required for public functions
-- Module-level documentation explaining purpose
-- `# Errors` section for fallible functions
-- `# Panics` section if function can panic
-
-**Example:**
-```rust
-/// Execute a SQL query and return a stream of rows.
-///
-/// # Arguments
-///
-/// * `sql` - The SQL query to execute. Use `@p1`, `@p2`, etc. for parameters.
-///
-/// # Returns
-///
-/// A stream of [`Row`] objects that can be iterated asynchronously.
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - The connection is not in a ready state
-/// - The SQL syntax is invalid
-/// - A network error occurs
-/// - The command times out
-///
-/// # Examples
-///
-/// ```rust
-/// # async fn example() -> Result<(), mssql_client::Error> {
-/// # let config = mssql_client::Config::from_connection_string("Server=localhost")?;
-/// let mut client = mssql_client::Client::connect(config).await?;
-///
-/// let rows = client.query("SELECT id, name FROM users", &[]).await?;
-/// for row in rows {
-///     let row = row?;
-///     let id: i32 = row.get(0)?;
-///     let name: String = row.get(1)?;
-///     println!("{}: {}", id, name);
-/// }
-/// # Ok(())
-/// # }
-/// ```
-pub async fn query(&mut self, sql: &str) -> Result<QueryStream<'_>, Error> {
-    // ...
-}
-```
+See [CONTRIBUTING.md § Documentation](CONTRIBUTING.md). All public items carry
+doc comments with `# Errors` / `# Panics` sections where applicable, enforced by
+`cargo doc -D warnings` in CI.
 
 ### 6.6 MSRV Policy
 
-**Policy:** Rolling 6-month MSRV window aligned with Tokio's policy.
-
-**Current MSRV:** Rust 1.88.0 (Rust 2024 Edition)
-
-**Enforcement:**
-```toml
-# Cargo.toml
-[package]
-rust-version = "1.88"
-```
-
-**CI Verification:**
-```yaml
-msrv:
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@1.88.0
-    - run: cargo check --all-features
-```
+See [STABILITY.md § MSRV Increase Policy](STABILITY.md), which is authoritative
+(MSRV bumps are NOT breaking changes). The current MSRV is pinned via
+`rust-version` in `Cargo.toml` and verified by the `msrv` CI job.
 
 ### 6.7 Deprecation Strategy
 
