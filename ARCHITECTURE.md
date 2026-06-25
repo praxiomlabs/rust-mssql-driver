@@ -883,7 +883,7 @@ alongside the response-streaming work.
 
 **Status:** Implemented
 
-**Decision:** Always Encrypted client-side decryption (the read path) is fully implemented with production-ready key providers. The encrypt-before-send write path is implemented for the common scalar types — parameters are described via `sp_describe_parameter_encryption` and encrypted client-side; the remaining temporal and fixed-width types are pending (#234). See LIMITATIONS.md.
+**Decision:** Always Encrypted client-side decryption (the read path) is fully implemented with production-ready key providers. The encrypt-before-send write path is implemented for the full scalar, temporal, and fixed-width type set (#234) — parameters are described via `sp_describe_parameter_encryption` and encrypted client-side. See LIMITATIONS.md for the exact type list and constraints (e.g. encrypted `decimal` is bounded to scale ≤ 28).
 
 **Implemented (v0.2.0):**
 - AEAD_AES_256_CBC_HMAC_SHA256 encryption/decryption
@@ -1352,11 +1352,13 @@ impl Default for TimeoutConfig {
 
 ### 4.5 Prepared Statement Lifecycle
 
-> **Implementation status (2026-06):** this section documents the intended
-> design. The `StatementCache` type exists but is not consulted by any query
-> path — all parameterized queries currently go through `sp_executesql`
-> (SQL Server's server-side plan cache still provides plan reuse). See
-> LIMITATIONS.md § Prepared Statement Cache.
+> **Implementation status:** the client-side `StatementCache` is wired into the
+> buffered `query` path but is **opt-in, off by default** — enabled via
+> `Statement Cache=true` / `Config::with_statement_cache(true)`. When disabled
+> (the default), parameterized queries go through `sp_executesql` (SQL Server's
+> server-side plan cache still provides plan reuse). See LIMITATIONS.md §
+> Prepared Statement Cache for the wired scope and what remains on
+> `sp_executesql`.
 
 SQL Server supports server-side prepared statements via RPC calls. The driver manages statement handles transparently to optimize repeated query execution.
 
@@ -1955,11 +1957,10 @@ msrv:
 
 ### 6.7 Deprecation Strategy
 
-**Process:**
-1. Mark item with `#[deprecated(since = "X.Y.Z", note = "Use `new_item` instead")]`
-2. Maintain deprecated item for at least 2 minor versions
-3. Remove in next major version
-4. Document migration path in CHANGELOG
+See [STABILITY.md § Deprecation Policy](STABILITY.md), which is authoritative:
+items are marked with `#[deprecated]`, kept for at least one minor release, and
+removed in a subsequent breaking release with the migration path recorded in the
+CHANGELOG.
 
 ---
 

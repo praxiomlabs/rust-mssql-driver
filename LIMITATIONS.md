@@ -18,7 +18,7 @@ For supported features, see [README.md](README.md).
 | Data Types | GEOMETRY, GEOGRAPHY | Use `STAsText()` or `STAsGeoJSON()` |
 | Data Types | HIERARCHYID | Use `.ToString()` |
 | Data Types | CLR UDTs | Cast to VARBINARY |
-| Performance | Prepared statement cache (not wired) | `sp_executesql` server plan cache |
+| Performance | Prepared statement cache (opt-in, off by default) | Enable with `Statement Cache=true`; otherwise `sp_executesql` server plan cache |
 | Auth | Interactive Entra flows (`ActiveDirectoryPassword`/`Interactive`/`DeviceCodeFlow`) | Acquire the token yourself and pass `Credentials::azure_token` (SP, managed identity, certificate, and the default chain are all built in) |
 | Auth | Kerberos untested against live KDC | SQL auth or NTLM |
 | Platforms | SQL Server 2005 and earlier | Upgrade to SQL Server 2008+ |

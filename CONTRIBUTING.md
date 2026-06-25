@@ -432,7 +432,7 @@ Dependabot is configured to group related deps in
 [`.github/dependabot.yml`](.github/dependabot.yml):
 
 - `opentelemetry*` crates move together (version alignment is required — see
-  [ARCHITECTURE.md § ADR-008](ARCHITECTURE.md#adr-008-opentelemetry-version-alignment))
+  [ARCHITECTURE.md § ADR-014](ARCHITECTURE.md#adr-014-opentelemetry-instrumentation))
 - `tokio` minor/patch bumps move together
 
 Add new groupings when we discover another "moves together" set.
