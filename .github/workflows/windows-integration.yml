@@ -1,0 +1,77 @@
+name: Windows Integration (SSPI)
+
+# Live Windows integrated-auth (SSPI) validation.
+#
+# The `sspi-auth` code is COMPILED on the windows-latest leg of ci.yml (the
+# "Build & test Windows-only features" step) but never exercised against a
+# real server, so a regression in the SSPI/SSO login handshake passes CI
+# unnoticed — the same "wired but never validated" class as the LOGIN7
+# packet-split bug (#213). This job installs SQL Server on the runner, enables
+# TCP/IP, and runs the #[ignore]d `windows_sspi` suite, which connects with
+# `Integrated Security=true` as the runner's Windows user and asserts the
+# negotiated auth scheme is NTLM or KERBEROS.
+#
+# NOT a required status check (yet): the SQL Server install is slow (~10 min)
+# and historically flaky on hosted runners, so this runs on pushes to main and
+# on manual dispatch rather than gating every PR. Promote it to a required
+# check once it has proven stable across a few runs.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  windows-sspi:
+    name: Windows SSPI (live)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@nextest
+
+      # Install SQL Server directly on the runner. There is no Linux-style
+      # `services:` container option here: GitHub `services:` only run on Linux
+      # runners and Microsoft's mssql image is Linux-only, so a live DB on a
+      # Windows runner means installing the engine onto the runner itself.
+      # SECURITYMODE=SQL enables mixed mode; the installing user (runneradmin)
+      # is added as a sysadmin, which is what `Integrated Security=true` logs
+      # in as.
+      - name: Install SQL Server 2022 (Developer)
+        shell: powershell
+        run: |
+          choco install sql-server-2022 --no-progress `
+            --params="'/IgnorePendingReboot /SECURITYMODE=SQL /SAPWD=YourStrong@Passw0rd'"
+
+      # Enable the TCP/IP protocol on the default instance and pin it to 1433,
+      # then bounce the service so the test can reach it over TCP (the driver
+      # is TCP-only; we do not enable named pipes).
+      - name: Enable TCP/IP and restart
+        shell: powershell
+        run: |
+          [reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.SqlWmiManagement") | Out-Null
+          $wmi = New-Object Microsoft.SqlServer.Management.Smo.Wmi.ManagedComputer
+          $tcp = $wmi.GetSmoObject(
+            "ManagedComputer[@Name='$env:COMPUTERNAME']/ServerInstance[@Name='MSSQLSERVER']/ServerProtocol[@Name='Tcp']")
+          $tcp.IsEnabled = $true
+          $tcp.Alter()
+          $ipAll = $tcp.IPAddresses | Where-Object { $_.Name -eq 'IPAll' }
+          $ipAll.IPAddressProperties['TcpPort'].Value = '1433'
+          $tcp.Alter()
+          Restart-Service -Name 'MSSQLSERVER' -Force
+
+      - name: Run live SSPI tests
+        shell: powershell
+        env:
+          MSSQL_HOST: localhost
+          MSSQL_PORT: "1433"
+        run: |
+          cargo nextest run -p mssql-client --features sspi-auth `
+            --run-ignored ignored-only -E 'binary(windows_sspi)'
