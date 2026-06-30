@@ -56,14 +56,10 @@ The following are explicitly out of scope for v1.0:
 
 ### 1.4 TDS Protocol Version Support
 
-| TDS Version | SQL Server Version | Status |
-|-------------|-------------------|--------|
-| TDS 7.3A | SQL Server 2008 | Supported via `TdsVersion::V7_3A` |
-| TDS 7.3B | SQL Server 2008 R2 | Supported via `TdsVersion::V7_3B` |
-| TDS 7.4 | SQL Server 2012+ | Default, full support |
-| TDS 8.0 | SQL Server 2022+ | Full support (strict TLS mode) |
-
-The driver defaults to TDS 7.4 for maximum compatibility with modern SQL Server while supporting legacy TDS 7.3 connections for enterprise environments with SQL Server 2008/2008 R2 instances.
+The driver supports TDS 7.3A (SQL Server 2008) through TDS 8.0 (SQL Server
+2022+ strict mode) and defaults to TDS 7.4 for modern deployments; the
+negotiated version is selectable via `TdsVersion`. See §8.1 (protocol-version
+features) and §8.2 (the full SQL Server compatibility matrix) for details.
 
 ---
 
@@ -724,52 +720,13 @@ impl Default for RetryPolicy {
 
 **Decision:** Use centralized configuration in the root `Cargo.toml`.
 
-**Implementation:**
+**Implementation:** the root `Cargo.toml` centralizes `[workspace.package]`
+(version, edition, license, MSRV) and `[workspace.dependencies]` so each
+dependency version is declared once. See the live root `Cargo.toml` for the
+current values — they are release-managed, so an inline copy here would only
+drift. Workspace-wide lints are centralized too:
 
 ```toml
-# Root Cargo.toml
-[workspace]
-resolver = "2"
-members = ["crates/*", "xtask"]
-
-[workspace.package]
-version = "0.8.0"
-edition = "2024"
-rust-version = "1.88"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/praxiomlabs/rust-mssql-driver"
-
-[workspace.dependencies]
-# Async runtime
-tokio = { version = "1.48", features = ["full"] }
-tokio-util = { version = "0.7", features = ["codec"] }
-tokio-rustls = "0.26"
-
-# Data handling
-bytes = "1.9"
-chrono = { version = "0.4", default-features = false, features = ["std"] }
-uuid = { version = "1.11", features = ["v4"] }
-rust_decimal = "1.36"
-serde_json = "1.0"
-
-# TLS
-rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
-webpki-roots = "1.0"
-
-# Error handling
-thiserror = "2.0"
-
-# Observability (optional `otel` feature)
-opentelemetry = { version = "0.32", optional = true }
-opentelemetry_sdk = { version = "0.32", optional = true }
-opentelemetry-otlp = { version = "0.32", optional = true }
-tracing-opentelemetry = { version = "0.33", optional = true }
-
-# Testing
-criterion = { version = "0.8", features = ["async_tokio"] }
-proptest = "1.5"
-testcontainers = "0.27"
-
 [workspace.lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"
@@ -1657,43 +1614,15 @@ pub fn default_tls_config() -> ClientConfig {
 
 ### 5.2 Credential Handling
 
-**Principles:**
-- Credentials never logged, even at trace level
-- Passwords zeroized after use via `zeroize` crate
-- Access tokens stored in `SecretString` wrapper
-- Connection strings redacted in error messages
-
-```rust
-#[derive(Zeroize, ZeroizeOnDrop)]
-pub struct Credentials {
-    username: String,
-    password: String,
-}
-
-pub struct SecretString(String);
-
-impl std::fmt::Debug for SecretString {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[REDACTED]")
-    }
-}
-```
+See [SECURITY.md § Credential Handling](SECURITY.md): credentials are never
+logged (even at trace level), passwords are zeroized via `zeroize`, access
+tokens live in a redacting `SecretString`, and connection strings are redacted
+in error messages.
 
 ### 5.3 SQL Injection Prevention
 
-**Parameterized Queries (Required):**
-```rust
-// GOOD - Parameterized
-client.query("SELECT * FROM users WHERE id = @p1", &[&user_id]).await?;
-
-// BAD - String interpolation (no API support for this pattern)
-// client.query(&format!("SELECT * FROM users WHERE id = {}", user_id), &[])
-```
-
-**Parameter Binding:**
-- All user values must be passed as parameters in the `&[...]` parameter slice
-- No API for raw SQL string execution with interpolation
-- Parameters sent via RPC protocol, never interpolated into SQL text
+See [SECURITY.md](SECURITY.md): user values are always bound as parameters and
+sent via the RPC protocol; there is no API for raw SQL string interpolation.
 
 ---
 

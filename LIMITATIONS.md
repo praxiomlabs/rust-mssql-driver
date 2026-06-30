@@ -35,30 +35,12 @@ These are limitations with workarounds for users who need the functionality.
 
 **Status:** Not supported
 
-MARS allows multiple queries to be active simultaneously on a single connection.
+MARS allows multiple queries to be active simultaneously on a single
+connection; see [ARCHITECTURE.md ADR-006](ARCHITECTURE.md) for the rationale.
 
-**Workaround:** Use the built-in connection pool:
-
-```rust
-use mssql_driver_pool::{Pool, PoolConfig};
-
-let pool = Pool::new(
-    PoolConfig::new().max_connections(10),
-    config
-).await?;
-
-// Execute queries concurrently using different connections
-let (result1, result2) = tokio::join!(
-    async {
-        let mut conn = pool.get().await?;
-        conn.query("SELECT 1", &[]).await
-    },
-    async {
-        let mut conn = pool.get().await?;
-        conn.query("SELECT 2", &[]).await
-    }
-);
-```
+**Workaround:** use the built-in connection pool (`mssql-driver-pool`) and run
+concurrent queries on separate connections (e.g. `tokio::join!` over
+`pool.get()` handles).
 
 ---
 
@@ -113,16 +95,8 @@ For the buffered `query()` path, a MAX cell is fully buffered; chunk via SQL
 
 Each `Client` instance must be owned by a single task.
 
-**Workaround:** Use the connection pool for concurrent access:
-
-```rust
-let pool = Pool::new(PoolConfig::new().max_connections(10), config).await?;
-
-tokio::spawn(async move {
-    let mut conn = pool.get().await?;
-    // Use connection
-});
-```
+**Workaround:** use the connection pool for concurrent access (see the MARS
+workaround above and the `mssql-driver-pool` docs).
 
 ---
 
