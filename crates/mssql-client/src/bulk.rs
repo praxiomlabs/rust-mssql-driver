@@ -166,7 +166,25 @@ impl BulkColumn {
     pub fn new<S: Into<String>>(name: S, sql_type: S, ordinal: usize) -> Result<Self, TypeError> {
         let sql_type_str: String = sql_type.into();
         reject_unsupported_bulk_type(&sql_type_str)?;
-        let (type_id, max_length, precision, scale) = parse_sql_type(&sql_type_str);
+        let (type_id, max_length, precision, scale) =
+            parse_sql_type(&sql_type_str).ok_or_else(|| {
+                let base = sql_type_str
+                    .split('(')
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_uppercase();
+                TypeError::UnsupportedType {
+                    sql_type: base,
+                    reason: "unsupported bulk-insert column type. Supported types: \
+                             BIT, TINYINT, SMALLINT, INT, BIGINT, REAL, FLOAT, \
+                             DECIMAL/NUMERIC, MONEY, SMALLMONEY, CHAR/VARCHAR, \
+                             NCHAR/NVARCHAR (incl. MAX), BINARY/VARBINARY (incl. MAX), \
+                             UNIQUEIDENTIFIER, DATE, TIME, DATETIME, DATETIME2, \
+                             DATETIMEOFFSET, SMALLDATETIME, and XML."
+                        .to_string(),
+                }
+            })?;
 
         Ok(Self {
             name: name.into(),
@@ -201,6 +219,9 @@ impl BulkColumn {
     }
 }
 
+/// Parsed TDS type descriptor: `(type_id, max_length, precision, scale)`.
+type ParsedSqlType = (u8, Option<u32>, Option<u8>, Option<u8>);
+
 /// Parse SQL type string into TDS type information.
 ///
 /// Type parameters (e.g., the "100" in `VARCHAR(100)`) are parsed with
@@ -208,24 +229,29 @@ impl BulkColumn {
 /// type's SQL Server default length (e.g., 8000 for VARCHAR, 4000 for
 /// NVARCHAR). This is intentional: bulk-insert column definitions come
 /// from user code, and defaulting to max length is safer than rejecting
-/// the operation when the base type is valid.
-fn parse_sql_type(sql_type: &str) -> (u8, Option<u32>, Option<u8>, Option<u8>) {
+/// the operation when the base type is valid. An unrecognized *base* type,
+/// by contrast, returns `None`, which `BulkColumn::new` turns into a
+/// [`TypeError::UnsupportedType`] error rather than silently coercing it.
+fn parse_sql_type(sql_type: &str) -> Option<ParsedSqlType> {
     let upper = sql_type.to_uppercase();
 
     // Extract base type and parameters
     let (base, params) = if let Some(paren_pos) = upper.find('(') {
-        let base = &upper[..paren_pos];
-        let params_str = upper[paren_pos + 1..].trim_end_matches(')');
+        // Trim so spaced-but-valid spellings (`VARCHAR (50)`, `NVARCHAR( MAX )`)
+        // still resolve — validate_sql_type permits spaces, and the unknown-type
+        // rejection must not turn those into UnsupportedType errors.
+        let base = upper[..paren_pos].trim();
+        let params_str = upper[paren_pos + 1..].trim_end_matches(')').trim();
         (base, Some(params_str))
     } else {
-        (upper.as_str(), None)
+        (upper.as_str().trim(), None)
     };
 
     // This returns the nullable type variant ID. `write_colmetadata` switches
     // to the fixed-width variant (e.g. 0x26 INTN → 0x38 Int4) when the target
     // column is NOT NULL, since SQL Server's BulkLoad rejects nullable type IDs
     // for NOT NULL columns with error 4816.
-    match base {
+    let result = match base {
         "BIT" => (0x68, Some(1), None, None),      // BITN
         "TINYINT" => (0x26, Some(1), None, None),  // INTN(1)
         "SMALLINT" => (0x26, Some(2), None, None), // INTN(2)
@@ -299,8 +325,12 @@ fn parse_sql_type(sql_type: &str) -> (u8, Option<u32>, Option<u8>, Option<u8>) {
         "MONEY" => (0x6E, Some(8), None, None), // MONEYN(8)
         "SMALLMONEY" => (0x6E, Some(4), None, None), // MONEYN(4)
         "XML" => (0xF1, Some(0xFFFF), None, None),
-        _ => (0xE7, Some(8000), None, None), // Default to NVARCHAR(4000)
-    }
+        // Unknown base type: return None so BulkColumn::new rejects it with a
+        // clear error rather than silently coercing to NVARCHAR (which would
+        // put wrong bytes on the wire under a mislabeled type).
+        _ => return None,
+    };
+    Some(result)
 }
 
 /// Reject deprecated large object types that this driver does not support in
@@ -1606,27 +1636,65 @@ mod tests {
     #[test]
     fn test_parse_sql_type() {
         // Integer types → INTN (0x26) with appropriate length
-        let (type_id, len, _prec, _scale) = parse_sql_type("INT");
+        let (type_id, len, _prec, _scale) = parse_sql_type("INT").unwrap();
         assert_eq!(type_id, 0x26);
         assert_eq!(len, Some(4));
 
-        let (type_id, len, _, _) = parse_sql_type("NVARCHAR(100)");
+        let (type_id, len, _, _) = parse_sql_type("NVARCHAR(100)").unwrap();
         assert_eq!(type_id, 0xE7);
         assert_eq!(len, Some(200)); // UTF-16 doubles
 
-        let (type_id, _, prec, scale) = parse_sql_type("DECIMAL(10,2)");
+        let (type_id, _, prec, scale) = parse_sql_type("DECIMAL(10,2)").unwrap();
         assert_eq!(type_id, 0x6C);
         assert_eq!(prec, Some(10));
         assert_eq!(scale, Some(2));
 
         // SMALLDATETIME/DATETIME → DATETIMEN (0x6F)
-        let (type_id, len, _, _) = parse_sql_type("SMALLDATETIME");
+        let (type_id, len, _, _) = parse_sql_type("SMALLDATETIME").unwrap();
         assert_eq!(type_id, 0x6F);
         assert_eq!(len, Some(4));
 
-        let (type_id, len, _, _) = parse_sql_type("DATETIME");
+        let (type_id, len, _, _) = parse_sql_type("DATETIME").unwrap();
         assert_eq!(type_id, 0x6F);
         assert_eq!(len, Some(8));
+
+        // Unknown base types are rejected (return None), not silently coerced.
+        assert_eq!(parse_sql_type("SQL_VARIANT"), None);
+        assert_eq!(parse_sql_type("NOTATYPE"), None);
+    }
+
+    #[test]
+    fn test_bulk_column_rejects_unknown_type() {
+        // A base type outside the supported set is an UnsupportedType error,
+        // not a silent NVARCHAR coercion that would corrupt the wire data.
+        for bogus in ["SQL_VARIANT", "GEOGRAPHY", "HIERARCHYID", "NOTATYPE"] {
+            let err = BulkColumn::new("c", bogus, 0).unwrap_err();
+            assert!(
+                matches!(err, TypeError::UnsupportedType { .. }),
+                "expected UnsupportedType for {bogus}, got {err:?}"
+            );
+        }
+        // Malformed *parameters* on a valid base type still fall back to the
+        // type default (unchanged behavior), so these must still succeed.
+        assert!(BulkColumn::new("c", "VARCHAR(garbage)", 0).is_ok());
+        assert!(BulkColumn::new("c", "MONEY", 0).is_ok());
+        assert!(BulkColumn::new("c", "DATETIME2(3)", 0).is_ok());
+    }
+
+    #[test]
+    fn test_parse_sql_type_tolerates_surrounding_spaces() {
+        // validate_sql_type permits spaces in type declarations, so the base
+        // (and MAX/param detection) must tolerate them — otherwise the new
+        // unknown-type rejection regresses valid spellings to UnsupportedType.
+        assert!(parse_sql_type("INT ").is_some());
+        assert!(parse_sql_type(" INT").is_some());
+        assert!(parse_sql_type("VARCHAR (50)").is_some());
+        assert!(parse_sql_type("DECIMAL (18, 2)").is_some());
+        let (id, len, _, _) = parse_sql_type("NVARCHAR( MAX )").unwrap();
+        assert_eq!(id, 0xE7);
+        assert_eq!(len, Some(0xFFFF)); // MAX detected despite inner spaces
+        assert!(BulkColumn::new("c", "VARCHAR (50)", 0).is_ok());
+        assert!(BulkColumn::new("c", "INT ", 0).is_ok());
     }
 
     #[test]
@@ -2073,22 +2141,22 @@ mod tests {
     #[test]
     fn test_parse_sql_type_max() {
         // Test NVARCHAR(MAX) parsing - uses 0xFFFF marker (not doubled for MAX)
-        let (type_id, len, _, _) = parse_sql_type("NVARCHAR(MAX)");
+        let (type_id, len, _, _) = parse_sql_type("NVARCHAR(MAX)").unwrap();
         assert_eq!(type_id, 0xE7);
         assert_eq!(len, Some(0xFFFF)); // MAX marker is 0xFFFF
 
         // Test VARBINARY(MAX) parsing
-        let (type_id, len, _, _) = parse_sql_type("VARBINARY(MAX)");
+        let (type_id, len, _, _) = parse_sql_type("VARBINARY(MAX)").unwrap();
         assert_eq!(type_id, 0xA5);
         assert_eq!(len, Some(0xFFFF));
 
         // Test VARCHAR(MAX) parsing
-        let (type_id, len, _, _) = parse_sql_type("VARCHAR(MAX)");
+        let (type_id, len, _, _) = parse_sql_type("VARCHAR(MAX)").unwrap();
         assert_eq!(type_id, 0xA7);
         assert_eq!(len, Some(0xFFFF));
 
         // Verify normal NVARCHAR does double the length
-        let (type_id, len, _, _) = parse_sql_type("NVARCHAR(100)");
+        let (type_id, len, _, _) = parse_sql_type("NVARCHAR(100)").unwrap();
         assert_eq!(type_id, 0xE7);
         assert_eq!(len, Some(200)); // 100 * 2 for UTF-16
     }
