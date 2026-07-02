@@ -1,0 +1,134 @@
+name: Kerberos Integration (KDC)
+
+# Repeatable regression guard for the #217 GSSAPI name-type fix (issue #239).
+#
+# gss_import_name is name-type-blind offline: a wrongly-typed service principal
+# (GSS_NT_HOSTBASED_SERVICE applied to the slash/port SPN MSSQLSvc/<host>:<port>,
+# instead of GSS_NT_KRB5_PRINCIPAL) is only rejected by a real KDC when a ticket
+# is requested. No offline/CI unit test can catch a regression of #217 — only a
+# live KDC can. This job stands up a throwaway MIT KDC, registers the SPN, and
+# runs the #[ignore]d kerberos_live test, which calls the real
+# IntegratedAuth::new(host, port).initialize() path and asserts it obtains a
+# service ticket + SPNEGO token.
+#
+# Scope: KDC only (client-side ticket acquisition). It does NOT stand up a
+# realm-joined SQL Server or complete the SSPI handshake — the live test stops
+# at the SPNEGO token, which is exactly what exercises the name-type. A full
+# realm-joined-SQL-Server e2e is a heavier follow-up.
+#
+# Verified locally end-to-end before landing: the test goes RED with the KDC up
+# when the name-type is reverted to GSS_NT_HOSTBASED_SERVICE, and GREEN with the
+# #217 fix — so this is a real guard, not a smoke test.
+#
+# Not a required check yet (staged, like windows-integration.yml): the KDC setup
+# can be environment-sensitive on hosted runners. Promote to required once it
+# has proven stable.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'crates/mssql-auth/**'
+      - '.github/workflows/kerberos-integration.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  kerberos-live:
+    name: Kerberos live (KDC)
+    runs-on: ubuntu-latest
+    env:
+      REALM: MSSQLTEST.LOCAL
+      KDC_HOST: localhost
+      KDC_PORT: "1433"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@nextest
+
+      - name: Install MIT Kerberos (KDC + client libs)
+        run: |
+          sudo debconf-set-selections <<< "krb5-config krb5-config/default_realm string $REALM"
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            krb5-kdc krb5-admin-server krb5-user libkrb5-dev
+
+      - name: Stand up a throwaway KDC and run the #217 name-type guard
+        env:
+          MSSQL_KERBEROS_HOST: localhost
+          MSSQL_KERBEROS_PORT: "1433"
+        run: |
+          set -euo pipefail
+          export PATH="/usr/sbin:$PATH"
+          D="$RUNNER_TEMP/krb"
+          rm -rf "$D"; mkdir -p "$D"
+          export KRB5_CONFIG="$D/krb5.conf"
+          export KRB5_KDC_PROFILE="$D/kdc.conf"
+          export KRB5CCNAME="$D/ccache"
+
+          # NOTE: the [realms] block MUST be multi-line — a single-line
+          # `REALM = { kdc = ... }` does not parse ("Cannot find KDC for realm").
+          cat > "$KRB5_CONFIG" <<EOF
+          [libdefaults]
+              default_realm = $REALM
+              dns_lookup_kdc = false
+              dns_lookup_realm = false
+              rdns = false
+          [realms]
+              $REALM = {
+                  kdc = 127.0.0.1
+              }
+          [domain_realm]
+              localhost = $REALM
+          [logging]
+              kdc = FILE:$D/kdc.log
+          EOF
+
+          cat > "$KRB5_KDC_PROFILE" <<EOF
+          [realms]
+              $REALM = {
+                  database_name = $D/principal
+                  key_stash_file = $D/.k5.stash
+                  acl_file = $D/kadm5.acl
+              }
+          EOF
+          touch "$D/kadm5.acl"
+
+          echo "::group::Create KDC database and principals"
+          kdb5_util create -s -r "$REALM" -P masterpw
+          # A kinit-able client user, and the slash/port SPN the driver targets.
+          # The SPN uses a random key (a client only needs to *request* a ticket
+          # for it, not decrypt it).
+          kadmin.local -r "$REALM" -q "addprinc -pw userpw kdctest@$REALM"
+          kadmin.local -r "$REALM" -q "addprinc -randkey MSSQLSvc/localhost:1433@$REALM"
+          echo "::endgroup::"
+
+          echo "::group::Start KDC (port 88 needs root; runners have passwordless sudo)"
+          sudo KRB5_CONFIG="$KRB5_CONFIG" KRB5_KDC_PROFILE="$KRB5_KDC_PROFILE" \
+            /usr/sbin/krb5kdc -n &
+          for i in $(seq 1 10); do
+            if ss -lnu | grep -q ':88 '; then echo "KDC listening"; break; fi
+            sleep 1
+          done
+          ss -lnu | grep -q ':88 ' || { echo "KDC failed to start"; cat "$D/kdc.log" || true; exit 1; }
+          echo "::endgroup::"
+
+          echo "::group::kinit + confirm the KDC issues the service ticket"
+          echo userpw | kinit "kdctest@$REALM"
+          kvno "MSSQLSvc/localhost:1433@$REALM"
+          klist
+          echo "::endgroup::"
+
+          echo "::group::Run kerberos_live (the #217 regression guard)"
+          cargo nextest run -p mssql-auth --features integrated-auth \
+            --run-ignored ignored-only -E 'binary(kerberos_live)'
+          echo "::endgroup::"
+
+          sudo pkill -f 'krb5kdc -n' || true
