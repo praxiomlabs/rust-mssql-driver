@@ -1316,101 +1316,27 @@ impl Default for TimeoutConfig {
 > Prepared Statement Cache for the wired scope and what remains on
 > `sp_executesql`.
 
-SQL Server supports server-side prepared statements via RPC calls. The driver manages statement handles transparently to optimize repeated query execution.
+SQL Server supports server-side prepared statements via RPC. When the opt-in
+statement cache is enabled (see the status note above), the driver manages
+handles transparently:
 
-#### Protocol Flow
+- **Cold miss:** `sp_prepexec` prepares and executes in a **single** round-trip
+  and returns the handle (the one-round-trip path from #337 — not a separate
+  `sp_prepare` then `sp_execute`).
+- **Hit:** `sp_execute` reuses the cached handle, skipping the re-parse.
+- **Eviction:** LRU eviction best-effort `sp_unprepare`s the evicted handle.
+- **Connection reset (`sp_reset_connection`):** the server invalidates every
+  handle for the session, so the client clears its cache.
 
-```
-Client                              Server
-  │                                   │
-  ├──── sp_prepare(sql) ─────────────►│
-  │◄─── handle (int32) ───────────────┤
-  │                                   │
-  ├──── sp_execute(handle, params) ──►│  (repeatable)
-  │◄─── results ──────────────────────┤
-  │                                   │
-  ├──── sp_unprepare(handle) ────────►│
-  │◄─── done ─────────────────────────┤
-```
+The concrete cached types, the config flag, and what still runs on
+`sp_executesql` are documented in
+[LIMITATIONS.md § Prepared Statement Cache](LIMITATIONS.md); the implementation
+is `Client::send_query_request` and `StatementCache` in
+`crates/mssql-client/src/`.
 
-#### Handle Management
-
-**Statement Cache:**
-```rust
-pub struct PreparedStatement {
-    /// Server-assigned handle for this prepared statement
-    handle: i32,
-    /// Hash of the SQL text for cache lookup
-    sql_hash: u64,
-    /// Parameter metadata from sp_describe_parameter_encryption
-    param_metadata: Arc<ParamMetaData>,
-    /// Timestamp for optional TTL-based eviction
-    created_at: Instant,
-}
-
-pub struct StatementCache {
-    /// LRU cache of prepared statements keyed by SQL hash
-    cache: LruCache<u64, PreparedStatement>,
-    /// Maximum cached statements per connection
-    max_size: usize,
-}
-```
-
-**Lifecycle Rules:**
-
-1. **Preparation:** First execution of a parameterized query calls `sp_prepare`, which returns a handle
-2. **Caching:** Handle is cached by SQL hash; subsequent executions use `sp_execute` with the cached handle
-3. **Eviction:** LRU eviction calls `sp_unprepare` for evicted handles to release server resources
-4. **Connection Return:** Pool reset (`sp_reset_connection`) invalidates all server-side handles
-5. **Connection Close:** Handles are implicitly released by the server
-
-**Configuration:**
-```rust
-pub struct StatementCacheConfig {
-    /// Enable statement caching (default: true)
-    pub enabled: bool,
-    /// Maximum statements per connection (default: 100)
-    pub max_statements: usize,
-    /// TTL before re-preparation (default: None - no expiry)
-    pub ttl: Option<Duration>,
-}
-
-impl Default for StatementCacheConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            max_statements: 100,
-            ttl: None,
-        }
-    }
-}
-```
-
-#### Pool Interaction
-
-When a connection is returned to the pool:
-
-1. `sp_reset_connection` is called (per §2.3 mssql-pool specification)
-2. Server invalidates all prepared statement handles for that session
-3. Client clears its local statement cache
-4. Next use re-prepares statements on demand (cache miss)
-
-**Design Note:** This design prioritizes correctness over maximum cache hit rate. Cross-connection statement sharing is explicitly **not supported** to avoid handle invalidation race conditions and session affinity issues.
-
-#### Usage Example
-
-```rust
-// Intended behavior once the cache is wired (today every iteration goes
-// through sp_executesql; there is no explicit prepare API either way):
-for user_id in user_ids {
-    // First iteration: sp_prepare + sp_execute
-    // Subsequent iterations: sp_execute only (cache hit)
-    let mut rows = client
-        .query("SELECT name FROM users WHERE id = @p1", &[&user_id])
-        .await?;
-    let _row = rows.next();
-}
-```
+**Design Note:** cross-connection statement sharing is explicitly **not
+supported** — handles are session-scoped, and sharing them across connections
+would create invalidation races and session-affinity problems.
 
 ---
 

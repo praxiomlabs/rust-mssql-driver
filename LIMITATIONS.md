@@ -108,10 +108,11 @@ An LRU statement cache is wired into the buffered
 [`Client::query`](https://docs.rs/mssql-client/latest/mssql_client/struct.Client.html#method.query)
 path behind the off-by-default `statement_cache` config flag
 (`Statement Cache=true` in a connection string, or
-`Config::with_statement_cache(true)`). When enabled, a parameterized query is
-prepared once per connection (`sp_prepare`) and subsequent identical queries
-reuse the handle (`sp_execute`); the cache is cleared when the connection is
-reset (RESETCONNECTION) since that invalidates server-side handles. Read
+`Config::with_statement_cache(true)`). When enabled, the first execution of a
+parameterized query uses `sp_prepexec` (prepare and execute in one round-trip)
+and caches the returned handle; subsequent identical queries reuse it via
+`sp_execute`. The cache is cleared when the connection is reset (RESETCONNECTION)
+since that invalidates server-side handles. Read
 effectiveness via `Client::statement_cache_stats()`.
 
 When the flag is off (the default), every parameterized query uses
@@ -120,9 +121,10 @@ cache.
 
 **Not yet covered (still `sp_executesql`):** `query_stream`, `query_multiple`,
 and Always Encrypted queries; and there is no pool-level handle cache. A cold
-miss costs two round-trips (`sp_prepare` then `sp_execute`), so the cache wins
-only on repeated execution — hence the opt-in flag for gathering real numbers
-before any default-on decision.
+miss is a single `sp_prepexec` round-trip (the same cost as the `sp_executesql`
+default) that additionally caches a handle, so the cache pays off on repeated
+execution via cheaper `sp_execute` hits — hence the opt-in flag for gathering
+real numbers before any default-on decision.
 
 ---
 
