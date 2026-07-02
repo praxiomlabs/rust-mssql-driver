@@ -10,10 +10,10 @@ This is the primary public API surface for the rust-mssql-driver project. It pro
 
 - **Type-state pattern**: Compile-time enforcement of connection states
 - **Async/await**: Built on Tokio for efficient async I/O
-- **Parameterized queries**: Server-side plan reuse via `sp_executesql` (a client-side statement cache is planned)
+- **Parameterized queries**: Server-side plan reuse via `sp_executesql`; an opt-in client-side statement cache (`Statement Cache=true`) adds handle reuse
 - **Transactions**: Full transaction support with savepoints
 - **Azure support**: Automatic routing and failover handling
-- **Lazy row decoding**: Rows decode on demand from the buffered response (true streaming from the socket is planned)
+- **Lazy row decoding**: Rows decode on demand from the buffered response; true socket streaming is available via `query_stream` / `query_stream_blob`
 - **Bulk insert**: Bulk data loading via BCP
 - **Table-valued parameters**: Pass collections to stored procedures
 

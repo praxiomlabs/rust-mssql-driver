@@ -18,7 +18,7 @@ For supported features, see [README.md](README.md).
 | Data Types | GEOMETRY, GEOGRAPHY | Use `STAsText()` or `STAsGeoJSON()` |
 | Data Types | HIERARCHYID | Use `.ToString()` |
 | Data Types | CLR UDTs | Cast to VARBINARY |
-| Performance | Prepared statement cache (not wired) | `sp_executesql` server plan cache |
+| Performance | Prepared statement cache (opt-in, off by default) | Enable with `Statement Cache=true`; otherwise `sp_executesql` server plan cache |
 | Auth | Interactive Entra flows (`ActiveDirectoryPassword`/`Interactive`/`DeviceCodeFlow`) | Acquire the token yourself and pass `Credentials::azure_token` (SP, managed identity, certificate, and the default chain are all built in) |
 | Auth | Kerberos untested against live KDC | SQL auth or NTLM |
 | Platforms | SQL Server 2005 and earlier | Upgrade to SQL Server 2008+ |
@@ -35,30 +35,12 @@ These are limitations with workarounds for users who need the functionality.
 
 **Status:** Not supported
 
-MARS allows multiple queries to be active simultaneously on a single connection.
+MARS allows multiple queries to be active simultaneously on a single
+connection; see [ARCHITECTURE.md ADR-006](ARCHITECTURE.md) for the rationale.
 
-**Workaround:** Use the built-in connection pool:
-
-```rust
-use mssql_driver_pool::{Pool, PoolConfig};
-
-let pool = Pool::new(
-    PoolConfig::new().max_connections(10),
-    config
-).await?;
-
-// Execute queries concurrently using different connections
-let (result1, result2) = tokio::join!(
-    async {
-        let mut conn = pool.get().await?;
-        conn.query("SELECT 1", &[]).await
-    },
-    async {
-        let mut conn = pool.get().await?;
-        conn.query("SELECT 2", &[]).await
-    }
-);
-```
+**Workaround:** use the built-in connection pool (`mssql-driver-pool`) and run
+concurrent queries on separate connections (e.g. `tokio::join!` over
+`pool.get()` handles).
 
 ---
 
@@ -113,16 +95,8 @@ For the buffered `query()` path, a MAX cell is fully buffered; chunk via SQL
 
 Each `Client` instance must be owned by a single task.
 
-**Workaround:** Use the connection pool for concurrent access:
-
-```rust
-let pool = Pool::new(PoolConfig::new().max_connections(10), config).await?;
-
-tokio::spawn(async move {
-    let mut conn = pool.get().await?;
-    // Use connection
-});
-```
+**Workaround:** use the connection pool for concurrent access (see the MARS
+workaround above and the `mssql-driver-pool` docs).
 
 ---
 
@@ -134,10 +108,11 @@ An LRU statement cache is wired into the buffered
 [`Client::query`](https://docs.rs/mssql-client/latest/mssql_client/struct.Client.html#method.query)
 path behind the off-by-default `statement_cache` config flag
 (`Statement Cache=true` in a connection string, or
-`Config::with_statement_cache(true)`). When enabled, a parameterized query is
-prepared once per connection (`sp_prepare`) and subsequent identical queries
-reuse the handle (`sp_execute`); the cache is cleared when the connection is
-reset (RESETCONNECTION) since that invalidates server-side handles. Read
+`Config::with_statement_cache(true)`). When enabled, the first execution of a
+parameterized query uses `sp_prepexec` (prepare and execute in one round-trip)
+and caches the returned handle; subsequent identical queries reuse it via
+`sp_execute`. The cache is cleared when the connection is reset (RESETCONNECTION)
+since that invalidates server-side handles. Read
 effectiveness via `Client::statement_cache_stats()`.
 
 When the flag is off (the default), every parameterized query uses
@@ -146,9 +121,10 @@ cache.
 
 **Not yet covered (still `sp_executesql`):** `query_stream`, `query_multiple`,
 and Always Encrypted queries; and there is no pool-level handle cache. A cold
-miss costs two round-trips (`sp_prepare` then `sp_execute`), so the cache wins
-only on repeated execution — hence the opt-in flag for gathering real numbers
-before any default-on decision.
+miss is a single `sp_prepexec` round-trip (the same cost as the `sp_executesql`
+default) that additionally caches a handle, so the cache pays off on repeated
+execution via cheaper `sp_execute` hits — hence the opt-in flag for gathering
+real numbers before any default-on decision.
 
 ---
 

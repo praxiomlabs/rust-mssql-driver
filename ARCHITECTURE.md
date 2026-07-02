@@ -39,11 +39,10 @@ This project aims to build the definitive Microsoft SQL Server driver for the Ru
 
 ### 1.2 Competitive Positioning
 
-| Driver | Weakness This Project Addresses |
-|--------|--------------------------------|
-| `tiberius` | Runtime-agnostic design compromises, TDS 8.0 as afterthought, `tokio_util::compat` overhead |
-| `odbc` crate | FFI overhead, deployment complexity, platform-specific installation |
-| Native `FreeTDS` | No async support, C memory safety concerns, manual resource management |
+See the [README](README.md) and [MIGRATION.md](MIGRATION.md) for how this driver
+compares to `tiberius` and other options. In brief: Tokio-native (no
+runtime-agnostic compatibility layer), TDS 8.0 strict support, and built-in
+pooling and transactions.
 
 ### 1.3 Non-Goals (Explicit Exclusions)
 
@@ -57,14 +56,10 @@ The following are explicitly out of scope for v1.0:
 
 ### 1.4 TDS Protocol Version Support
 
-| TDS Version | SQL Server Version | Status |
-|-------------|-------------------|--------|
-| TDS 7.3A | SQL Server 2008 | Supported via `TdsVersion::V7_3A` |
-| TDS 7.3B | SQL Server 2008 R2 | Supported via `TdsVersion::V7_3B` |
-| TDS 7.4 | SQL Server 2012+ | Default, full support |
-| TDS 8.0 | SQL Server 2022+ | Full support (strict TLS mode) |
-
-The driver defaults to TDS 7.4 for maximum compatibility with modern SQL Server while supporting legacy TDS 7.3 connections for enterprise environments with SQL Server 2008/2008 R2 instances.
+The driver supports TDS 7.3A (SQL Server 2008) through TDS 8.0 (SQL Server
+2022+ strict mode) and defaults to TDS 7.4 for modern deployments; the
+negotiated version is selectable via `TdsVersion`. See §8.1 (protocol-version
+features) and §8.2 (the full SQL Server compatibility matrix) for details.
 
 ---
 
@@ -725,52 +720,13 @@ impl Default for RetryPolicy {
 
 **Decision:** Use centralized configuration in the root `Cargo.toml`.
 
-**Implementation:**
+**Implementation:** the root `Cargo.toml` centralizes `[workspace.package]`
+(version, edition, license, MSRV) and `[workspace.dependencies]` so each
+dependency version is declared once. See the live root `Cargo.toml` for the
+current values — they are release-managed, so an inline copy here would only
+drift. Workspace-wide lints are centralized too:
 
 ```toml
-# Root Cargo.toml
-[workspace]
-resolver = "2"
-members = ["crates/*", "xtask"]
-
-[workspace.package]
-version = "0.8.0"
-edition = "2024"
-rust-version = "1.88"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/praxiomlabs/rust-mssql-driver"
-
-[workspace.dependencies]
-# Async runtime
-tokio = { version = "1.48", features = ["full"] }
-tokio-util = { version = "0.7", features = ["codec"] }
-tokio-rustls = "0.26"
-
-# Data handling
-bytes = "1.9"
-chrono = { version = "0.4", default-features = false, features = ["std"] }
-uuid = { version = "1.11", features = ["v4"] }
-rust_decimal = "1.36"
-serde_json = "1.0"
-
-# TLS
-rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
-webpki-roots = "1.0"
-
-# Error handling
-thiserror = "2.0"
-
-# Observability (optional `otel` feature)
-opentelemetry = { version = "0.32", optional = true }
-opentelemetry_sdk = { version = "0.32", optional = true }
-opentelemetry-otlp = { version = "0.32", optional = true }
-tracing-opentelemetry = { version = "0.33", optional = true }
-
-# Testing
-criterion = { version = "0.8", features = ["async_tokio"] }
-proptest = "1.5"
-testcontainers = "0.27"
-
 [workspace.lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"
@@ -883,7 +839,7 @@ alongside the response-streaming work.
 
 **Status:** Implemented
 
-**Decision:** Always Encrypted client-side decryption (the read path) is fully implemented with production-ready key providers. The encrypt-before-send write path is implemented for the common scalar types — parameters are described via `sp_describe_parameter_encryption` and encrypted client-side; the remaining temporal and fixed-width types are pending (#234). See LIMITATIONS.md.
+**Decision:** Always Encrypted client-side decryption (the read path) is fully implemented with production-ready key providers. The encrypt-before-send write path is implemented for the full scalar, temporal, and fixed-width type set (#234) — parameters are described via `sp_describe_parameter_encryption` and encrypted client-side. See LIMITATIONS.md for the exact type list and constraints (e.g. encrypted `decimal` is bounded to scale ≤ 28).
 
 **Implemented (v0.2.0):**
 - AEAD_AES_256_CBC_HMAC_SHA256 encryption/decryption
@@ -1352,107 +1308,35 @@ impl Default for TimeoutConfig {
 
 ### 4.5 Prepared Statement Lifecycle
 
-> **Implementation status (2026-06):** this section documents the intended
-> design. The `StatementCache` type exists but is not consulted by any query
-> path — all parameterized queries currently go through `sp_executesql`
-> (SQL Server's server-side plan cache still provides plan reuse). See
-> LIMITATIONS.md § Prepared Statement Cache.
+> **Implementation status:** the client-side `StatementCache` is wired into the
+> buffered `query` path but is **opt-in, off by default** — enabled via
+> `Statement Cache=true` / `Config::with_statement_cache(true)`. When disabled
+> (the default), parameterized queries go through `sp_executesql` (SQL Server's
+> server-side plan cache still provides plan reuse). See LIMITATIONS.md §
+> Prepared Statement Cache for the wired scope and what remains on
+> `sp_executesql`.
 
-SQL Server supports server-side prepared statements via RPC calls. The driver manages statement handles transparently to optimize repeated query execution.
+SQL Server supports server-side prepared statements via RPC. When the opt-in
+statement cache is enabled (see the status note above), the driver manages
+handles transparently:
 
-#### Protocol Flow
+- **Cold miss:** `sp_prepexec` prepares and executes in a **single** round-trip
+  and returns the handle (the one-round-trip path from #337 — not a separate
+  `sp_prepare` then `sp_execute`).
+- **Hit:** `sp_execute` reuses the cached handle, skipping the re-parse.
+- **Eviction:** LRU eviction best-effort `sp_unprepare`s the evicted handle.
+- **Connection reset (`sp_reset_connection`):** the server invalidates every
+  handle for the session, so the client clears its cache.
 
-```
-Client                              Server
-  │                                   │
-  ├──── sp_prepare(sql) ─────────────►│
-  │◄─── handle (int32) ───────────────┤
-  │                                   │
-  ├──── sp_execute(handle, params) ──►│  (repeatable)
-  │◄─── results ──────────────────────┤
-  │                                   │
-  ├──── sp_unprepare(handle) ────────►│
-  │◄─── done ─────────────────────────┤
-```
+The concrete cached types, the config flag, and what still runs on
+`sp_executesql` are documented in
+[LIMITATIONS.md § Prepared Statement Cache](LIMITATIONS.md); the implementation
+is `Client::send_query_request` and `StatementCache` in
+`crates/mssql-client/src/`.
 
-#### Handle Management
-
-**Statement Cache:**
-```rust
-pub struct PreparedStatement {
-    /// Server-assigned handle for this prepared statement
-    handle: i32,
-    /// Hash of the SQL text for cache lookup
-    sql_hash: u64,
-    /// Parameter metadata from sp_describe_parameter_encryption
-    param_metadata: Arc<ParamMetaData>,
-    /// Timestamp for optional TTL-based eviction
-    created_at: Instant,
-}
-
-pub struct StatementCache {
-    /// LRU cache of prepared statements keyed by SQL hash
-    cache: LruCache<u64, PreparedStatement>,
-    /// Maximum cached statements per connection
-    max_size: usize,
-}
-```
-
-**Lifecycle Rules:**
-
-1. **Preparation:** First execution of a parameterized query calls `sp_prepare`, which returns a handle
-2. **Caching:** Handle is cached by SQL hash; subsequent executions use `sp_execute` with the cached handle
-3. **Eviction:** LRU eviction calls `sp_unprepare` for evicted handles to release server resources
-4. **Connection Return:** Pool reset (`sp_reset_connection`) invalidates all server-side handles
-5. **Connection Close:** Handles are implicitly released by the server
-
-**Configuration:**
-```rust
-pub struct StatementCacheConfig {
-    /// Enable statement caching (default: true)
-    pub enabled: bool,
-    /// Maximum statements per connection (default: 100)
-    pub max_statements: usize,
-    /// TTL before re-preparation (default: None - no expiry)
-    pub ttl: Option<Duration>,
-}
-
-impl Default for StatementCacheConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            max_statements: 100,
-            ttl: None,
-        }
-    }
-}
-```
-
-#### Pool Interaction
-
-When a connection is returned to the pool:
-
-1. `sp_reset_connection` is called (per §2.3 mssql-pool specification)
-2. Server invalidates all prepared statement handles for that session
-3. Client clears its local statement cache
-4. Next use re-prepares statements on demand (cache miss)
-
-**Design Note:** This design prioritizes correctness over maximum cache hit rate. Cross-connection statement sharing is explicitly **not supported** to avoid handle invalidation race conditions and session affinity issues.
-
-#### Usage Example
-
-```rust
-// Intended behavior once the cache is wired (today every iteration goes
-// through sp_executesql; there is no explicit prepare API either way):
-for user_id in user_ids {
-    // First iteration: sp_prepare + sp_execute
-    // Subsequent iterations: sp_execute only (cache hit)
-    let mut rows = client
-        .query("SELECT name FROM users WHERE id = @p1", &[&user_id])
-        .await?;
-    let _row = rows.next();
-}
-```
+**Design Note:** cross-connection statement sharing is explicitly **not
+supported** — handles are session-scoped, and sharing them across connections
+would create invalidation races and session-affinity problems.
 
 ---
 
@@ -1656,43 +1540,15 @@ pub fn default_tls_config() -> ClientConfig {
 
 ### 5.2 Credential Handling
 
-**Principles:**
-- Credentials never logged, even at trace level
-- Passwords zeroized after use via `zeroize` crate
-- Access tokens stored in `SecretString` wrapper
-- Connection strings redacted in error messages
-
-```rust
-#[derive(Zeroize, ZeroizeOnDrop)]
-pub struct Credentials {
-    username: String,
-    password: String,
-}
-
-pub struct SecretString(String);
-
-impl std::fmt::Debug for SecretString {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[REDACTED]")
-    }
-}
-```
+See [SECURITY.md § Credential Handling](SECURITY.md): credentials are never
+logged (even at trace level), passwords are zeroized via `zeroize`, access
+tokens live in a redacting `SecretString`, and connection strings are redacted
+in error messages.
 
 ### 5.3 SQL Injection Prevention
 
-**Parameterized Queries (Required):**
-```rust
-// GOOD - Parameterized
-client.query("SELECT * FROM users WHERE id = @p1", &[&user_id]).await?;
-
-// BAD - String interpolation (no API support for this pattern)
-// client.query(&format!("SELECT * FROM users WHERE id = {}", user_id), &[])
-```
-
-**Parameter Binding:**
-- All user values must be passed as parameters in the `&[...]` parameter slice
-- No API for raw SQL string execution with interpolation
-- Parameters sent via RPC protocol, never interpolated into SQL text
+See [SECURITY.md](SECURITY.md): user values are always bound as parameters and
+sent via the RPC protocol; there is no API for raw SQL string interpolation.
 
 ---
 
@@ -1733,233 +1589,41 @@ skip = [
 
 ### 6.2 CI Pipeline
 
-```yaml
-# .github/workflows/ci.yml
-name: CI
+The CI pipeline is defined in [`.github/workflows/`](.github/workflows/) and
+mirrored locally by `just ci-all`. The full gate list (cross-platform matrix,
+live integration across SQL Server 2017/2019/2022, Miri, fuzzing,
+public-API/semver, supply-chain, and the commit-hygiene gates) is documented in
+CLAUDE.md. It is not reproduced here to avoid drift.
 
-on: [push, pull_request]
+### 6.3 Fuzz Testing
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@nextest
-      - run: cargo nextest run --all-features
-      
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - run: cargo fmt --check
-      - run: cargo clippy --all-features -- -D warnings
-      
-  deny:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v1
-      
-  miri:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: miri
-      - run: cargo miri test -p tds-protocol
-      
-  fuzz:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-      - run: cargo install cargo-fuzz
-      - run: cargo fuzz run parse_packet -- -max_total_time=300
-      
-  semver:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: obi1kenobi/cargo-semver-checks-action@v2
-        
-  integration:
-    runs-on: ubuntu-latest
-    services:
-      mssql:
-        image: mcr.microsoft.com/mssql/server:2022-latest
-        env:
-          ACCEPT_EULA: Y
-          SA_PASSWORD: YourStrong@Passw0rd
-        ports:
-          - 1433:1433
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo nextest run --features integration-tests
-```
-
-### 6.3 Fuzz Testing Targets
-
-```rust
-// fuzz/fuzz_targets/parse_packet.rs
-#![no_main]
-use libfuzzer_sys::fuzz_target;
-use tds_protocol::packet::PacketHeader;
-
-fuzz_target!(|data: &[u8]| {
-    let _ = PacketHeader::parse(data);
-});
-
-// fuzz/fuzz_targets/parse_token.rs
-#![no_main]
-use libfuzzer_sys::fuzz_target;
-use tds_protocol::token::Token;
-
-fuzz_target!(|data: &[u8]| {
-    let _ = Token::parse(data);
-});
-
-// fuzz/fuzz_targets/connection_string.rs
-#![no_main]
-use libfuzzer_sys::fuzz_target;
-use mssql_client::Config;
-
-fuzz_target!(|data: &[u8]| {
-    if let Ok(s) = std::str::from_utf8(data) {
-        let _ = s.parse::<Config>();
-    }
-});
-```
+Fuzz targets live in [`fuzz/fuzz_targets/`](fuzz/) (wire parsers, token stream,
+connection-string parser). They run per-PR as a smoke job and on a nightly
+long-budget schedule (`fuzz-nightly.yml`).
 
 ### 6.4 Benchmarking
 
-```rust
-// benches/query_benchmark.rs
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
-use mssql_client::Client;
-use tokio::runtime::Runtime;
-
-fn query_benchmark(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
-    let client = rt.block_on(async {
-        let config = Config::from_connection_string("Server=localhost;...").unwrap();
-        Client::connect(config).await.unwrap()
-    });
-    
-    let mut group = c.benchmark_group("query");
-    
-    for rows in [100, 1000, 10000, 100000] {
-        group.bench_with_input(
-            BenchmarkId::new("select_rows", rows),
-            &rows,
-            |b, &rows| {
-                b.to_async(&rt).iter(|| async {
-                    let sql = format!("SELECT TOP {} * FROM test_data", rows);
-                    let mut stream = client.query(&sql, &[]).await.unwrap();
-                    let mut count = 0;
-                    while let Some(_) = stream.next() {
-                        count += 1;
-                    }
-                    count
-                });
-            },
-        );
-    }
-    
-    group.finish();
-}
-
-criterion_group!(benches, query_benchmark);
-criterion_main!(benches);
-```
+Criterion benches live in `benches/`; performance-regression detection runs via
+`benchmarks.yml`.
 
 ### 6.5 Documentation Standards
 
-**Required Documentation:**
-- All public items must have doc comments
-- Examples required for public functions
-- Module-level documentation explaining purpose
-- `# Errors` section for fallible functions
-- `# Panics` section if function can panic
-
-**Example:**
-```rust
-/// Execute a SQL query and return a stream of rows.
-///
-/// # Arguments
-///
-/// * `sql` - The SQL query to execute. Use `@p1`, `@p2`, etc. for parameters.
-///
-/// # Returns
-///
-/// A stream of [`Row`] objects that can be iterated asynchronously.
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - The connection is not in a ready state
-/// - The SQL syntax is invalid
-/// - A network error occurs
-/// - The command times out
-///
-/// # Examples
-///
-/// ```rust
-/// # async fn example() -> Result<(), mssql_client::Error> {
-/// # let config = mssql_client::Config::from_connection_string("Server=localhost")?;
-/// let mut client = mssql_client::Client::connect(config).await?;
-///
-/// let rows = client.query("SELECT id, name FROM users", &[]).await?;
-/// for row in rows {
-///     let row = row?;
-///     let id: i32 = row.get(0)?;
-///     let name: String = row.get(1)?;
-///     println!("{}: {}", id, name);
-/// }
-/// # Ok(())
-/// # }
-/// ```
-pub async fn query(&mut self, sql: &str) -> Result<QueryStream<'_>, Error> {
-    // ...
-}
-```
+See [CONTRIBUTING.md § Documentation](CONTRIBUTING.md). All public items carry
+doc comments with `# Errors` / `# Panics` sections where applicable, enforced by
+`cargo doc -D warnings` in CI.
 
 ### 6.6 MSRV Policy
 
-**Policy:** Rolling 6-month MSRV window aligned with Tokio's policy.
-
-**Current MSRV:** Rust 1.88.0 (Rust 2024 Edition)
-
-**Enforcement:**
-```toml
-# Cargo.toml
-[package]
-rust-version = "1.88"
-```
-
-**CI Verification:**
-```yaml
-msrv:
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@1.88.0
-    - run: cargo check --all-features
-```
+See [STABILITY.md § MSRV Increase Policy](STABILITY.md), which is authoritative
+(MSRV bumps are NOT breaking changes). The current MSRV is pinned via
+`rust-version` in `Cargo.toml` and verified by the `msrv` CI job.
 
 ### 6.7 Deprecation Strategy
 
-**Process:**
-1. Mark item with `#[deprecated(since = "X.Y.Z", note = "Use `new_item` instead")]`
-2. Maintain deprecated item for at least 2 minor versions
-3. Remove in next major version
-4. Document migration path in CHANGELOG
+See [STABILITY.md § Deprecation Policy](STABILITY.md), which is authoritative:
+items are marked with `#[deprecated]`, kept for at least one minor release, and
+removed in a subsequent breaking release with the migration path recorded in the
+CHANGELOG.
 
 ---
 

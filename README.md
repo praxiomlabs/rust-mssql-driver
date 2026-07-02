@@ -254,10 +254,12 @@ Known gaps, so you don't have to discover them yourself:
 
 - Kerberos/GSSAPI and FILESTREAM are implemented but not yet validated against
   live infrastructure.
-- Always Encrypted reads are fully transparent; writes cover the common scalar
-  types (some temporal and fixed-width types are pending — see LIMITATIONS.md).
-- Parameterized queries run via `sp_executesql` (the server still reuses
-  plans); the client-side prepared-statement cache is planned.
+- Always Encrypted reads are fully transparent; writes cover the full scalar,
+  temporal, and fixed-width type set (see LIMITATIONS.md for the exact list and
+  constraints).
+- Parameterized queries run via `sp_executesql` by default (the server still
+  reuses plans); a client-side prepared-statement cache is available opt-in
+  (`Statement Cache=true`).
 - No MARS (multiple active result sets on one connection).
 
 The full list, with workarounds where they exist, is in
