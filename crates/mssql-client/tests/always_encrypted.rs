@@ -791,6 +791,194 @@ mod live_server {
         );
     }
 
+    /// Always Encrypted decryption through the STORED-PROCEDURE reader
+    /// (`read_procedure_result`). The claim-reality audit flagged this reader as
+    /// wired-but-untested for AE (only the buffered `query` reader had coverage).
+    /// Inserts an encrypted INT, then reads it back by CALLING a proc that
+    /// selects the encrypted column, proving the procedure reader resolves the
+    /// CEK and decrypts the result set.
+    #[tokio::test]
+    #[ignore = "Requires SQL Server with Always Encrypted"]
+    async fn test_always_encrypted_decrypts_through_stored_procedure() {
+        let admin_cfg = match admin_config() {
+            Some(c) => c,
+            None => return,
+        };
+        let mut admin = Client::connect(admin_cfg).await.expect("admin connect");
+
+        let (rsa_key, pem) = fresh_rsa_keypair();
+        let cek = fresh_cek();
+
+        let fx = setup(
+            &mut admin,
+            &cek,
+            &rsa_key,
+            "CREATE TABLE [{TABLE}] ( \
+             Id INT NOT NULL PRIMARY KEY, \
+             EncInt INT ENCRYPTED WITH ( \
+             COLUMN_ENCRYPTION_KEY = [{CEK}], \
+             ENCRYPTION_TYPE = DETERMINISTIC, \
+             ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256' ) NULL )",
+        )
+        .await;
+
+        let proc_name = format!("AE_ReadProc_{}", fx.table_name);
+        let create_proc = format!(
+            "CREATE PROCEDURE dbo.{proc_name} @id INT AS \
+             SELECT EncInt FROM [{}] WHERE Id = @id",
+            fx.table_name
+        );
+        admin.execute(&create_proc, &[]).await.expect("create proc");
+        drop(admin);
+
+        let mut client = Client::connect(encrypted_config(&pem).expect("cfg"))
+            .await
+            .expect("ae connect");
+
+        let insert = format!(
+            "INSERT INTO [{}] (Id, EncInt) VALUES (@p1, @p2)",
+            fx.table_name
+        );
+        let inserted = client.execute(&insert, &[&1i32, &1234i32]).await;
+
+        // Read the encrypted column back THROUGH THE PROCEDURE reader.
+        let via_proc: Result<i32, String> = if inserted.is_ok() {
+            async {
+                let result = client
+                    .call_procedure(&format!("dbo.{proc_name}"), &[&1i32])
+                    .await
+                    .map_err(|e| format!("call: {e}"))?;
+                let mut rs = result
+                    .result_sets
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| "no result set".to_string())?;
+                let row = rs
+                    .next_row()
+                    .ok_or_else(|| "no row".to_string())?
+                    .map_err(|e| format!("row: {e}"))?;
+                row.get::<i32>(0).map_err(|e| format!("EncInt: {e}"))
+            }
+            .await
+        } else {
+            Err("insert failed".to_string())
+        };
+
+        // Teardown before asserting so a failure never leaks server objects.
+        let mut admin = Client::connect(admin_config().expect("cfg"))
+            .await
+            .expect("admin reconnect");
+        let _ = admin
+            .execute(&format!("DROP PROCEDURE IF EXISTS dbo.{proc_name}"), &[])
+            .await;
+        teardown(&mut admin, &fx).await;
+
+        assert_eq!(inserted.expect("encrypted INSERT"), 1, "one row inserted");
+        assert_eq!(
+            via_proc.expect("decrypt via procedure reader"),
+            1234,
+            "read_procedure_result must decrypt the encrypted INT column"
+        );
+    }
+
+    /// Always Encrypted decryption through the BUFFERED MULTI-RESULT reader
+    /// (`read_multi_result_response`, driven by `query_multiple`). The audit
+    /// noted the existing multi-result AE tests exercised the streaming
+    /// `query_stream` path, not this buffered reader. Runs a two-SELECT batch
+    /// over an encrypted column and asserts BOTH result sets decrypt.
+    #[tokio::test]
+    #[ignore = "Requires SQL Server with Always Encrypted"]
+    async fn test_always_encrypted_decrypts_through_query_multiple() {
+        let admin_cfg = match admin_config() {
+            Some(c) => c,
+            None => return,
+        };
+        let mut admin = Client::connect(admin_cfg).await.expect("admin connect");
+
+        let (rsa_key, pem) = fresh_rsa_keypair();
+        let cek = fresh_cek();
+
+        let fx = setup(
+            &mut admin,
+            &cek,
+            &rsa_key,
+            "CREATE TABLE [{TABLE}] ( \
+             Id INT NOT NULL PRIMARY KEY, \
+             EncInt INT ENCRYPTED WITH ( \
+             COLUMN_ENCRYPTION_KEY = [{CEK}], \
+             ENCRYPTION_TYPE = DETERMINISTIC, \
+             ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256' ) NULL )",
+        )
+        .await;
+        drop(admin);
+
+        let mut client = Client::connect(encrypted_config(&pem).expect("cfg"))
+            .await
+            .expect("ae connect");
+
+        let insert = format!(
+            "INSERT INTO [{}] (Id, EncInt) VALUES (@p1, @p2)",
+            fx.table_name
+        );
+        let ins1 = client.execute(&insert, &[&1i32, &1234i32]).await;
+        let ins2 = client.execute(&insert, &[&2i32, &5678i32]).await;
+
+        // Two SELECTs in one batch → two result sets, both over the encrypted
+        // column, decrypted by the buffered multi-result reader.
+        let both: Result<(i32, i32), String> = if ins1.is_ok() && ins2.is_ok() {
+            async {
+                let sql = format!(
+                    "SELECT EncInt FROM [{t}] WHERE Id = 1; SELECT EncInt FROM [{t}] WHERE Id = 2",
+                    t = fx.table_name
+                );
+                let mut results = client
+                    .query_multiple(&sql, &[])
+                    .await
+                    .map_err(|e| format!("query_multiple: {e}"))?;
+                let first = results
+                    .next_row()
+                    .await
+                    .map_err(|e| format!("row1: {e}"))?
+                    .ok_or_else(|| "no row in result 1".to_string())?
+                    .get::<i32>(0)
+                    .map_err(|e| format!("EncInt1: {e}"))?;
+                if !results
+                    .next_result()
+                    .await
+                    .map_err(|e| format!("advance: {e}"))?
+                {
+                    return Err("expected a second result set".to_string());
+                }
+                let second = results
+                    .next_row()
+                    .await
+                    .map_err(|e| format!("row2: {e}"))?
+                    .ok_or_else(|| "no row in result 2".to_string())?
+                    .get::<i32>(0)
+                    .map_err(|e| format!("EncInt2: {e}"))?;
+                Ok((first, second))
+            }
+            .await
+        } else {
+            Err("insert failed".to_string())
+        };
+
+        let mut admin = Client::connect(admin_config().expect("cfg"))
+            .await
+            .expect("admin reconnect");
+        teardown(&mut admin, &fx).await;
+
+        let (a, b) = both.expect("decrypt via query_multiple");
+        assert_eq!(
+            a, 1234,
+            "first result set decrypts through the buffered reader"
+        );
+        assert_eq!(
+            b, 5678,
+            "second result set decrypts through the buffered reader"
+        );
+    }
+
     /// Write→read round-trip for the fixed-width numeric types: bigint,
     /// smallint, tinyint, bit, real, and float. Each is encrypted on INSERT and
     /// decrypted back on SELECT, exercising both the 8-byte integer
