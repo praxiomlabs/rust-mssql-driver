@@ -142,7 +142,6 @@ pub struct Client<S: ConnectionState> {
 /// - TLS (TDS 8.0 strict mode) - requires `tls` feature
 /// - TLS with PreLogin wrapping (TDS 7.x style) - requires `tls` feature
 /// - Plain TCP (for internal networks or when `tls` feature is disabled)
-#[allow(dead_code)] // Connection will be used once query execution is implemented
 enum ConnectionHandle {
     /// TLS connection (TDS 8.0 strict mode - TLS before any TDS traffic)
     #[cfg(feature = "tls")]

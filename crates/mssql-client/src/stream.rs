@@ -655,16 +655,6 @@ impl<'a> MultiResultStream<'a> {
         }
     }
 
-    /// Create an empty multi-result stream.
-    #[allow(dead_code)]
-    pub(crate) fn empty() -> Self {
-        Self {
-            result_sets: Vec::new(),
-            current_result: 0,
-            _marker: std::marker::PhantomData,
-        }
-    }
-
     /// Get the current result set index (0-based).
     #[must_use]
     pub fn current_result_index(&self) -> usize {
