@@ -2495,7 +2495,12 @@ async fn test_bulk_insert_all_types_null() {
     let t = NaiveTime::from_hms_opt(12, 0, 0).unwrap();
     let dt = NaiveDateTime::new(d, NaiveTime::from_hms_milli_opt(12, 0, 0, 500).unwrap());
     let sdt = NaiveDateTime::new(d, NaiveTime::from_hms_opt(12, 0, 0).unwrap());
-    let dt2 = NaiveDateTime::new(d, NaiveTime::from_hms_nano_opt(12, 0, 0, 1234567).unwrap());
+    // 100-ns-aligned so the DATETIME2(7)/DATETIMEOFFSET(7) round-trip is exact
+    // (sub-100-ns truncation is covered by the mssql-types temporal proptest).
+    let dt2 = NaiveDateTime::new(
+        d,
+        NaiveTime::from_hms_nano_opt(12, 0, 0, 1_234_500).unwrap(),
+    );
     let offset = chrono::FixedOffset::east_opt(0).unwrap();
     let dto = chrono::DateTime::<chrono::FixedOffset>::from_naive_utc_and_offset(dt2, offset);
     let guid = uuid::Uuid::from_u128(0x1234_5678_1234_5678_1234_5678_1234_5678);
@@ -2555,6 +2560,33 @@ async fn test_bulk_insert_all_types_null() {
     assert_eq!(data[1].get::<i16>(3).unwrap(), -42);
     assert_eq!(data[1].get::<i32>(4).unwrap(), 42);
     assert_eq!(data[1].get::<i64>(5).unwrap(), 42_000_000_000);
+    // Columns 6-20 were inserted but previously never read back.
+    assert!((data[1].get::<f32>(6).unwrap() - std::f32::consts::PI).abs() < 1e-6);
+    assert!((data[1].get::<f64>(7).unwrap() - std::f64::consts::E).abs() < 1e-12);
+    assert_eq!(data[1].get::<Decimal>(8).unwrap(), Decimal::new(1234, 2));
+    assert_eq!(
+        data[1].get::<Decimal>(9).unwrap(),
+        Decimal::new(98_765_432, 4)
+    );
+    assert_eq!(data[1].get::<Decimal>(10).unwrap(), Decimal::new(12_345, 4));
+    assert_eq!(data[1].get::<String>(11).unwrap(), "vc");
+    assert_eq!(data[1].get::<String>(12).unwrap(), "nvc");
+    assert_eq!(
+        data[1].get::<Vec<u8>>(13).unwrap(),
+        vec![0xDE, 0xAD, 0xBE, 0xEF]
+    );
+    assert_eq!(data[1].get::<NaiveDate>(14).unwrap(), d);
+    assert_eq!(data[1].get::<NaiveTime>(15).unwrap(), t);
+    assert_eq!(data[1].get::<NaiveDateTime>(16).unwrap(), dt);
+    assert_eq!(data[1].get::<NaiveDateTime>(17).unwrap(), sdt);
+    assert_eq!(data[1].get::<NaiveDateTime>(18).unwrap(), dt2);
+    assert_eq!(
+        data[1]
+            .get::<chrono::DateTime<chrono::FixedOffset>>(19)
+            .unwrap(),
+        dto
+    );
+    assert_eq!(data[1].get::<uuid::Uuid>(20).unwrap(), guid);
 
     client.close().await.expect("Failed to close");
 }
