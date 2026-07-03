@@ -1617,4 +1617,69 @@ mod tests {
             }
         }
     }
+
+    // Value-equality round-trips for the temporal codecs. The example tests
+    // pin specific instants; these exercise the interval arithmetic across the
+    // whole value domain. `encode_time` always stores scale-7 (100-ns)
+    // intervals, so the round-trip preserves the input truncated to 100-ns.
+    #[cfg(feature = "chrono")]
+    mod proptest_temporal {
+        use super::*;
+        use bytes::{BufMut, BytesMut};
+        use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+        use proptest::prelude::*;
+
+        /// Truncate to the 100-ns granularity `encode_time` stores.
+        fn trunc_100ns(t: NaiveTime) -> NaiveTime {
+            let nanos = (t.nanosecond() / 100) * 100;
+            NaiveTime::from_num_seconds_from_midnight_opt(t.num_seconds_from_midnight(), nanos)
+                .expect("valid time")
+        }
+
+        /// Prepend the TDS 1-byte length and decode at scale 7.
+        fn decode_at_scale7(encoded: BytesMut, type_id: u8) -> SqlValue {
+            let len = encoded.len() as u8;
+            let mut buf = BytesMut::with_capacity(1 + len as usize);
+            buf.put_u8(len);
+            buf.extend_from_slice(&encoded);
+            let mut bytes = buf.freeze();
+            decode_value(&mut bytes, &TypeInfo::datetime_with_scale(type_id, 7)).unwrap()
+        }
+
+        proptest! {
+            #[test]
+            fn time_roundtrips_at_100ns_granularity(
+                secs in 0u32..86_400u32,
+                nanos in 0u32..1_000_000_000u32,
+            ) {
+                let orig = NaiveTime::from_num_seconds_from_midnight_opt(secs, nanos).unwrap();
+                let mut enc = BytesMut::new();
+                crate::encode::encode_time(orig, &mut enc);
+                match decode_at_scale7(enc, 0x29) {
+                    SqlValue::Time(t) => prop_assert_eq!(t, trunc_100ns(orig)),
+                    other => prop_assert!(false, "expected Time, got {:?}", other),
+                }
+            }
+
+            #[test]
+            fn datetime2_roundtrips_at_100ns_granularity(
+                year in 1i32..=9999i32,
+                ordinal in 1u32..=365u32,
+                secs in 0u32..86_400u32,
+                nanos in 0u32..1_000_000_000u32,
+            ) {
+                let date = NaiveDate::from_yo_opt(year, ordinal).unwrap();
+                let time = NaiveTime::from_num_seconds_from_midnight_opt(secs, nanos).unwrap();
+                let orig = NaiveDateTime::new(date, time);
+                let mut enc = BytesMut::new();
+                crate::encode::encode_datetime2(orig, &mut enc).unwrap();
+                match decode_at_scale7(enc, 0x2A) {
+                    SqlValue::DateTime(d) => {
+                        prop_assert_eq!(d, NaiveDateTime::new(date, trunc_100ns(time)));
+                    }
+                    other => prop_assert!(false, "expected DateTime, got {:?}", other),
+                }
+            }
+        }
+    }
 }
