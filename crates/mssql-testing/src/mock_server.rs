@@ -331,6 +331,9 @@ pub struct MockServerConfig {
     login_routing_to_self: bool,
     /// Socket address to bind (default `127.0.0.1:0`).
     bind_addr: String,
+    /// Drop the first N accepted connections before any handshake, to
+    /// simulate transient connection failures (for connect-retry tests).
+    fail_first_n: usize,
 }
 
 /// Builder for `MockTdsServer`.
@@ -352,6 +355,7 @@ impl MockServerBuilder {
                 login_routing: None,
                 login_routing_to_self: false,
                 bind_addr: "127.0.0.1:0".to_string(),
+                fail_first_n: 0,
             },
         }
     }
@@ -398,6 +402,17 @@ impl MockServerBuilder {
     /// `127.0.0.1:0` (e.g. `[::1]:1433` to listen on the IPv6 loopback).
     pub fn with_bind_addr(mut self, addr: impl Into<String>) -> Self {
         self.config.bind_addr = addr.into();
+        self
+    }
+
+    /// Drop the first `n` accepted connections immediately, before any
+    /// handshake, to simulate transient connection failures. The `(n + 1)`th
+    /// connection is served normally. Every dropped attempt still increments
+    /// [`total_connection_count`](MockTdsServer::total_connection_count), so a
+    /// test can assert the client retried. Useful for exercising the client's
+    /// connect-retry loop.
+    pub fn fail_first_connections(mut self, n: usize) -> Self {
+        self.config.fail_first_n = n;
         self
     }
 
@@ -483,25 +498,34 @@ impl MockTdsServer {
                     result = listener.accept() => {
                         match result {
                             Ok((stream, _peer_addr)) => {
-                                let config = config.clone();
-                                let count = connection_count.clone();
-                                {
+                                let fail = {
                                     let mut t = total_connections.lock().await;
                                     *t += 1;
+                                    *t <= config.fail_first_n
+                                };
+                                if fail {
+                                    // Simulate a transient failure: close the
+                                    // socket before any handshake so the client
+                                    // sees a connection error and retries. The
+                                    // attempt is still counted above.
+                                    drop(stream);
+                                } else {
+                                    let config = config.clone();
+                                    let count = connection_count.clone();
+                                    tokio::spawn(async move {
+                                        {
+                                            let mut c = count.lock().await;
+                                            *c += 1;
+                                        }
+                                        if let Err(e) = handle_connection(stream, config).await {
+                                            tracing::debug!("Connection error: {}", e);
+                                        }
+                                        {
+                                            let mut c = count.lock().await;
+                                            *c = c.saturating_sub(1);
+                                        }
+                                    });
                                 }
-                                tokio::spawn(async move {
-                                    {
-                                        let mut c = count.lock().await;
-                                        *c += 1;
-                                    }
-                                    if let Err(e) = handle_connection(stream, config).await {
-                                        tracing::debug!("Connection error: {}", e);
-                                    }
-                                    {
-                                        let mut c = count.lock().await;
-                                        *c = c.saturating_sub(1);
-                                    }
-                                });
                             }
                             Err(e) => {
                                 tracing::error!("Accept error: {}", e);
