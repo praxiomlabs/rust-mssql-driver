@@ -617,4 +617,63 @@ mod tests {
         ));
         assert!(map_algorithm("UNKNOWN").is_err());
     }
+
+    /// Live round-trip through the REAL Azure Key Vault unwrap path
+    /// (`decrypt_cek`), closing the audit gap that no test exercised the KV
+    /// provider's actual key-unwrap (only CMK-path parsing was covered).
+    /// Assembles the canonical signed CEK envelope — RSA-OAEP(CEK) wrapped by
+    /// the KV key (supplied via env from `az keyvault key encrypt`), then
+    /// `sign_data` (KV RS256) over its SHA-256 digest — and asserts
+    /// `decrypt_cek` verifies the signature against the CMK and unwraps the CEK
+    /// back to plaintext. Exercises verify_signature (KV verify) + unwrap_key
+    /// (KV unwrap) end to end. Gated on env; skips when unset. Auth via the
+    /// `az` CLI session (`DeveloperToolsCredential`).
+    ///
+    /// Env: `AZURE_KEYVAULT_CMK_PATH` (https://<vault>/keys/<name>/<version>),
+    /// `AEKV_PLAIN_CEK_HEX`, `AEKV_WRAPPED_CEK_HEX`.
+    #[tokio::test]
+    #[ignore = "Requires a live Azure Key Vault + az session (see env vars)"]
+    async fn decrypt_cek_round_trips_through_live_key_vault() {
+        use sha2::Digest;
+
+        fn from_hex(s: &str) -> Vec<u8> {
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("valid hex"))
+                .collect()
+        }
+
+        let (cmk_path, cek, ciphertext) = match (
+            std::env::var("AZURE_KEYVAULT_CMK_PATH").ok(),
+            std::env::var("AEKV_PLAIN_CEK_HEX").ok(),
+            std::env::var("AEKV_WRAPPED_CEK_HEX").ok(),
+        ) {
+            (Some(p), Some(plain), Some(wrapped)) => (p, from_hex(&plain), from_hex(&wrapped)),
+            _ => return, // not configured; skip
+        };
+
+        let provider = AzureKeyVaultProvider::new().expect("provider");
+
+        // Assemble the canonical signed CEK envelope the way provisioning tools
+        // do: signed_portion(cmk_path, ciphertext) followed by an RS256
+        // signature over its SHA-256 digest.
+        let signed_portion = crate::cek_envelope::build_signed_portion(&cmk_path, &ciphertext);
+        let digest: [u8; 32] = sha2::Sha256::digest(&signed_portion).into();
+        let signature = provider
+            .sign_data(&cmk_path, &digest)
+            .await
+            .expect("Key Vault RS256 sign");
+        let mut envelope = signed_portion;
+        envelope.extend_from_slice(&signature);
+
+        let decrypted = provider
+            .decrypt_cek(&cmk_path, "RSA_OAEP", &envelope)
+            .await
+            .expect("decrypt_cek must verify + unwrap via Key Vault");
+
+        assert_eq!(
+            decrypted, cek,
+            "Key-Vault-unwrapped CEK must equal the original plaintext CEK"
+        );
+    }
 }
