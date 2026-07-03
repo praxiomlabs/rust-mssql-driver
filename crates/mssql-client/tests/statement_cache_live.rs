@@ -112,3 +112,75 @@ async fn statement_cache_off_never_consults_cache() {
 
     client.close().await.expect("close");
 }
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn statement_cache_cleared_on_connection_reset() {
+    let config = base_config()
+        .expect("SQL Server config required")
+        .with_statement_cache(true);
+    let mut client = Client::connect(config).await.expect("connect");
+
+    // Populate: one distinct statement, prepared once.
+    assert_eq!(query_one_i32(&mut client, 5).await, 5);
+    let stats = client.statement_cache_stats();
+    assert_eq!(stats.misses, 1);
+    assert_eq!(stats.hits, 0);
+
+    // Simulate a pool return: the next request carries RESETCONNECTION, which
+    // invalidates every server-side prepared handle. The client MUST drop the
+    // cache so it never sp_execute()s an invalidated handle.
+    client.mark_needs_reset();
+
+    // Same SQL again. If the cache was cleared it MISSES (re-prepares). If it
+    // was NOT cleared this would be a HIT on a now-invalid handle. clear()
+    // preserves the cumulative counters, so a cleared cache yields hits==0,
+    // misses==2, entries==1.
+    assert_eq!(query_one_i32(&mut client, 6).await, 6);
+    let stats = client.statement_cache_stats();
+    assert_eq!(
+        stats.hits, 0,
+        "cache must be cleared on reset — no reuse of an invalidated handle"
+    );
+    assert_eq!(
+        stats.misses, 2,
+        "the reset forces a re-prepare of the same statement"
+    );
+    assert_eq!(stats.entries, 1, "the re-prepared statement is re-cached");
+
+    client.close().await.expect("close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn statement_cache_evicts_when_full_and_stays_usable() {
+    let config = base_config()
+        .expect("SQL Server config required")
+        .with_statement_cache(true);
+    let mut client = Client::connect(config).await.expect("connect");
+
+    // Exceed the 256-entry default cap with distinct SQL texts. Each eviction
+    // fires a best-effort sp_unprepare for the evicted handle; a broken
+    // unprepare-on-eviction path would error here or corrupt the connection.
+    for i in 0..300i32 {
+        let sql = format!("SELECT @p1 + {i} AS value");
+        let rows = client.query(&sql, &[&i]).await.expect("query failed");
+        let mut got = None;
+        for result in rows {
+            got = Some(result.expect("row").get::<i32>(0).expect("value"));
+        }
+        assert_eq!(got, Some(i + i));
+    }
+
+    let stats = client.statement_cache_stats();
+    assert_eq!(
+        stats.entries, 256,
+        "cache is capped at the default max; eviction occurred"
+    );
+
+    // The connection survived the evictions (each an sp_unprepare) and is still
+    // usable for a fresh query.
+    assert_eq!(query_one_i32(&mut client, 99).await, 99);
+
+    client.close().await.expect("close");
+}

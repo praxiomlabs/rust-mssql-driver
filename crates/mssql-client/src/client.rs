@@ -603,6 +603,16 @@ impl<S: ConnectionState> Client<S> {
             return Ok(());
         }
 
+        // If a connection reset is pending, the next packet carries
+        // RESETCONNECTION (set in `send_rpc`), which invalidates every
+        // server-side prepared handle. Drop the cache BEFORE the lookup so this
+        // request re-prepares instead of `sp_execute`-ing a handle the reset is
+        // about to invalidate (otherwise the server rejects it with "Could not
+        // find prepared statement with handle N").
+        if self.needs_reset {
+            let _ = self.statement_cache.clear();
+        }
+
         let rpc_params =
             Self::convert_params(params, self.send_unicode(), self.server_collation())?;
         // Key on the parameter declaration + SQL: a cached handle is only valid

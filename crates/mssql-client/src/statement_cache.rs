@@ -15,7 +15,8 @@
 //!
 //! ## Lifecycle
 //!
-//! 1. First execution of a parameterized query calls `sp_prepare`, returning a handle
+//! 1. First execution of a parameterized query calls `sp_prepexec` (prepare +
+//!    execute in one round-trip), returning a handle
 //! 2. The handle is cached by SQL hash; subsequent executions use `sp_execute`
 //! 3. When the cache is full, LRU eviction calls `sp_unprepare` for evicted handles
 //! 4. Pool reset (`sp_reset_connection`) invalidates all handles, clearing the cache

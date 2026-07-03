@@ -434,17 +434,25 @@ fn test_authentication_sql_password_keeps_sql_credentials() {
 
 #[test]
 fn test_authentication_unsupported_ad_value_errors_with_token_guidance() {
-    let err = Config::from_connection_string(
-        "Server=s;User Id=u;Password=p;Authentication=ActiveDirectoryPassword",
-    )
-    .expect_err("ActiveDirectoryPassword is not supported");
+    // All three interactive Entra values share one match arm in the parser;
+    // cover each so a future split of that arm cannot silently drop one.
+    for value in [
+        "ActiveDirectoryPassword",
+        "ActiveDirectoryInteractive",
+        "ActiveDirectoryDeviceCodeFlow",
+    ] {
+        let err = Config::from_connection_string(&format!(
+            "Server=s;User Id=u;Password=p;Authentication={value}"
+        ))
+        .expect_err("interactive Entra value should not be supported");
 
-    let msg = err.to_string();
-    assert!(msg.contains("not supported"), "{msg}");
-    assert!(
-        msg.contains("azure_token"),
-        "should point to the bring-your-own-token escape hatch: {msg}"
-    );
+        let msg = err.to_string();
+        assert!(msg.contains("not supported"), "{value}: {msg}");
+        assert!(
+            msg.contains("azure_token"),
+            "{value} should point to the bring-your-own-token escape hatch: {msg}"
+        );
+    }
 }
 
 #[test]

@@ -713,6 +713,42 @@ mod tests {
         assert_eq!(tds_version, TdsVersion::V7_4.raw());
     }
 
+    #[test]
+    fn test_login7_encodes_hostname_and_language_fields() {
+        fn utf16le(s: &str) -> Vec<u8> {
+            s.encode_utf16().flat_map(u16::to_le_bytes).collect()
+        }
+        fn contains(hay: &[u8], needle: &[u8]) -> bool {
+            hay.windows(needle.len()).any(|w| w == needle)
+        }
+
+        let encoded = Login7::new()
+            .with_hostname("TESTHOST")
+            .with_language("us_english")
+            .with_sql_auth("u", "p")
+            .encode();
+        assert!(
+            contains(&encoded, &utf16le("TESTHOST")),
+            "HostName field must be serialized into the LOGIN7 packet"
+        );
+        assert!(
+            contains(&encoded, &utf16le("us_english")),
+            "Language field must be serialized into the LOGIN7 packet"
+        );
+
+        // Absent when unset — proves the presence checks above are not vacuous
+        // (i.e. the bytes are there because the field was set, not always).
+        let bare = Login7::new().with_sql_auth("u", "p").encode();
+        assert!(
+            !contains(&bare, &utf16le("TESTHOST")),
+            "HostName must be absent when unset"
+        );
+        assert!(
+            !contains(&bare, &utf16le("us_english")),
+            "Language must be absent when unset"
+        );
+    }
+
     /// `ApplicationIntent=ReadOnly` is wired to the LOGIN7 `READONLY_INTENT`
     /// bit (TypeFlags bit 5, MS-TDS §2.2.6.4) — pin both the flag encoding
     /// and its position in the encoded packet (byte 26: after Length,

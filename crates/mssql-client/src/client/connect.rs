@@ -1653,6 +1653,69 @@ mod tls_config_tests {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
+mod login7_config_wiring_tests {
+    use super::*;
+    use crate::config::ApplicationIntent;
+
+    #[test]
+    fn build_login7_wires_read_only_intent_from_application_intent() {
+        let ro = Config::new().application_intent(ApplicationIntent::ReadOnly);
+        let login = Client::<Disconnected>::build_login7(&ro, None, None);
+        assert!(
+            login.type_flags.read_only_intent,
+            "ApplicationIntent::ReadOnly must set the LOGIN7 READONLY_INTENT bit"
+        );
+
+        let rw = Config::new().application_intent(ApplicationIntent::ReadWrite);
+        let login = Client::<Disconnected>::build_login7(&rw, None, None);
+        assert!(
+            !login.type_flags.read_only_intent,
+            "ApplicationIntent::ReadWrite must leave the READONLY_INTENT bit clear"
+        );
+    }
+
+    #[test]
+    fn build_login7_wires_language_field() {
+        let login =
+            Client::<Disconnected>::build_login7(&Config::new().language("us_english"), None, None);
+        assert_eq!(login.language, "us_english");
+
+        // Unset language leaves the field empty (not a leaked default).
+        let login = Client::<Disconnected>::build_login7(&Config::new(), None, None);
+        assert!(login.language.is_empty());
+    }
+
+    #[test]
+    fn build_login7_carries_explicit_workstation_id_into_hostname() {
+        let cfg = Config::new().workstation_id("MY-WKS");
+        assert_eq!(
+            Client::<Disconnected>::resolve_workstation_id(&cfg),
+            "MY-WKS"
+        );
+        let login = Client::<Disconnected>::build_login7(&cfg, None, None);
+        assert_eq!(
+            login.hostname, "MY-WKS",
+            "explicit Workstation ID must land in the LOGIN7 HostName field"
+        );
+    }
+
+    #[test]
+    fn resolve_workstation_id_falls_back_to_machine_hostname() {
+        // No override → the documented COMPUTERNAME/HOSTNAME lookup (empty only
+        // if neither is set). Reads the same env the resolver does, pinning the
+        // exact precedence and unwrap_or_default fallback.
+        let expected = std::env::var("COMPUTERNAME")
+            .or_else(|_| std::env::var("HOSTNAME"))
+            .unwrap_or_default();
+        assert_eq!(
+            Client::<Disconnected>::resolve_workstation_id(&Config::new()),
+            expected
+        );
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod fed_auth_login_tests {
     use super::*;
     use tds_protocol::prelogin::EncryptionLevel;
