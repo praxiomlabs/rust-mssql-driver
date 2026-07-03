@@ -1241,8 +1241,10 @@ mod live_server {
 
     /// Write→read round-trip for the fixed-width `char`/`nchar`/`binary` types.
     /// AE requires `char`/`nchar` columns to use a `*_BIN2` collation for
-    /// deterministic encryption. The normalized form is the value's bytes,
-    /// unpadded, so the values read back at their original length.
+    /// deterministic encryption. The normalized (write) form is the value's
+    /// bytes, unpadded; but fixed-width `char`/`nchar` still read back
+    /// space-padded to the column width (only `binary` reads back unpadded),
+    /// as the assertions below verify.
     #[tokio::test]
     #[ignore = "Requires SQL Server with Always Encrypted"]
     async fn test_fixed_width_parameter_encryption_round_trip() {
