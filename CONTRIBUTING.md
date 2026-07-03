@@ -303,6 +303,14 @@ Tests are organized by functional domain:
 | `protocol_conformance.rs` | MS-TDS specification compliance |
 | `collation_test.rs` | Character encoding and collation handling |
 | `edge_cases.rs` | Boundary conditions (empty results, large values, etc.) |
+| `bulk_insert.rs` | Bulk copy (BCP) round-trips |
+| `stored_procedure.rs` | Stored-procedure RPC and OUTPUT parameters |
+| `statement_cache_live.rs` | Opt-in prepared-statement cache |
+| `query_stream.rs` / `blob_stream.rs` | Incremental row and BLOB streaming |
+| `type_matrix.rs` | Differential type encode/decode vs the server |
+| `rpc_roundtrip.rs` | RPC parameter encoding |
+
+This table is representative; see `crates/mssql-client/tests/` for the full set.
 
 ### Test Patterns for Database Drivers
 
