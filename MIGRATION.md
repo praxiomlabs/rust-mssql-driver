@@ -450,6 +450,14 @@ match result {
 - Structured error with all server error fields
 - Error classification for retry logic
 
+**Behavioral difference — unexpected column types.** Tiberius decodes a fixed
+set of column types and `todo!()`-panics on the rest (`type_info.rs`), so a
+result set containing a `SQL_VARIANT` column (or another type it doesn't
+handle) aborts the task. This driver decodes `SQL_VARIANT` and legacy types,
+and where a value genuinely can't be decoded it returns a typed `Error` you can
+match on rather than panicking. Concretely: `SELECT CAST(42 AS SQL_VARIANT)`
+panics under Tiberius and returns `42` here.
+
 ## Type Mappings
 
 ### Key Differences
