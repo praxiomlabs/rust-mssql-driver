@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.1](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.20.0...v0.20.1) - 2026-07-03
+
+### Fixed
+
+- *(client)* clear statement cache before lookup on pending RESETCONNECTION
+- *(bulk)* reject unknown column types instead of silent NVARCHAR coercion
+
+### Other
+
+- *(ae)* cover the procedure and buffered multi-result decryption readers
+- cover verified LOGIN7 config-wiring gaps (appintent, language, workstation)
+- *(config)* cover ActiveDirectoryInteractive/DeviceCodeFlow rejection
+- correct verified stale claims (prepexec lifecycle, memory bounds, AE char padding)
+- correct stale statement-cache protocol model to sp_prepexec
+- *(ae)* live Azure Key Vault decrypt_cek round-trip (env-gated)
+
 ## [0.20.0](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.19.3...v0.20.0) - 2026-06-24
 
 ### Added
