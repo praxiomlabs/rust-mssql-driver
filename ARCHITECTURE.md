@@ -92,35 +92,18 @@ mssql-driver/
 ### 2.2 Crate Dependency Graph
 
 ```
-                    ┌─────────────────┐
-                    │  mssql-client   │ ← Public API
-                    └────────┬────────┘
-                             │
-        ┌────────────────────┼────────────────────┐
-        │                    │                    │
-        ▼                    ▼                    ▼
-┌───────────────┐   ┌───────────────┐   ┌───────────────┐
-│  mssql-pool   │   │  mssql-auth   │   │ mssql-derive  │
-└───────┬───────┘   └───────┬───────┘   └───────────────┘
-        │                   │
-        └─────────┬─────────┘
-                  │
-                  ▼
-          ┌───────────────┐
-          │  mssql-codec  │
-          └───────┬───────┘
-                  │
-        ┌─────────┴─────────┐
-        │                   │
-        ▼                   ▼
-┌───────────────┐   ┌───────────────┐
-│   mssql-tls   │   │  mssql-types  │
-└───────┬───────┘   └───────────────┘
-        │
-        ▼
-┌───────────────┐
-│ tds-protocol  │ ← no_std compatible
-└───────────────┘
+mssql-pool                        built-in connection pooling
+└── mssql-client                  ← public API surface
+    ├── mssql-codec  ──►  tds-protocol
+    ├── mssql-auth                authentication strategies
+    ├── mssql-tls                 TLS negotiation
+    ├── mssql-types               SQL ↔ Rust type mapping
+    ├── mssql-derive              row-mapping proc macros
+    └── tds-protocol              no_std core TDS protocol
+
+Leaf crates (no workspace-internal dependencies):
+  tds-protocol, mssql-types, mssql-tls, mssql-auth, mssql-derive.
+mssql-codec depends only on tds-protocol; mssql-pool depends on mssql-client.
 ```
 
 ### 2.3 Crate Specifications
@@ -173,7 +156,7 @@ pub enum Token {
 - Certificate validation and hostname verification
 - TLS 1.2/1.3 protocol selection
 
-**Dependencies:** `rustls`, `webpki-roots`, `tokio-rustls`, `tds-protocol`
+**Dependencies:** `rustls`, `webpki-roots`, `tokio-rustls`
 
 **Rationale:** TDS TLS negotiation is sufficiently complex to warrant isolation. TDS 8.0 fundamentally changes the handshake order (TCP → TLS → TDS vs. TCP → TDS prelogin → TLS → TDS), and this crate encapsulates that complexity.
 
@@ -186,7 +169,7 @@ pub enum Token {
 - Packet continuation handling (large packets split across multiple TDS packets)
 - IO splitting for cancellation safety (see ADR-004)
 
-**Dependencies:** `tds-protocol`, `mssql-tls`, `tokio-util` (Codec), `bytes`, `tokio`
+**Dependencies:** `tds-protocol`, `tokio-util` (Codec), `bytes`, `tokio`
 
 #### `crates/mssql-types`
 
@@ -613,8 +596,7 @@ tx.commit().await?;
 
 // With isolation level
 let tx = client
-    .begin_transaction()
-    .isolation_level(IsolationLevel::Serializable)
+    .begin_transaction_with_isolation(IsolationLevel::Serializable)
     .await?;
 
 // Savepoints
