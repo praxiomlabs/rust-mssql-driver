@@ -746,10 +746,3 @@ impl rustls::client::danger::ServerCertVerifier for DangerousVerifier {
 // =============================================================================
 // Comparison Tests Against Real SQL Server (require live SQL Server)
 // =============================================================================
-
-#[tokio::test]
-#[ignore = "Requires SQL Server for comparison"]
-async fn test_compare_with_real_server() {
-    // This test would compare mock and real SQL Server responses
-    // Requires both mock TLS support and a running SQL Server
-}
