@@ -27,19 +27,6 @@ fn test_null_value_creation() {
 }
 
 #[test]
-fn test_option_none_is_null() {
-    let value: Option<i32> = None;
-    assert!(value.is_none());
-}
-
-#[test]
-fn test_option_some_is_not_null() {
-    let value: Option<i32> = Some(42);
-    assert!(value.is_some());
-    assert_eq!(value, Some(42));
-}
-
-#[test]
 fn test_null_from_sql_to_option() {
     let null = SqlValue::Null;
     let result: Result<Option<i32>, _> = Option::<i32>::from_sql(&null);
