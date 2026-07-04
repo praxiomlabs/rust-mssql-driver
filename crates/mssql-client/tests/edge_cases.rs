@@ -453,14 +453,12 @@ async fn test_null_handling_live() {
         .await
         .expect("Query failed");
 
-    if let Some(row) = stream.next() {
-        let row = row.expect("Row error");
-        let null_val: Option<i32> = row.get(0).expect("Get failed");
-        let int_val: Option<i32> = row.get(1).expect("Get failed");
-
-        assert!(null_val.is_none());
-        assert_eq!(int_val, Some(42));
-    }
+    // Require the row: an empty result set is a failure, not a vacuous pass.
+    let row = stream.next().expect("expected one row").expect("Row error");
+    let null_val: Option<i32> = row.get(0).expect("Get failed");
+    let int_val: Option<i32> = row.get(1).expect("Get failed");
+    assert!(null_val.is_none());
+    assert_eq!(int_val, Some(42));
 
     client.close().await.expect("Close failed");
 }
@@ -479,11 +477,10 @@ async fn test_unicode_handling_live() {
         .await
         .expect("Query failed");
 
-    if let Some(row) = stream.next() {
-        let row = row.expect("Row error");
-        let result: String = row.get(0).expect("Get failed");
-        assert_eq!(result, test_string);
-    }
+    // Require the row: an empty result set is a failure, not a vacuous pass.
+    let row = stream.next().expect("expected one row").expect("Row error");
+    let result: String = row.get(0).expect("Get failed");
+    assert_eq!(result, test_string);
 
     client.close().await.expect("Close failed");
 }
