@@ -1501,12 +1501,25 @@ mod tests {
     }
 
     #[test]
-    fn test_varchar_encode_round_trip() {
-        // Verify the encoded param can be serialized without panics
+    fn test_varchar_encode_includes_name_and_value() {
+        // Encoding must carry the VARCHAR value bytes (Windows-1252, ASCII here)
+        // and the UTF-16LE parameter name into the buffer — not merely produce
+        // non-empty output.
         let param = RpcParam::varchar("@val", "test value");
         let mut buf = bytes::BytesMut::new();
         param.encode(&mut buf);
-        assert!(!buf.is_empty());
+        let bytes = &buf[..];
+        assert!(
+            bytes.windows(10).any(|w| w == b"test value"),
+            "encoded buffer should contain the VARCHAR value"
+        );
+        let name_utf16: Vec<u8> = "@val".encode_utf16().flat_map(u16::to_le_bytes).collect();
+        assert!(
+            bytes
+                .windows(name_utf16.len())
+                .any(|w| w == name_utf16.as_slice()),
+            "encoded buffer should contain the UTF-16LE parameter name"
+        );
     }
 
     #[test]

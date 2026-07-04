@@ -561,9 +561,12 @@ fn test_io_error_source() {
     let io_err = std::io::Error::other("inner error");
     let err = Error::from(io_err);
 
-    // The error should have a source
-    // Note: thiserror may or may not expose the source depending on definition
-    let _ = err.source();
+    // Error::Io wraps the io::Error via #[source], so it must be exposed.
+    assert!(
+        err.source()
+            .is_some_and(|s| s.to_string().contains("inner error")),
+        "Error::Io should expose the wrapped io::Error as its source"
+    );
 }
 
 // =============================================================================
