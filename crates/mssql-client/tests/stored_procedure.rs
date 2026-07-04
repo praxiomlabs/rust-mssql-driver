@@ -74,6 +74,9 @@ async fn test_call_procedure_no_params() {
     assert_eq!(result.return_value, 0);
     assert!(result.has_result_sets());
     assert_eq!(result.result_sets.len(), 1);
+    // Read the single cell (previously only the set count was checked).
+    let mut rs = result.result_sets.into_iter().next().unwrap();
+    assert_eq!(rs.next_row().unwrap().unwrap().get::<i32>(0).unwrap(), 1);
 
     // Cleanup
     client
@@ -189,14 +192,19 @@ async fn test_call_procedure_multiple_result_sets() {
     assert_eq!(result.return_value, 0);
     assert_eq!(result.result_sets.len(), 2);
 
-    // First result set: two int columns
-    let mut rs1 = result.result_sets.into_iter().next().unwrap();
+    let mut sets = result.result_sets.into_iter();
+    // First result set: two int columns.
+    let mut rs1 = sets.next().unwrap();
     assert_eq!(rs1.columns().len(), 2);
     let row = rs1.next_row().unwrap().unwrap();
     let a: i32 = row.get(0).unwrap();
     let b: i32 = row.get(1).unwrap();
     assert_eq!(a, 1);
     assert_eq!(b, 2);
+    // Second result set: the greeting string (previously never read).
+    let mut rs2 = sets.next().unwrap();
+    let greeting: String = rs2.next_row().unwrap().unwrap().get(0).unwrap();
+    assert_eq!(greeting, "hello");
 
     client
         .execute("DROP PROCEDURE dbo.test_multi_rs", &[])
