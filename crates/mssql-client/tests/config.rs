@@ -59,12 +59,16 @@ fn test_missing_equals_sign() {
 
 #[test]
 fn test_multiple_equals_in_value() {
-    // Password with equals sign
-    let _config =
+    // ADO.NET splits each key=value pair on the FIRST '=', so a password
+    // containing '=' is preserved verbatim as the value.
+    let config =
         Config::from_connection_string("Server=localhost;Password=pass=word=with=equals;").unwrap();
 
-    // The current implementation splits on first '=', so everything after is the value
-    // Note: This may need fixing depending on desired behavior
+    if let mssql_client::Credentials::SqlServer { password, .. } = &config.credentials {
+        assert_eq!(password.as_ref(), "pass=word=with=equals");
+    } else {
+        unreachable!("expected SqlServer credentials");
+    }
 }
 
 #[test]
