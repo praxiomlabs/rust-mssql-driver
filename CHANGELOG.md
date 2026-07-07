@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.2](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.20.1...v0.20.2) - 2026-07-07
+
+### Other
+
+- *(client)* guard save_point() name validation against injection
+- require the row in two live tests instead of skipping asserts
+- strengthen misnamed/assertion-free tests
+- *(proc)* read the result-set values two stored-proc tests ignored
+- remove std tautologies, assert the multi-equals parser behavior
+- *(bulk)* assert the 15 previously-unchecked columns in all-types round-trip
+- *(client)* remove verified dead code
+- *(types)* property-test temporal encode/decode value roundtrips
+
 ## [0.20.1](https://github.com/praxiomlabs/rust-mssql-driver/compare/v0.20.0...v0.20.1) - 2026-07-03
 
 ### Fixed
