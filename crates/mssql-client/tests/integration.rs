@@ -29,7 +29,7 @@
     clippy::approx_constant
 )]
 
-use mssql_client::{Client, Config};
+use mssql_client::{Client, Config, Error};
 
 /// Helper to get test configuration from environment variables.
 fn get_test_config() -> Option<Config> {
@@ -836,6 +836,29 @@ async fn test_transaction_savepoint() {
     );
 
     client.close().await.expect("Failed to close");
+}
+
+#[tokio::test]
+#[ignore = "Requires SQL Server"]
+async fn test_savepoint_rejects_injection_name() {
+    // Regression guard for the save_point() -> validate_identifier() wiring.
+    // An injection/invalid savepoint name must be rejected client-side, before
+    // any SAVE TRANSACTION batch is sent. If the validate_identifier() call in
+    // save_point() is removed, the name reaches the server as raw SQL and the
+    // error type is no longer InvalidIdentifier, so this assertion fails.
+    let config = get_test_config().expect("SQL Server config required");
+    let client = Client::connect(config).await.expect("Failed to connect");
+
+    let mut tx = client.begin_transaction().await.expect("Begin failed");
+
+    let err = tx
+        .save_point("sp1; DROP TABLE users")
+        .await
+        .expect_err("save_point must reject an injection name");
+    assert!(
+        matches!(err, Error::InvalidIdentifier(_)),
+        "expected client-side InvalidIdentifier rejection, got: {err:?}"
+    );
 }
 
 #[tokio::test]
