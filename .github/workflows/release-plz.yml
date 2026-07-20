@@ -78,7 +78,7 @@ jobs:
         id: auth
         uses: rust-lang/crates-io-auth-action@v1
       - name: Run release-plz
-        uses: release-plz/action@v0.5.130
+        uses: release-plz/action@v0.5.131
         with:
           command: release
         env:
@@ -118,7 +118,7 @@ jobs:
       - name: Use stable toolchain despite the MSRV pin
         run: echo "RUSTUP_TOOLCHAIN=stable" >> "$GITHUB_ENV"
       - name: Run release-plz
-        uses: release-plz/action@v0.5.130
+        uses: release-plz/action@v0.5.131
         with:
           command: release-pr
         env:
